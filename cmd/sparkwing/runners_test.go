@@ -44,6 +44,9 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 	calls := []string{}
 	home := t.TempDir()
 	f := &runnersFixture{config: filepath.Join(t.TempDir(), "config.yaml"), calls: &calls, failExec: map[string]string{}, binary: "/usr/local/bin/sparkwing-runner"}
+	previousHome := runnerAccountHome
+	runnerAccountHome = func() (string, error) { return home, nil }
+	t.Cleanup(func() { runnerAccountHome = previousHome })
 	if runtime.GOOS == "windows" {
 		f.binary = "C:/usr/local/bin/sparkwing-runner.exe"
 	}

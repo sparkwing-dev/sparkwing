@@ -723,7 +723,9 @@ Before submitting a `--runner here` trigger, the CLI starts or waits for that
 local controller, including when a profile selects a remote controller. Resuming
 a here run also waits for local admission readiness before claiming it. If local
 startup fails, a new trigger is refused before the remote run is allocated.
-Other machines register as runners with Cloud. They need `sparkwing-runner`
+Other machines register as runners with Cloud. A shared runner on a person's
+machine belongs under a dedicated OS user: see [shared runners](shared-runners.md).
+Runner machines need `sparkwing-runner`
 beside `sparkwing`, which `curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --runner`
 installs from the signed release. `sparkwing runners add --runner NAME
 --personal --profile work` prints a code to approve on the controller's

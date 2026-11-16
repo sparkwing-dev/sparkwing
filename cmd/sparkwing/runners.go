@@ -57,6 +57,10 @@ type runnerEnrollment struct {
 	personal     bool
 	launcher     bool
 	sessionStdin bool
+	serviceUser  string
+	runnerBinary string
+	servicePath  string
+	warnings     []string
 }
 
 func runRunnersAdd(inv clisurface.Invocation) error { return runnersAdd(inv, terminalConsole()) }
@@ -132,10 +136,13 @@ func prepareRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *name
 	if err != nil {
 		return enrollment, prof, err
 	}
-	if err := checkAgentConfigAbsent(enrollment.path, enrollment.force); err != nil {
+	if err := validateRunnerEnrollment(enrollment.config); err != nil {
 		return enrollment, prof, err
 	}
-	if err := validateRunnerEnrollment(enrollment.config); err != nil {
+	if enrollment.serviceUser != "" {
+		return enrollment, prof, planServiceUser(context.Background(), &enrollment)
+	}
+	if err := checkAgentConfigAbsent(enrollment.path, enrollment.force); err != nil {
 		return enrollment, prof, err
 	}
 	enrollment.service, err = planRunnerService(enrollment.path, enrollment.service.skipped)
@@ -175,6 +182,12 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--launcher requires --reserved-for on a shared runner"}
 	}
 	enrollment.sessionStdin = inv.Bool("session-stdin")
+	enrollment.serviceUser = inv.Value("service-user")
+	if inv.Has("service-user") {
+		if err := runnerservice.ValidAccountName(enrollment.serviceUser); err != nil {
+			return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
+		}
+	}
 	prof, err := resolveProfile(inv.Value("profile"))
 	if err != nil {
 		return enrollment, nil, err
@@ -188,8 +201,14 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 	}
 	enrollment.profileName, enrollment.force = prof.Name, inv.Bool("force")
 	enrollment.service.skipped = inv.Bool("no-service") || enrollment.launcher
-	controller, localAdmission := strings.TrimRight(prof.ControllerURL(), "/"), true
+	// safety: a dedicated account cannot reach the person's owner-only local
+	// controller, so sharing its admission would fail every claimed job.
+	controller, localAdmission := strings.TrimRight(prof.ControllerURL(), "/"), enrollment.serviceUser == ""
 	enrollment.config = userconfig.RunnerConfig{Controller: &controller, MaxConcurrent: maxConcurrent, HolderPrefix: &name, Labels: inv.Flags["label"], Repos: inv.Flags["repos"], LocalAdmission: &localAdmission}
+	enrollment.warnings = runnerEnrollmentWarnings(enrollment)
+	for _, warning := range enrollment.warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", warning)
+	}
 	return enrollment, prof, nil
 }
 
@@ -209,6 +228,9 @@ func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enroll
 	for _, grant := range issued.Grants {
 		minted.Metadata.Scopes = append(minted.Metadata.Scopes, capability.Grant(grant))
 	}
+	if enrollment.serviceUser != "" {
+		return finishServiceUserEnrollment(ctx, manager, enrollment, minted)
+	}
 	service, err := finishRunnerEnrollment(enrollment.path, enrollment.config, minted.Token, enrollment.force, enrollment.service, func() error {
 		_, revokeErr := manager.RevokeToken(context.WithoutCancel(ctx), minted.Metadata.Prefix)
 		if revokeErr != nil {
@@ -224,7 +246,7 @@ func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enroll
 		service.Command = nil
 		service.Detail = "Launcher-only credential. Configure sparkwing-runner launch or the runner chart's launcher with the enrolled credential."
 	}
-	return renderRunnerEnrollment(enrollment, minted.Metadata, service)
+	return renderRunnerEnrollment(enrollment, minted.Metadata, service, nil)
 }
 
 type runnerServiceResult struct {
@@ -235,16 +257,18 @@ type runnerServiceResult struct {
 }
 
 type runnerEnrollmentResult struct {
-	Personal bool                         `json:"personal"`
-	Runner   string                       `json:"runner"`
-	Profile  string                       `json:"profile"`
-	Config   string                       `json:"config"`
-	Token    controllerwire.TokenMetadata `json:"token"`
-	Service  runnerServiceResult          `json:"service"`
+	Personal    bool                         `json:"personal"`
+	ServiceUser *serviceUserInstalled        `json:"service_user,omitempty"`
+	Warnings    []string                     `json:"warnings,omitempty"`
+	Runner      string                       `json:"runner"`
+	Profile     string                       `json:"profile"`
+	Config      string                       `json:"config"`
+	Token       controllerwire.TokenMetadata `json:"token"`
+	Service     runnerServiceResult          `json:"service"`
 }
 
-func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.TokenMetadata, service runnerServiceResult) error {
-	result := runnerEnrollmentResult{Runner: *enrollment.config.HolderPrefix, Profile: enrollment.profileName, Config: enrollment.path, Token: token, Service: service, Personal: enrollment.personal}
+func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.TokenMetadata, service runnerServiceResult, installed *serviceUserInstalled) error {
+	result := runnerEnrollmentResult{Runner: *enrollment.config.HolderPrefix, Profile: enrollment.profileName, Config: enrollment.path, Token: token, Service: service, Personal: enrollment.personal, ServiceUser: installed, Warnings: enrollment.warnings}
 	switch enrollment.format {
 	case "json":
 		return json.NewEncoder(os.Stdout).Encode(result)
@@ -255,6 +279,13 @@ func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.To
 	fmt.Printf("minted runner token %s for %s on profile %s\n", token.Prefix, opsview.DisplayText(token.Principal), opsview.DisplayText(enrollment.profileName))
 	if enrollment.personal {
 		fmt.Println("personal capacity: accepts only your runs")
+	}
+	if installed != nil {
+		renderServiceUserEnrollment(enrollment, *installed)
+		fmt.Println("what a shared runner trusts and isolates: sparkwing docs read --topic shared-runners")
+		fmt.Printf("revoke this runner with:\n  sparkwing runners remove --profile %s --service-user %s\n", opsview.DisplayText(enrollment.profileName), opsview.DisplayText(enrollment.serviceUser))
+		fmt.Printf("or revoke its token with:\n  sparkwing tokens revoke --profile %s --token %s\n", opsview.DisplayText(enrollment.profileName), token.Prefix)
+		return nil
 	}
 	fmt.Printf("wrote the runner section of %s (mode 0600)\n", opsview.DisplayText(enrollment.path))
 	fmt.Printf("service: %s\n", service.Status)
@@ -294,6 +325,7 @@ func printRunnerRevokeHint(profileName, prefix string) {
 type runnerRemoval struct {
 	path, profileName, tokenPrefix, name, format string
 	noService                                    bool
+	serviceUser, controller                      string
 }
 
 func runRunnersRemove(inv clisurface.Invocation) error {
@@ -327,56 +359,79 @@ func prepareRunnerRemoval(inv clisurface.Invocation) (runnerRemoval, *namedProfi
 	if err := requireController(prof, "runners remove"); err != nil {
 		return removal, nil, err
 	}
+	selected, err := normalizeControllerURL(prof.ControllerURL())
+	if err != nil {
+		return removal, nil, fmt.Errorf("profile %q: invalid controller URL", prof.Name)
+	}
+	if inv.Has("service-user") {
+		serviceUser := inv.Value("service-user")
+		if err := runnerservice.ValidAccountName(serviceUser); err != nil {
+			return removal, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: err.Error()}
+		}
+		return runnerRemoval{profileName: prof.Name, name: inv.Value("runner"), format: format, serviceUser: serviceUser, controller: selected}, prof, nil
+	}
 	path, err := agentConfigPath(inv.Value("config"))
 	if err != nil {
 		return removal, nil, err
 	}
-	cfg, err := userconfig.ReadConfig(path)
+	enrolled, err := readEnrolledCredential(path)
 	if err != nil {
 		return removal, nil, err
 	}
-	if cfg.Runner == nil {
-		return removal, nil, fmt.Errorf("%s has no runner section; sparkwing runners add writes one: %w", path, os.ErrNotExist)
-	}
-	raw := cfg.Runner
-	name := ""
-	if raw.HolderPrefix != nil {
-		name = *raw.HolderPrefix
-	}
-	if selectedName := inv.Value("runner"); selectedName != "" && selectedName != name {
-		return removal, nil, fmt.Errorf("%s holds runner %q, which does not match --runner %q", path, name, selectedName)
+	if selectedName := inv.Value("runner"); selectedName != "" && selectedName != enrolled.name {
+		return removal, nil, fmt.Errorf("%s holds runner %q, which does not match --runner %q", path, enrolled.name, selectedName)
 	}
 	// safety: a connection for another controller must not revoke a same-prefix credential there.
-	if raw.Controller == nil {
-		return removal, nil, fmt.Errorf("%s: runner controller is required", path)
-	}
-	configured, err := normalizeControllerURL(*raw.Controller)
-	if err != nil {
-		return removal, nil, fmt.Errorf("%s: invalid runner controller URL", path)
-	}
-	selected, err := normalizeControllerURL(prof.ControllerURL())
-	if err != nil || configured != selected {
+	if enrolled.controller != selected {
 		return removal, nil, fmt.Errorf("%s: runner controller differs from profile %q", path, prof.Name)
 	}
+	return runnerRemoval{path: path, profileName: prof.Name, tokenPrefix: enrolled.prefix, noService: inv.Bool("no-service"), name: enrolled.name, format: format, controller: selected}, prof, nil
+}
+
+type enrolledCredential struct{ name, controller, prefix string }
+
+func readEnrolledCredential(path string) (enrolledCredential, error) {
+	var enrolled enrolledCredential
+	cfg, err := userconfig.ReadConfig(path)
+	if err != nil {
+		return enrolled, err
+	}
+	if cfg.Runner == nil {
+		return enrolled, fmt.Errorf("%s has no runner section; sparkwing runners add writes one: %w", path, os.ErrNotExist)
+	}
+	raw := cfg.Runner
+	if raw.HolderPrefix != nil {
+		enrolled.name = *raw.HolderPrefix
+	}
+	if raw.Controller == nil {
+		return enrolled, fmt.Errorf("%s: runner controller is required", path)
+	}
+	enrolled.controller, err = normalizeControllerURL(*raw.Controller)
+	if err != nil {
+		return enrolled, fmt.Errorf("%s: invalid runner controller URL", path)
+	}
 	if raw.CredentialsDir == nil || strings.TrimSpace(*raw.CredentialsDir) == "" {
-		return removal, nil, fmt.Errorf("%s: runner.credentials_dir is required", path)
+		return enrolled, fmt.Errorf("%s: runner.credentials_dir is required", path)
 	}
 	credential, err := fssecure.OpenPrivateConfig(filepath.Join(*raw.CredentialsDir, "agent-token"))
 	if err != nil {
-		return removal, nil, err
+		return enrolled, err
 	}
 	value, readErr := io.ReadAll(credential)
 	if err := errors.Join(readErr, credential.Close()); err != nil {
-		return removal, nil, err
+		return enrolled, err
 	}
-	prefix, err := tokenPrefix(strings.TrimSpace(string(value)))
+	enrolled.prefix, err = tokenPrefix(strings.TrimSpace(string(value)))
 	if err != nil {
-		return removal, nil, fmt.Errorf("%s: %w", path, err)
+		return enrolled, fmt.Errorf("%s: %w", path, err)
 	}
-	return runnerRemoval{path: path, profileName: prof.Name, tokenPrefix: prefix, noService: inv.Bool("no-service"), name: name, format: format}, prof, nil
+	return enrolled, nil
 }
 
 func removeRunner(ctx context.Context, manager controllerwire.TokenManager, removal runnerRemoval) error {
+	if removal.serviceUser != "" {
+		return removeServiceUserRunner(ctx, manager, removal)
+	}
 	if err := requireRunnerToken(ctx, manager, removal.tokenPrefix, removal.path); err != nil {
 		return err
 	}

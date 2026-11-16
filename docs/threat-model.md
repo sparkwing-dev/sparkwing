@@ -106,6 +106,8 @@ proof. A rendered pod specification or label does not prove isolation.
 
 - Run the service under a dedicated OS account or isolated VM/container. Keep
   unrelated credentials and personal data outside its reach.
+  `sparkwing runners add --service-user` sets up the dedicated account; see
+  [shared runners](shared-runners.md).
 - Enroll only repositories whose accepted code may act as that account. Check
   repository restrictions and granted reservations separately from free labels.
 - Scope secrets to the pipelines and pools that need them. Code authorized to
