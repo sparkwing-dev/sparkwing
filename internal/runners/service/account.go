@@ -154,10 +154,17 @@ func createAccount(ctx context.Context, h AccountHost, name string) (Account, er
 		value := strconv.Itoa(id)
 		group, user := "/Groups/"+name, "/Users/"+name
 		for _, args := range [][]string{
-			{group}, {group, "PrimaryGroupID", value}, {group, "Password", "*"},
-			{user}, {user, "UniqueID", value}, {user, "PrimaryGroupID", value},
-			{user, "UserShell", "/usr/bin/false"}, {user, "NFSHomeDirectory", home},
-			{user, "RealName", "Sparkwing runner"}, {user, "Password", "*"}, {user, "IsHidden", "1"},
+			{group},
+			{group, "PrimaryGroupID", value},
+			{group, "Password", "*"},
+			{user},
+			{user, "UniqueID", value},
+			{user, "PrimaryGroupID", value},
+			{user, "UserShell", "/usr/bin/false"},
+			{user, "NFSHomeDirectory", home},
+			{user, "RealName", "Sparkwing runner"},
+			{user, "Password", "*"},
+			{user, "IsHidden", "1"},
 		} {
 			if err := runCommandArgs(ctx, h.run, "dscl", append([]string{".", "-create"}, args...)...); err != nil {
 				return Account{}, err
@@ -186,7 +193,6 @@ func createAccount(ctx context.Context, h AccountHost, name string) (Account, er
 	return account, nil
 }
 
-// freeDarwinID picks a hidden system id that is neither a user nor a group id yet.
 func freeDarwinID(ctx context.Context, h AccountHost) (int, error) {
 	used := map[int]bool{}
 	for _, list := range [][]string{{"/Users", "UniqueID"}, {"/Groups", "PrimaryGroupID"}} {

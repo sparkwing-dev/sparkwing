@@ -228,23 +228,17 @@ func enrollRunner(ctx context.Context, manager client.RunnerTokenManager, enroll
 	for _, grant := range issued.Grants {
 		minted.Metadata.Scopes = append(minted.Metadata.Scopes, capability.Grant(grant))
 	}
-	revoke := func() error {
+	if enrollment.serviceUser != "" {
+		return finishServiceUserEnrollment(ctx, manager, enrollment, minted)
+	}
+	service, err := finishRunnerEnrollment(enrollment.path, enrollment.config, minted.Token, enrollment.force, enrollment.service, func() error {
 		_, revokeErr := manager.RevokeToken(context.WithoutCancel(ctx), minted.Metadata.Prefix)
 		if revokeErr != nil {
 			printRunnerRevokeHint(enrollment.profileName, minted.Metadata.Prefix)
 			return fmt.Errorf("revoke failed enrollment token %s: %w", minted.Metadata.Prefix, revokeErr)
 		}
 		return nil
-	}
-	if enrollment.serviceUser != "" {
-		installed, err := installEnrolledServiceUser(ctx, enrollment, minted.Token)
-		if err != nil {
-			return errors.Join(err, revoke())
-		}
-		enrollment.path = installed.Config
-		return renderRunnerEnrollment(enrollment, minted.Metadata, installed.Service, &installed)
-	}
-	service, err := finishRunnerEnrollment(enrollment.path, enrollment.config, minted.Token, enrollment.force, enrollment.service, revoke)
+	})
 	if err != nil {
 		return err
 	}
@@ -396,7 +390,6 @@ func prepareRunnerRemoval(inv clisurface.Invocation) (runnerRemoval, *namedProfi
 
 type enrolledCredential struct{ name, controller, prefix string }
 
-// readEnrolledCredential reads the runner name, normalized controller and token prefix from a machine file.
 func readEnrolledCredential(path string) (enrolledCredential, error) {
 	var enrolled enrolledCredential
 	cfg, err := userconfig.ReadConfig(path)

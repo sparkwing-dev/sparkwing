@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -10,10 +11,9 @@ import (
 	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
 )
 
-// stageServiceBinaries copies this CLI and the runner into a root-owned
-// directory the account can execute from, because the originals may sit in a
-// home the account cannot enter. It stages beside the account homes rather
-// than in /tmp, which some hosts mount noexec.
+// safety: the originals may sit in a home the account cannot enter, so a root-owned copy
+// is what the account executes; it sits beside the account homes because some hosts
+// mount /tmp noexec.
 func stageServiceBinaries(goos, runnerBinary string) (self, runner string, cleanup func(), err error) {
 	root := runnerservice.DefaultHomeRoot(goos)
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -23,7 +23,11 @@ func stageServiceBinaries(goos, runnerBinary string) (self, runner string, clean
 	if err != nil {
 		return "", "", nil, err
 	}
-	cleanup = func() { _ = os.RemoveAll(dir) }
+	cleanup = func() {
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: remove staged binaries %s: %v\n", dir, err)
+		}
+	}
 	defer func() {
 		if err != nil {
 			cleanup()
@@ -66,8 +70,6 @@ func copyExecutable(source, target string) (err error) {
 	return os.Chmod(target, 0o755)
 }
 
-// installRunnerBinary replaces target with an executable copy of source, so a
-// running runner keeps its old image until the service restarts.
 func installRunnerBinary(source, target string) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		return err

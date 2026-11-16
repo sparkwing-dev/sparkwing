@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
@@ -24,7 +25,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-// safety: the privileged steps reach the machine only through these, so a suite can substitute a host that touches nothing.
+// safety: privileged steps reach the machine only through these,
+// so a suite can substitute a host that touches nothing.
 var (
 	serviceUserPrivilege   privilegedRunner = sudoRunner{}
 	serviceUserBooted                       = systemdBooted
@@ -37,13 +39,11 @@ var (
 	runnerAccountHome                       = os.UserHomeDir
 )
 
-// privilegedRunner runs this CLI's own root-only steps.
 type privilegedRunner interface {
 	Check(ctx context.Context) error
 	Run(ctx context.Context, args []string, stdin []byte) ([]byte, error)
 }
 
-// serviceUserEnrollment travels on stdin from runners add to the root step and on to the account.
 type serviceUserEnrollment struct {
 	Runner       userconfig.RunnerConfig `json:"runner"`
 	Credential   string                  `json:"credential"`
@@ -129,6 +129,19 @@ func planServiceUser(ctx context.Context, enrollment *runnerEnrollment) error {
 	enrollment.runnerBinary, enrollment.servicePath = host.Binary, host.Path
 	// safety: asking for the password before minting means a refusal leaves no live credential.
 	return serviceUserPrivilege.Check(ctx)
+}
+
+func finishServiceUserEnrollment(ctx context.Context, manager client.RunnerTokenManager, enrollment runnerEnrollment, minted controllerwire.TokenCreated) error {
+	installed, err := installEnrolledServiceUser(ctx, enrollment, minted.Token)
+	if err != nil {
+		if _, revokeErr := manager.RevokeToken(context.WithoutCancel(ctx), minted.Metadata.Prefix); revokeErr != nil {
+			printRunnerRevokeHint(enrollment.profileName, minted.Metadata.Prefix)
+			err = errors.Join(err, fmt.Errorf("revoke failed enrollment token %s: %w", minted.Metadata.Prefix, revokeErr))
+		}
+		return err
+	}
+	enrollment.path = installed.Config
+	return renderRunnerEnrollment(enrollment, minted.Metadata, installed.Service, &installed)
 }
 
 func installEnrolledServiceUser(ctx context.Context, enrollment runnerEnrollment, credential string) (serviceUserInstalled, error) {
@@ -310,8 +323,8 @@ func runRunnerAccountWrite(inv clisurface.Invocation) error {
 	return json.NewEncoder(os.Stdout).Encode(written)
 }
 
-// writeRunnerAccount runs as the service account, so every file it creates is
-// the account's own and no root process writes through paths the account controls.
+// safety: this runs as the service account, so every file it creates is the account's own
+// and no root process writes through paths the account controls.
 func writeRunnerAccount(payload serviceUserEnrollment, runnerBinary string) (result accountWritten, err error) {
 	if serviceUserEUID() == 0 {
 		return result, errors.New("the runner account's files are written as that account, never as root")
@@ -411,7 +424,6 @@ func deleteAccountCommand(goos, name, home string) string {
 	return "sudo userdel --remove " + name
 }
 
-// credentialMarkers are paths in a home whose presence means jobs running as that account could read personal secrets.
 var credentialMarkers = []string{
 	".ssh", ".aws", ".azure", ".config/gcloud", ".kube", ".docker/config.json", ".gnupg", ".netrc", ".git-credentials",
 	".mozilla", ".config/google-chrome", ".config/chromium", "Library/Application Support/Google/Chrome", "Library/Application Support/Firefox",

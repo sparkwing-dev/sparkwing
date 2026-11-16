@@ -13,8 +13,7 @@ import (
 	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
 )
 
-// runAsServiceAccount runs a staged copy of this CLI as the account, with only
-// that account's identity, home and a system PATH.
+// safety: only the account's identity, home and a system PATH reach the child.
 func runAsServiceAccount(ctx context.Context, account runnerservice.Account, args []string, stdin []byte) ([]byte, error) {
 	// safety: no SPARKWING_HOME, so the account's default ~/.sparkwing and
 	// ~/.config/sparkwing are the home the config write is allowed to touch.

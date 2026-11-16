@@ -6,7 +6,7 @@ func Registry() []Command {
 		{Path: "sparkwing", Flags: []Flag{}},
 		{Path: "sparkwing __sdk-install", Hidden: true, Rules: []string{"Read engine.SDKInstallRequest from stdin, inherit the filtered install environment, write one engine.SDKCommand to stdout."}},
 		{Path: "sparkwing __runner-account-write", Hidden: true, Rules: []string{"Run as a dedicated runner account by runners install-service: write the runner enrollment JSON on stdin into this account's config and copy the runner into ~/.local/bin."}, Flags: []Flag{
-			{Name: "runner-binary", Argument: "PATH", Required: true},
+			{Name: "runner-binary", Argument: "PATH", Required: true, Meaning: "Staged sparkwing-runner to copy into this account's ~/.local/bin."},
 		}},
 		{Path: "sparkwing __runner-account-read", Hidden: true, Rules: []string{"Run as a dedicated runner account by runners uninstall-service: report the runner name, controller and token prefix from this account's config."}},
 		{Path: "sparkwing __complete", Hidden: true, Flags: []Flag{
