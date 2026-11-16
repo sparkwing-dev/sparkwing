@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -35,11 +36,17 @@ type completionGitHub struct {
 		Names       []string          `json:"repositories"`
 		Permissions map[string]string `json:"permissions"`
 	}
-	paths         []string
-	repository    int64
-	name          string
-	existing      int64
+	paths      []string
+	repository int64
+	name       string
+	private    bool
+	existing   int64
+	// hack: GitHub appends annotations across writes, so the fake keeps them per check run.
+	annotations   map[int64][]githubapp.CheckRunAnnotation
+	batches       []int
 	failWrites    int
+	failWrite     int
+	writeCount    int
 	checksGranted bool
 	before        func(*http.Request)
 }
@@ -69,15 +76,23 @@ func (g *completionGitHub) RoundTrip(r *http.Request) (*http.Response, error) {
 			payload = `{"token":"private","expires_at":"2100-01-01T00:00:00Z"}`
 		}
 	case r.URL.Path == "/repositories/42":
-		payload = fmt.Sprintf(`{"id":%d,"full_name":%q}`, g.repository, g.name)
+		payload = fmt.Sprintf(`{"id":%d,"full_name":%q,"private":%t}`, g.repository, g.name, g.private)
 	case strings.Contains(r.URL.Path, "/commits/") && strings.HasSuffix(r.URL.Path, "/check-runs"):
 		payload = `{"check_runs":[]}`
 		if g.existing > 0 {
 			payload = fmt.Sprintf(`{"check_runs":[{"id":%d,"external_id":"run"}]}`, g.existing)
 		}
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/repos/"+g.name+"/check-runs/"):
+		id, err := strconv.ParseInt(strings.TrimPrefix(r.URL.Path, "/repos/"+g.name+"/check-runs/"), 10, 64)
+		if err != nil || id != g.existing {
+			status, payload = 404, `{"message":"Not Found"}`
+			break
+		}
+		payload = fmt.Sprintf(`{"id":%d,"output":{"annotations_count":%d}}`, id, len(g.annotations[id]))
 	case strings.HasPrefix(r.URL.Path, "/repos/"+g.name+"/check-runs"):
-		if g.failWrites > 0 {
-			g.failWrites--
+		g.writeCount++
+		if g.failWrites > 0 || g.writeCount == g.failWrite {
+			g.failWrites = max(g.failWrites-1, 0)
 			status = 502
 			break
 		}
@@ -85,16 +100,57 @@ func (g *completionGitHub) RoundTrip(r *http.Request) (*http.Response, error) {
 		if err := json.NewDecoder(r.Body).Decode(&check); err != nil {
 			return nil, err
 		}
+		if refusal := githubCheckRunRefusal(check); refusal != "" {
+			status, payload = 422, fmt.Sprintf(`{"message":%q}`, refusal)
+			break
+		}
 		g.checks = append(g.checks, check)
 		g.checkWrites = append(g.checkWrites, r.Method+" "+r.URL.Path)
 		if g.existing == 0 {
 			g.existing = 101
+		}
+		if check.Output != nil {
+			if g.annotations == nil {
+				g.annotations = map[int64][]githubapp.CheckRunAnnotation{}
+			}
+			g.annotations[g.existing] = append(g.annotations[g.existing], check.Output.Annotations...)
+			g.batches = append(g.batches, len(check.Output.Annotations))
 		}
 		payload = fmt.Sprintf(`{"id":%d}`, g.existing)
 	default:
 		return nil, fmt.Errorf("unexpected request %s %s", r.Method, r.URL)
 	}
 	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(payload))}, nil
+}
+
+func githubCheckRunRefusal(check githubapp.CheckRun) string {
+	out := check.Output
+	if out == nil {
+		return ""
+	}
+	switch {
+	case utf8.RuneCountInString(out.Summary) > 65535:
+		return "output.summary is too long"
+	case utf8.RuneCountInString(out.Text) > 65535:
+		return "output.text is too long"
+	case len(out.Annotations) > githubapp.MaxCheckRunAnnotations:
+		return "output.annotations has more than 50 items"
+	case len(out.Annotations) > 0 && (out.Title == "" || out.Summary == ""):
+		return "output.title and output.summary are required"
+	}
+	for _, a := range out.Annotations {
+		switch {
+		case a.Path == "" || a.StartLine <= 0 || a.EndLine < a.StartLine || a.Message == "":
+			return "annotation needs path, start_line, end_line and message"
+		case a.Level != "notice" && a.Level != "warning" && a.Level != "failure":
+			return "annotation_level is not notice, warning or failure"
+		case (a.StartColumn != 0 || a.EndColumn != 0) && a.StartLine != a.EndLine:
+			return "columns need a single-line annotation"
+		case len(a.Message) > 64<<10:
+			return "annotation message is too long"
+		}
+	}
+	return ""
 }
 
 type githubCompletionFixture struct {

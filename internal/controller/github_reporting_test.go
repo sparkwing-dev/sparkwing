@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -175,24 +177,292 @@ func TestGitHubAppCheckRunSummaryIsBounded(t *testing.T) {
 	}
 }
 
-func TestGitHubAppCheckRunSummaryKeepsPrivateRunDataInConsole(t *testing.T) {
+type seededStep struct {
+	id, status, err, summary string
+	attempt                  int
+	annotations              []nodewire.Annotation
+}
+
+func (f *githubCompletionFixture) report(job, summary string, annotations []nodewire.Annotation, attempt int, steps ...seededStep) {
+	f.t.Helper()
+	encoded := []byte(nil)
+	if len(annotations) > 0 {
+		var err error
+		if encoded, err = json.Marshal(annotations); err != nil {
+			f.t.Fatal(err)
+		}
+	}
+	engineSQL(f.t, f.server.store, `UPDATE nodes SET summary=?,annotations_json=?,attempt=? WHERE team='a' AND run_id='run' AND node_id=?`, summary, encoded, attempt, job)
+	at := f.now.UnixNano()
+	seeded := map[int]bool{}
+	for _, step := range steps {
+		if !seeded[step.attempt] {
+			seeded[step.attempt] = true
+			engineSQL(f.t, f.server.store, `INSERT INTO node_attempts(team,run_id,node_id,attempt,generation,holder,capability_prefix,executor_kind,executor_name,executor_location,started_at,finished_at,outcome) VALUES ('a','run',?,?,?,'fixture','fixture','process','fixture','local',?,?,'failed')`, job, step.attempt, step.attempt, at, at)
+		}
+		var stepAnnotations []byte
+		if len(step.annotations) > 0 {
+			var err error
+			if stepAnnotations, err = json.Marshal(step.annotations); err != nil {
+				f.t.Fatal(err)
+			}
+		}
+		engineSQL(f.t, f.server.store, `INSERT INTO node_steps(team,run_id,node_id,attempt,generation,step_id,status,error,started_at,finished_at,annotations_json,summary) VALUES ('a','run',?,?,?,?,?,?,?,?,?,?)`, job, step.attempt, step.attempt, step.id, step.status, step.err, at, at, stepAnnotations, step.summary)
+	}
+}
+
+func (f *githubCompletionFixture) completedCheck() githubapp.CheckRun {
+	f.t.Helper()
+	checks := f.api.checks
+	if len(checks) == 0 || checks[len(checks)-1].Status != "completed" || checks[len(checks)-1].Output == nil {
+		f.t.Fatalf("no completed check: %+v", checks)
+	}
+	return checks[len(checks)-1]
+}
+
+func TestGitHubAppCheckRunOnPublicRepositoryKeepsRunDetailsInConsole(t *testing.T) {
 	f := newGitHubCompletion(t)
 	f.addReportingNode("secret-node-name", runstate.NodeFailed, "ghp_secret-looking-node-error")
+	f.report("secret-node-name", "secret-looking job summary", []nodewire.Annotation{{Level: "error", Message: "secret-looking annotation", File: "main.go", Line: 3}}, 1,
+		seededStep{id: "secret-step", attempt: 1, status: "failed", err: "secret-looking step error", summary: "secret-looking step summary"})
 	f.finish(runstate.RunFailed)
 	engineSQL(t, f.server.store, `UPDATE runs SET error='ghp_secret-looking-run-error' WHERE team='a' AND id='run'`)
 	f.reconcile()
 	if len(f.api.checks) != 1 {
 		t.Fatalf("summary check=%+v", f.api.checks)
 	}
-	summary := f.api.checks[0].Output.Summary
-	for _, private := range []string{"secret-node-name", "ghp_secret-looking-node-error", "ghp_secret-looking-run-error"} {
-		if strings.Contains(summary, private) {
-			t.Fatalf("public check exposes %q: %s", private, summary)
+	out := f.api.checks[0].Output
+	for _, private := range []string{"secret-node-name", "ghp_secret-looking-node-error", "ghp_secret-looking-run-error", "secret-looking job summary", "secret-step", "secret-looking step"} {
+		if strings.Contains(out.Title+out.Summary+out.Text, private) {
+			t.Fatalf("public repository check exposes %q: %+v", private, out)
 		}
 	}
+	if out.Text != "" || len(out.Annotations) != 0 || len(f.api.annotations[101]) != 0 {
+		t.Fatalf("public repository check carries details: %+v", out)
+	}
 	for _, want := range []string{"Failed", "2 failed", "https://dash.example.test/runs?run=run"} {
-		if !strings.Contains(summary, want) {
-			t.Fatalf("summary lacks %q: %s", want, summary)
+		if !strings.Contains(out.Summary, want) {
+			t.Fatalf("summary lacks %q: %s", want, out.Summary)
 		}
+	}
+}
+
+func TestGitHubAppCheckRunCarriesDetailsOnPrivateRepositories(t *testing.T) {
+	f := newGitHubCompletion(t)
+	f.api.private = true
+	f.addReportingNode("compile", runstate.NodeSuccess, "")
+	f.addReportingNode("unit-tests", runstate.NodeFailed, "go test: *** FAIL TestParse\nexpected 3, got 4")
+	f.report("compile", "Binary size **12 MB**.", nil, 1)
+	f.report("unit-tests", "", nil, 2,
+		seededStep{id: "stale", attempt: 1, status: "failed", err: "stale attempt error", summary: "stale attempt summary"},
+		seededStep{id: "vet", attempt: 2, status: "failed", err: "vet: *** shadows err", summary: "vet found 1 issue"})
+	f.finish(runstate.RunFailed)
+	engineSQL(t, f.server.store, `UPDATE runs SET error='1 job failed' WHERE team='a' AND id='run'`)
+	f.reconcile()
+	check := f.completedCheck()
+	out := check.Output
+	if out.Title != "Failed: 2 of 3 jobs failed" {
+		t.Fatalf("title=%q", out.Title)
+	}
+	for _, want := range []string{"https://dash.example.test/runs?run=run", "unit-tests", "go test: *** FAIL TestParse", "### compile", "Binary size **12 MB**.", "### unit-tests / vet", "vet found 1 issue"} {
+		if !strings.Contains(out.Summary, want) {
+			t.Fatalf("summary lacks %q:\n%s", want, out.Summary)
+		}
+	}
+	for _, want := range []string{"1 job failed", "go test: *** FAIL TestParse\nexpected 3, got 4", "vet: *** shadows err"} {
+		if !strings.Contains(out.Text, want) {
+			t.Fatalf("text lacks %q:\n%s", want, out.Text)
+		}
+	}
+	if strings.Contains(out.Summary+out.Text, "stale attempt") {
+		t.Fatalf("check carries a superseded attempt's results:\n%s\n%s", out.Summary, out.Text)
+	}
+}
+
+func TestGitHubAppCheckRunDetailsAreBounded(t *testing.T) {
+	f := newGitHubCompletion(t)
+	f.api.private = true
+	run, err := f.tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan nodewire.PlanDoc
+	if err := json.Unmarshal(run.Plan, &plan); err != nil {
+		t.Fatal(err)
+	}
+	rows := make([]string, 400)
+	args := make([]any, 0, 7*len(rows))
+	for i := range rows {
+		job := nodewire.JobSpec{ID: "node-" + strconv.Itoa(i)}
+		plan.Jobs = append(plan.Jobs, job)
+		spec, err := json.Marshal(job)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows[i] = "('a','run',?,'done','failed',?,?,?,?,?,?)"
+		failure := strings.Repeat("é", 300) + "\n````````\n" + strings.Repeat("ü", 300)
+		summary := ""
+		if i < 30 {
+			summary = "```go\n" + strings.Repeat("界", 30_000)
+		}
+		args = append(args, job.ID, failure, f.now.UnixNano(), spec, []byte(`{}`), i+2, summary)
+	}
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, f.server.store, `UPDATE runs SET plan_json=? WHERE team='a' AND id='run'`, encoded)
+	// perf: one insert projects the fixture's claim indexes once for the whole reporting batch.
+	engineSQL(t, f.server.store, `INSERT INTO nodes(team,run_id,node_id,status,outcome,error,finished_at,spec_json,execution_json,seq,summary) VALUES `+strings.Join(rows, ","), args...)
+	f.finish(runstate.RunFailed)
+	engineSQL(t, f.server.store, `UPDATE runs SET error=? WHERE team='a' AND id='run'`, strings.Repeat("ü", 100_000))
+	f.reconcile()
+	out := f.completedCheck().Output
+	for name, field := range map[string]string{"summary": out.Summary, "text": out.Text} {
+		if !utf8.ValidString(field) || utf8.RuneCountInString(field) > 65535 {
+			t.Fatalf("%s is out of bounds: %d runes", name, utf8.RuneCountInString(field))
+		}
+		if !strings.Contains(field, "truncated") || !strings.Contains(field, "https://dash.example.test/runs?run=run") {
+			t.Fatalf("%s lacks its truncation note or link", name)
+		}
+		if fence := unclosedFence(field); fence != "" {
+			t.Fatalf("%s leaves fence %q open", name, fence)
+		}
+	}
+	if !strings.Contains(out.Summary, "401 failed") {
+		t.Fatalf("summary lost its counts")
+	}
+}
+
+// safety: judged apart from the reporter's own fence parser, so a parser bug cannot pass its own output.
+func unclosedFence(doc string) string {
+	open := ""
+	for line := range strings.SplitSeq(doc, "\n") {
+		trimmed := strings.TrimRight(line, " ")
+		run := len(trimmed) - len(strings.TrimLeft(trimmed, "`"))
+		switch {
+		case open == "" && run >= 3:
+			open = trimmed[:run]
+		case open != "" && run >= len(open) && run == len(trimmed):
+			open = ""
+		}
+	}
+	return open
+}
+
+func pathAnnotations(n int, prefix string) []nodewire.Annotation {
+	levels := []string{"error", "warn", "info", "debug", ""}
+	out := make([]nodewire.Annotation, n)
+	for i := range out {
+		out[i] = nodewire.Annotation{Level: levels[i%len(levels)], Message: prefix + " finding " + strconv.Itoa(i), File: "./pkg/" + prefix + ".go", Line: i + 1, Column: 4}
+		if i%3 == 1 {
+			out[i].EndLine = i + 3
+		}
+		if i%7 == 6 {
+			out[i].Line, out[i].EndLine, out[i].Column = 0, 0, 0
+		}
+	}
+	return out
+}
+
+func TestGitHubAppCheckRunSendsPathAnnotationsInBatches(t *testing.T) {
+	f := newGitHubCompletion(t)
+	f.api.private = true
+	f.addReportingNode("lint", runstate.NodeFailed, "lint failed")
+	unpathed := []nodewire.Annotation{{Level: "error", Message: "no file here"}, {Level: "warn", Message: "nor here", Line: 4}}
+	f.report("lint", "", append(pathAnnotations(70, "job"), unpathed...), 1,
+		seededStep{id: "vet", attempt: 1, status: "failed", err: "vet failed", annotations: append(pathAnnotations(50, "step"), unpathed...)})
+	f.finish(runstate.RunFailed)
+	f.reconcile()
+	if got := fmt.Sprint(f.api.batches); got != "[50 50 20]" {
+		t.Fatalf("annotation batches=%s", got)
+	}
+	sent := f.api.annotations[101]
+	if len(sent) != 120 {
+		t.Fatalf("sent %d annotations", len(sent))
+	}
+	levels := map[string]string{"error": "failure", "warn": "warning", "info": "notice", "debug": "notice", "": "notice"}
+	for i, a := range sent {
+		source, prefix := i, "job"
+		if i >= 70 {
+			source, prefix = i-70, "step"
+		}
+		want := pathAnnotations(70, prefix)[source]
+		if a.Path != "pkg/"+prefix+".go" || a.Message != want.Message || a.Level != levels[want.Level] {
+			t.Fatalf("annotation %d=%+v from %+v", i, a, want)
+		}
+		switch {
+		case want.Line == 0:
+			if a.StartLine != 1 || a.EndLine != 1 || a.StartColumn != 0 {
+				t.Fatalf("unlined annotation %d=%+v", i, a)
+			}
+		case want.EndLine > want.Line:
+			if a.StartLine != want.Line || a.EndLine != want.EndLine || a.StartColumn != 0 || a.EndColumn != 0 {
+				t.Fatalf("range annotation %d=%+v", i, a)
+			}
+		default:
+			if a.StartLine != want.Line || a.EndLine != want.Line || a.StartColumn != 4 || a.EndColumn != 4 {
+				t.Fatalf("line annotation %d=%+v", i, a)
+			}
+		}
+	}
+	for _, check := range f.api.checks {
+		if check.Status != "completed" || check.Conclusion != "failure" || check.Output.Title == "" || !strings.Contains(check.Output.Summary, "lint") {
+			t.Fatalf("annotation write lost the completed check: %+v", check)
+		}
+	}
+}
+
+func TestGitHubAppCheckRunCapsAnnotations(t *testing.T) {
+	f := newGitHubCompletion(t)
+	f.api.private = true
+	f.addReportingNode("lint", runstate.NodeFailed, "lint failed")
+	f.report("lint", "", pathAnnotations(260, "job"), 1)
+	f.finish(runstate.RunFailed)
+	f.reconcile()
+	if got := len(f.api.annotations[101]); got != 200 {
+		t.Fatalf("sent %d annotations", got)
+	}
+	if summary := f.completedCheck().Output.Summary; !strings.Contains(summary, "60 more annotations") {
+		t.Fatalf("summary does not count the unsent annotations:\n%s", summary)
+	}
+}
+
+func TestGitHubAppCheckRunAnnotationsAreNotDuplicatedOnRedelivery(t *testing.T) {
+	for name, recorded := range map[string]bool{"adopted": false, "recorded": true} {
+		t.Run(name, func(t *testing.T) {
+			f := newGitHubCompletion(t)
+			f.api.private = true
+			if recorded {
+				start := f.pending()
+				f.reconcile()
+				start()
+			}
+			f.addReportingNode("lint", runstate.NodeFailed, "lint failed")
+			f.report("lint", "", pathAnnotations(120, "job"), 1)
+			f.finish(runstate.RunFailed)
+			f.api.failWrite = f.api.writeCount + 2
+			f.reconcile()
+			if _, delivered, _, _ := f.revision(); delivered != 0 && !recorded {
+				t.Fatal("a partly written check run was acknowledged")
+			}
+			f.now = f.now.Add(time.Hour)
+			f.reconcile()
+			sent := f.api.annotations[101]
+			seen := map[string]bool{}
+			for _, a := range sent {
+				if seen[a.Message] {
+					t.Fatalf("annotation %q sent twice", a.Message)
+				}
+				seen[a.Message] = true
+			}
+			if len(sent) != 120 {
+				t.Fatalf("sent %d annotations", len(sent))
+			}
+			desired, delivered, _, _ := f.revision()
+			if delivered != desired {
+				t.Fatalf("revisions=%d/%d", delivered, desired)
+			}
+		})
 	}
 }
