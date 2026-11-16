@@ -261,9 +261,16 @@ build. A runner roll starts a successor and stops new claims on the old instance
 The old runner keeps its held jobs, uploads and terminal acknowledgements until
 they finish. A healthy drain has no kill deadline. Controller replacement does
 not cancel these runner processes. Existing execution leases still apply during
-an outage. The local runner polls its controller for work every 500 ms, idle or
-not, so a new run starts within half a second of intake. Unlike shared
-controllers, the local controller never advises an idle runner to poll less often.
+an outage. An idle local runner's claim waits at the controller, which answers
+as soon as a commit makes work claimable, or empty after 10 s. The runner then
+claims again at once, so a run submitted to an idle runner starts within
+milliseconds of intake. An idle machine sends one claim and records the runner
+as live once every 10 s. A waiting claim also wakes when a job's
+concurrency-group queue timeout runs out, which settles that job. While the
+runner holds work, such as a run's trigger, it polls every 500 ms instead, so a
+job the plan releases starts within half a second. Shared controllers never hold
+claims, and unlike them the local controller never advises an idle runner to
+poll less often.
 
 A systemd-booted Linux host requires a working user manager. Each runner has its
 own systemd user service and cgroup, separate from the controller. A Linux host
@@ -487,6 +494,20 @@ filter claims before preferences order eligible work. Labels grant no pool
 membership or repository permission. See [scheduling](scheduling.md),
 [Git credentials](git-credentials.md) and the [threat model](threat-model.md).
 
+### Pausing a registered machine
+
+`sparkwing runners pause` stops the runner enrolled on this machine from claiming
+new work, planning included. Jobs it already holds run to completion and report
+normally. The runner keeps polling with no free slots, so it stays online.
+`sparkwing runners resume` lets it claim again on its next poll, without a
+restart. The pause survives a runner restart.
+
+The pause is local to the machine: a `paused` file beside the runner credential
+in `runner.credentials_dir`. `sparkwing runners list` on this machine shows the
+runner as `paused`. Other machines and the console see it as idle with no
+claims. To stop the runner entirely, stop its service or run
+`sparkwing runners remove`.
+
 ## Environment and secrets
 
 A local run captures its environment once. Children retain its captured snapshot
@@ -571,8 +592,24 @@ admission:
   budget: 50%,enforce
 ```
 
-Admission charges against that host's capacity. On Linux, an available writable
-cgroup can enforce the machine budget. macOS scheduling controls are advisory.
+Admission charges against that host's capacity. `enforce` also asks the OS to
+hold Sparkwing to the budget. On a systemd Linux host, the local runner's user
+service starts with `CPUQuota` at the budget's cores, `MemoryMax` when the budget
+names memory, and nice 10, so every job the runner hosts shares that cap. On
+Linux, jobs the CLI hosts itself are niced as well. A runner without systemd,
+macOS and Windows get no OS cap; macOS gives jobs background scheduling only.
+
+The controller reads the budget when it starts. After changing it, run
+`sparkwing daemon restart`. The restarted controller replaces a runner started
+under another budget; that runner finishes its held jobs under the old limits.
+
+`sparkwing queue list` reads the limits back from the running runner and reports
+what the OS applied: `OS-enforced: runner jobs capped at 2.0 cores, nice 10`, or
+`not enforced (<reason>); admission cap only` when a limit is missing, looser
+than the budget, or no runner is running yet. If the service manager refuses a
+limit, the runner still starts and the status says the budget is not enforced.
+These limits cover the local runner only. An enrolled `sparkwing-runner` service
+is not capped by them.
 Runner labels control job placement, rather than an
 OS resource sandbox. Operator ceilings refuse excessive author values instead
 of silently clamping them. See [machine settings](machine-config.md).
@@ -693,7 +730,9 @@ Before submitting a `--runner here` trigger, the CLI starts or waits for that
 local controller, including when a profile selects a remote controller. Resuming
 a here run also waits for local admission readiness before claiming it. If local
 startup fails, a new trigger is refused before the remote run is allocated.
-Other machines register as runners with Cloud. They need `sparkwing-runner`
+Other machines register as runners with Cloud. A shared runner on a person's
+machine belongs under a dedicated OS user: see [shared runners](shared-runners.md).
+Runner machines need `sparkwing-runner`
 beside `sparkwing`, which `curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --runner`
 installs from the signed release. `sparkwing runners add --runner NAME
 --personal --profile work` prints a code to approve on the controller's
@@ -738,10 +777,14 @@ machine budget is full.
 
 With `local_admission` enabled, the runner never starts the local controller and
 must match its build. If no controller runs, or it runs a build the runner
-cannot speak to, each claimed job fails with the fix: `sparkwing dashboard
-open` or `sparkwing daemon install` for a missing controller, matching
-builds for a mismatch, or `local_admission: false` to stop sharing. The runner
-logs one warning per cause while it lasts.
+cannot speak to, the runner claims no jobs, so runs wait for another eligible
+machine or for the controller instead of failing. Planning continues. The
+runner logs one `runner idle` warning per cause with the fix: `sparkwing
+dashboard open` or `sparkwing daemon install` for a missing controller,
+matching builds for a mismatch, or `local_admission: false` to stop sharing. It
+logs `runner takes jobs again` once the controller answers. If the controller
+cannot be read for another reason, the runner still claims and the job's own
+admission decides.
 
 Each claimed job holds its machine lease through source preparation, execution
 and cleanup. Busy local work does not prevent jobs from becoming ready for overflow.

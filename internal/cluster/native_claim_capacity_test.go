@@ -149,34 +149,84 @@ func (capacityUnusedHost) Host(context.Context, controllerwire.ClaimedUnit) erro
 	panic("empty claim was hosted")
 }
 
-func TestNativeClaimCapacityLeavesAdmissionAuthoritativeWithoutDaemon(t *testing.T) {
+func TestLocalAdmissionRunnerWithoutDaemonClaimsNoJobs(t *testing.T) {
+	var logged strings.Builder
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
 	home, err := os.MkdirTemp("", "absent-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	t.Setenv("SPARKWING_HOME", home)
 	if _, err := wingdclient.Query(t.Context(), wingdclient.Options{Home: home, Version: "v1.2.3"}); !errors.Is(err, wingdclient.ErrNoDaemon) {
 		t.Fatalf("fixture daemon state: %v", err)
 	}
-	calls := 0
+	var requests []controllerwire.ClaimRequest
 	options := client.EngineOptions{URL: "http://controller.invalid", Bearer: fixedBearer("runner"), HTTP: &http.Client{Transport: productionTransport(func(r *http.Request) (*http.Response, error) {
 		var request controllerwire.ClaimRequest
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			return nil, err
 		}
-		if request.FreeSlots == nil || *request.FreeSlots != 1 || !slices.Equal(request.Kinds, []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}) {
-			t.Errorf("missing daemon changed admission: %+v", request)
-		}
-		calls++
+		requests = append(requests, request)
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{}`))}, nil
 	})}}
 	controller, err := nativeCapacityClient(home, "v1.2.3")(options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = controller.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", FreeSlots: new(1), Kinds: []capability.UnitKind{capability.UnitTrigger, capability.UnitNode}})
-	if err != nil || calls != 1 {
-		t.Fatalf("claim could not reach authoritative admission without daemon: calls=%d error=%v", calls, err)
+	claim := func(kinds ...capability.UnitKind) controllerwire.ClaimRequest {
+		t.Helper()
+		if _, err := controller.Claim(t.Context(), controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", FreeSlots: new(1), Kinds: kinds}); err != nil {
+			t.Fatal(err)
+		}
+		return requests[len(requests)-1]
+	}
+	for range 3 {
+		if got := claim(capability.UnitNode); got.FreeSlots == nil || *got.FreeSlots != 0 {
+			t.Fatalf("a runner without its local controller offered job capacity: %+v", got)
+		}
+	}
+	if got := claim(capability.UnitTrigger, capability.UnitPlan, capability.UnitNode); !slices.Equal(got.Kinds, []capability.UnitKind{capability.UnitTrigger, capability.UnitPlan}) || *got.FreeSlots != 1 {
+		t.Fatalf("a missing local controller stopped planning or kept jobs: %+v", got)
+	}
+
+	// safety: other programs' load must not read as a full machine, which also withdraws job capacity.
+	budget, err := userconfig.ParseBudget("1,128MiB,ignore-external")
+	if err != nil {
+		t.Fatal(err)
+	}
+	daemon, err := wingd.New(wingd.Config{Home: home, Version: "v1.2.3", Budget: budget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- daemon.Run(ctx) }()
+	select {
+	case <-daemon.Ready():
+	case err := <-done:
+		cancel()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+	for range 2 {
+		if got := claim(capability.UnitNode); got.FreeSlots == nil || *got.FreeSlots != 1 {
+			t.Fatalf("a started local controller left the runner idle: %+v", got)
+		}
+	}
+	text := logged.String()
+	if strings.Count(text, "level=WARN") != 1 || !strings.Contains(text, "runner idle") || !strings.Contains(text, "no local controller is running") {
+		t.Fatalf("runner did not explain once why it was idle:\n%s", text)
+	}
+	if strings.Count(text, "runner takes jobs again") != 1 {
+		t.Fatalf("runner did not say once that it takes jobs again:\n%s", text)
 	}
 }
 

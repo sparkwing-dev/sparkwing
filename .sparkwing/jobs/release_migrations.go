@@ -9,6 +9,8 @@ import (
 	"testing/fstest"
 	"unicode"
 
+	"golang.org/x/mod/semver"
+
 	docs "github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
@@ -81,6 +83,13 @@ func planMigrationRoll(changelogBody, guideSource, indexBody, version, date stri
 	if len(breaking) == 0 {
 		return migrationRoll{}, nil
 	}
+	if release := strings.TrimSuffix(semver.Canonical(version), semver.Prerelease(version)); release != semver.MajorMinor(version)+".0" {
+		next, err := bumpVersion(release, "minor")
+		if err != nil {
+			return migrationRoll{}, err
+		}
+		return migrationRoll{}, fmt.Errorf("[%s] carries %d (Breaking) entries, but VERSIONING.md promises breaking changes only in a minor release; cut %s instead, or take the breaking change out", version, len(breaking), next)
+	}
 	guideName := version + ".md"
 	guideBody := retitleGuide(guideSource, version)
 	rolledBody, repointed := repointMigrationLinks(changelogBody, sec.StartLine, guideName)
@@ -115,7 +124,7 @@ func planMigrationRoll(changelogBody, guideSource, indexBody, version, date stri
 
 // safety: release cuts and changelog lint must agree on which breaking entries require a migration guide.
 func refuseUnrolledBreaking(rolled docs.ReleaseSection, guideName, guideBody string) error {
-	issues := lintSectionBreakingEntries(rolled, fstest.MapFS{guideName: &fstest.MapFile{Data: []byte(guideBody)}})
+	issues := lintSectionBreakingEntries(rolled, fstest.MapFS{guideName: &fstest.MapFile{Data: []byte(guideBody)}}, true)
 	if len(issues) == 0 {
 		return nil
 	}

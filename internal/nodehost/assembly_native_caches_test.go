@@ -80,7 +80,7 @@ func nativeCacheRoundTrip(t *testing.T, name, value string, field, delta uint8, 
 		}
 	}
 	prepare := services.Config.Executor.PrepareCaches
-	finish, err := prepare(t.Context(), input, job)
+	finish, err := prepare(t.Context(), input, job, nil)
 	if err != nil || finish == nil {
 		t.Fatalf("prepare declared cache: %v", err)
 	}
@@ -132,7 +132,7 @@ func nativeCacheRoundTrip(t *testing.T, name, value string, field, delta uint8, 
 	if err := os.RemoveAll(directory); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := prepare(t.Context(), input, job); err != nil {
+	if _, err := prepare(t.Context(), input, job, nil); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(filepath.Join(directory, "dependency"))

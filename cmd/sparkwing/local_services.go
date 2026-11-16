@@ -139,8 +139,7 @@ func bindLocalController(ctx context.Context, b localcontroller.Binding) (localc
 }
 
 // perf: idle claim advice sheds fleet polling load, which one machine's runner on a private socket
-// does not produce. Advised, the runner waited up to 6.25 s after a pause before starting a new run;
-// at its own 500 ms floor it costs two empty claims a second while idle.
+// does not produce. Advised, the runner waited up to 6.25 s after a pause before starting a new run.
 func newLocalServer(b localcontroller.Binding) *controller.Server {
 	return controller.New(b.Store, nil).WithEngineController(b.Controller).WithIdleClaimPoll(0)
 }
@@ -160,6 +159,9 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 		return localcontroller.Services{}, err
 	}
 	b.Controller.RunnerPolicy = &controller.SignedRunnerAdmission{Resolver: engines}
+	// perf: the daemon is its store's only writer, so an idle runner's claim waits for the
+	// commit that makes work claimable instead of polling for it twice a second.
+	b.Controller.ClaimWake = b.Store
 	engines, err = engine.NewResolver(engine.Config{BuildVersion: installedVersion(), CacheDirectory: filepath.Join(b.Home, "engines"), LocalOnly: true})
 	if err != nil {
 		return localcontroller.Services{}, err

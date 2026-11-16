@@ -4,17 +4,15 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
 
 func TestExamplesCommandUsesDeclaredSelectorAndFormats(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	list, err := templates.List()
+	list, err := exampleCatalog()
 	if err != nil || len(list) == 0 {
 		t.Fatalf("example catalog: %v, %d entries", err, len(list))
 	}
-	selected := list[0]
+	selected := list[0].Template
 	for _, format := range []string{"pretty", "json", "plain"} {
 		t.Run(format, func(t *testing.T) {
 			var commandErr error

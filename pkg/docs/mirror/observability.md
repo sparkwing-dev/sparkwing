@@ -639,6 +639,13 @@ to that endpoint:
 - **Traces** via `otlptracehttp` (run + HTTP spans).
 - **Logs** via `otlploghttp` (structured logs with trace correlation).
 
+Each endpoint variable that is set (`OTEL_EXPORTER_OTLP_ENDPOINT`,
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`) must
+be an `http://` or `https://` URL with a host. Otherwise the service or runner
+refuses to start, and the error names the variable but not its value, which
+can carry credentials. A malformed endpoint therefore never sends
+`OTEL_EXPORTER_OTLP_HEADERS` to the exporter's default `localhost:4318`.
+
 Metrics stay on the Prometheus `/metrics` endpoint. There is no
 in-cluster OTEL collector required; point the OTLP endpoint at whatever
 backend you run (e.g. Tempo for traces, Loki for logs).
@@ -946,8 +953,8 @@ annotation starts its own trace and gets its own sampling decision; they record
 only a short `runner start` or `runner warm` startup span. `--help` starts no
 exporter and does not wait for a flush.
 Exporter failures report a fixed warning without endpoint values or response
-bodies, and OTel's internal logger is silenced, so a malformed endpoint is not
-echoed either. Flush cannot change the command's already-decided exit outcome.
+bodies, and OTel's internal logger is silenced. A malformed endpoint stops the
+command before it starts, as described under OTLP export. Flush cannot change the command's already-decided exit outcome.
 With neither trace endpoint configured, they start no exporter. This does not
 configure a CLI or wingd exporter or enable runner log export.
 

@@ -689,10 +689,10 @@ type BudgetState struct {
 	MemoryBytes int64 `json:"memory_bytes"`
 	// MachineMemoryBytes is the host's full measured memory.
 	MachineMemoryBytes int64 `json:"machine_memory_bytes"`
-	// Enforce reports whether the budget is hardened at the OS level
-	// (a cgroup on Linux, background scheduling on macOS) in addition to
-	// capping admission.
-	Enforce bool `json:"enforce,omitempty"`
+	// Enforcement is present when the budget asks for OS enforcement. It
+	// reports the limits the OS actually applies to runner-hosted jobs, read
+	// back from the running runner, not the configured request.
+	Enforcement *BudgetEnforcement `json:"enforcement,omitempty"`
 	// IgnoreExternal reports that the budget tells admission to stop
 	// subtracting measured non-sparkwing load. It repeats
 	// [QueueState.IgnoreExternal] so the setting and its source travel
@@ -708,6 +708,20 @@ type BudgetState struct {
 	Origin string `json:"origin,omitempty"`
 	// Raw is the budget setting string as supplied, for display.
 	Raw string `json:"raw,omitempty"`
+}
+
+// BudgetEnforcement reports the OS limits in force for runner-hosted jobs.
+type BudgetEnforcement struct {
+	// Applied is true when every limit the budget names is in force.
+	Applied bool `json:"applied"`
+	// CPUCores is the CPU limit observed on the runner, zero when none.
+	CPUCores float64 `json:"cpu_cores,omitempty"`
+	// MemoryBytes is the memory limit observed on the runner, zero when none.
+	MemoryBytes int64 `json:"memory_bytes,omitempty"`
+	// Nice is the runner's observed scheduling niceness.
+	Nice int `json:"nice,omitempty"`
+	// Reason explains why the budget is not enforced when Applied is false.
+	Reason string `json:"reason,omitempty"`
 }
 
 // EventsWindow summarizes the daemon's rolling window of admission

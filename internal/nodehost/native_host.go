@@ -177,7 +177,7 @@ type ExecutionOperations struct {
 	Bind             func(context.Context, NodeInput) (ProcessGrant, error)
 	ChildContext     func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	PrepareArtifacts func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
-	PrepareCaches    func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
+	PrepareCaches    func(context.Context, NodeInput, nodewire.JobSpec, CacheReporter) (ExecutorFinalizer, error)
 	PublishOutput    func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
 	Annotate         func(context.Context, NodeInput, nodewire.AnnotationRequest) error
 	ReadFailure      func(context.Context, runspec.NodeRef, int64) (*nodewire.JobFailure, error)

@@ -344,15 +344,23 @@ func TestGoStepsAnswerOnlyToChangesThatReachGo(t *testing.T) {
 	}
 }
 
-func TestDocsOnlyChangeSkipsTheGoStepsAndTheSDKSuite(t *testing.T) {
+func TestDocsOnlyChangeSkipsTheGoStepsAndNarrowsTheSDKSuite(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "base")
 	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
 	ctx := newTestContext(t)
+	writeGoFile(t, filepath.Join(root, "README.md"), "# Readme\n")
+	gitCommitAll(t, root, "readme")
+	if !skipUnlessGoTouched("vet")(ctx) || !skipTypeScriptSDKUnlessTouched(ctx) {
+		t.Fatal("a README change ran vet or the TypeScript SDK suite")
+	}
 	writeGoFile(t, filepath.Join(root, "docs", "guide.md"), "# Guide\n")
 	gitCommitAll(t, root, "docs")
-	if !skipUnlessGoTouched("vet")(ctx) || !skipTypeScriptSDKUnlessTouched(ctx) {
-		t.Fatal("a docs-only change ran vet or the TypeScript SDK suite")
+	if !skipUnlessGoTouched("vet")(ctx) {
+		t.Fatal("a docs-only change ran vet")
+	}
+	if suite, _ := typeScriptSuite(ctx); skipTypeScriptSDKUnlessTouched(ctx) || suite != typeScriptSuiteDocs {
+		t.Fatalf("a docs-only change selected TypeScript suite %q, want only the docs snippet checks", suite)
 	}
 	writeGoFile(t, filepath.Join(root, "sdk", "typescript", "src", "index.ts"), "export {}\n")
 	gitCommitAll(t, root, "sdk")
@@ -474,5 +482,23 @@ func TestAffectedProtocolSchemasRunTheirReaderWithoutTheCLI(t *testing.T) {
 	p := planAffectedTests(".", []string{"."}, []string{"docs/schemas/node-protocol.schema.json"}, packages, nil)
 	if !slices.Equal(p.packages, []string{"m/doccheck"}) {
 		t.Fatalf("schema readers = %v, want doccheck", p.packages)
+	}
+}
+
+func TestTypeScriptSDKSuiteNarrowsToDocsSnippetsForADocsOnlyChange(t *testing.T) {
+	for _, tc := range []struct {
+		files []string
+		goWhy string
+		want  string
+	}{
+		{files: []string{"docs/sdk.md", "sdk/typescript/src/plan.ts"}, want: typeScriptSuiteFull},
+		{files: []string{"docs/sdk.md"}, goWhy: "internal/x.go changed", want: typeScriptSuiteFull},
+		{files: []string{"README.md", "docs/sdk.md"}, want: typeScriptSuiteDocs},
+		{files: []string{"pkg/docs/mirror/sdk.md", "docs/_sidebar.json", "web/src/app.ts"}, want: typeScriptSuiteNone},
+		{files: nil, want: typeScriptSuiteNone},
+	} {
+		if got, _ := typeScriptSuiteFor(tc.files, tc.goWhy); got != tc.want {
+			t.Errorf("typeScriptSuiteFor(%q, %q) = %q, want %q", tc.files, tc.goWhy, got, tc.want)
+		}
 	}
 }

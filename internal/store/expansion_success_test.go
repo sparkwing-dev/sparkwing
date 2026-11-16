@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
@@ -223,5 +224,34 @@ func TestExpansionReplayRechecksLeaseAfterSecretDecryption(t *testing.T) {
 	})
 	if _, err := tenant.AcceptExpansion(t.Context(), request); err == nil {
 		t.Fatal("replayed through expired owner")
+	}
+}
+
+// The check reporter numbers a generated job's steps from this read, because a generated job is absent from plan_json.
+func TestListDeclaredStepsCarriesAcceptedGeneratedDeclaration(t *testing.T) {
+	tenant, request := successfulExpansionFixture(t)
+	request.Body = []byte(`{"jobs":[{"id":"generated","steps":[{"id":"deploy","needs":["build"]},{"id":"build"}],"groups":["group"],"deps":["job"]}]}`)
+	if _, err := tenant.AcceptExpansion(t.Context(), request); err != nil {
+		t.Fatal(err)
+	}
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan nodewire.PlanDoc
+	if err := json.Unmarshal(run.Plan, &plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, declared := range plan.Jobs {
+		if declared.ID == "generated" {
+			t.Fatal("generated job appears in plan_json, so this test no longer covers the expansion-only declaration")
+		}
+	}
+	declared, err := tenant.ListDeclaredSteps(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string][]string{"job": {"step"}, "generated": {"deploy", "build"}}; !reflect.DeepEqual(declared, want) {
+		t.Fatalf("declared steps = %v, want %v", declared, want)
 	}
 }

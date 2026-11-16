@@ -7033,13 +7033,32 @@ components:
         - memory_bytes
       type: object
       x-sparkwing-go-type: match.Resources
+    pkg.wingwire.BudgetEnforcement:
+      additionalProperties: true
+      properties:
+        applied:
+          type: boolean
+        cpu_cores:
+          type: number
+        memory_bytes:
+          type: integer
+        nice:
+          type: integer
+        reason:
+          type: string
+      required:
+        - applied
+      type: object
+      x-sparkwing-go-type: wingwire.BudgetEnforcement
     pkg.wingwire.BudgetState:
       additionalProperties: true
       properties:
         cores:
           type: number
-        enforce:
-          type: boolean
+        enforcement:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.wingwire.BudgetEnforcement'
+            - type: "null"
         ignore_external:
           type: boolean
         machine_cores:

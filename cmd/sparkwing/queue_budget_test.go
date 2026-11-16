@@ -21,12 +21,28 @@ func TestBudgetNote_EnforcedAndMemory(t *testing.T) {
 	note := budgetNote(&wingwire.BudgetState{
 		Cores: 4, MachineCores: 8,
 		MemoryBytes: 8 << 30, MachineMemoryBytes: 16 << 30,
-		Enforce: true,
+		Enforcement: &wingwire.BudgetEnforcement{Applied: true, CPUCores: 4, MemoryBytes: 8 << 30, Nice: 10},
 	})
-	for _, want := range []string{"4.0 cores (machine 8.0)", "memory", "OS-enforced"} {
+	for _, want := range []string{"4.0 cores (machine 8.0)", "memory", "OS-enforced: runner jobs capped at 4.0 cores, 8.0 GiB memory, nice 10"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("budget note %q missing %q", note, want)
 		}
+	}
+}
+
+func TestBudgetNoteReportsAppliedEnforcementOnly(t *testing.T) {
+	note := budgetNote(&wingwire.BudgetState{
+		Cores: 2, MachineCores: 16,
+		Enforcement: &wingwire.BudgetEnforcement{Reason: "the local runner's cgroup has no CPU limit"},
+	})
+	if strings.Contains(note, "OS-enforced") {
+		t.Fatalf("an unapplied limit was reported as enforced: %q", note)
+	}
+	if want := "not enforced (the local runner's cgroup has no CPU limit); admission cap only"; !strings.Contains(note, want) {
+		t.Fatalf("budget note %q missing %q", note, want)
+	}
+	if note := budgetNote(&wingwire.BudgetState{Cores: 2, MachineCores: 16}); strings.Contains(note, "enforced") {
+		t.Fatalf("a budget without enforce mentions enforcement: %q", note)
 	}
 }
 

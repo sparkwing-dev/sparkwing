@@ -20,8 +20,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-
-	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
 
 func runPipelineNew(inv clisurface.Invocation) error {
@@ -86,7 +84,7 @@ func runPipelineNew(inv clisurface.Invocation) error {
 }
 
 func printExamplesHint() {
-	list, err := templates.List()
+	list, err := exampleCatalog()
 	if err != nil || len(list) == 0 {
 		return
 	}
@@ -352,28 +350,24 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger,
 		fmt.Fprintf(os.Stderr, "init: note: could not update .sparkwing/.gitignore; add %s to an ignore file: %v\n", ignored, err)
 	}
 	tidied := false
-	if !typescript {
+	if typescript {
+		if err := lockTypeScriptSkeleton(context.Background(), sparkwingDir); err != nil {
+			return err
+		}
+	} else {
 		tidied, err = tidySkeleton(context.Background(), sparkwingDir)
 		if err != nil {
 			return err
 		}
 	}
-	setupCommand := ""
-	if typescript {
-		setupCommand = "npm --prefix " + shellSingleQuote(sparkwingDir) + " install --package-lock-only --ignore-scripts --no-audit --no-fund"
-	}
 	if mode == "json" {
 		return json.NewEncoder(os.Stdout).Encode(struct {
-			Pipeline     string `json:"pipeline"`
-			Path         string `json:"path"`
-			SetupCommand string `json:"setup_command,omitempty"`
-		}{name, file, setupCommand})
+			Pipeline string `json:"pipeline"`
+			Path     string `json:"path"`
+		}{name, file})
 	}
 	if mode == "plain" {
 		_, err := fmt.Fprintln(os.Stdout, name)
-		if err == nil && setupCommand != "" {
-			_, err = fmt.Fprintln(os.Stdout, setupCommand)
-		}
 		return err
 	}
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
@@ -404,15 +398,14 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger,
 	if tidied {
 		fmt.Printf("  %s %s\n", color.Green("+"), color.Dim("resolved dependencies (go mod tidy)"))
 	}
+	if typescript {
+		fmt.Printf("  %s %s\n", color.Green("+"), color.Dim("resolved dependencies into .sparkwing/package-lock.json"))
+	}
 	fmt.Println()
 	fmt.Println(color.Bold("TIPS"))
 	tips := []InfoNextStep{
 		{Command: "sparkwing run " + name, Purpose: "run it"},
 		{Command: "sparkwing docs read --topic sdk", Purpose: "SDK reference for editing the stub"},
-	}
-
-	if setupCommand != "" {
-		tips = append([]InfoNextStep{{Command: setupCommand, Purpose: "create package-lock.json before the first run"}}, tips...)
 	}
 
 	if len(triggerEvents(trigger)) == 0 {
@@ -480,9 +473,9 @@ func ({{STRUCT}}) Examples() []sw.Example {
 }
 
 // Plan registers the pipeline's DAG on the passed-in *Plan. run
-// carries run-time environment: run.Args (CLI flags), run.Git (repo
-// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
-// (registered name).
+// carries run-time environment: run.Git (repo state), run.Trigger
+// (what started the run, such as local or github_app), run.Pipeline
+// (registered name). Typed inputs arrive as the third parameter.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	sw.Job(plan, run.Pipeline, &{{STRUCT}}Job{})
 	return nil
@@ -521,7 +514,7 @@ import (
 
 // {{STRUCT}} is a build/test/deploy pipeline.
 //
-//   build -> test -> deploy
+//	build -> test -> deploy
 //
 // See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
 type {{STRUCT}} struct{ sw.Base }
@@ -538,9 +531,9 @@ func ({{STRUCT}}) Examples() []sw.Example {
 }
 
 // Plan registers the pipeline's DAG on the passed-in *Plan. run
-// carries run-time environment: run.Args (CLI flags), run.Git (repo
-// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
-// (registered name).
+// carries run-time environment: run.Git (repo state), run.Trigger
+// (what started the run, such as local or github_app), run.Pipeline
+// (registered name). Typed inputs arrive as the third parameter.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	build := sw.Job(plan, "build", &{{STRUCT}}Build{})
 	test := sw.Job(plan, "test", &{{STRUCT}}Test{}).Needs(build)
@@ -601,7 +594,7 @@ import (
 
 // {{STRUCT}} is a pull-request gate pipeline.
 //
-//   lint, test (in parallel) -> gate
+//	lint, test (in parallel) -> gate
 //
 // gate passes only when both lint and test pass. See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
 type {{STRUCT}} struct{ sw.Base }
@@ -619,9 +612,9 @@ func ({{STRUCT}}) Examples() []sw.Example {
 }
 
 // Plan registers the pipeline's DAG on the passed-in *Plan. run
-// carries run-time environment: run.Args (CLI flags), run.Git (repo
-// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
-// (registered name).
+// carries run-time environment: run.Git (repo state), run.Trigger
+// (what started the run, such as local or github_app), run.Pipeline
+// (registered name). Typed inputs arrive as the third parameter.
 //
 // Prefers gives matching eligible runners a head start without
 // relaxing placement requirements.
@@ -685,7 +678,7 @@ import (
 
 // {{STRUCT}} is a release pipeline.
 //
-//   version-bump -> changelog -> publish
+//	version-bump -> changelog -> publish
 //
 // A linear release flow: compute the next version, regenerate the
 // changelog, then tag and publish. See ` + "`sparkwing docs read --topic sdk`" + ` for SDK helpers.
@@ -704,9 +697,9 @@ func ({{STRUCT}}) Examples() []sw.Example {
 }
 
 // Plan registers the pipeline's DAG on the passed-in *Plan. run
-// carries run-time environment: run.Args (CLI flags), run.Git (repo
-// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
-// (registered name).
+// carries run-time environment: run.Git (repo state), run.Trigger
+// (what started the run, such as local or github_app), run.Pipeline
+// (registered name). Typed inputs arrive as the third parameter.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	bump := sw.Job(plan, "version-bump", &{{STRUCT}}VersionBump{})
 	changelog := sw.Job(plan, "changelog", &{{STRUCT}}Changelog{}).Needs(bump)
@@ -767,7 +760,7 @@ import (
 
 // {{STRUCT}} is a scheduled report pipeline.
 //
-//   collect -> { gather-metrics, gather-errors, gather-usage } -> publish-report
+//	collect -> { gather-metrics, gather-errors, gather-usage } -> publish-report
 //
 // A fan-out report: collect seeds three independent gatherers that run
 // in parallel, and publish-report converges them into one summary.
@@ -787,9 +780,9 @@ func ({{STRUCT}}) Examples() []sw.Example {
 }
 
 // Plan registers the pipeline's DAG on the passed-in *Plan. run
-// carries run-time environment: run.Args (CLI flags), run.Git (repo
-// state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
-// (registered name).
+// carries run-time environment: run.Git (repo state), run.Trigger
+// (what started the run, such as local or github_app), run.Pipeline
+// (registered name). Typed inputs arrive as the third parameter.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	collect := sw.Job(plan, "collect", &{{STRUCT}}Collect{})
 	metrics := sw.Job(plan, "gather-metrics", &{{STRUCT}}GatherMetrics{}).Needs(collect).Prefers("report")

@@ -992,6 +992,45 @@ Machine roots require a direct account sign-in session or deployment authority.
 Their grants are limited to `nodes.claim` and `triggers.claim`. The store checks
 these rules in the transaction that issues the root.
 
+### Deleting a team or account
+
+A team owner deletes a team from the dashboard, or with `sparkwing team delete
+--profile NAME --confirm SLUG`. `--confirm` must repeat the slug of the team the
+profile's credential belongs to. The command needs a profile token holding
+`team.admin`; tokens from `sparkwing login` never carry it, while one created
+with `sparkwing tokens create --allow-team-admin` from an administrator token
+does. Members without the owner role are refused.
+
+The request takes effect at once:
+
+- every team token is revoked, the requester's profile included;
+- members lose the team, and their sessions move to another team they belong to;
+- open invitations are withdrawn;
+- active runs are cancelled, and schedules stop.
+
+Within a few minutes the controller removes the team's runs, logs, artifacts,
+cache entries, secrets, subscriptions, runners and every other operational row,
+along with every stored object under the team's namespace. It sweeps once more
+75 minutes later for anything a finishing upload wrote in between. Credit,
+charge, checkout, refund and dispute records stay, linked to the team's slug,
+because accounting law requires them. The operator's audit log keeps its
+records of the team's events, such as run cancellations and deletions. The
+slug stays reserved and cannot be reused. `GET /api/v1/me/team-deletions` shows the requester each deletion's
+state.
+
+An owner cannot delete their only team: deleting it means deleting the account.
+Account deletion is an operator action. Ask the deployment's support contact,
+which the refusal names when the controller sets `--support-contact`. On
+Sparkwing Cloud that is support@sparkwing.dev. The
+operator calls `DELETE /api/v1/operator/accounts/{account}` from an operator
+console session. It removes the account's identities, sessions, memberships and
+tokens, and deletes every team the account was the only member of. It refuses
+an account that is the last owner of a team with other members until ownership
+moves or that team is deleted.
+
+Deleted data stays in backups for a bounded time; see
+[deleted data in backups](backup-restore.md#deleted-data-in-backups).
+
 ### Device sign-in
 
 `sparkwing login` and a personal `runners add` without

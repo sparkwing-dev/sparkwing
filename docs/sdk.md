@@ -1,12 +1,24 @@
-# Go SDK
+# Pipeline SDK
 
-The `sparkwing` package declares pipelines, jobs and steps. The engine hosts the
-run through [protocol 2](node-protocol.md), schedules the graph and owns retries,
-timeouts, admission, secrets, storage and masking. SDK processes execute the
-callbacks the host selects.
+Pipelines are written in Go with the `sparkwing` package or in TypeScript with
+the `@sparkwing/sdk` package. Both declare pipelines, jobs and steps with the same
+model. The engine hosts the run through [protocol 2](node-protocol.md), schedules
+the graph and owns retries, timeouts, admission, secrets, storage and masking.
+SDK processes execute the callbacks the host selects.
+
+Each Go example on this page is followed by its TypeScript form. Where only one
+SDK has a feature, the text says so. Every export is listed in the
+[Go API reference](sdk-reference.md) and the
+[TypeScript API reference](sdk-typescript-reference.md). Porting a GitHub
+Actions workflow? [Migrating from GitHub Actions](migrate-from-github-actions.md)
+maps each workflow concept to these APIs.
 
 ```go
 import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+```
+
+```ts
+import { definePipeline, main } from "@sparkwing/sdk";
 ```
 
 The Go SDK is its own module, `github.com/sparkwing-dev/sparkwing/sparkwing`,
@@ -57,6 +69,34 @@ func main() {
     sw.Main()
 }
 ```
+
+```ts
+import { definePipeline, main } from "@sparkwing/sdk";
+
+definePipeline({
+  name: "Ship",
+  args: [{ name: "target", type: "string", default: "staging", enum: ["staging", "prod"] }],
+  plan(plan, run) {
+    const build = plan.job("build", async (ctx) => {
+      await ctx.exec(["npm", "run", "build"]).run();
+    });
+    plan
+      .job("deploy", (ctx) => {
+        ctx.log.info(`deploying to ${run.args["target"]}`);
+      })
+      .needs(build);
+  },
+});
+
+await main();
+```
+
+In TypeScript, `definePipeline` registers a pipeline under its `name`, and
+`main()` serves every pipeline the entry module has imported. A scaffolded
+project's `index.ts` imports each file under `jobs/` and calls `main()` once.
+`args` entries take `type`, `description`, `short`, `default`, `required`,
+`enum` and `secret`, the same declarations as the Go struct tags below, and
+values arrive as strings in `run.args` and `ctx.args`.
 
 Registration is keyed by the `entrypoint` a `sparkwing.yaml` pipeline names
 (`entrypoint: Ship` here), not by the pipeline name. `sw.RegisterEntrypoint[T]`
@@ -118,6 +158,10 @@ produce the same graph. Read clocks, random values and mutable environment
 inside callbacks. A reconstruction mismatch fails with `plan_drift` before the
 body starts.
 
+TypeScript's `run` (the second `plan` argument, also `ctx.run` in callbacks)
+has `id`, `pipeline`, `args`, `git`, `trigger`, `dryRun`, `noMemo`, `startedAt`
+and `runner`.
+
 `RunContext` contains `RunID`, `Pipeline`, `Git`, `Trigger`, `StartedAt`, `DryRun`,
 `NoMemo`, `StartAt` and `StopAt`. These are the host's run snapshot. `StartAt`
 and `StopAt` hold the `--sw-start-at` and `--sw-stop-at` step bounds when the host
@@ -158,14 +202,58 @@ func (Build) Work(work *sw.Work) (*sw.WorkStep, error) {
 }
 ```
 
+```ts
+interface BuildOutput {
+  digest: string;
+}
+const build = plan.job<BuildOutput>("build");
+const compile = build.step("compile", async (ctx) => {
+  await ctx.exec(["go", "build", "./..."]).run();
+});
+build
+  .step("result", (): BuildOutput => ({ digest: "sha256:example" }))
+  .needs(compile)
+  .result();
+```
+
+In TypeScript, `plan.job(id, body)` is the single-step form. A job declared
+without a body gets steps from `job.step(id, body)`, and `.result()` selects
+the step whose output becomes the job's output. `ctx.stepOutput(step)` reads a
+completed step's output.
+
 The host schedules steps when their dependencies settle. `sw.StepGet[T](ctx,
 step)` reads a completed step's local output. A new attempt resets those outputs.
 The protocol carries an explicit attempt ordinal and terminal-step snapshot for
 both step bodies and step conditions.
 
 `sw.GroupJobs(plan, name, jobs...)` groups jobs and provides a dependency target.
-`sw.JobFanOut(plan, name, items, fn)` declares a static fan-out.
-`sw.GroupSteps(work, name, steps...)` groups steps within a job.
+`sw.JobFanOut(plan, name, items, fn)` declares a static fan-out: one job per
+item, grouped under `name`. Modifiers on the returned group apply to every
+member, and a job that needs the group waits for all of them.
+`sw.GroupSteps(work, name, steps...)` groups steps within a job. TypeScript
+spells these `plan.groupJobs(id, ...jobs)`, `plan.jobFanOut(id, items, fn)` and
+`job.groupSteps(id, ...steps)`.
+
+```go
+targets := []string{"linux", "darwin", "windows"}
+builds := sw.JobFanOut(plan, "build", targets, func(goos string) (string, any) {
+    return "build-" + goos, func(ctx context.Context) error {
+        _, err := sw.Exec(ctx, "go", "build", "./...").Env("GOOS", goos).Run()
+        return err
+    }
+})
+sw.Job(plan, "release", func(context.Context) error { return nil }).Needs(builds)
+```
+
+```ts
+const builds = plan.jobFanOut("build", ["linux", "darwin", "windows"], (goos) => [
+  `build-${goos}`,
+  async (ctx) => {
+    await ctx.exec(["go", "build", "./..."]).env("GOOS", goos).run();
+  },
+]);
+plan.job("release", () => undefined).needs(builds);
+```
 
 | Declaration | Behavior |
 |---|---|
@@ -201,6 +289,19 @@ sw.Job(plan, "report", func(ctx context.Context) error {
 }).Needs(build)
 ```
 
+```ts
+const build = plan.job("build", () => ({ digest: "sha256:example" }));
+plan
+  .job("report", async (ctx) => {
+    const output = await ctx.output(build);
+    ctx.log.info(`built ${output?.digest}`);
+  })
+  .needs(build);
+```
+
+TypeScript `ctx.output(job)` returns `undefined` when the output is absent.
+`refTo(job)` gives a reference with `get(ctx)` and `tryGet(ctx)`.
+
 `Ref.Get(ctx)` returns the decoded value. `Ref.TryGet(ctx)` also reports
 presence. An upstream that was skipped, has not finished, or ran in a dry run
 without a dry-run body is absent, as is an expired output; TypeScript `tryGet`
@@ -222,7 +323,8 @@ set no run option beyond those that only place, schedule or present it (so no
 only, start-at, stop-at, dry run, pause or debug), sealed no environment variables, ran every
 job on a trusted host, and in which the referenced job succeeded. A controller that predates it is refused.
 It cannot be combined with `sw.FromAnyRun()`.
-TypeScript uses `refToLastRun(pipeline, jobID, { fromAnyRun: true })`.
+TypeScript uses `refToLastRun(pipeline, jobID, { maxAgeMs, fromAnyRun: true })`
+and declares the read with `job.references(ref)`.
 
 `sw.RunAndAwait[Out, In](ctx, pipeline, jobID, options...)` starts a child run and
 waits for its output. Options include `sw.WithFreshInputs(in)`,
@@ -244,7 +346,7 @@ inherits the parent's identity, including its repository and pipeline for OIDC
 claims and pipeline secrets. A child that names a branch the controller resolves
 runs as an asserted manual run under its own pipeline name and reads only
 team-wide shared secrets. Use `WithFreshRepo("owner/repo")` (TypeScript
-`runAndAwait` option `repo`) for an explicit repository and `WithFreshBranch`
+`ctx.runPipeline` option `repo`) for an explicit repository and `WithFreshBranch`
 (option `branch`) to override its default `main` branch. The parent's live claim
 must authorize that repository. A child in another repository always names a
 branch, never a commit, and is always asserted.
@@ -255,6 +357,30 @@ counting the root, and one root starts at most the team's
 The creating job reads the child's committed output under its live claim.
 Missing output, missing bytes and failed digest verification fail the await.
 An explicit JSON `null` remains a valid output.
+
+```go
+sw.Job(plan, "release", func(ctx context.Context) error {
+    out, err := sw.RunAndAwait[map[string]string, sw.NoInputs](ctx, "deploy-us", "deploy",
+        sw.WithFreshArgs(map[string]string{"target": "prod"}))
+    if err == nil {
+        sw.Info(ctx, "deployed %s", out["url"])
+    }
+    return err
+}).StartsChildren("deploy-us")
+```
+
+```ts
+plan
+  .job("release", async (ctx) => {
+    const out = await ctx.runPipeline<{ url: string }>("deploy-us", "deploy", { args: { target: "prod" } });
+    ctx.log.info(`deployed ${out.url}`);
+  })
+  .startsChildren("deploy-us");
+```
+
+TypeScript `ctx.runPipeline(pipeline, jobID, options)` is `RunAndAwait`: it
+starts the child, waits, and returns the named job's output. Its options are
+`args`, `inputs`, `repo`, `branch` and `timeoutMs`.
 
 ## Generated jobs
 
@@ -278,6 +404,19 @@ generated := source.Generate(func(ctx context.Context, expansion *sw.Plan) error
 sw.Job(plan, "finish", func(context.Context) error { return nil }).
     NeedsGenerated(generated)
 ```
+
+```ts
+const source = plan.job("build", () => ({ digest: "sha256:example" }));
+const generated = source.generate((expansion, output) => {
+  expansion.job("inspect", (ctx) => {
+    ctx.log.info(`inspecting ${output.digest}`);
+  });
+});
+plan.job("finish", () => undefined).needsGenerated(generated);
+```
+
+A TypeScript generator receives the source's output directly as its second
+argument.
 
 Each registration has a stable ID. The host persists the accepted jobs and the
 barrier even when the callback generates zero jobs. The limit is 256 jobs per
@@ -318,6 +457,38 @@ Recovery callbacks can accept `sw.Failure` to inspect `Stage` and `Err`.
 Local and runner hosts load this failure from the persisted source job.
 Calling `OnFailure` on the returned job declares the next recovery in the chain.
 
+```go
+deploy := sw.Job(plan, "deploy", func(ctx context.Context) error {
+    _, err := sw.Exec(ctx, "./scripts/deploy.sh").Run()
+    return err
+}).
+    Retry(2, sw.Backoff(10*time.Second)).
+    Timeout(15 * time.Minute).
+    NoProgressTimeout(5 * time.Minute)
+deploy.OnFailure("rollback", func(ctx context.Context) error {
+    _, err := sw.Exec(ctx, "./scripts/rollback.sh").Run()
+    return err
+})
+```
+
+```ts
+const deploy = plan
+  .job("deploy", async (ctx) => {
+    await ctx.exec(["./scripts/deploy.sh"]).run();
+  })
+  .retry(2, { backoffMs: 10_000 })
+  .timeout(15 * 60_000)
+  .noProgressTimeout(5 * 60_000);
+deploy.onFailure("rollback", async (ctx) => {
+  ctx.log.warn(`deploy failed: ${ctx.failure?.message}`);
+  await ctx.exec(["./scripts/rollback.sh"]).run();
+});
+```
+
+TypeScript durations are milliseconds. A TypeScript recovery job reads the
+source job's failure from `ctx.failure`. `beforeRun`, `verify` and `afterRun`
+take the same callbacks as their Go counterparts.
+
 ## Core requests
 
 Local admission charges each job one core unless the job declares its CPU.
@@ -340,6 +511,14 @@ gate := plan.Approval("promote", sw.ApprovalConfig{
     OnTimeout: sw.ApprovalDeny,
 }).Needs(build)
 sw.Job(plan, "release", func(context.Context) error { return nil }).Needs(gate)
+```
+
+```ts
+const build = plan.job("build", () => undefined);
+const gate = plan
+  .approval("promote", { message: "Promote this build?", timeoutMs: 2 * 60 * 60_000, onTimeout: "deny" })
+  .needs(build);
+plan.job("release", () => undefined).needs(gate);
 ```
 
 `OnTimeout` accepts `sw.ApprovalFail`, `sw.ApprovalDeny` or
@@ -372,8 +551,16 @@ sw.Job(plan, "build", Build{}).
     }, sw.MemoTTL(24*time.Hour))
 ```
 
+```ts
+plan.job("build", () => undefined).memo(() => memoKey("build", "toolchain-v1"), { ttlMs: 24 * 60 * 60_000 });
+plan.job("bundle", () => undefined).memo(compose(files("package-lock.json"), tree("src")));
+```
+
+TypeScript returns `noMemo` from the key callback to bypass reuse.
+
 The `sparkwing/inputs` package supplies `RepoFiles`, `Files`, `Tree`, `Env`,
-`Parts`, `Const` and `Compose` input recipes, evaluated by the host against its
+`Parts`, `Const` and `Compose` input recipes (TypeScript exports `repoFiles`,
+`files`, `tree`, `env`, `parts`, `constant` and `compose` from `@sparkwing/sdk`), evaluated by the host against its
 checkout and effective job environment. Pass a recipe directly to `Memo`.
 Include every input that affects the
 result. The host scopes reuse by the accepted repository and trust policy.
@@ -392,6 +579,18 @@ sw.Job(plan, "test", func(ctx context.Context) error {
 }).Cache(sw.GoModules())
 ```
 
+```ts
+plan
+  .job("test", async (ctx) => {
+    await ctx.exec(["npm", "ci"]).run();
+    await ctx.exec(["npm", "test"]).run();
+  })
+  .cache(npm());
+```
+
+TypeScript declares caches with `goModules()`, `npm()` and
+`dir(path, ...keyFiles)`.
+
 `Artifacts(globs...)` publishes files. `Consumes(producer, sw.Into(prefix))`
 stages the producer's artifacts and adds its dependency. Patterns and staging
 destinations use the repository working directory and stay inside that workspace.
@@ -401,6 +600,11 @@ Artifact staging failure fails the job.
 build := sw.Job(plan, "build", Build{}).Artifacts("dist/**")
 sw.Job(plan, "package", func(context.Context) error { return nil }).
     Consumes(build, sw.Into("input/build"))
+```
+
+```ts
+const build = plan.job("build", () => undefined).artifacts("dist/**");
+plan.job("package", () => undefined).consumes(build, { into: "input/build" });
 ```
 
 ## Environment and placement
@@ -448,6 +652,14 @@ deploys := sw.NewConcurrencyGroup("deploys", sw.ConcurrencyLimit{
 sw.Job(plan, "deploy", func(context.Context) error { return nil }).
     Concurrency(deploys)
 ```
+
+```ts
+const deploys = new ConcurrencyGroup("deploys", { scope: "global", capacity: 1, onLimit: "queue" });
+plan.job("deploy", () => undefined).concurrency(deploys);
+```
+
+TypeScript spells scopes `"global"`, `"run"` and `"box"`, and policies
+`"queue"`, `"fail"`, `"skip"` and `"cancel_others"`.
 
 Scopes are `sw.ScopeGlobal`, `sw.ScopeRun` and `sw.ScopeBox`. Policies are
 `sw.Queue`, `sw.Fail`, `sw.Skip` and `sw.CancelOthers`. Set a positive `Capacity`
@@ -522,6 +734,27 @@ type ShipSecrets struct {
 func (Ship) Secrets() any { return &ShipSecrets{} }
 ```
 
+```ts
+import { definePipeline } from "@sparkwing/sdk";
+
+definePipeline({
+  name: "Ship",
+  secrets: [{ name: "DEPLOY_TOKEN" }],
+  plan(plan) {
+    plan.job("deploy", async (ctx) => {
+      const token = await ctx.secret("DEPLOY_TOKEN");
+      if (token === undefined) throw new Error("DEPLOY_TOKEN is not set");
+      await ctx.exec(["./scripts/deploy.sh"]).env("DEPLOY_TOKEN", token).run();
+    });
+  },
+});
+```
+
+TypeScript declares secrets in the pipeline's `secrets` list. `optional: true`
+makes one optional, and `ctx.secret` then returns `undefined` when it is unset.
+`variable: true` declares an unmasked value read with `ctx.variable(name)`.
+`ctx.mask(value)` registers a dynamically obtained secret.
+
 `sw.PipelineSecrets[ShipSecrets](ctx)` returns the resolved struct.
 `sw.Secret(ctx, name)` reads a masked value. `sw.Variable(ctx, name)` reads an
 unmasked value. A classification mismatch fails the read. `MustSecret` and
@@ -572,6 +805,27 @@ On Windows, `Exec` refuses the System32 WSL `bash.exe` launcher; install Git Bas
 Engine credentials and protocol settings
 are removed from child environments, including values supplied through `Env`.
 Terminators include `Run`, `Capture`, `String`, `Lines`, `JSON` and `MustBeEmpty`.
+
+```go
+sha, err := sw.Exec(ctx, "git", "rev-parse", "HEAD").String()
+if err != nil {
+    return err
+}
+if _, err := sw.Bash(ctx, `echo "building $SHA"`).Env("SHA", sha).Run(); err != nil {
+    return err
+}
+```
+
+```ts
+plan.job("build", async (ctx) => {
+  const sha = await ctx.exec(["git", "rev-parse", "HEAD"]).string();
+  await ctx.bash('echo "building $SHA"').env("SHA", sha).run();
+});
+```
+
+TypeScript builds commands with `ctx.exec(argv)` and `ctx.bash(script)`, whose
+terminators are `run`, `capture`, `string`, `lines`, `json` and `mustBeEmpty`.
+A failing command rejects with `ExecError`.
 Handle returned errors to fail the step. `ExecError` carries exit status and
 captured output. Its message repeats at most 512 bytes of the command and counts
 the rest; the `Command` field keeps it whole. When a context deadline kills a command, `Terminated` is
@@ -587,13 +841,16 @@ paths with `filepath.Join(sw.WorkDir(), name)` or Node's `path.resolve(workDir()
 Call them inside execution callbacks when their result depends on workspace
 state. Subpackages provide Docker, git and service helpers.
 
-`sw.Info`, `sw.Warn` and `sw.Error` emit structured text records.
+`sw.Info`, `sw.Warn` and `sw.Error` emit structured text records
+(TypeScript `ctx.log.info`, `ctx.log.warn` and `ctx.log.error`).
 `sw.Annotate(ctx, sw.Annotation{...})` writes a diagnostic with level, message,
 file and optional line, end-line and column. Positions are one-based when
 supplied. Levels are `debug`, `info`, `warn` and `error`, with `info` as the
 default. `sw.Summary(ctx, markdown)` replaces the job or step summary. The host
 assigns the job, filters debug records and masks text before applying limits.
-Annotation and summary write failures fail the callback.
+Annotation and summary write failures fail the callback. On a private repository, a
+run the GitHub App started shows its summaries on its check run and its annotations
+that name a file inline on the commit; see [Check runs](github-app.md#check-runs).
 
 A step can declare `Risk(labels...)`, `DryRun(callback)` and
 `SafeWithoutDryRun()`. The host enforces approved risks and chooses the dry-run
@@ -608,7 +865,7 @@ the registration. Import the `sparkwing/cleanup` subpackage for this helper.
 
 ## Testing author code
 
-Import `github.com/sparkwing-dev/sparkwing/sparkwingtest` to exercise
+The fake host is Go only. Import `github.com/sparkwing-dev/sparkwing/sparkwingtest` to exercise
 author code with an isolated fake host. `Options` supplies runner and run
 context, classified secrets, job outputs and callbacks for OIDC, latest output
 and child runs.

@@ -20,7 +20,17 @@ sparkwing.Job(plan, "build", func(context.Context) error { return nil }).
     ), sparkwing.MemoTTL(7*24*time.Hour))
 ```
 
-The `sparkwing/inputs` helpers declare recipes in the plan. `Files` selects
+```ts
+plan
+  .job("build", () => undefined)
+  .memo(compose(files("**/*.ts", "package.json", "package-lock.json"), env("NODE_ENV"), constant("toolchain-v1")), {
+    ttlMs: 7 * 24 * 60 * 60_000,
+  });
+```
+
+The `sparkwing/inputs` helpers declare recipes in the plan; TypeScript imports
+the same recipes (`files`, `repoFiles`, `ignore`, `tree`, `env`, `parts`,
+`constant` and `compose`) from `@sparkwing/sdk`. `Files` selects
 tracked files, `RepoFiles` selects all tracked files with optional `Ignore`
 patterns, and `Tree` includes every regular file recursively, including untracked
 files, while skipping symlinks. Tree roots must be relative paths inside the
@@ -71,6 +81,17 @@ sparkwing.Job(plan, "deploy", func(context.Context) error { return nil }).
     })
 ```
 
+```ts
+const build = plan.job("build", () => ({ digest: "sha256:example" }));
+plan
+  .job("deploy", () => undefined)
+  .needs(build)
+  .memo(async (ctx) => memoKey("deploy", (await ctx.output(build))?.digest));
+```
+
+A TypeScript output read needs a declared edge, so the deploy job also names
+`build` in `.needs`.
+
 Choose stable key parts that distinguish different work. Each member of a group
 needs its own key when its inputs differ.
 
@@ -84,7 +105,7 @@ machine. Declare file results with
 
 ## Opting out per invocation
 
-Return `sparkwing.NoMemo, nil` from a key callback to bypass reuse for that job.
+Return `sparkwing.NoMemo, nil` (TypeScript `noMemo`) from a key callback to bypass reuse for that job.
 `sparkwing run <pipeline> --sw-no-memo` bypasses memoization for the invocation.
 Dependency directory caches remain a separate declaration.
 
@@ -105,6 +126,40 @@ sparkwing.Job(plan, "web-test", func(context.Context) error { return nil }).
 sparkwing.Job(plan, "gems", func(context.Context) error { return nil }).
     Cache(sparkwing.Dir("vendor/bundle", sparkwing.KeyFromFile("Gemfile.lock")))
 ```
+
+```ts
+plan
+  .job("test", async (ctx) => {
+    await ctx.exec(["go", "test", "./..."]).run();
+  })
+  .cache(goModules());
+
+plan.job("web-test", () => undefined).cache(npm());
+
+plan.job("gems", () => undefined).cache(dir("vendor/bundle", "Gemfile.lock"));
+```
+
+### Did the cache work?
+
+Each declared cache writes one line to the job log, and the same text as a job
+annotation, when the job's last attempt finishes. `runs status --run <id> -o json`
+lists them under `jobs[].annotations`. A line names the cache, adds its directory
+when that is a `Dir()` path inside the checkout, and masks the job's secrets. It
+never shows a resolved host directory or a path outside the checkout.
+
+| Line | Meaning |
+|---|---|
+| `hit (key K); restored` | A saved archive for this lockfile restored the directory. |
+| `miss (key K); saved N` | Nothing was saved for this lockfile yet; the successful job saved it. |
+| `miss (key K); nothing to save, ...` | The directory was still empty after the job, so there is nothing for the next run. Check the path. |
+| `miss (key K); not saved because the job did not succeed` | Only successful attempts save. |
+| `present on this host (key K); not restored or saved` | The directory already had content, so the host neither restored nor saved it. `Npm()` and `GoModules()` usually report this on a developer machine, whose `~/.npm` and `GOMODCACHE` persist between runs. |
+| `no key file (F) in the checkout; running uncached` | None of the files the cache keys on exists, so the job ran without the cache. |
+| `restore failed (key K); ran cold; ...` | A warning: the saved archive could not be restored, so the job ran cold. The rest of the line says whether it saved. |
+| `save failed` / `preparation failed` | A warning; the next run starts cold, or this one ran uncached. |
+
+`K` is the first 12 characters of the cache key, which changes when the lockfile
+changes.
 
 ### Directory helpers
 
