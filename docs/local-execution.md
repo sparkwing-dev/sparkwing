@@ -61,7 +61,7 @@ sparkwing pipeline trigger build-deploy --profile prod
 ```
 
 Engine flags precede `--`. Pipeline and job arguments follow it. Local `run`
-uses this machine's controller unless Cloud routing is configured. `--profile NAME` requires `--route cloud`. A profile
+uses this machine's controller unless Cloud routing is configured. On `run`, `--profile NAME` requires `--route cloud` or `--route burst`. A profile
 selects the controller for `pipeline trigger`, run observations and management.
 
 | Invocation | Execution and records |
