@@ -22,8 +22,7 @@ type releasePushFixture struct {
 	repo, origin, detached, source, commit string
 }
 
-// newReleasePushFixture builds a source commit on origin/main and a detached
-// release commit for v0.99.0 that no remote has, as commit-changelog leaves them.
+// safety: the release commit for v0.99.0 is detached and on no remote, as commit-changelog leaves it.
 func newReleasePushFixture(t *testing.T) releasePushFixture {
 	t.Helper()
 	repo := atomicReleaseRepo(t, fixtureChangelog)
@@ -64,8 +63,7 @@ func releasePushHost(t *testing.T, commit string) sparkwingtest.Host {
 	}})
 }
 
-// blockingFIFO returns a FIFO with no writer, so a reader blocks on it until
-// cleanup opens it for writing and closes it, which releases any leaked reader.
+// safety: a FIFO with no writer blocks its reader with no clock; cleanup opens and closes it to release a leaked one.
 func blockingFIFO(t *testing.T) string {
 	t.Helper()
 	fifo := filepath.Join(t.TempDir(), "block")
