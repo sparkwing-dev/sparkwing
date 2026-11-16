@@ -9,9 +9,9 @@
 ### Added
 
 - **cli:** Common guesses suggest the real command
-  `runs show` suggests `runs status`, `pipelines list` suggests `pipeline list`, `secrets add`
-  suggests `secrets set`, `logout` suggests the profile removal command, and similar. The command
-  still fails with a usage error; nothing runs under the guessed name.
+  Typing runs show suggests `runs status`, pipelines list suggests `pipeline list`, secrets add
+  suggests `secrets set`, logout suggests `profiles delete`, and similar. The command still fails
+  with a usage error; nothing runs under the guessed name.
 - **cli:** Examples on the most-used commands
   `runs`, `pipeline`, `secrets`, `schedules`, `profiles add`, `login`, `dashboard open`,
   `daemon stop`, `docs search` and `cache explain` help pages show one to three invocations.

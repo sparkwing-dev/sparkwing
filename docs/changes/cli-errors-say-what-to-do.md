@@ -1,7 +1,7 @@
 ### Changed
 
 - **cli:** A missing run, secret, schedule or other record names what was not found and exits 4
-  `runs logs --run nope` and its siblings print `run "nope" not found` with a hint such as
+  `runs logs --run nope` and its siblings print run "nope" not found with a hint such as
   `list runs with sparkwing runs list`, carrying `--profile` when one was given, instead of the
   controller route. Every not-found refusal exits 4, the code `runs status` already used, so
   `runs cancel`, `secrets get` and `schedules show` no longer exit 1. JSON keeps code `not_found`.

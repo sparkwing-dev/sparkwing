@@ -9,7 +9,7 @@ omitted.
 `--profile NAME`, or for `sparkwing run` an explicit `--route cloud` or
 `--route burst`, which uses `run.routing.profile` when `--profile` is absent.
 Without either, or with `--profile=`, the command uses the local controller.
-`profiles set --default` is gone, `profiles list` and `profiles show` no longer
+`profiles set` no longer takes `--default`, `profiles list` and `profiles show` no longer
 report `default`, and a config file that still carries `default: true` fails to
 load with:
 
