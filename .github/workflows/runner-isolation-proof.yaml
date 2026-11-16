@@ -1,0 +1,48 @@
+name: Runner isolation proof
+
+# Manual only. Proves that a runner enrolled with `runners add --service-user`
+# runs as its own OS user and that its claimed jobs cannot read another user's
+# home. The VM is discarded afterwards, which is what lets the proof create
+# users, system services and sudoers entries; bin/runner-isolation-proof.sh
+# refuses to run anywhere else.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-isolation-proof
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    name: Runner isolation proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      GOWORK: "auto"
+      SPARKWING_ISOLATION_PROOF_VM: disposable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.11"
+          cache: false
+
+      - name: Prove dedicated-user runner isolation
+        run: bash bin/runner-isolation-proof.sh "$RUNNER_TEMP/runner-isolation-evidence"
+
+      - name: Upload evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runner-isolation-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runner-isolation-evidence
+          if-no-files-found: error
+          retention-days: 14
