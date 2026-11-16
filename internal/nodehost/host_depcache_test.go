@@ -32,7 +32,7 @@ func TestRemoteDepcache(t *testing.T) {
 			if enabled {
 				input.Storage.RemoteCache = remote
 			}
-			finish, err := adapter.Prepare(t.Context(), input, job)
+			finish, err := adapter.Prepare(t.Context(), input, job, nil)
 			if err != nil || finish == nil {
 				t.Fatalf("prepare remote=%v", err)
 			}
@@ -98,8 +98,8 @@ func TestExecutorDepcache(t *testing.T) {
 					backend.upload.Authority.Attempt = backend.upload.Identity.Attempt
 					return StorageBinding{Bytes: backend, Records: backend, Authority: backend.upload.Authority}, nil
 				}
-				deps.PrepareCaches = func(ctx context.Context, in NodeInput, job nodewire.JobSpec) (ExecutorFinalizer, error) {
-					finish, err := originalPrepare(ctx, in, job)
+				deps.PrepareCaches = func(ctx context.Context, in NodeInput, job nodewire.JobSpec, report CacheReporter) (ExecutorFinalizer, error) {
+					finish, err := originalPrepare(ctx, in, job, report)
 					if err != nil || miss {
 						return finish, err
 					}
@@ -171,7 +171,7 @@ func TestDepcacheRecords(t *testing.T) {
 	t.Helper()
 	t.Run("miss_save_restore", func(t *testing.T) {
 		input, adapter, backend, job := depcacheFixture(t)
-		finish, err := adapter.Prepare(t.Context(), input, job)
+		finish, err := adapter.Prepare(t.Context(), input, job, nil)
 		if err != nil || finish == nil {
 			t.Fatalf("prepare=%v finalizer=%t", err, finish != nil)
 		}
@@ -183,7 +183,7 @@ func TestDepcacheRecords(t *testing.T) {
 		if err := os.RemoveAll(filepath.Join(input.Entry.Directory, "vendor")); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := adapter.Prepare(t.Context(), input, job); err != nil {
+		if _, err := adapter.Prepare(t.Context(), input, job, nil); err != nil {
 			t.Fatal(err)
 		}
 		value, err := os.ReadFile(filepath.Join(input.Entry.Directory, "vendor/module/file"))
@@ -199,8 +199,12 @@ func TestDepcacheRecords(t *testing.T) {
 		seedDepcache(t, input, adapter, backend, job)
 		adapter.Budget.Deadline = time.Unix(1, 0)
 		warnings := 0
-		adapter.Warn = func(string) { warnings++ }
-		if _, err := adapter.Prepare(t.Context(), input, job); err != nil {
+		report := countCacheWarnings(&warnings)
+		finish, err := adapter.Prepare(t.Context(), input, job, report)
+		if err != nil || finish == nil {
+			t.Fatalf("prepare=%v", err)
+		}
+		if err := finish(t.Context(), input, &runstate.NodeResult{Outcome: runstate.NodeFailed}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(filepath.Join(input.Entry.Directory, "vendor/module/file")); !errors.Is(err, os.ErrNotExist) || warnings == 0 {
@@ -223,8 +227,12 @@ func TestDepcacheRecords(t *testing.T) {
 				backend.values[backend.commit.Digest] = value
 			}
 			warnings := 0
-			adapter.Warn = func(string) { warnings++ }
-			if _, err := adapter.Prepare(t.Context(), input, job); err != nil {
+			report := countCacheWarnings(&warnings)
+			finish, err := adapter.Prepare(t.Context(), input, job, report)
+			if err != nil || finish == nil {
+				t.Fatalf("prepare=%v", err)
+			}
+			if err := finish(t.Context(), input, &runstate.NodeResult{Outcome: runstate.NodeFailed}); err != nil {
 				t.Fatal(err)
 			}
 			if warnings == 0 {
@@ -255,8 +263,8 @@ func TestDepcacheRecords(t *testing.T) {
 				writePublishedFile(t, input.Entry.Directory, "vendor/old", "warm", 0o600)
 			}
 			warnings := 0
-			adapter.Warn = func(string) { warnings++ }
-			finish, err := adapter.Prepare(t.Context(), input, job)
+			report := countCacheWarnings(&warnings)
+			finish, err := adapter.Prepare(t.Context(), input, job, report)
 			if err != nil || finish == nil {
 				t.Fatalf("prepare=%v", err)
 			}
@@ -296,7 +304,7 @@ func TestDepcacheRecords(t *testing.T) {
 
 func seedDepcache(t *testing.T, input NodeInput, adapter DepcacheRecords, backend *depcacheBackendFixture, job nodewire.JobSpec) {
 	t.Helper()
-	finish, err := adapter.Prepare(t.Context(), input, job)
+	finish, err := adapter.Prepare(t.Context(), input, job, nil)
 	if err != nil || finish == nil {
 		t.Fatalf("prepare seed=%v", err)
 	}
@@ -344,8 +352,8 @@ func checkDepcacheConfinement(t *testing.T, name, link string, symlink bool) {
 	}
 	backend.commit.Digest = outputDigest(archive.Bytes())
 	backend.values[backend.commit.Digest] = archive.Bytes()
-	adapter.Warn = func(string) {}
-	if _, err := adapter.Prepare(t.Context(), input, job); err != nil {
+	quiet := func(string, string) {}
+	if _, err := adapter.Prepare(t.Context(), input, job, quiet); err != nil {
 		t.Fatal(err)
 	}
 	value, err := os.ReadFile(filepath.Join(outside, "victim"))
@@ -359,8 +367,10 @@ func checkDepcacheCaptureConfinement(t *testing.T, spelling string, keyfile bool
 	input, adapter, backend, job := depcacheFixture(t)
 	workspace, outside := input.Entry.Directory, t.TempDir()
 	warnings := 0
-	adapter.Warn = func(message string) {
-		warnings++
+	report := func(level, message string) {
+		if level == "warn" {
+			warnings++
+		}
 		if strings.Contains(message, outside) || strings.Contains(message, "private-cache-content-outside-root") {
 			t.Fatal("cache warning exposed outside data")
 		}
@@ -368,7 +378,7 @@ func checkDepcacheCaptureConfinement(t *testing.T, spelling string, keyfile bool
 	var finish ExecutorFinalizer
 	var err error
 	if !keyfile {
-		finish, err = adapter.Prepare(t.Context(), input, job)
+		finish, err = adapter.Prepare(t.Context(), input, job, report)
 		if err != nil || finish == nil {
 			t.Fatalf("prepare=%v", err)
 		}
@@ -407,7 +417,7 @@ func checkDepcacheCaptureConfinement(t *testing.T, spelling string, keyfile bool
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	if keyfile {
-		finish, err = adapter.Prepare(t.Context(), input, job)
+		finish, err = adapter.Prepare(t.Context(), input, job, report)
 		if err != nil || finish == nil {
 			t.Fatalf("prepare=%v", err)
 		}
@@ -459,8 +469,8 @@ func checkDepcacheUploadBinding(t *testing.T, field uint8, value string) {
 		return upload, err
 	}
 	warnings := 0
-	adapter.Warn = func(string) { warnings++ }
-	finish, err := adapter.Prepare(t.Context(), input, job)
+	report := countCacheWarnings(&warnings)
+	finish, err := adapter.Prepare(t.Context(), input, job, report)
 	if err != nil || finish == nil {
 		t.Fatalf("prepare=%v", err)
 	}
@@ -475,5 +485,13 @@ func checkDepcacheUploadBinding(t *testing.T, field uint8, value string) {
 		}
 	} else if backend.commit != nil || len(backend.puts) != 0 || warnings == 0 {
 		t.Fatal("mismatched cache binding reached storage")
+	}
+}
+
+func countCacheWarnings(count *int) CacheReporter {
+	return func(level, _ string) {
+		if level == "warn" {
+			*count++
+		}
 	}
 }

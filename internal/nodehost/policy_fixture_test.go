@@ -22,7 +22,7 @@ func setTestExecutor(d *ExecutorDependencies, f func(context.Context, testPolicy
 	d.PrepareArtifacts = func(ctx context.Context, in NodeInput, j nodewire.JobSpec) (ExecutorFinalizer, error) {
 		return f(ctx, testPolicyName{"artifacts"}, in, j)
 	}
-	d.PrepareCaches = func(ctx context.Context, in NodeInput, j nodewire.JobSpec) (ExecutorFinalizer, error) {
+	d.PrepareCaches = func(ctx context.Context, in NodeInput, j nodewire.JobSpec, _ CacheReporter) (ExecutorFinalizer, error) {
 		return f(ctx, testPolicyName{"caches"}, in, j)
 	}
 }
