@@ -27,18 +27,6 @@ declared `Consumes`. Write each job's outputs under its own directory, such as `
 `Artifacts` glob does not pick up another's files. Declare `Consumes` anyway: on Cloud and shared runners each job has
 its own workspace and receives only what it consumes. **By design for local runs.**
 
-### Branch checks in local runs
-
-A local run on v0.72.8 records no branch, so `git:branch=` guards refuse it and `Git.Branch` is empty. Until the fix
-ships, check the branch in a `SkipIf` that runs `git branch --show-current`. Runs the GitHub App starts always carry
-their branch. See [run guards](pipelines.md#triggers). **A fix is in progress.**
-
-### Read `RunContext.Git` inside jobs, not while planning
-
-`RunContext.Git` can be nil while Sparkwing discovers a pipeline's plan, and a panic there is reported only as a plan
-failure. Read it inside a job body or a `SkipIf` predicate, as the [migration guide](migrate-from-github-actions.md#if)
-does. See [the SDK guide](sdk.md#plan-must-be-pure). **A fix is in progress.**
-
 ### Services and containers need Docker
 
 Service containers and Docker helpers need a Docker daemon on the machine that runs the job. Sparkwing Cloud
