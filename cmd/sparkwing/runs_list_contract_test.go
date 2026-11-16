@@ -339,7 +339,7 @@ func TestRunStatusFilterRefusesUnknownStates(t *testing.T) {
 		"runs list --status !Failed":          states + "; did you mean !failed?",
 		"runs grep --grep x --status faild":   states + "; did you mean failed?",
 		"runs list --status !failed":          "",
-		"runs logs --grep x --status success": "",
+		"runs grep --grep x --status success": "",
 	} {
 		inv, err := clisurface.Parse("sparkwing", strings.Fields(args))
 		if err != nil {

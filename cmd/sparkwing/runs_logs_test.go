@@ -77,7 +77,7 @@ func TestRunLogsPagesAndFollowsUntilPersistedCompletion(t *testing.T) {
 }
 
 func TestRunLogSearchPreservesFiltersMatchesAndContinuation(t *testing.T) {
-	for _, verb := range []string{"logs", "grep"} {
+	for _, verb := range []string{"grep"} {
 		t.Run(verb, func(t *testing.T) {
 			var output, diagnostics bytes.Buffer
 			reader := fakeLogReader{search: func(_ context.Context, q controllerwire.LogSearchQuery) (controllerwire.LogSearchPage, error) {
@@ -103,6 +103,13 @@ func TestRunLogsRejectInvalidUsageBeforeConnecting(t *testing.T) {
 	} {
 		if err := runRunsLogsArgs(t.Context(), "logs", args); exitCodeFor(err) != 2 {
 			t.Fatalf("args=%v err=%v exit=%d", args, err, exitCodeFor(err))
+		}
+	}
+	for _, args := range [][]string{
+		{}, {"--run", "r1"}, {"--run", "r1", "--grep", "fatal", "--pipeline", "build"}, {"--run", "r1", "--grep", "fatal", "--cursor", "old"}, {"--run", "r1", "--grep", "fatal", "-q"},
+	} {
+		if err := runRunsLogsArgs(t.Context(), "grep", args); exitCodeFor(err) != 2 {
+			t.Fatalf("grep args=%v err=%v exit=%d", args, err, exitCodeFor(err))
 		}
 	}
 }
@@ -153,13 +160,33 @@ func TestRunLogSearchLookbackAndEmptyPageRemainExplicit(t *testing.T) {
 }
 
 func TestRunLogsRetainsSelectionAndPlainOutput(t *testing.T) {
-	inv := logInvocation(t, "logs", "--run", "412", "--job", "build", "--head", "2", "--lines", "2:4", "--grep", "fatal", "--since", "7d", "--no-events", "-o", "plain")
+	inv := logInvocation(t, "logs", "--run", "412", "--job", "build", "--head", "2", "--lines", "2:4", "--since", "7d", "--no-events", "-o", "plain")
 	reader := fakeLogReader{read: func(_ context.Context, run string, query controllerwire.LogQuery) (controllerwire.LogPage, error) {
-		if run != "412" || query.Job != "build" || query.Head == nil || *query.Head != 2 || query.Lines != "2:4" || query.Grep != "fatal" || query.Since != 7*24*time.Hour || !query.NoEvents {
+		if run != "412" || query.Job != "build" || query.Head == nil || *query.Head != 2 || query.Lines != "2:4" || query.Grep != "" || query.Since != 7*24*time.Hour || !query.NoEvents {
 			t.Fatalf("run=%s query=%+v", run, query)
 		}
 		return controllerwire.LogPage{Records: []controllerwire.LogRecord{jobLogRecord("r1", "fatal error")}, Complete: true}, nil
 	}}
+	var output bytes.Buffer
+	if err := observeRunLogs(t.Context(), inv, reader, nil, &output, &output, nil); err != nil || output.String() != "fatal error\n" {
+		t.Fatalf("output=%q err=%v", output.String(), err)
+	}
+}
+
+func TestRunsGrepWithRunFiltersThatRunsLogs(t *testing.T) {
+	inv := logInvocation(t, "grep", "--run", "412", "--job", "build", "--grep", "fatal", "--since", "7d", "-o", "plain")
+	reader := fakeLogReader{
+		read: func(_ context.Context, run string, query controllerwire.LogQuery) (controllerwire.LogPage, error) {
+			if run != "412" || query.Job != "build" || query.Grep != "fatal" || query.Since != 7*24*time.Hour {
+				t.Fatalf("run=%s query=%+v", run, query)
+			}
+			return controllerwire.LogPage{Records: []controllerwire.LogRecord{jobLogRecord("412", "fatal error")}, Complete: true}, nil
+		},
+		search: func(context.Context, controllerwire.LogSearchQuery) (controllerwire.LogSearchPage, error) {
+			t.Fatal("a single-run grep searched across runs")
+			return controllerwire.LogSearchPage{}, nil
+		},
+	}
 	var output bytes.Buffer
 	if err := observeRunLogs(t.Context(), inv, reader, nil, &output, &output, nil); err != nil || output.String() != "fatal error\n" {
 		t.Fatalf("output=%q err=%v", output.String(), err)
@@ -531,14 +558,12 @@ func TestRunLogsHidesMaskedKeeperDiagnostic(t *testing.T) {
 
 func TestRunsLogsWithoutRunOrGrepNamesBothChoices(t *testing.T) {
 	for args, want := range map[string]string{
-		"runs logs":                           "pass --run <id> to read a run's logs, or --grep <pattern> to search across runs; sparkwing runs list shows run IDs",
-		"runs logs --grep x --max-matches -1": "--max-matches must be nonnegative",
-		"runs grep --grep x --max-matches -1": "--max-matches must be nonnegative",
+		"runs logs": "pass --run <id> to read a run's logs, or search across runs with sparkwing runs grep --grep <pattern>; sparkwing runs list shows run IDs",
+		"runs grep --run r1 --grep x --pipeline p": "--pipeline searches across runs; drop --run to use it",
+		"runs grep --grep x --max-matches -1":      "--max-matches must be nonnegative",
 	} {
 		inv, err := clisurface.Parse("sparkwing", strings.Fields(args))
-		if err == nil && inv.Command.Path == "sparkwing runs grep" {
-			_, err = parseLogSearch(inv, time.Now())
-		} else if err == nil {
+		if err == nil {
 			_, err = parseRunLogs(inv)
 		}
 		var usage *clisurface.UsageError

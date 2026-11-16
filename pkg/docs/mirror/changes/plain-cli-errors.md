@@ -12,7 +12,7 @@
   register reads `no pipeline named "biuld"` with the nearest listed name,
   instead of telling you to register the typo. A misspelled flag suggests the
   nearest one, and a mistyped `--dry-run` points at `--sw-dry-run`. `runs logs` with
-  no arguments asks for `--run` or `--grep`. A stray positional names the flag
+  no arguments asks for `--run` or points at `runs grep`. A stray positional names the flag
   that takes it, such as `--run RUN_ID`. An empty `runs list --pipeline` result
   suggests a close sparkwing.yaml name. A run outside a git repository says to
   run `git init`.

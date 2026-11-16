@@ -300,3 +300,15 @@ func TestRunStatusesMatchStoredRunStates(t *testing.T) {
 		t.Fatalf("RunStatuses() = %v, want %v", RunStatuses(), want)
 	}
 }
+
+func TestRunsLogsGrepPointsAtRunsGrep(t *testing.T) {
+	_, err := Parse("sparkwing", []string{"runs", "logs", "--run", "r1", "--grep", "fatal"})
+	want := "flag --grep is not accepted; search log text with sparkwing runs grep --grep PATTERN"
+	var usage *UsageError
+	if !errors.As(err, &usage) || usage.Message != want {
+		t.Fatalf("error %v, want %q", err, want)
+	}
+	if _, err := Parse("sparkwing", []string{"runs", "grep", "--run", "r1", "--grep", "fatal"}); err != nil {
+		t.Fatalf("runs grep --run: %v", err)
+	}
+}

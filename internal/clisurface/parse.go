@@ -201,6 +201,9 @@ func suggestCommand(commands []Command, parent, word, next string) string {
 // safety: only a command that forwards pipeline arguments points at --; any
 // other names its own flags, so the hint never sends a user to a separator.
 func (i Invocation) flagHint(name string) string {
+	if moved := movedFlags[i.Command.Path+" --"+name]; moved != "" {
+		return "; " + moved
+	}
 	suggestion := ""
 	if closest := i.closestFlag(name); closest != "" {
 		suggestion = "; did you mean --" + closest + "?"

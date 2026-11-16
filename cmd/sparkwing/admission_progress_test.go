@@ -102,7 +102,7 @@ func TestAdmissionProgressMaterialChangesAndIntervals(t *testing.T) {
 
 func TestAdmissionProgressPreservesFilteredAndHistoricalLogs(t *testing.T) {
 	for _, args := range [][]string{
-		{"--grep", "needs"}, {"--lines", "1:3"}, {"--head", "5"}, {"--no-events"},
+		{"--lines", "1:3"}, {"--head", "5"}, {"--no-events"},
 	} {
 		inv := logInvocation(t, append([]string{"logs", "--run", "412", "--follow", "-o", "plain"}, args...)...)
 		query, err := parseRunLogs(inv)
