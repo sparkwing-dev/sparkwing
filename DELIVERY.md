@@ -1409,31 +1409,45 @@ sparkwing run cloud-isolation -- --database <staging database host>:5432 \
   --evidence ~/evidence/cloud-isolation/$(date +%F)
 ```
 
+The pipeline attacks staging only. It refuses a controller URL or namespace
+that is not staging's, and before the first upload it checks that both team
+profiles point at the staging controller and authenticate as their own teams.
+Target discovery fails when the cluster shows no controller pods or services,
+cluster DNS, ingress pods or controller nodes, or when the database endpoint is
+missing.
+
 The run uploads the `isolation-probe` fixture as each team, in three phases on
-three fresh nodes. The fixture's sources live in `.sparkwing/isolationprobe`.
-Each probe job does the following:
+three fresh nodes. Each phase starts only after the run before it reported every
+result its plan owed and none failed. The first failure stops the sequence and
+cancels the runs it started, and the report is still written. The fixture's
+sources live in `.sparkwing/isolationprobe`. Each probe job does the following:
 
 - reaches for instance metadata over IPv4 and IPv6;
 - reaches for the controller's pods and services, cluster DNS and the database;
 - reaches for the kube API's private and public endpoints;
 - reaches for the other runs' nodes, kubelets, listeners and Docker ports, and
-  its own node;
-- checks its mounts, devices, sockets and user namespace;
+  for its own node's ports and its own pod's Docker ports;
+- checks its mounts, devices, sockets, its user namespace and the peers' canary
+  files, searching the scratch volume except this pod's own paths;
+- reads a job output it depends on, and is refused two it does not;
 - repeats from a DinD container on Docker's bridge and from one holding every
   privilege the sidecar grants, which also tries host kernel files, mounts,
-  device nodes and the syscalls the DinD seccomp profile refuses.
+  device nodes, `NET_ADMIN` and the syscalls the DinD seccomp profile refuses.
 
 The probes stay non-destructive:
 
 - they connect and close;
 - they open kernel files without writing to them;
-- they answer an unexpected connection with anonymous reads only;
-- each job is bounded at 20 minutes on two cores.
+- they answer an unexpected connection with anonymous reads and dry runs only;
+- each job is bounded at 20 minutes on Cloud's default two-core class.
 
-The driver reads the cluster with kubectl to find targets and map each run to
-its pod and node. It writes `REPORT.md`, every probe result and the cluster
-captures to the evidence directory. The report lists every refusal by checklist
-item.
+While the runs are live, the driver records each run's pods, the nodes they used,
+every pod seen on those nodes, their NodeClaims and each raw run status. It
+judges placement from those records, because the launcher deletes a run's Jobs
+when the run ends. Every result the plan owed must be present, from one manifest
+shared by the probe and the driver. `REPORT.md` counts the verdicts by
+checklist item, lists each failure, and lists every check that was not probed.
+`results.ndjson` holds every result.
 
 It needs the following:
 
@@ -1442,7 +1456,7 @@ It needs the following:
   names;
 - CLI profiles named `stg-iso-a` and `stg-iso-b`, holding run tokens for those
   staging teams. The teams need Cloud credits, which only an operator console
-  grants.
+  grants, and no CLI command shows a team's balance.
 
 An operator-created team credential expires 30 days after the team is created,
 and every token minted from it expires with it. While that credential is still

@@ -156,7 +156,7 @@ pipelines:
   # Hostile-job conformance against staging Cloud from two dedicated
   # conformance teams, whose CLI profiles share the teams' names. Every pod,
   # service, node and API address is discovered from the cluster when it runs;
-  # pass --database host:port to probe the controller database as well.
+  # pass the controller database as --database host:port, which is required.
   - name: cloud-isolation
     entrypoint: CloudIsolation
     args:
