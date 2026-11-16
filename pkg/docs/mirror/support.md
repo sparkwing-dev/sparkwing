@@ -12,6 +12,14 @@
 A self-hosted controller names its own operator's contact in the dashboard's
 Help panel and in limit messages.
 
+Once a deletion runs, the controller removes the data from the live service
+within a few minutes.
+Credit and payment records and the operator's audit log stay. On Sparkwing
+Cloud, copies in database backups and old object versions remain for about 7
+days, typically gone within 8: S3 rounds each expiry up to the next midnight
+UTC and removes expired versions asynchronously. See
+[backup and restore](backup-restore.md) for the details.
+
 ## What to include
 
 - `sparkwing version` output.
