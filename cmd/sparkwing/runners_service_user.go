@@ -291,7 +291,8 @@ func uninstallServiceUser(ctx context.Context, goos, name string) (serviceUserRe
 	if err != nil {
 		return serviceUserRemoved{}, fmt.Errorf("%w; the runner token of %s is still live", err, name)
 	}
-	removed, recordErr := readEnrollmentRecord(enrollmentRecordPath(goos, name))
+	recordPath := enrollmentRecordPath(goos, name)
+	removed, recordErr := readEnrollmentRecord(recordPath)
 	if recordErr != nil && found {
 		var readErr error
 		removed, readErr = readAccountEnrollment(ctx, goos, account)
@@ -303,6 +304,11 @@ func uninstallServiceUser(ctx context.Context, goos, name string) (serviceUserRe
 	removed.Account, removed.Home, removed.Detail = account.Name, account.Home, state.Detail
 	if recordErr != nil {
 		return removed, fmt.Errorf("%s, but nothing names its runner token (%w); find it with sparkwing tokens list --type runner and revoke it with sparkwing tokens revoke", state.Detail, recordErr)
+	}
+	// safety: the result carries the token prefix to the caller, so the record is
+	// spent; a failed removal is reported without blocking the revoke that follows.
+	if err := os.Remove(recordPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		removed.Detail += fmt.Sprintf("; remove the enrollment record %s by hand: %v", recordPath, err)
 	}
 	return removed, nil
 }

@@ -435,6 +435,24 @@ func TestRunnersUninstallServiceStopsTheServiceWhenTheAccountConfigIsGone(t *tes
 	}
 }
 
+func TestRunnersUninstallServiceRemovesTheEnrollmentRecord(t *testing.T) {
+	fx := newInstallFixture(t)
+	if _, err := installServiceUser(t.Context(), "linux", "sw-ci", serviceUserEnrollment{Credential: "swk_000000001_secret", RunnerBinary: "/usr/local/bin/sparkwing-runner"}); err != nil {
+		t.Fatal(err)
+	}
+	record := filepath.Join(fx.host.HomeRoot, ".enrollments", "sw-ci.json")
+	if _, err := os.Stat(record); err != nil {
+		t.Fatalf("install wrote no enrollment record: %v", err)
+	}
+	removed, err := uninstallServiceUser(t.Context(), "linux", "sw-ci")
+	if err != nil || removed.TokenPrefix == "" {
+		t.Fatalf("removed = %+v err = %v", removed, err)
+	}
+	if _, err := os.Lstat(record); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the enrollment record outlived its runner: %v", err)
+	}
+}
+
 func TestRunnersUninstallServiceStopsAndNamesTheRecoveryWithoutAnyRecord(t *testing.T) {
 	fx := newInstallFixture(t)
 	if _, err := installServiceUser(t.Context(), "linux", "sw-ci", serviceUserEnrollment{Credential: "swk_000000001_secret", RunnerBinary: "/usr/local/bin/sparkwing-runner"}); err != nil {
