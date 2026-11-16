@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
 	"path/filepath"
@@ -44,7 +45,7 @@ func RemoveLocalRunnerStartupEnvironment(home, id string) error {
 
 // StartLocalRunnerProcess starts an independently supervised runner. Cancellation
 // bounds startup only; a launched runner drains through its own control protocol.
-func StartLocalRunnerProcess(ctx context.Context, host crontimer.Host, id string) (result error) {
+func StartLocalRunnerProcess(ctx context.Context, host crontimer.Host, id string, limits RunnerLimits) (result error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -66,7 +67,7 @@ func StartLocalRunnerProcess(ctx context.Context, host crontimer.Host, id string
 	}()
 	switch host.GOOS {
 	case "linux":
-		return startLocalRunnerLinux(ctx, host, id, "/run/systemd/system")
+		return startLocalRunnerLinux(ctx, host, id, "/run/systemd/system", limits)
 	case "darwin":
 		return startLocalRunnerDarwin(ctx, host, id)
 	case "windows":
@@ -224,7 +225,7 @@ func runnerHostStat(host crontimer.Host, path string) (os.FileInfo, error) {
 	return os.Stat(path)
 }
 
-func startLocalRunnerLinux(ctx context.Context, host crontimer.Host, id, bootPath string) error {
+func startLocalRunnerLinux(ctx context.Context, host crontimer.Host, id, bootPath string, limits RunnerLimits) error {
 	info, err := runnerHostStat(host, bootPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return startUnmanagedLocalRunner(ctx, host, id)
@@ -264,13 +265,24 @@ func startLocalRunnerLinux(ctx context.Context, host crontimer.Host, id, bootPat
 		"--property=KillMode=mixed",
 		"--property=EnvironmentFile=" + environmentPath,
 		"--property=StandardOutput=append:" + log, "--property=StandardError=append:" + log,
-		"--", host.Binary,
 	}
+	command := []string{"--", host.Binary}
 	// safety: systemd expands dollar signs in argv independently of the environment-file parser.
 	for _, arg := range localRunnerArguments(host, id)[1:] {
-		args = append(args, strings.ReplaceAll(arg, "$", "$$"))
+		command = append(command, strings.ReplaceAll(arg, "$", "$$"))
 	}
-	return runnerManagerCommand(ctx, host, "systemd-run", args...)
+	limited := limits.systemdArguments()
+	if len(limited) == 0 {
+		return runnerManagerCommand(ctx, host, "systemd-run", slices.Concat(args, command)...)
+	}
+	err = runnerManagerCommand(ctx, host, "systemd-run", slices.Concat(args, limited, command)...)
+	if err == nil {
+		return nil
+	}
+	// safety: a manager that refuses a resource property must not cost the user their runner;
+	// queue status reads the runner's limits back and reports the budget as not enforced.
+	slog.Warn("local runner started without the budget's OS limits", "err", err)
+	return runnerManagerCommand(ctx, host, "systemd-run", slices.Concat(args, command)...)
 }
 
 func startLocalRunnerDarwin(ctx context.Context, host crontimer.Host, id string) error {

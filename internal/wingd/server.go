@@ -118,6 +118,10 @@ type Daemon struct {
 	container *containerSensor
 
 	cgroup *cgroupLimiter
+
+	enforcementMu sync.Mutex
+	enforcement   *wingwire.BudgetEnforcement
+	enforcementAt time.Time
 }
 
 type delivery struct {

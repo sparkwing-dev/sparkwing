@@ -41,9 +41,21 @@ func (s *containerSensor) capacityLimits() (cores float64, memBytes uint64) {
 	if s == nil {
 		return 0, 0
 	}
+	cores, memBytes = s.v2Limits("self")
+	if cores == 0 && memBytes == 0 {
+		cores, memBytes = s.capacityV1()
+	}
+	return cores, memBytes
+}
+
+func (s *containerSensor) processLimits(pid int) (cores float64, memBytes uint64) {
+	return s.v2Limits(strconv.Itoa(pid))
+}
+
+func (s *containerSensor) v2Limits(process string) (cores float64, memBytes uint64) {
 	// safety: a limit on any ancestor binds this process, so a systemd slice
 	// that caps the service's parent is read as well as the leaf.
-	for _, dir := range s.v2Ancestry() {
+	for _, dir := range s.v2Ancestry(process) {
 		if c, ok := parseCPUMax(s.readTrim(filepath.Join(dir, "cpu.max"))); ok && (cores == 0 || c < cores) {
 			cores = c
 		}
@@ -53,9 +65,6 @@ func (s *containerSensor) capacityLimits() (cores float64, memBytes uint64) {
 		if m, ok := parseMemMax(s.readTrim(filepath.Join(dir, "memory.max"))); ok && (memBytes == 0 || m < memBytes) {
 			memBytes = m
 		}
-	}
-	if cores == 0 && memBytes == 0 {
-		cores, memBytes = s.capacityV1()
 	}
 	return cores, memBytes
 }
@@ -121,8 +130,8 @@ func (s *containerSensor) v2Dir() (string, bool) {
 	return "", false
 }
 
-func (s *containerSensor) v2Ancestry() []string {
-	rel, ok := cgroupV2Path(s.readFile(filepath.Join("proc", "self", "cgroup")))
+func (s *containerSensor) v2Ancestry(process string) []string {
+	rel, ok := cgroupV2Path(s.readFile(filepath.Join("proc", process, "cgroup")))
 	if !ok {
 		return nil
 	}
