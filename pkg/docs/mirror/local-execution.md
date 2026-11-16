@@ -738,10 +738,14 @@ machine budget is full.
 
 With `local_admission` enabled, the runner never starts the local controller and
 must match its build. If no controller runs, or it runs a build the runner
-cannot speak to, each claimed job fails with the fix: `sparkwing dashboard
-open` or `sparkwing daemon install` for a missing controller, matching
-builds for a mismatch, or `local_admission: false` to stop sharing. The runner
-logs one warning per cause while it lasts.
+cannot speak to, the runner claims no jobs, so runs wait for another eligible
+machine or for the controller instead of failing. Planning continues. The
+runner logs one `runner idle` warning per cause with the fix: `sparkwing
+dashboard open` or `sparkwing daemon install` for a missing controller,
+matching builds for a mismatch, or `local_admission: false` to stop sharing. It
+logs `runner takes jobs again` once the controller answers. If the controller
+cannot be read for another reason, the runner still claims and the job's own
+admission decides.
 
 Each claimed job holds its machine lease through source preparation, execution
 and cleanup. Busy local work does not prevent jobs from becoming ready for overflow.
