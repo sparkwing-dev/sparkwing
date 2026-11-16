@@ -2,11 +2,13 @@
 
 - **runner:** Each dependency cache reports what it did
   Every cache a job declares with `Cache(...)` writes one job-log line and one
-  job annotation per attempt, such as `cache npm: miss (key 3f2a91c04b1e); saved
-  4.1 MiB` or `cache npm: present on this host (key ...); not restored or saved`.
-  `runs status -o json` lists them under `jobs[].annotations`. A missing key file,
-  an empty cache directory after the job and a failed save are named instead of
-  passing silently.
+  job annotation when the job's last attempt finishes, such as
+  `cache npm: miss (key 3f2a91c04b1e); saved 4.1 MiB` or
+  `cache npm: present on this host (key ...); not restored or saved`.
+  `runs status -o json` lists them under `jobs[].annotations`. A cache the job
+  ran without says why: no key file in the checkout, a failed restore, or a
+  failed save. An empty cache directory after the job is named too. Lines mask
+  the job's secrets and show only paths inside the checkout.
 
 ### Fixed
 

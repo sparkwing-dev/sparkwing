@@ -251,6 +251,13 @@ func (h *nodeExecutor) accepted(ctx context.Context, input NodeInput) (runspec.S
 }
 
 func (h *nodeExecutor) layers(ctx context.Context, input *NodeInput, job nodewire.JobSpec, body func() (runstate.NodeResult, error)) (result runstate.NodeResult, err error) {
+	var jobMasks *MaskRegistry
+	if len(job.Caches) > 0 && h.deps.Masks != nil {
+		// safety: attempts release their job mask scope before the cache finalizer reports, so the
+		// layer holds the scope itself; otherwise a job-registered secret in a cache line goes unmasked.
+		jobMasks = h.deps.Masks.job(input.Accepted.RunID, input.NodeID)
+		defer h.deps.Masks.releaseJob(input.Accepted.RunID, input.NodeID)
+	}
 	var finalizers []ExecutorFinalizer
 	defer func() {
 		for i := len(finalizers) - 1; i >= 0; i-- {
@@ -286,7 +293,7 @@ func (h *nodeExecutor) layers(ctx context.Context, input *NodeInput, job nodewir
 	var prepareCaches func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
 	if h.deps.PrepareCaches != nil {
 		prepareCaches = func(ctx context.Context, current NodeInput, job nodewire.JobSpec) (ExecutorFinalizer, error) {
-			return h.deps.PrepareCaches(ctx, current, job, h.cacheReporter(ctx, current))
+			return h.deps.PrepareCaches(ctx, current, job, h.cacheReporter(ctx, input, jobMasks))
 		}
 	}
 	if err := prepare(prepareCaches, len(job.Caches) > 0); err != nil {

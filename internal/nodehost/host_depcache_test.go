@@ -200,7 +200,11 @@ func TestDepcacheRecords(t *testing.T) {
 		adapter.Budget.Deadline = time.Unix(1, 0)
 		warnings := 0
 		report := countCacheWarnings(&warnings)
-		if _, err := adapter.Prepare(t.Context(), input, job, report); err != nil {
+		finish, err := adapter.Prepare(t.Context(), input, job, report)
+		if err != nil || finish == nil {
+			t.Fatalf("prepare=%v", err)
+		}
+		if err := finish(t.Context(), input, &runstate.NodeResult{Outcome: runstate.NodeFailed}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(filepath.Join(input.Entry.Directory, "vendor/module/file")); !errors.Is(err, os.ErrNotExist) || warnings == 0 {
@@ -224,7 +228,11 @@ func TestDepcacheRecords(t *testing.T) {
 			}
 			warnings := 0
 			report := countCacheWarnings(&warnings)
-			if _, err := adapter.Prepare(t.Context(), input, job, report); err != nil {
+			finish, err := adapter.Prepare(t.Context(), input, job, report)
+			if err != nil || finish == nil {
+				t.Fatalf("prepare=%v", err)
+			}
+			if err := finish(t.Context(), input, &runstate.NodeResult{Outcome: runstate.NodeFailed}); err != nil {
 				t.Fatal(err)
 			}
 			if warnings == 0 {

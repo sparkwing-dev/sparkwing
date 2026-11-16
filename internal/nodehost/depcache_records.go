@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,10 +29,12 @@ type DepcacheRecords struct {
 type CacheReporter func(level, message string)
 
 type directoryCache struct {
-	key  blob.DepcacheKey
-	dir  string
-	save bool
-	cold string
+	declaration   nodewire.CacheSpec
+	key           blob.DepcacheKey
+	dir           string
+	save          bool
+	cold          string
+	restoreFailed bool
 
 	workspace, declared string
 }
@@ -47,35 +48,46 @@ func (d DepcacheRecords) Prepare(ctx context.Context, input NodeInput, job nodew
 		return nil, errors.New("cache layer requires a workspace and bound storage adapters")
 	}
 	if report == nil {
-		report = func(level, message string) { slog.Log(ctx, cacheLogLevel(level), message) }
+		// safety: only the executor's reporter holds the job-scoped masker, so lines are never
+		// written unmasked to the host log.
+		report = func(string, string) {}
 	}
+	workspace := sdkWorkingDirectory(input.Entry)
 	caches := make([]directoryCache, 0, len(job.Caches))
+	var uncached []string
 	for _, declaration := range job.Caches {
-		cache, err := d.prepare(ctx, input, declaration, report)
+		cache, err := d.prepare(ctx, input, declaration)
 		if errors.Is(err, errNoCacheKeyFile) {
-			report("warn", fmt.Sprintf("cache %s: no key file (%s) in the workspace; running uncached", declaration.Name, strings.Join(declaration.KeyFiles, ", ")))
+			uncached = append(uncached, fmt.Sprintf("%s: no key file (%s) in the checkout; running uncached", cacheLabel(declaration), checkoutKeyFiles(workspace, declaration.KeyFiles)))
 			continue
 		}
 		if err != nil {
-			report("warn", fmt.Sprintf("cache %s: preparation failed; running uncached", declaration.Name))
+			uncached = append(uncached, cacheLabel(declaration)+": preparation failed; running uncached")
 			continue
-		}
-		if !cache.save {
-			report("info", fmt.Sprintf("cache %s: %s", declaration.Name, cache.cold))
 		}
 		caches = append(caches, cache)
 	}
 	if err := context.Cause(ctx); err != nil {
 		return nil, err
 	}
+	// safety: every outcome is reported here, after retries, because a new attempt clears the
+	// job's annotations and only the finishing attempt holds authority to write them.
 	return func(ctx context.Context, current NodeInput, result *runstate.NodeResult) error {
+		for _, message := range uncached {
+			report("warn", message)
+		}
 		for _, cache := range caches {
-			if !cache.save {
-				continue
+			prefix := fmt.Sprintf("%s: %s", cacheLabel(cache.declaration), cache.cold)
+			level := "info"
+			if cache.restoreFailed {
+				level = "warn"
 			}
-			prefix := fmt.Sprintf("cache %s: %s", cache.key.Name, cache.cold)
-			if result.Outcome != runstate.NodeSuccess {
-				report("info", prefix+"; not saved because the job did not succeed")
+			switch {
+			case !cache.save:
+				report(level, prefix)
+				continue
+			case result.Outcome != runstate.NodeSuccess:
+				report(level, prefix+"; not saved because the job did not succeed")
 				continue
 			}
 			size, err := d.save(ctx, current, cache)
@@ -83,9 +95,9 @@ func (d DepcacheRecords) Prepare(ctx context.Context, input NodeInput, job nodew
 			case err != nil:
 				report("warn", prefix+"; save failed, the next run starts cold")
 			case size == 0:
-				report("info", prefix+"; nothing to save, the cache directory is empty after the job")
+				report(level, prefix+"; nothing to save, the cache directory is empty after the job")
 			default:
-				report("info", fmt.Sprintf("%s; saved %s", prefix, formatCacheBytes(size)))
+				report(level, fmt.Sprintf("%s; saved %s", prefix, formatCacheBytes(size)))
 			}
 		}
 		return context.Cause(ctx)
@@ -94,11 +106,34 @@ func (d DepcacheRecords) Prepare(ctx context.Context, input NodeInput, job nodew
 
 var errNoCacheKeyFile = errors.New("cache has no readable key file")
 
-func cacheLogLevel(level string) slog.Level {
-	if level == "warn" {
-		return slog.LevelWarn
+// safety: a resolver declaration's Path is never validated, and key files may name
+// absolute paths, so only checkout-relative directory paths reach a user-visible line.
+func cacheLabel(declaration nodewire.CacheSpec) string {
+	path := filepath.Clean(declaration.Path)
+	if declaration.Resolver == "" && declaration.Path != "" && filepath.IsLocal(path) && filepath.ToSlash(path) != declaration.Name {
+		return fmt.Sprintf("cache %s (%s)", declaration.Name, filepath.ToSlash(path))
 	}
-	return slog.LevelInfo
+	return "cache " + declaration.Name
+}
+
+func checkoutKeyFiles(workspace string, files []string) string {
+	shown := make([]string, 0, len(files))
+	for _, name := range files {
+		if filepath.IsAbs(name) {
+			relative, err := filepath.Rel(workspace, name)
+			if err != nil {
+				shown = append(shown, "a file outside the checkout")
+				continue
+			}
+			name = relative
+		}
+		if name = filepath.Clean(name); !filepath.IsLocal(name) {
+			shown = append(shown, "a file outside the checkout")
+			continue
+		}
+		shown = append(shown, filepath.ToSlash(name))
+	}
+	return strings.Join(shown, ", ")
 }
 
 func formatCacheBytes(size int64) string {
@@ -119,12 +154,12 @@ func shortCacheKey(key string) string {
 	return key
 }
 
-func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declaration nodewire.CacheSpec, report CacheReporter) (directoryCache, error) {
+func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declaration nodewire.CacheSpec) (directoryCache, error) {
 	key, err := directoryCacheKey(ctx, sdkWorkingDirectory(input.Entry), declaration)
 	if err != nil {
 		return directoryCache{}, err
 	}
-	cache := directoryCache{key: blob.DepcacheKey{Repo: input.Storage.Authority.Repo, Ref: input.Storage.Authority.Ref.Scope, Name: declaration.Name, Key: key}}
+	cache := directoryCache{declaration: declaration, key: blob.DepcacheKey{Repo: input.Storage.Authority.Repo, Ref: input.Storage.Authority.Ref.Scope, Name: declaration.Name, Key: key}}
 	if declaration.Resolver != "" {
 		if d.Resolve == nil {
 			return directoryCache{}, errors.New("cache directory resolver is unavailable")
@@ -155,8 +190,7 @@ func (d DepcacheRecords) prepare(ctx context.Context, input NodeInput, declarati
 	restored, err := d.restore(ctx, input, cache)
 	switch {
 	case err != nil:
-		cache.cold = fmt.Sprintf("restore failed (key %s)", short)
-		report("warn", fmt.Sprintf("cache %s: restore failed (key %s); running cold", declaration.Name, short))
+		cache.cold, cache.restoreFailed = fmt.Sprintf("restore failed (key %s); ran cold", short), true
 	case restored:
 		cache.cold = fmt.Sprintf("hit (key %s); restored", short)
 	default:

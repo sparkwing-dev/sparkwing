@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
@@ -27,18 +28,22 @@ func TestDepcacheReportsOneOutcomePerCache(t *testing.T) {
 		level   string
 		want    string
 	}{
-		{name: "miss_saved", during: writeVendor, outcome: runstate.NodeSuccess, level: "info", want: `^cache dependencies: miss \(key ` + key + `\); saved \d+ B$`},
-		{name: "hit", before: seedDepcache, outcome: runstate.NodeSuccess, level: "info", want: `^cache dependencies: hit \(key ` + key + `\); restored$`},
+		{name: "miss_saved", during: writeVendor, outcome: runstate.NodeSuccess, level: "info", want: `^cache dependencies \(vendor\): miss \(key ` + key + `\); saved \d+ B$`},
+		{name: "hit", before: seedDepcache, outcome: runstate.NodeSuccess, level: "info", want: `^cache dependencies \(vendor\): hit \(key ` + key + `\); restored$`},
 		{name: "present", before: func(t *testing.T, input NodeInput, _ DepcacheRecords, _ *depcacheBackendFixture, _ nodewire.JobSpec) {
 			writePublishedFile(t, input.Entry.Directory, "vendor/old", "warm", 0o600)
-		}, outcome: runstate.NodeSuccess, level: "info", want: `^cache dependencies: present on this host \(key ` + key + `\); not restored or saved$`},
-		{name: "empty", outcome: runstate.NodeSuccess, level: "info", want: `^cache dependencies: miss \(key ` + key + `\); nothing to save, the cache directory is empty after the job$`},
-		{name: "job_failed", during: writeVendor, outcome: runstate.NodeFailed, level: "info", want: `^cache dependencies: miss \(key ` + key + `\); not saved because the job did not succeed$`},
+		}, outcome: runstate.NodeSuccess, level: "info", want: `^cache dependencies \(vendor\): present on this host \(key ` + key + `\); not restored or saved$`},
+		{name: "empty", outcome: runstate.NodeSuccess, level: "info", want: `^cache dependencies \(vendor\): miss \(key ` + key + `\); nothing to save, the cache directory is empty after the job$`},
+		{name: "job_failed", during: writeVendor, outcome: runstate.NodeFailed, level: "info", want: `^cache dependencies \(vendor\): miss \(key ` + key + `\); not saved because the job did not succeed$`},
+		{name: "restore_failed", before: func(t *testing.T, input NodeInput, adapter DepcacheRecords, backend *depcacheBackendFixture, job nodewire.JobSpec) {
+			seedDepcache(t, input, adapter, backend, job)
+			backend.mode = "lookup"
+		}, during: writeVendor, outcome: runstate.NodeSuccess, level: "warn", want: `^cache dependencies \(vendor\): restore failed \(key ` + key + `\); ran cold; saved \d+ B$`},
 		{name: "no_key_file", before: func(t *testing.T, input NodeInput, _ DepcacheRecords, _ *depcacheBackendFixture, _ nodewire.JobSpec) {
 			if err := os.Remove(filepath.Join(input.Entry.Directory, "lockfile")); err != nil {
 				t.Fatal(err)
 			}
-		}, outcome: runstate.NodeSuccess, level: "warn", want: `^cache dependencies: no key file \(lockfile\) in the workspace; running uncached$`},
+		}, outcome: runstate.NodeSuccess, level: "warn", want: `^cache dependencies \(vendor\): no key file \(lockfile\) in the checkout; running uncached$`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			input, adapter, backend, job := depcacheFixture(t)
@@ -81,11 +86,40 @@ func TestCacheReporterWritesJobLogAndAnnotation(t *testing.T) {
 			return nil
 		},
 	}}
-	h.cacheReporter(t.Context(), NodeInput{})("info", "cache npm: hit (key 0123456789ab); restored")
+	h.cacheReporter(t.Context(), &NodeInput{}, nil)("info", "cache npm: hit (key 0123456789ab); restored")
 	if len(frames) != 1 || frames[0].Event != "cache" || frames[0].Level != "info" || frames[0].Message != "cache npm: hit (key 0123456789ab); restored" {
 		t.Fatalf("job log frames = %+v", frames)
 	}
 	if len(annotations) != 1 || annotations[0].Level != "info" || annotations[0].Message != frames[0].Message {
 		t.Fatalf("annotations = %+v", annotations)
+	}
+}
+
+func TestCacheReporterUsesTheFinishingAttempt(t *testing.T) {
+	input, adapter, _, job := depcacheFixture(t)
+	input.Attempt = 1
+	var logged, annotated []runspec.AttemptOrdinal
+	h := &nodeExecutor{deps: ExecutorDependencies{
+		PrepareCaches: adapter.Prepare,
+		Log: func(_ context.Context, in NodeInput, frame nodewire.FrameLog) error {
+			if frame.Event == "cache" {
+				logged = append(logged, in.Attempt)
+			}
+			return nil
+		},
+		Annotate: func(_ context.Context, in NodeInput, _ nodewire.AnnotationRequest) error {
+			annotated = append(annotated, in.Attempt)
+			return nil
+		},
+	}}
+	if _, err := h.layers(t.Context(), &input, job, func() (runstate.NodeResult, error) {
+		input.Attempt = 2
+		writeVendor(t, input.Entry.Directory)
+		return runstate.NodeResult{Outcome: runstate.NodeSuccess}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(logged) != 1 || logged[0] != 2 || len(annotated) != 1 || annotated[0] != 2 {
+		t.Fatalf("cache outcome logged by attempts %v and annotated by %v, want attempt 2 once", logged, annotated)
 	}
 }

@@ -109,8 +109,10 @@ sparkwing.Job(plan, "gems", func(context.Context) error { return nil }).
 ### Did the cache work?
 
 Each declared cache writes one line to the job log, and the same text as a job
-annotation, per attempt. `runs status --run <id> -o json` lists them under
-`jobs[].annotations`.
+annotation, when the job's last attempt finishes. `runs status --run <id> -o json`
+lists them under `jobs[].annotations`. A line names the cache, adds its directory
+when that is a `Dir()` path inside the checkout, and masks the job's secrets. It
+never shows a resolved host directory or a path outside the checkout.
 
 | Line | Meaning |
 |---|---|
@@ -119,8 +121,9 @@ annotation, per attempt. `runs status --run <id> -o json` lists them under
 | `miss (key K); nothing to save, ...` | The directory was still empty after the job, so there is nothing for the next run. Check the path. |
 | `miss (key K); not saved because the job did not succeed` | Only successful attempts save. |
 | `present on this host (key K); not restored or saved` | The directory already had content, so the host neither restored nor saved it. `Npm()` and `GoModules()` usually report this on a developer machine, whose `~/.npm` and `GOMODCACHE` persist between runs. |
-| `no key file (F) in the workspace; running uncached` | The lockfile the cache keys on is missing. |
-| `restore failed` / `save failed` / `preparation failed` | A warning; the job ran cold or the next run starts cold. |
+| `no key file (F) in the checkout; running uncached` | None of the files the cache keys on exists, so the job ran without the cache. |
+| `restore failed (key K); ran cold; ...` | A warning: the saved archive could not be restored, so the job ran cold. The rest of the line says whether it saved. |
+| `save failed` / `preparation failed` | A warning; the next run starts cold, or this one ran uncached. |
 
 `K` is the first 12 characters of the cache key, which changes when the lockfile
 changes.

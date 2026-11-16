@@ -232,7 +232,11 @@ func restoreDepcache(ctx context.Context, cache nodehost.DepcacheRecords, input 
 		return false, false, err
 	}
 	report := func(level, _ string) { warned = warned || level == "warn" }
-	if _, err := cache.Prepare(ctx, input, job, report); err != nil {
+	finish, err := cache.Prepare(ctx, input, job, report)
+	if err != nil {
+		return false, warned, err
+	}
+	if err := finish(ctx, input, &runstate.NodeResult{Outcome: runstate.NodeFailed}); err != nil {
 		return false, warned, err
 	}
 	_, statErr := os.Stat(filepath.Join(destination, "module"))
