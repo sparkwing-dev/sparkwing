@@ -516,3 +516,26 @@ func TestMigrationIndexSummaryIsTheGuidesLeadSentence(t *testing.T) {
 		}
 	}
 }
+
+// VERSIONING.md promises breaking changes only in a minor release, so a patch cut with
+// a (Breaking) entry must stop before it tags.
+func TestReleaseCutRefusesABreakingEntryInAPatch(t *testing.T) {
+	changelog := `# Changelog
+
+## [v0.9.1] - 2026-03-04
+
+### Changed
+
+- **cache (Breaking):** ` + "`FETCH_INTERVAL`" + ` now defaults to ` + "`0`" + `, so a cache
+  started with no flags stops polling.
+`
+	dir := migrationRepo(t, changelog, freshUnreleasedGuide, migrationIndexFixture)
+	_, err := planMigrationRollIn(dir, changelog, "v0.9.1", "2026-03-04")
+	if err == nil || !strings.Contains(err.Error(), "v0.10.0") {
+		t.Fatalf("the cut accepted a (Breaking) entry in patch v0.9.1: %v", err)
+	}
+	fixed := strings.ReplaceAll(changelog, " (Breaking)", "")
+	if _, err := planMigrationRollIn(dir, fixed, "v0.9.1", "2026-03-04"); err != nil {
+		t.Fatalf("the cut refused a patch with no (Breaking) entry: %v", err)
+	}
+}
