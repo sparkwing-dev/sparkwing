@@ -41,7 +41,11 @@ If a break cannot be avoided, it ships with two things:
 - a scripted path in `sparkwing pipeline upgrade` that makes the change for you,
   so moving the pin is one command, not a hand edit.
 
-A break never ships without both.
+A break never ships without both. The changelog lint and the release cut
+refuse an SDK `(Breaking)` entry (scope `sdk` or `typescript`) that does not
+link a section of the migration guide. Before cutting a release that carries
+one, the release owner runs `sparkwing pipeline upgrade` on a pipeline pinned to
+the previous SDK and confirms the command makes the change.
 
 Not covered: `sparkwing/runtime`, `sparkwing/protocol/...` and
 `sparkwing/testsupport/...`. They are the host's side of the SDK and change
@@ -56,10 +60,13 @@ with it.
   that release's notes with a `(Breaking)` marker and a migration guide. A patch
   release never contains a breaking change; the release pipeline refuses to cut
   a patch whose changelog section has a `(Breaking)` entry.
-- An SDK pin keeps its engine. A repository's pin selects the newest permitted
-  engine that accepts its SDK, and each engine release is supported for twelve
-  months after publication. A pipeline whose pin you leave alone keeps running
-  for that window, unless a release is revoked for a security problem.
+- An SDK pin stays runnable. Each new run resolves the newest permitted engine
+  that accepts the pin's SDK, so a later run of an unchanged pin can use a newer
+  engine; a run already accepted keeps its exact engine through retries and
+  resumes. Each engine release is supported for twelve months after
+  publication, so a pin you leave alone keeps resolving a supported engine for
+  at least twelve months after the newest engine that accepts it was published,
+  unless a security problem revokes a release or raises the minimum version.
 - Release notes are the
   [GitHub releases](https://github.com/sparkwing-dev/sparkwing/releases); watch
   the repository's releases to be notified. Migration guides are at

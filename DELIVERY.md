@@ -699,7 +699,11 @@ The version defaults to a minor bump of the newest tag on origin; pass
 `-- --bump patch` for a patch release or `-- --version vX.Y.Z` to name it
 (pipeline flags follow `--`). A patch cut whose section carries a `(Breaking)`
 entry is refused before it commits, because VERSIONING.md promises breaking
-changes only in a minor release; cut the minor instead. The
+changes only in a minor release; cut the minor instead. An SDK `(Breaking)`
+entry (scope `sdk` or `typescript`) must link a migration guide section, in
+`[Unreleased]` and at the cut. Before cutting one, run `sparkwing pipeline
+upgrade` on a pipeline pinned to the previous SDK and confirm it makes the
+change the guide describes. The
 pipeline refuses `v1.0.0` and above. The dry run resolves the version, runs the
 read-only cut checks (version freshness, Go directives, SDK pins, changelog
 links, docs sidebar) and previews the changelog and guide roll; build, lint and the short

@@ -124,7 +124,7 @@ func planMigrationRoll(changelogBody, guideSource, indexBody, version, date stri
 
 // safety: release cuts and changelog lint must agree on which breaking entries require a migration guide.
 func refuseUnrolledBreaking(rolled docs.ReleaseSection, guideName, guideBody string) error {
-	issues := lintSectionBreakingEntries(rolled, fstest.MapFS{guideName: &fstest.MapFile{Data: []byte(guideBody)}})
+	issues := lintSectionBreakingEntries(rolled, fstest.MapFS{guideName: &fstest.MapFile{Data: []byte(guideBody)}}, true)
 	if len(issues) == 0 {
 		return nil
 	}

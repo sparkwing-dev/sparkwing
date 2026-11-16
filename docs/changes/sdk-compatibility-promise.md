@@ -6,5 +6,6 @@
   `sparkwing pipeline upgrade` path. `sparkwing/runtime`, `sparkwing/protocol`
   and `sparkwing/testsupport` are not covered. Releases ship on a weekly train,
   breaking changes ship only in its Monday minor release and never in a patch,
-  and an SDK pin keeps its engine for that engine's twelve-month support
-  window. See `VERSIONING.md` and `sparkwing docs read --topic versioning`.
+  and an unchanged SDK pin keeps resolving a supported engine for at least
+  twelve months after the newest engine that accepts it was published. See
+  `VERSIONING.md` and `sparkwing docs read --topic versioning`.
