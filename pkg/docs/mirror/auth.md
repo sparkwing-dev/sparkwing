@@ -1012,8 +1012,9 @@ cache entries, secrets, subscriptions, runners and every other operational row,
 along with every stored object under the team's namespace. It sweeps once more
 75 minutes later for anything a finishing upload wrote in between. Credit,
 charge, checkout, refund and dispute records stay, linked to the team's slug,
-because accounting law requires them. The slug stays reserved and cannot be
-reused. `GET /api/v1/me/team-deletions` shows the requester each deletion's
+because accounting law requires them. The operator's audit log keeps its
+records of the team's events, such as run cancellations and deletions. The
+slug stays reserved and cannot be reused. `GET /api/v1/me/team-deletions` shows the requester each deletion's
 state.
 
 An owner cannot delete their only team: deleting it means deleting the account.
