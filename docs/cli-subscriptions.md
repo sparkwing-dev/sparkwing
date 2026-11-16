@@ -49,7 +49,7 @@ The signing secret is printed once and never shown again; rotate-secret replaces
 | `--pipeline NAME` | Receive events only for these exact pipeline names; omitted, every pipeline. Repeatable; comma-separated values are accepted. |
 | `--repo KEY` | Receive events only for these repository keys, as run JSON reports them; omitted, every repository. Repeatable; comma-separated values are accepted. |
 | `--description TEXT` | Note shown with the subscription, at most 200 characters. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing subscriptions delete`
 
@@ -66,7 +66,7 @@ Delete a subscription and its pending deliveries through the team-admin route. J
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--subscription ID` | Subscription ID, as subscriptions list shows it. (required) |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing subscriptions list`
 
@@ -82,7 +82,7 @@ List the team's run event subscriptions without their secrets; only team adminis
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing subscriptions rotate-secret`
 
@@ -99,7 +99,7 @@ Replace a subscription's signing secret and print the new one once. Signing swit
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--subscription ID` | Subscription ID, as subscriptions list shows it. (required) |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing subscriptions show`
 
@@ -116,4 +116,4 @@ Show one subscription without its secret. JSON emits the subscription; plain emi
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--subscription ID` | Subscription ID, as subscriptions list shows it. (required) |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |

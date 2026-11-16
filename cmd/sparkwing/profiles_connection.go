@@ -57,7 +57,6 @@ func addProfile(inv clisurface.Invocation, format string) error {
 		if profiles == nil {
 			profiles = make(map[string]userconfig.Profile)
 		}
-		p.Default = profiles[name].Default
 		profiles[name] = p.Profile
 		return nil
 	})

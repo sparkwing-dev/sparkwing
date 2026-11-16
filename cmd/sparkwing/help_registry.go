@@ -204,7 +204,6 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing login --scope":                                  "Grants to ask for; defaults to every run and log grant your role holds.",
 	"sparkwing login --force":                                  "Point an existing profile at a different controller.",
 	"sparkwing profiles add --profile":                         "Name for this saved connection; defaults to the controller host.",
-	"sparkwing profiles set --default":                         "Use this profile when an optional --profile is omitted. --default=false restores local selection if this is the default.",
 	"sparkwing pipeline plan --sw-dry-run":                     "Preview dry-run bodies as would_dry_run, safe steps as would_run, and steps without either as would_skip. SkipIf remains evaluated at run time.",
 	"sparkwing pipeline plan --start-at":                       "Preview the run as if it started at this step, marking steps that are neither this step nor downstream of it as skipped.",
 	"sparkwing pipeline plan --stop-at":                        "Preview the run as if it stopped after this step, marking steps that are neither this step nor upstream of it as skipped.",
@@ -404,7 +403,7 @@ var commandFlagDescriptions = map[string]string{
 const tokenFlagDescription = "Token identifier or prefix."
 
 var flagDescriptions = map[string]string{
-	"profile":             "Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local.",
+	"profile":             "Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller.",
 	"repo":                "Repository identity as owner/name. Naming a repository grants no access.",
 	"checkout":            "Path to a local checkout.",
 	"run":                 "Run ID or per-team run number.",
@@ -586,7 +585,7 @@ var commandSynopses = map[string]string{
 	"sparkwing profiles add":                        "Add a controller connection profile",
 	"sparkwing profiles list":                       "Print every registered profile",
 	"sparkwing profiles remove":                     "Remove a controller connection profile",
-	"sparkwing profiles set":                        "Update a connection or select the default profile",
+	"sparkwing profiles set":                        "Update a profile's controller URL or token",
 	"sparkwing profiles show":                       "Print one controller connection profile",
 	"sparkwing queue":                               "Inspect queued work and scheduling priority",
 	"sparkwing queue list":                          "List running and queued work with expected start and finish",

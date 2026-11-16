@@ -12,7 +12,7 @@ See [Config reference](config-reference.md).
 
 | Section | Holds |
 | --- | --- |
-| `profiles` | Named controller connections containing `controller.url`, an optional `controller.token`, and `default: true` to select an optional-profile CLI connection. |
+| `profiles` | Named controller connections containing `controller.url` and an optional `controller.token`. A command uses one only when `--profile` names it. |
 | `repos` | Registered checkout paths, `fallback_paths`, `auto_register` and `include_worktrees`. |
 | `admission` | Machine admission `mode`, `budget` and `custom` policy. |
 | `dashboard` | The local dashboard's loopback `address` and `read_only` switch. |
@@ -78,9 +78,9 @@ Cloud Jobs, here-hosted runs and the requester's own personal machines accept ev
 network base names cannot be submitted at all.
 
 Connections come only from this machine file. A project can name a profile but
-cannot define one. A controller command uses an explicit `--profile` first, then a saved default
-when its profile flag is optional, then the local controller. Use `--profile=`
-to select local for one invocation. See [Controller connections](backends.md).
+cannot define one. A command reaches a controller only when `--profile` names it on that
+invocation; otherwise, and with `--profile=`, it uses the local controller. See
+[Controller connections](backends.md).
 
 Enrollment saves the machine's display name in `runner.holder_prefix`.
 `sparkwing-runner start --config PATH` accepts this saved metadata. The Cloud

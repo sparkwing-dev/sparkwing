@@ -203,10 +203,9 @@ indexed in [cli-reference.md](cli-reference.md):
 - **Root flags.** `-C DIR`, `--profile NAME` and `-o FORMAT` may go before
   the verb, as in `sparkwing -C ~/code/other runs list`. It selects a local checkout before project discovery.
 - **Profile addressing.** `--profile NAME` picks a private controller
-  connection. Commands with an optional profile use the saved default when
-  omitted, then the local controller when no default is selected. Set it with
-  `profiles set --profile NAME --default`; `--profile=` selects local for one
-  command. Environment and project config cannot choose a default connection.
+  connection for that one command. Without it, or with `--profile=`, every
+  command uses the local controller. No saved setting, environment variable or
+  project config chooses a connection.
   `sparkwing run` executes locally and takes no `--profile`.
   `sparkwing pipeline trigger <pipeline> --profile NAME` submits remote work.
 - **Required flags.** Marked `[required]` in `--help`; missing ones fail

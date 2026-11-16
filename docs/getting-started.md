@@ -527,13 +527,11 @@ An existing profile is replaced only with `--force`. Removing a profile with
 `--keep-token` removes only the saved connection. Project configuration cannot
 supply connection profiles or credentials.
 
-Use `--profile NAME` to select a connection, or save one with
-`sparkwing profiles set --profile prod --default`. Optional-profile commands
-use that default when the flag is omitted. With no saved default they use the
-local controller. `--profile=` selects local for one command.
+Pass `--profile NAME` on each command that should reach a controller. A command
+without it, or with `--profile=`, uses the local controller; no saved setting
+or environment variable selects a connection.
 
-`sparkwing run` keeps its separate machine routing preference. A saved default
-profile does not change local execution. Use `--sw-route cloud --profile NAME`
+`sparkwing run` keeps its separate machine routing preference. Use `--sw-route cloud --profile NAME`
 to send one run directly to Cloud. Without `--profile`, that explicit route
 uses machine `run.routing.profile`.
 
