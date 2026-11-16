@@ -119,6 +119,7 @@ func (s *Store) queryRow(ctx context.Context, q string, args ...any) rowScanner 
 }
 
 type storeTx struct {
+	retryGateGroup       bool
 	ctx                  context.Context
 	operator             *Operator
 	authorityLocks       []rowLock

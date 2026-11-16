@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
@@ -78,6 +79,17 @@ func materializeChangeTx(ctx context.Context, tx *storeTx, team Team, change nod
 	if node.ClaimedBy != "" {
 		if err := checkSelfClaimTx(ctx, tx, team, change.Actor, node); err != nil {
 			return change, err
+		}
+	}
+	if source.Kind == runstate.SourceManualRetry {
+		var declaration nodewire.JobSpec
+		if err := json.Unmarshal(node.Spec, &declaration); err != nil {
+			return change, err
+		}
+		if declaration.Approval != nil && !tx.retryGateGroup {
+			if err := materializeRetryDependentsTx(ctx, tx, team, change); err != nil {
+				return change, err
+			}
 		}
 	}
 	result.OutputRecord, result.ManifestRecord = records.Output, records.Manifest
