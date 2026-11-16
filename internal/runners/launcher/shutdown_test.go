@@ -88,6 +88,8 @@ func TestLauncherShutdownPreservesIndependentFaults(t *testing.T) {
 						})
 					case "breaker":
 						control.award = award
+						// safety: the controller fences an award to one claim; the bare fake repeats it on every claim.
+						l.Control = &queuedControl{controlFake: control, queue: []*CloudJobAward{award}}
 						boundary.reserveErr = ErrNoDedicatedNode
 						l.Breaker = func(context.Context) (bool, error) { return false, failure() }
 					}

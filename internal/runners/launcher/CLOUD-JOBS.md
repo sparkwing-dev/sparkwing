@@ -422,7 +422,10 @@ Transport failures never trigger a second claim in the adapter.
 `--docker-image` require digest-pinned operator images. Namespace defaults to
 `sparkwing-jobs`. Deadlines come from the award rather than a launcher flag.
 `sparkwing-runner launch --poll <duration>` sets the interval between claim and
-reconciliation cycles. The duration must be positive. Omitting it keeps the
+reconciliation cycles. Each cycle claims until the controller answers with no
+award, up to eight awards, so jobs that become ready together launch in the
+same cycle; the bound keeps one fan-out from holding the loop away from
+renewals and teardown. The duration must be positive. Omitting it keeps the
 runtime's configured interval, which defaults to five seconds. While a held
 same-run successor waits for predecessor teardown, reconciliation and placement
 recheck at most one second apart (or the shorter configured poll). New claims

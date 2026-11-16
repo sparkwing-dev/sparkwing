@@ -169,6 +169,13 @@ func New(cfg Config) *Client {
 	if cfg.HTTP == nil {
 		cfg.HTTP = &http.Client{Timeout: requestTimeout}
 	}
+	sender := *cfg.HTTP
+	base := sender.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	sender.Transport = memoTransport{base: base}
+	cfg.HTTP = &sender
 	return &Client{cfg: cfg}
 }
 
