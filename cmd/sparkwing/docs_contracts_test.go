@@ -88,7 +88,9 @@ var userNamedEnvReads = map[string]string{
 
 // safety: a computed read hides the names it produces, so each one is listed
 // here and the page check covers them like any other read.
-var constructedEnvReads = map[string][]string{}
+var constructedEnvReads = map[string][]string{
+	"internal/otelutil/otelutil.go: key": {"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"},
+}
 
 var envPageRow = regexp.MustCompile("(?m)^\\| `([A-Z][A-Z0-9_]*)` \\|")
 
