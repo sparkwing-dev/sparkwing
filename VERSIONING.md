@@ -7,7 +7,7 @@ Sparkwing follows semantic versioning with explicit scope: only certain parts of
 | Scope | Promise |
 |---|---|
 | `pkg/...` packages | Public API. Breaking changes only in major version bumps (or minor while pre-1.0). |
-| Top-level `sparkwing/` package | Author SDK. Same promise as `pkg/...`. |
+| Author SDK: Go `sparkwing/` and `sparkwing/{git,docker,services,inputs,cleanup}`, TypeScript `@sparkwing/sdk` | Additive changes only. See [SDK compatibility](#sdk-compatibility). |
 | CLI flags (`sparkwing` and subcommands) | Public surface. Renames or removals follow the removal procedure below. |
 | Wire protocols (HTTP API request/response shapes, persisted JSON record shapes) | Treated as public API. JSON field renames or type changes are breaking. |
 | YAML config formats (`.sparkwing/sparkwing.yaml`, `~/.config/sparkwing/config.yaml`) | Public surface. Field renames or removals are breaking. |
@@ -18,8 +18,52 @@ Sparkwing follows semantic versioning with explicit scope: only certain parts of
 |---|---|
 | `internal/...` packages, including `internal/store`, `internal/controller`, its client and cipher tests, and `internal/storage` | Implementation detail. Can change anytime, even in patch releases. External consumers cannot import these (Go-enforced). Wire JSON remains covered regardless of its Go package. |
 | `cmd/...` binary internals | The CLI flag surface is covered (above), but the internals of how each binary is built are not. |
+| Go `sparkwing/runtime`, `sparkwing/protocol/...` and `sparkwing/testsupport/...` | The Sparkwing host's side of the SDK. Importable only because the host needs them across the module boundary. Pipeline code should not import them. They change whenever the host does. |
 | Test fixtures, test helpers, `_test.go` files | Not part of the API surface. |
 | Embedded documentation, examples, scaffold templates | May be revised at any time. |
+
+## SDK compatibility
+
+The author SDK is the code a pipeline imports:
+
+- Go: the top-level package `github.com/sparkwing-dev/sparkwing/sparkwing` and its
+  `git`, `docker`, `services`, `inputs` and `cleanup` packages.
+- TypeScript: `@sparkwing/sdk`, as declared in its `index.d.ts`.
+
+Changes to these surfaces are additive only: new functions, types, methods,
+options and optional fields. Pipeline code that builds and plans against one SDK
+release builds and plans against every later one.
+
+If a break cannot be avoided, it ships with two things:
+
+- a migration guide section in `docs/migrations/v<X.Y.Z>.md`, linked from its
+  `(Breaking)` changelog entry;
+- a scripted path in `sparkwing pipeline upgrade` that makes the change for you,
+  so moving the pin is one command, not a hand edit.
+
+A break never ships without both.
+
+Not covered: `sparkwing/runtime`, `sparkwing/protocol/...` and
+`sparkwing/testsupport/...`. They are the host's side of the SDK and change
+with it.
+
+## Release cadence
+
+- Sparkwing ships on a weekly train. Each Monday, the minor release
+  (`v0.Y.0`) is cut from `main` if it has unreleased changes. Patch releases
+  (`v0.Y.Z`) ship between trains for fixes.
+- Breaking changes ship only in the Monday minor release. Each one is listed in
+  that release's notes with a `(Breaking)` marker and a migration guide. A patch
+  release never contains a breaking change; the release pipeline refuses to cut
+  a patch whose changelog section has a `(Breaking)` entry.
+- An SDK pin keeps its engine. A repository's pin selects the newest permitted
+  engine that accepts its SDK, and each engine release is supported for twelve
+  months after publication. A pipeline whose pin you leave alone keeps running
+  for that window, unless a release is revoked for a security problem.
+- Release notes are the
+  [GitHub releases](https://github.com/sparkwing-dev/sparkwing/releases); watch
+  the repository's releases to be notified. Migration guides are at
+  <https://sparkwing.dev/docs/migration-guide/> and in `sparkwing docs migrations`.
 
 ## What's a breaking change
 
@@ -36,11 +80,11 @@ Any of the following on covered surfaces:
 
 ## Removal procedure
 
-Pre-1.0, a covered symbol is removed outright in the release that replaces it. The removal ships as a `### Removed` (or `### Changed`) CHANGELOG entry carrying a `(Breaking)` marker inside the bold scope, linked to an H2 in `docs/migrations/v<X.Y.Z>.md` with before/after code. Where the removed spelling can still be typed -- a retired CLI flag, a retired config file -- the release that removes it recognizes the old spelling and fails with an error naming the replacement and the migration guide, rather than accepting it with a warning. That recognition is a reading aid, not a deprecation window: the symbol is already gone, and the recognition is itself removable, after which the old spelling reads as unknown.
+Pre-1.0, a covered symbol is removed outright in the release that replaces it, which is a Monday minor release (see [Release cadence](#release-cadence)). The author SDK takes no removals except under [SDK compatibility](#sdk-compatibility). The removal ships as a `### Removed` (or `### Changed`) CHANGELOG entry carrying a `(Breaking)` marker inside the bold scope, linked to an H2 in `docs/migrations/v<X.Y.Z>.md` with before/after code. Where the removed spelling can still be typed -- a retired CLI flag, a retired config file -- the release that removes it recognizes the old spelling and fails with an error naming the replacement and the migration guide, rather than accepting it with a warning. That recognition is a reading aid, not a deprecation window: the symbol is already gone, and the recognition is itself removable, after which the old spelling reads as unknown.
 
 ## Pre-1.0 caveat
 
-While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go semver convention. Once Sparkwing reaches `v1.0.0`, breaking changes will be confined to major bumps.
+While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go semver convention; patch bumps never do. Once Sparkwing reaches `v1.0.0`, breaking changes will be confined to major bumps.
 
 ## Security support
 

@@ -199,14 +199,16 @@ routes. External clients use the HTTP contract described by the spec.
 
 Sparkwing follows semantic versioning, but with explicit scope: only
 some packages and surfaces carry stability promises. The short version
-is that `pkg/...`, the top-level `sparkwing/` SDK package, CLI flags,
-wire formats, and YAML configs are covered; everything under
-`internal/...` is implementation detail and may change at any time.
+is that `pkg/...`, the Go and TypeScript author SDK, CLI flags, wire
+formats, and YAML configs are covered; everything under `internal/...`
+is implementation detail and may change at any time. The author SDK
+takes additive changes only. Releases ship on a weekly train, and
+breaking changes ship only in its Monday minor release, never in a patch.
 
 See [VERSIONING.md](./VERSIONING.md) for the full policy, the
-deprecation procedure, and the pre-1.0 caveat. User-visible changes
-land in [CHANGELOG.md](./CHANGELOG.md); CI enforces that covered
-surfaces ship with matching entries.
+removal procedure, the release cadence and the pre-1.0 caveat.
+User-visible changes land in [CHANGELOG.md](./CHANGELOG.md); CI
+enforces that covered surfaces ship with matching entries.
 
 ## Dependencies
 
