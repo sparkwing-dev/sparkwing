@@ -165,13 +165,13 @@ func TestHeldClaimSearchesAgainWhenAGroupWaitRunsOut(t *testing.T) {
 // lookup must still wake the hold for it rather than treat it as already settled.
 func TestHeldClaimSearchesAgainWhenAGroupWaitRunsOutDuringTheSearch(t *testing.T) {
 	wake := &countingWake{}
-	wake.lookup = func() {
-		if wake.searches.Load() == 1 {
-			time.Sleep(2 * time.Second)
-		}
-	}
 	f := newClaimHoldFixture(t, func(s *store.Store) ClaimWake { wake.ClaimWake = s; return wake })
 	synctest.Test(t, func(t *testing.T) {
+		wake.lookup = func() {
+			if wake.searches.Load() == 1 {
+				time.Sleep(2 * time.Second)
+			}
+		}
 		wake.lapseAt = time.Now().Add(time.Second)
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
