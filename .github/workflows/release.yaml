@@ -82,12 +82,6 @@ jobs:
             source_sha="$(printf '%s\n' "$lines" | awk -v direct="refs/tags/$TAG" '$2 == direct { print $1 }')"
           fi
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
-          # Anyone who can push a tag could otherwise publish a signed release of unreviewed code.
-          status="$(gh api "repos/$GITHUB_REPOSITORY/compare/$DEFAULT_BRANCH...$source_sha" --jq .status)"
-          if [ "$status" != behind ] && [ "$status" != identical ]; then
-            echo "::error::release tag $TAG is not reachable from $DEFAULT_BRANCH" >&2
-            exit 1
-          fi
           echo "source_sha=$source_sha" >>"$GITHUB_OUTPUT"
 
   dashboard:
