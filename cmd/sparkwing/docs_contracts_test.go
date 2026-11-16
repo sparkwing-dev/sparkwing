@@ -600,6 +600,10 @@ files:
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			continue
 		}
+		// safety: an example program documents its own settings in its README, not on the product's reference page.
+		if strings.HasPrefix(path, "examples/") {
+			continue
+		}
 		for dir := filepath.Dir(path); dir != "."; dir = filepath.Dir(dir) {
 			switch filepath.Base(dir) {
 			case ".git", "testdata", "node_modules", "vendor":
