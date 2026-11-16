@@ -16,11 +16,11 @@ Look at past runs with `sparkwing runs list` and `sparkwing runs logs --run ID`.
 
 `sparkwing run --help-all` adds Cloud routing, publication, CI use without the shared controller, step windows and every flag.
 
-Runs locally by default through the local runner. Foreground commands observe persisted output; standalone and foreground publication keep their CLI host. --sw-route cloud --profile NAME sends planning and jobs directly to Cloud, including without a terminal. --sw-detached returns after intake; otherwise the CLI follows logs. Explicit Cloud routing never falls back locally. --profile requires --sw-route cloud. Repository local restrictions still apply.
+Runs locally by default through the local runner. Foreground commands observe persisted output; standalone and foreground publication keep their CLI host. --sw-route cloud --profile NAME sends planning and jobs directly to Cloud, including without a terminal. --sw-detached returns after intake; otherwise the CLI follows logs. Explicit Cloud routing never falls back locally. --sw-route burst applies the machine run.routing preferences, overflow and fallback; a run without --sw-route stays on this machine whatever run.routing says. --profile requires --sw-route cloud or burst. Repository local restrictions still apply.
 
 ### Burst and overflow
 
-Set route: cloud and profile: NAME in machine run.routing to opt in. Repository defaults.run and pipelines[].run may only restrict routing to local and declare secret names. Machine configuration authorizes untracked source_files. The CLI hosts the Cloud-owned run and streams its logs. Ctrl-C requests cancellation. The default preference is here for 5s, then your registered personal machines for 5s, then Cloud. Other team runners cannot claim burst jobs. Prefer entries accept target and a non-negative hold duration. A controller that is unreachable before intake falls back to a local run and reports it. Authorization failures and a lost intake response remain failures because an accepted run keeps one owner. See [local execution](local-execution.md#burst-and-overflow) for configuration and secret handling.
+Pass --sw-route burst on a run to use machine run.routing, whose profile: NAME or --profile NAME selects the Cloud connection. Repository defaults.run and pipelines[].run may only restrict routing to local and declare secret names. Machine configuration authorizes untracked source_files. The CLI hosts the Cloud-owned run and streams its logs. Ctrl-C requests cancellation. The default preference is here for 5s, then your registered personal machines for 5s, then Cloud. Other team runners cannot claim burst jobs. Prefer entries accept target and a non-negative hold duration. A controller that is unreachable before intake falls back to a local run and reports it. Authorization failures and a lost intake response remain failures because an accepted run keeps one owner. See [local execution](local-execution.md#burst-and-overflow) for configuration and secret handling.
 
 Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.
 
@@ -47,8 +47,8 @@ Cache-from reads only authorized verified-default-branch memo/artifacts/depcache
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--publish PROFILE` | Copy this local run's results to the named controller profile. |
-| `--sw-route ROUTE` | Select local execution or direct Cloud execution for this invocation. Values: local, cloud. |
-| `--profile NAME` | Cloud connection profile; requires --sw-route cloud. |
+| `--sw-route ROUTE` | Leave this machine for one invocation: cloud runs directly on Cloud; burst applies machine run.routing preferences and overflow. Without it the run is local. Values: local, cloud, burst. |
+| `--profile NAME` | Cloud connection profile; requires --sw-route cloud or burst. |
 | `--agent NAME` | Coding agent starting this run, such as claude-code:land-agent; none records no agent. Display-only. |
 | `--sw-cache-from PROFILE` | Read the authorized remote cache; an empty value disables the machine default. |
 | `--sw-pause-before JOB` | Pause before the selected job. Repeatable; comma-separated values are accepted. |

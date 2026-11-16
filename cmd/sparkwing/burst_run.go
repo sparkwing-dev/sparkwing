@@ -40,6 +40,8 @@ func resolveRunRouting(machine userconfig.Config, project *projectconfig.Config,
 	var route userconfig.RunRouting
 	if machine.Run != nil && machine.Run.Routing != nil {
 		route = *machine.Run.Routing
+		// safety: machine routing never picks the route; only --sw-route cloud or burst leaves this machine.
+		route.Route = nil
 	}
 	restrict := func(r *projectconfig.RunRestrictions) {
 		if r != nil && r.Route != nil {
@@ -149,12 +151,12 @@ func loadRunRouting(directory, pipeline string, flags runFlags) (userconfig.RunR
 
 func resolveInvocationRouting(machine userconfig.Config, project *projectconfig.Config, pipeline string, flags runFlags) (userconfig.RunRouting, error) {
 	route := resolveRunRouting(machine, project, pipeline)
-	if flags.route == "cloud" {
+	if flags.route == "cloud" || flags.route == "burst" {
 		if restricted := resolveRunRouting(userconfig.Config{}, project, pipeline); restricted.Route != nil {
-			return route, errors.New("run: repository run.route: local forbids --sw-route cloud")
+			return route, fmt.Errorf("run: repository run.route: local forbids --sw-route %s", flags.route)
 		}
-	}
-	if flags.route != "" {
+		route.Route = new("cloud")
+	} else if flags.route != "" {
 		route.Route = new(flags.route)
 	}
 	if flags.profile != "" {

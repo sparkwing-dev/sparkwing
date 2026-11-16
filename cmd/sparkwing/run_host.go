@@ -315,11 +315,11 @@ func validateLocalRunFlags(flags runFlags) error {
 	if flags.parseErr != nil {
 		return flags.parseErr
 	}
-	if flags.profile != "" && flags.route != "cloud" {
-		return errors.New("run: --profile requires --sw-route cloud")
+	if flags.profile != "" && flags.route != "cloud" && flags.route != "burst" {
+		return errors.New("run: --profile requires --sw-route cloud or --sw-route burst")
 	}
-	if flags.route != "" && flags.route != "local" && flags.route != "cloud" {
-		return errors.New("run: --sw-route must be local or cloud")
+	if flags.route != "" && flags.route != "local" && flags.route != "cloud" && flags.route != "burst" {
+		return errors.New("run: --sw-route must be local, cloud or burst")
 	}
 	if flags.prioritySet || flags.priority != "" {
 		if _, err := validatePriorityFlag(flags.priority); err != nil {

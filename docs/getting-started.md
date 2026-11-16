@@ -531,9 +531,10 @@ Pass `--profile NAME` on each command that should reach a controller. A command
 without it, or with `--profile=`, uses the local controller; no saved setting
 or environment variable selects a connection.
 
-`sparkwing run` keeps its separate machine routing preference. Use `--sw-route cloud --profile NAME`
-to send one run directly to Cloud. Without `--profile`, that explicit route
-uses machine `run.routing.profile`.
+`sparkwing run` stays on this machine unless the invocation passes `--sw-route`.
+Use `--sw-route cloud --profile NAME` to send one run directly to Cloud, or
+`--sw-route burst` to apply the machine `run.routing` overflow preferences.
+Without `--profile`, either route uses machine `run.routing.profile`.
 
 ```bash
 sparkwing profiles show --profile prod        # saved connection, with token redacted

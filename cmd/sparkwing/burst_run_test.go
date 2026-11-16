@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -25,7 +26,7 @@ func TestRunRoutingPrecedence(t *testing.T) {
 	if r := resolveRunRouting(machine, cfg, "deploy"); *r.Route != local {
 		t.Fatal(r)
 	}
-	if r := resolveRunRouting(machine, cfg, "test"); *r.Route != cloud || r.OverflowMinutes != nil {
+	if r := resolveRunRouting(machine, cfg, "test"); r.Route != nil || *r.Profile != profile || r.OverflowMinutes != nil {
 		t.Fatal(r)
 	}
 	if r := resolveRunRouting(userconfig.Config{}, nil, "test"); r.Route != nil {
@@ -261,5 +262,69 @@ func TestExplicitCloudRouteDetachesAndNeverFallsBack(t *testing.T) {
 				t.Fatalf("called=%v err=%v", called, err)
 			}
 		}
+	}
+}
+
+func TestBareRunStaysLocalAndBurstNeedsAnExplicitRoute(t *testing.T) {
+	machine := userconfig.Config{Run: &userconfig.RunConfig{Routing: &userconfig.RunRouting{Route: new("cloud"), Profile: new("far"), Prefer: []userconfig.RoutePreference{{Target: "here", Hold: "5s"}, {Target: "cloud"}}}}}
+	bare, err := resolveInvocationRouting(machine, nil, "gate", runFlags{})
+	if err != nil || bare.Route != nil {
+		t.Fatalf("a bare run routed to %v: %v", bare.Route, err)
+	}
+	calls := map[string]int{}
+	deps := burstRunDependencies{
+		connect: func(context.Context, string) (client.EngineOptions, func(), error) {
+			calls["connect"]++
+			return client.EngineOptions{}, func() {}, nil
+		},
+		probe: func(context.Context, client.EngineOptions) error { return nil },
+		local: func(context.Context, string, runFlags, []string) error { calls["local"]++; return nil },
+		cloud: func(context.Context, string, runFlags, []string, userconfig.RunRouting, client.EngineOptions) error {
+			calls["cloud"]++
+			return nil
+		},
+	}
+	if err := runRoutedCommand(t.Context(), "gate", runFlags{}, nil, bare, io.Discard, deps); err != nil || calls["local"] != 1 || calls["connect"] != 0 {
+		t.Fatalf("bare run: %v %v", calls, err)
+	}
+	burst, err := resolveInvocationRouting(machine, nil, "gate", runFlags{route: "burst"})
+	if err != nil || burst.Route == nil || *burst.Route != "cloud" || *burst.Profile != "far" || len(burst.Prefer) != 2 {
+		t.Fatalf("--sw-route burst did not apply machine routing: %+v %v", burst, err)
+	}
+	if err := runRoutedCommand(t.Context(), "gate", runFlags{route: "burst"}, nil, burst, io.Discard, deps); err != nil || calls["cloud"] != 1 {
+		t.Fatalf("burst run: %v %v", calls, err)
+	}
+	if err := validateLocalRunFlags(runFlags{route: "burst"}); err != nil {
+		t.Fatalf("--sw-route burst refused: %v", err)
+	}
+	restricted := &projectconfig.Config{Defaults: &projectconfig.Defaults{Run: &projectconfig.RunRestrictions{Route: new("local")}}}
+	if _, err := resolveInvocationRouting(machine, restricted, "gate", runFlags{route: "burst"}); err == nil {
+		t.Fatal("--sw-route burst bypassed repository local restriction")
+	}
+}
+
+func TestManagedHookRunsStayLocalUnderMachineRouting(t *testing.T) {
+	t.Setenv("SPARKWING_PROFILE", "far")
+	machine := userconfig.Config{Run: &userconfig.RunConfig{Routing: &userconfig.RunRouting{Route: new("cloud"), Profile: new("far"), Prefer: []userconfig.RoutePreference{{Target: "cloud"}}}}}
+	script := renderHookScript("pre-push", []string{"gate"})
+	runs := 0
+	for _, line := range strings.Split(script, "\n") {
+		words, ok := strings.CutPrefix(line, "sparkwing run ")
+		if !ok {
+			continue
+		}
+		runs++
+		inv, err := clisurface.Parse("sparkwing", append([]string{"run"}, strings.Fields(strings.ReplaceAll(words, "'", ""))...))
+		if err != nil {
+			t.Fatalf("hook line %q: %v", line, err)
+		}
+		flags, _ := runFlagsFromInvocation(inv)
+		route, err := resolveInvocationRouting(machine, nil, inv.Pipeline, flags)
+		if err != nil || route.Route != nil {
+			t.Fatalf("hook line %q routed to %v: %v", line, route.Route, err)
+		}
+	}
+	if runs != 1 {
+		t.Fatalf("hook script has %d run lines:\n%s", runs, script)
 	}
 }
