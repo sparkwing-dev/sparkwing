@@ -715,10 +715,31 @@ func permissionsNotGranted(body []byte) bool {
 }
 
 // CheckRunOutput is the text a check run shows on GitHub. GitHub accepts at
-// most 65535 characters in Summary.
+// most 65535 characters in each of Summary and Text, and at most
+// [MaxCheckRunAnnotations] annotations per request; each request appends its
+// annotations to those the check run already has.
 type CheckRunOutput struct {
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
+	Title       string               `json:"title"`
+	Summary     string               `json:"summary"`
+	Text        string               `json:"text,omitempty"`
+	Annotations []CheckRunAnnotation `json:"annotations,omitempty"`
+}
+
+// MaxCheckRunAnnotations is how many annotations GitHub accepts in one check run write.
+const MaxCheckRunAnnotations = 50
+
+// CheckRunAnnotation marks a line range of a repository file. Level is
+// "notice", "warning" or "failure". GitHub accepts columns only on a
+// single-line range.
+type CheckRunAnnotation struct {
+	Path        string `json:"path"`
+	StartLine   int    `json:"start_line"`
+	EndLine     int    `json:"end_line"`
+	StartColumn int    `json:"start_column,omitempty"`
+	EndColumn   int    `json:"end_column,omitempty"`
+	Level       string `json:"annotation_level"`
+	Message     string `json:"message"`
+	Title       string `json:"title,omitempty"`
 }
 
 // CheckRun is what the App writes to one check run. Status is "queued",
@@ -795,6 +816,32 @@ func (c *Client) UpdateCheckRun(ctx context.Context, token, owner, repo string, 
 	_, err := c.repoWrite(ctx, http.MethodPatch, token, owner, repo,
 		"/check-runs/"+strconv.FormatInt(id, 10), "update check run", run)
 	return err
+}
+
+// CheckRunAnnotationCount returns how many annotations check run id on
+// owner/repo already holds.
+func (c *Client) CheckRunAnnotationCount(ctx context.Context, token, owner, repo string, id int64) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.APIURL+"/repos/"+url.PathEscape(owner)+"/"+
+		url.PathEscape(repo)+"/check-runs/"+strconv.FormatInt(id, 10), nil)
+	if err != nil {
+		return 0, err
+	}
+	c.apiHeaders(req, "token "+token)
+	var found struct {
+		Output struct {
+			AnnotationsCount int `json:"annotations_count"`
+		} `json:"output"`
+	}
+	status, err := c.do(req, &found)
+	switch {
+	case err != nil:
+		return 0, err
+	case status == http.StatusForbidden:
+		return 0, fmt.Errorf("%w: read check run answered 403", ErrPermissionMissing)
+	case status < 200 || status >= 300:
+		return 0, &apiError{op: "read check run", status: status}
+	}
+	return found.Output.AnnotationsCount, nil
 }
 
 func (c *Client) repoWrite(ctx context.Context, method, token, owner, repo, path, op string, body any) ([]byte, error) {

@@ -593,7 +593,9 @@ file and optional line, end-line and column. Positions are one-based when
 supplied. Levels are `debug`, `info`, `warn` and `error`, with `info` as the
 default. `sw.Summary(ctx, markdown)` replaces the job or step summary. The host
 assigns the job, filters debug records and masks text before applying limits.
-Annotation and summary write failures fail the callback.
+Annotation and summary write failures fail the callback. On a private repository, a
+run the GitHub App started shows its summaries on its check run and its annotations
+that name a file inline on the commit; see [Check runs](github-app.md#check-runs).
 
 A step can declare `Risk(labels...)`, `DryRun(callback)` and
 `SafeWithoutDryRun()`. The host enforces approved risks and chooses the dry-run
