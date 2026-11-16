@@ -8,8 +8,8 @@ Node versions, a build that publishes `dist/`, and a deploy that receives
   through `npx node@<version>`, because jobs use the host's toolchain.
 - `.artifacts("dist/**")` publishes the build output and `.consumes(build)`
   stages it into the deploy job's workspace.
-- The deploy job's `skipIf` reads the run's branch. A local run does not record
-  one, so the predicate falls back to the checked-out branch.
+- The deploy job's `skipIf` reads the run's branch, which a local run takes
+  from the checked-out branch, so the deploy is skipped everywhere but `main`.
 - A box-scoped concurrency group makes these jobs take turns on one machine,
   because a local run's jobs share your working tree.
 
