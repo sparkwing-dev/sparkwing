@@ -2,6 +2,7 @@ package isolationprobe
 
 import (
 	"io/fs"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -72,7 +73,9 @@ func TestMarkerProbesFindTheNodesOwnPaths(t *testing.T) {
 	}
 }
 
-func TestWalkTreeFindsRuntimeSocketsAndPeerCanariesOutsideSkippedTrees(t *testing.T) {
+func never() bool { return false }
+
+func TestWalkTreeFindsRuntimeSocketsAndPeerCanariesOutsideExemptPaths(t *testing.T) {
 	mfs := fstest.MapFS{
 		"proc/1/comm":                        {Data: []byte("x")},
 		"proc/docker.sock":                   {Mode: fs.ModeSocket},
@@ -84,22 +87,74 @@ func TestWalkTreeFindsRuntimeSocketsAndPeerCanariesOutsideSkippedTrees(t *testin
 		"etc/hosts":                          {},
 	}
 	walk := func(root string, fn fs.WalkDirFunc) error { return fs.WalkDir(mfs, root, fn) }
-	f := walkTree(".", []string{"proc", "tmp"}, []string{"isolation-canary-stg-iso-b"}, 1000, walk)
+	f := walkTree(".", []string{"proc", "tmp/docker.sock"}, []string{"isolation-canary-stg-iso-b"}, 1000, never, walk)
 	if strings.Join(f.sockets, ",") != "run/containerd/containerd.sock" || strings.Join(f.canaries, ",") != "var/tmp/isolation-canary-stg-iso-b" || f.budget {
 		t.Fatalf("walk = %+v", f)
 	}
-	results := walkResults(ContextJob, f, true)
+	results := walkResults(ContextJob, f)
 	if len(results) != 2 || results[0].Verdict != Breach || results[1].Verdict != Breach {
 		t.Fatalf("walk results = %+v, want both breaches", results)
 	}
-	clean := walkResults(ContextJob, walkTree(".", []string{"proc", "tmp", "run", "var"}, []string{"isolation-canary-stg-iso-b"}, 1000, walk), true)
-	if clean[0].Verdict != Pass || clean[1].Verdict != Pass {
+	clean := walkResults(ContextJob, walkTree(".", []string{"proc", "tmp", "run", "var"}, []string{"isolation-canary-stg-iso-b"}, 1000, never, walk))
+	if clean[0].Verdict != Pass || clean[1].Verdict != Pass || clean[0].Probe != probeSockets || clean[1].Probe != probeCanaries {
 		t.Fatalf("clean walk = %+v", clean)
 	}
-	cut := walkResults(ContextJob, walkTree(".", nil, nil, 2, walk), true)
+	cut := walkResults(ContextJob, walkTree(".", nil, nil, 2, never, walk))
 	for _, r := range cut {
 		if r.Verdict != Inconclusive {
 			t.Fatalf("budget-exhausted walk = %+v, want inconclusive", cut)
 		}
+	}
+	big := fstest.MapFS{}
+	for i := range 3000 {
+		big["d/f"+strconv.Itoa(i)] = &fstest.MapFile{}
+	}
+	stalled := walkTree(".", nil, nil, 1_000_000, func() bool { return true }, func(root string, fn fs.WalkDirFunc) error { return fs.WalkDir(big, root, fn) })
+	if !stalled.budget || stalled.visited > 1024 {
+		t.Fatalf("walk past its time budget = %+v, want it stopped at the first check", stalled)
+	}
+}
+
+// The walk exempts exactly the pod's own socket, DinD state and run directory, so a peer's canary
+// or socket on the same scratch volume is found from the job container and, under /host, from the
+// privileged container.
+func TestWalkSearchesPeerScratchAndExemptsOnlyThePodsOwn(t *testing.T) {
+	const peer, own = "isolation-canary-peer", "isolation-canary-own"
+	scratch := func(root string) fstest.MapFS {
+		return fstest.MapFS{
+			root + "tmp/docker.sock":                              {Mode: fs.ModeSocket},
+			root + "tmp/docker-exec/containerd/containerd.sock":   {Mode: fs.ModeSocket},
+			root + "tmp/docker/overlay2/l/x":                      {},
+			root + "tmp/isolation-probe/run-" + own + "/" + own:   {},
+			root + "tmp/isolation-probe/run-" + peer + "/" + peer: {},
+		}
+	}
+	walkOf := func(mfs fstest.MapFS) func(string, fs.WalkDirFunc) error {
+		return func(_ string, fn fs.WalkDirFunc) error {
+			return fs.WalkDir(mfs, ".", func(path string, d fs.DirEntry, err error) error {
+				return fn("/"+strings.TrimPrefix(path, "."), d, err)
+			})
+		}
+	}
+	privileged := scratch("host/")
+	privileged["out/exchange/plan.json"] = &fstest.MapFile{}
+	views := map[string]fstest.MapFS{ContextJob: scratch(""), ContextPrivileged: privileged}
+	ownPaths := ownScratch("/tmp/docker.sock", "/tmp/isolation-probe/run-"+own)
+	for where, want := range map[string]string{
+		ContextJob:        "/tmp/isolation-probe/run-" + peer + "/" + peer,
+		ContextPrivileged: "/host/tmp/isolation-probe/run-" + peer + "/" + peer,
+	} {
+		f := walkTree("/", walkExemptions(where, ownPaths), []string{peer, own}, 1000, never, walkOf(views[where]))
+		if len(f.sockets) != 0 {
+			t.Errorf("%s flagged the pod's own sockets: %v", where, f.sockets)
+		}
+		if strings.Join(f.canaries, ",") != want {
+			t.Errorf("%s canaries = %v, want only the peer's %s", where, f.canaries, want)
+		}
+	}
+	job := views[ContextJob]
+	job["tmp/peer-scratch/docker.sock"] = &fstest.MapFile{Mode: fs.ModeSocket}
+	if f := walkTree("/", walkExemptions(ContextJob, ownPaths), nil, 1000, never, walkOf(job)); strings.Join(f.sockets, ",") != "/tmp/peer-scratch/docker.sock" {
+		t.Fatalf("sockets = %v, want the peer's socket outside the pod's own", f.sockets)
 	}
 }

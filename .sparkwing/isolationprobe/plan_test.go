@@ -13,7 +13,7 @@ func validPlan() Plan {
 		PeerCanaries: []string{"isolation-canary-stg-iso-b"},
 		Targets: []Target{
 			{Item: "C4", Name: "IMDS", Address: "169.254.169.254:80", Expect: ExpectBlocked, Listening: true, Grade: GradeIMDS},
-			{Item: "C7", Name: "public kube API", Address: "example.eks.amazonaws.com:443", Expect: ExpectDenied, Listening: true, Grade: GradeKubeAPI},
+			{Item: "C7", Name: "public kube API", Address: "api.example.invalid:443", Expect: ExpectDenied, Listening: true, Grade: GradeKubeAPI, Namespace: "staging-ns"},
 			{Item: "C5", Name: "IMDS IPv6", Address: "[fd00:ec2::254]:80", Expect: ExpectBlocked},
 		},
 	}
@@ -21,7 +21,7 @@ func validPlan() Plan {
 
 func TestReadPlanAcceptsAPlanItCanJudge(t *testing.T) {
 	path := filepath.Join(t.TempDir(), PlanFile)
-	if err := os.WriteFile(path, []byte(`{"team":"stg-iso-a","controller_url":"https://staging.sparkwing.dev","listen_port":18080,"canary":"c","targets":[{"item":"C6","name":"controller","address":"10.0.59.130:4343","expect":"blocked","listening":true}]}`), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"team":"stg-iso-a","controller_url":"https://staging.sparkwing.dev","listen_port":18080,"canary":"c","targets":[{"item":"C6","name":"controller","address":"10.9.3.3:4343","expect":"blocked","listening":true}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	p, err := ReadPlan(path)
@@ -50,6 +50,7 @@ func TestValidateRefusesAPlanItCannotJudge(t *testing.T) {
 		"address":            {func(p *Plan) { p.Targets[0].Address = "169.254.169.254" }, "address"},
 		"expect":             {func(p *Plan) { p.Targets[0].Expect = "maybe" }, "unknown expect"},
 		"ungraded denial":    {func(p *Plan) { p.Targets[1].Grade = "" }, "needs a grade"},
+		"kube API namespace": {func(p *Plan) { p.Targets[1].Namespace = "" }, "namespace it asks about"},
 		"grade":              {func(p *Plan) { p.Targets[0].Grade = "ssh" }, "unknown grade"},
 		"unnamed target":     {func(p *Plan) { p.Targets[2].Name = "" }, "item and name"},
 		"unclassified probe": {func(p *Plan) { p.Targets[2].Item = "" }, "item and name"},
@@ -67,7 +68,7 @@ func TestValidateRefusesAPlanItCannotJudge(t *testing.T) {
 func TestParseLogFindsMarkerLinesBehindLogPrefixes(t *testing.T) {
 	result := Result{Item: "C4", Context: ContextJob, Probe: "IMDS", Expect: ExpectBlocked, Outcome: outcomeTimeout, Verdict: Pass}
 	text := strings.Join([]string{
-		"2026-11-16T07:00:00Z probe | " + FormatLine(ReadyMarker, Ready{PodIPs: []string{"10.0.1.2"}, ListenPort: 18080, NetNS: "net:[1]"}),
+		"2026-11-16T07:00:00Z probe | " + FormatLine(ReadyMarker, Ready{PodIPs: []string{"10.9.1.2"}, ListenPort: 18080, NetNS: "net:[1]"}),
 		"unrelated output",
 		"[probe] " + FormatLine(ResultMarker, result),
 		FormatLine(SummaryMarker, Summarize([]Result{result})),
@@ -76,7 +77,7 @@ func TestParseLogFindsMarkerLinesBehindLogPrefixes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(log.Ready) != 1 || log.Ready[0].PodIPs[0] != "10.0.1.2" || len(log.Results) != 1 || log.Results[0] != result || len(log.Summaries) != 1 || !log.Summaries[0].OK {
+	if len(log.Ready) != 1 || log.Ready[0].PodIPs[0] != "10.9.1.2" || len(log.Results) != 1 || log.Results[0] != result || len(log.Summaries) != 1 || !log.Summaries[0].OK {
 		t.Fatalf("parsed log = %+v", log)
 	}
 	if _, err := ParseLog("x " + ResultMarker + "{not json"); err == nil {

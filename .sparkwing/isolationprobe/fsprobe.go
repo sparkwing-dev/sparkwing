@@ -4,7 +4,9 @@ import (
 	"io/fs"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type mount struct {
@@ -64,7 +66,7 @@ var runtimePodRoots = []string{
 
 func auditMounts(where string, mounts []mount) []Result {
 	if len(mounts) == 0 {
-		return []Result{{Item: "C10", Context: where, Probe: "mount audit", Expect: ExpectBlocked, Outcome: "no mounts parsed", Verdict: Inconclusive}}
+		return []Result{{Item: "C10", Context: where, Probe: probeMountAudit, Expect: ExpectBlocked, Outcome: "no mounts parsed", Verdict: Inconclusive}}
 	}
 	pods := map[string]bool{}
 	for _, m := range mounts {
@@ -85,7 +87,7 @@ func auditMounts(where string, mounts []mount) []Result {
 			out = append(out, Result{Item: "C10", Context: where, Probe: "node path mounted outside the pod", Target: m.point, Expect: ExpectBlocked, Outcome: m.fstype + " root " + m.root, Verdict: Breach})
 		}
 	}
-	summary := Result{Item: "C10", Context: where, Probe: "mount audit", Expect: ExpectBlocked, Outcome: "all mounts are virtual, the container's own or this pod's", Verdict: Pass}
+	summary := Result{Item: "C10", Context: where, Probe: probeMountAudit, Expect: ExpectBlocked, Outcome: "all mounts are virtual, the container's own or this pod's", Verdict: Pass}
 	if len(out) > 0 {
 		summary.Outcome, summary.Verdict = "a mount reaches outside the pod", Breach
 	}
@@ -129,9 +131,46 @@ func markerProbes(where, base string, exists func(string) bool) []Result {
 	return []Result{r}
 }
 
-// safety: sockets with these names belong to a node's container runtime or kubelet; one outside
-// the job's scratch is a way to start containers outside the pod.
+// safety: sockets with these names belong to a container runtime or the kubelet; one the pod does
+// not own is a way to start containers outside the pod.
 var runtimeSockets = map[string]bool{"docker.sock": true, "containerd.sock": true, "kubelet.sock": true, "dockershim.sock": true, "cri-dockerd.sock": true, "crio.sock": true}
+
+// safety: a huge or slow tree must not stall the probe, so a walk stops at whichever bound it
+// reaches first and reports the stop.
+const (
+	walkBudget  = 1_000_000
+	walkTimeout = 2 * time.Minute
+)
+
+var kernelViews = []string{"/proc", "/sys", "/dev"}
+
+// safety: dockerd keeps its state beside its socket on the scratch volume, so the pod's own daemon
+// state is exempt by the same rule as the socket, and nothing else on the volume is.
+func ownScratch(socket, runDir string) []string {
+	var out []string
+	if socket != "" {
+		dir := filepath.Dir(socket)
+		out = append(out, socket, filepath.Join(dir, "docker"), filepath.Join(dir, "docker-exec"))
+	}
+	if runDir != "" {
+		out = append(out, runDir)
+	}
+	return out
+}
+
+// safety: the privileged container sees the sidecar's root, scratch included, under /host, so the
+// pod's own paths are exempt there and peer scratch stays in the search.
+func walkExemptions(where string, own []string) []string {
+	out := append([]string(nil), kernelViews...)
+	if where != ContextPrivileged {
+		return append(out, own...)
+	}
+	out = append(out, "/out")
+	for _, p := range append(append([]string(nil), kernelViews...), own...) {
+		out = append(out, filepath.Join("/host", p))
+	}
+	return out
+}
 
 type walkFindings struct {
 	sockets  []string
@@ -140,17 +179,17 @@ type walkFindings struct {
 	budget   bool
 }
 
-// safety: the walk skips kernel views and the job's own scratch, and stops at a fixed budget so a
-// huge tree cannot stall the probe; an exhausted budget is reported, not passed.
-func walkTree(root string, skip, peerCanaries []string, budget int, walk func(string, fs.WalkDirFunc) error) walkFindings {
+// safety: the walk passes over kernel views and the exact paths this pod owns and searches the
+// rest, peer scratch included; an exhausted budget is reported, not passed.
+func walkTree(root string, exempt, peerCanaries []string, budget int, expired func() bool, walk func(string, fs.WalkDirFunc) error) walkFindings {
 	var f walkFindings
 	peers := map[string]bool{}
 	for _, c := range peerCanaries {
 		peers[c] = true
 	}
-	skipped := map[string]bool{}
-	for _, s := range skip {
-		skipped[s] = true
+	exempted := map[string]bool{}
+	for _, s := range exempt {
+		exempted[s] = true
 	}
 	_ = walk(root, func(path string, d fs.DirEntry, err error) error { //nolint:errcheck // unreadable entries are skipped
 		if err != nil {
@@ -160,12 +199,15 @@ func walkTree(root string, skip, peerCanaries []string, budget int, walk func(st
 			return nil
 		}
 		f.visited++
-		if f.visited > budget {
+		if f.visited > budget || (f.visited%1024 == 0 && expired()) {
 			f.budget = true
 			return fs.SkipAll
 		}
-		if d.IsDir() && skipped[path] {
-			return fs.SkipDir
+		if exempted[path] {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if d.Type()&fs.ModeSocket != 0 && runtimeSockets[d.Name()] {
 			f.sockets = append(f.sockets, path)
@@ -178,19 +220,17 @@ func walkTree(root string, skip, peerCanaries []string, budget int, walk func(st
 	return f
 }
 
-func walkResults(where string, f walkFindings, scanCanaries bool) []Result {
-	sockets := Result{Item: "C9", Context: where, Probe: "runtime sockets outside scratch", Expect: ExpectBlocked, Outcome: "none found", Verdict: Pass}
+func walkResults(where string, f walkFindings) []Result {
+	clean := "none in " + strconv.Itoa(f.visited) + " entries"
+	sockets := Result{Item: "C9", Context: where, Probe: probeSockets, Expect: ExpectBlocked, Outcome: clean, Verdict: Pass}
 	if len(f.sockets) > 0 {
 		sockets.Outcome, sockets.Verdict = strings.Join(f.sockets, ","), Breach
 	}
-	out := []Result{sockets}
-	if scanCanaries {
-		canary := Result{Item: "C10", Context: where, Probe: "peer canary files", Expect: ExpectBlocked, Outcome: "none found", Verdict: Pass}
-		if len(f.canaries) > 0 {
-			canary.Outcome, canary.Verdict = strings.Join(f.canaries, ","), Breach
-		}
-		out = append(out, canary)
+	canary := Result{Item: "C10", Context: where, Probe: probeCanaries, Expect: ExpectBlocked, Outcome: clean, Verdict: Pass}
+	if len(f.canaries) > 0 {
+		canary.Outcome, canary.Verdict = strings.Join(f.canaries, ","), Breach
 	}
+	out := []Result{sockets, canary}
 	if f.budget {
 		for i := range out {
 			if out[i].Verdict == Pass {

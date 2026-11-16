@@ -11,12 +11,9 @@ import (
 type hostOptions struct {
 	where        string
 	workDir      string
-	privileged   bool
 	podNetNS     string
-	markerBases  []string
-	walkSkip     []string
+	own          []string
 	peerCanaries []string
-	scanCanaries bool
 }
 
 // safety: Cloud jobs run on Linux amd64 or arm64, so a probe elsewhere reports its host checks as

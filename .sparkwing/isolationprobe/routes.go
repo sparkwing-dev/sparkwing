@@ -24,11 +24,10 @@ type route struct {
 }
 
 // safety: customer code holds no controller authority, so every anonymous call must be refused.
-func (n network) routeProbes(ctx context.Context, where string, plan Plan, runID string, wait func(context.Context) error) []Result {
+func controllerRoutes(plan Plan, runID string) []route {
 	if runID == "" {
-		return []Result{{Item: "C3", Context: where, Probe: "anonymous controller routes", Expect: ExpectDenied, Outcome: "no run ID outside a Cloud job", Verdict: NotProbed}}
+		return nil
 	}
-	base := strings.TrimRight(plan.ControllerURL, "/")
 	output := func(run, job string) string {
 		return "/api/v1/runs/" + url.PathEscape(run) + "/jobs/" + url.PathEscape(job) + "/output"
 	}
@@ -40,6 +39,15 @@ func (n network) routeProbes(ctx context.Context, where string, plan Plan, runID
 	for _, peer := range plan.PeerRuns {
 		routes = append(routes, route{name: "anonymous peer-run probe output", method: http.MethodGet, path: output(peer, ProbeJob)})
 	}
+	return routes
+}
+
+func (n network) routeProbes(ctx context.Context, where string, plan Plan, runID string, wait func(context.Context) error) []Result {
+	routes := controllerRoutes(plan, runID)
+	if len(routes) == 0 {
+		return []Result{{Item: "C3", Context: where, Probe: "anonymous controller routes", Expect: ExpectDenied, Outcome: "no run ID outside a Cloud job", Verdict: NotProbed}}
+	}
+	base := strings.TrimRight(plan.ControllerURL, "/")
 	out := make([]Result, 0, len(routes))
 	for _, rt := range routes {
 		start := n.now()
@@ -96,7 +104,7 @@ func credentialProbes(where string, env []string, home string, readFile func(str
 			found = found || strings.Contains(up, name)
 		}
 	}
-	envResult := Result{Item: "C3", Context: where, Probe: "credential-named environment variable", Expect: ExpectBlocked, Outcome: "none set", Verdict: Pass}
+	envResult := Result{Item: "C3", Context: where, Probe: probeCredentialEnv, Expect: ExpectBlocked, Outcome: "none set", Verdict: Pass}
 	if found {
 		envResult.Outcome, envResult.Verdict = "one or more set", Breach
 	}

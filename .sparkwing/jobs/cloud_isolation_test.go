@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sparkwing-pipelines/isolationprobe"
+	"sparkwing-pipelines/isolationprobe/fixture"
 	"strings"
 	"sync"
 	"testing"
@@ -28,28 +29,36 @@ func TestCloudIsolationPipelineIsRegisteredAndBounded(t *testing.T) {
 
 func isoArgs() CloudIsolationArgs {
 	return CloudIsolationArgs{
-		TeamA: "stg-iso-a", TeamB: "stg-iso-b", ControllerURL: "https://staging.sparkwing.dev", KubeContext: "kikd-prod",
-		PublicContext: "kikd-prod", ControllerNS: "sparkwing-staging", JobNamespace: isoJobNS, InfraNodePool: "staging-infra",
-		IngressNS: "traefik", VPCResolver: "10.0.0.2", Database: "db.internal:5432",
+		TeamA: "stg-iso-a", TeamB: "stg-iso-b", ControllerURL: "https://staging.sparkwing.dev", KubeContext: "staging-read",
+		PublicContext: "staging-read", ControllerNS: "sparkwing-staging", JobNamespace: isoJobNS, InfraNodePool: "infra-pool",
+		IngressNS: "ingress", VPCResolver: "10.9.0.2", Database: "db.example.invalid:5432",
 	}
 }
 
-func TestCloudIsolationArgsRefuseAnIncompleteDeployment(t *testing.T) {
+// The driver attacks staging and nothing else, and refuses a deployment it could not attack whole.
+func TestCloudIsolationArgsRefuseAnythingButAllOfStaging(t *testing.T) {
 	if err := isoArgs().validate(); err != nil {
 		t.Fatal(err)
 	}
-	same := isoArgs()
-	same.TeamB = same.TeamA
-	empty := CloudIsolationArgs{}
 	for name, c := range map[string]struct {
-		args CloudIsolationArgs
+		edit func(*CloudIsolationArgs)
 		want string
 	}{
-		"one team":     {same, "different teams"},
-		"no targets":   {empty, "--job-namespace is required"},
-		"no endpoint ": {empty, "--public-api-context is required"},
+		"one team":                 {func(a *CloudIsolationArgs) { a.TeamB = a.TeamA }, "different teams"},
+		"production controller":    {func(a *CloudIsolationArgs) { a.ControllerURL = "https://api.sparkwing.dev" }, "staging only"},
+		"production namespace":     {func(a *CloudIsolationArgs) { a.ControllerNS = "sparkwing" }, "--controller-namespace sparkwing is not staging's"},
+		"production job namespace": {func(a *CloudIsolationArgs) { a.JobNamespace = "sparkwing-cloud-jobs" }, "--job-namespace sparkwing-cloud-jobs is not staging's"},
+		"no database":              {func(a *CloudIsolationArgs) { a.Database = "" }, "--database is required"},
+		"database without a port":  {func(a *CloudIsolationArgs) { a.Database = "db.example.invalid" }, "host:port"},
+		"no resolver":              {func(a *CloudIsolationArgs) { a.VPCResolver = "" }, "--vpc-resolver is required"},
+		"resolver by name":         {func(a *CloudIsolationArgs) { a.VPCResolver = "resolver.example.invalid" }, "IP address"},
+		"no ingress":               {func(a *CloudIsolationArgs) { a.IngressNS = "" }, "--ingress-namespaces is required"},
+		"no infra pool":            {func(a *CloudIsolationArgs) { a.InfraNodePool = "" }, "--infra-node-pool is required"},
+		"no endpoint":              {func(a *CloudIsolationArgs) { a.PublicContext = "" }, "--public-api-context is required"},
 	} {
-		if err := c.args.validate(); err == nil || !strings.Contains(err.Error(), c.want) {
+		args := isoArgs()
+		c.edit(&args)
+		if err := args.validate(); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: %v, want %q", name, err, c.want)
 		}
 	}
@@ -64,6 +73,19 @@ func TestTeamNodeValueMatchesTheLaunchersLabel(t *testing.T) {
 	} {
 		if got := teamNodeValue(isoJobNS, team); got != want {
 			t.Errorf("%s: %s, want %s", team, got, want)
+		}
+	}
+}
+
+// The launcher fences a node to one run with "run-" and the first 20 bytes of the SHA-256 of
+// namespace/run; these vectors pin that formula.
+func TestRunNodeValueMatchesTheLaunchersFence(t *testing.T) {
+	for run, want := range map[string]string{
+		"run-1": "run-3e21626e7741180f09c7ffefeab3e8d92081cb54",
+		"run-2": "run-b4ed4e149c8ebf2540e643f3a33cc2a6d2f69537",
+	} {
+		if got := runNodeValue(isoJobNS, run); got != want {
+			t.Errorf("%s: %s, want %s", run, got, want)
 		}
 	}
 }
@@ -119,21 +141,22 @@ func isoInputs() targetInputs {
 	var slice kubeEndpointSlice
 	slice.Endpoints = append(slice.Endpoints, struct {
 		Addresses []string `json:"addresses"`
-	}{[]string{"10.0.62.116"}}, struct {
+	}{[]string{"10.9.12.12"}}, struct {
 		Addresses []string `json:"addresses"`
-	}{[]string{"10.0.71.108"}})
+	}{[]string{"10.9.12.13"}})
 	return targetInputs{
-		ControllerPods:     []kubePod{isoPod("controller", "10.0.59.130", true, 4343, 9091), isoPod("launcher", "10.0.59.131", false, 8080)},
-		ControllerServices: []kubeService{isoService("controller", "172.20.10.1", 80)},
-		DNSPods:            []kubePod{isoPod("coredns", "10.0.62.166", true, 53, 9153)},
-		DNSServices:        []kubeService{isoService("kube-dns", "172.20.0.10", 53, 9153)},
-		APIService:         isoService("kubernetes", "172.20.0.1", 443),
+		Namespace:          "sparkwing-staging",
+		ControllerPods:     []kubePod{isoPod("controller", "10.9.10.10", true, 4343, 9091), isoPod("launcher", "10.9.10.11", false, 8080)},
+		ControllerServices: []kubeService{isoService("controller", "172.30.10.1", 80)},
+		DNSPods:            []kubePod{isoPod("coredns", "10.9.11.11", true, 53, 9153)},
+		DNSServices:        []kubeService{isoService("kube-dns", "172.30.0.10", 53, 9153)},
+		APIService:         isoService("kubernetes", "172.30.0.1", 443),
 		APIEndpoints:       []kubeEndpointSlice{slice},
-		InfraNodes:         []kubeNode{isoNode("ip-10-0-51-209", "10.0.51.209")},
-		IngressPods:        []kubePod{isoPod("traefik", "10.0.62.161", true, 8000)},
-		PublicAPI:          "example.gr7.us-west-2.eks.amazonaws.com",
-		Database:           "db.internal:5432",
-		VPCResolver:        "10.0.0.2",
+		InfraNodes:         []kubeNode{isoNode("infra-node-1", "10.9.13.13")},
+		IngressPods:        []kubePod{isoPod("ingress", "10.9.14.14", true, 8000)},
+		PublicAPI:          "api.example.invalid",
+		Database:           "db.example.invalid:5432",
+		VPCResolver:        "10.9.0.2",
 	}
 }
 
@@ -150,47 +173,65 @@ func TestStaticTargetsCoverEveryItemFromTheCluster(t *testing.T) {
 	for _, tg := range targets {
 		byAddr[tg.Address] = tg
 	}
+	kube := func(expect isolationprobe.Expect) isolationprobe.Target {
+		return isolationprobe.Target{Item: "C7", Expect: expect, Listening: true, Grade: isolationprobe.GradeKubeAPI, Namespace: "sparkwing-staging"}
+	}
 	for addr, want := range map[string]isolationprobe.Target{
-		"10.0.59.130:4343":   {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
-		"10.0.59.131:8080":   {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: false},
-		"172.20.10.1:80":     {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
-		"10.0.62.166:9153":   {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
-		"172.20.0.10:9153":   {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
-		"10.0.51.209:10250":  {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true, Grade: isolationprobe.GradeKubelet},
-		"10.0.62.161:8000":   {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
-		"db.internal:5432":   {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
-		"10.0.0.2:53":        {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
-		"10.100.0.1:443":     {Item: "C6", Expect: isolationprobe.ExpectBlocked},
-		"169.254.169.254:80": {Item: "C4", Expect: isolationprobe.ExpectBlocked, Listening: true, Grade: isolationprobe.GradeIMDS},
-		"[fd00:ec2::254]:80": {Item: "C5", Expect: isolationprobe.ExpectBlocked, Grade: isolationprobe.GradeIMDS},
-		"172.20.0.1:443":     {Item: "C7", Expect: isolationprobe.ExpectBlocked, Listening: true, Grade: isolationprobe.GradeKubeAPI},
-		"10.0.71.108:443":    {Item: "C7", Expect: isolationprobe.ExpectBlocked, Listening: true, Grade: isolationprobe.GradeKubeAPI},
-		"example.gr7.us-west-2.eks.amazonaws.com:443": {Item: "C7", Expect: isolationprobe.ExpectDenied, Listening: true, Grade: isolationprobe.GradeKubeAPI},
+		"10.9.10.10:4343":         {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
+		"10.9.10.11:8080":         {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: false},
+		"172.30.10.1:80":          {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
+		"10.9.11.11:9153":         {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
+		"172.30.0.10:9153":        {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
+		"10.9.13.13:10250":        {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true, Grade: isolationprobe.GradeKubelet},
+		"10.9.13.13:10249":        {Item: "C6", Expect: isolationprobe.ExpectBlocked},
+		"10.9.14.14:8000":         {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
+		"db.example.invalid:5432": {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
+		"10.9.0.2:53":             {Item: "C6", Expect: isolationprobe.ExpectBlocked, Listening: true},
+		"10.100.0.1:443":          {Item: "C6", Expect: isolationprobe.ExpectObserved},
+		"169.254.169.254:80":      {Item: "C4", Expect: isolationprobe.ExpectBlocked, Listening: true, Grade: isolationprobe.GradeIMDS},
+		"[fd00:ec2::254]:80":      {Item: "C5", Expect: isolationprobe.ExpectBlocked, Grade: isolationprobe.GradeIMDS},
+		"172.30.0.1:443":          kube(isolationprobe.ExpectBlocked),
+		"10.9.12.13:443":          kube(isolationprobe.ExpectBlocked),
+		"api.example.invalid:443": kube(isolationprobe.ExpectDenied),
 	} {
 		got, ok := byAddr[addr]
-		if !ok || got.Item != want.Item || got.Expect != want.Expect || got.Listening != want.Listening || got.Grade != want.Grade {
+		if !ok || got.Item != want.Item || got.Expect != want.Expect || got.Listening != want.Listening || got.Grade != want.Grade || got.Namespace != want.Namespace {
 			t.Errorf("%s = %+v, want %+v", addr, got, want)
 		}
 	}
-	if _, ok := byAddr["10.0.62.166:53"]; ok {
+	if _, ok := byAddr["10.9.11.11:53"]; ok {
 		t.Error("cluster DNS's own port 53 is a target; the fence allows it")
 	}
-	noEndpoints := isoInputs()
-	noEndpoints.APIEndpoints = nil
-	if _, err := staticTargets(noEndpoints); err == nil {
-		t.Error("discovery passed without the API's private endpoints")
-	}
-	noPublic := isoInputs()
-	noPublic.PublicAPI = ""
-	if _, err := staticTargets(noPublic); err == nil {
-		t.Error("discovery passed without the public API endpoint")
+}
+
+// Discovery that finds no members of a group the fence must hide fails before any run starts,
+// rather than passing C6 or C7 without probing that group.
+func TestStaticTargetsRefuseAMissingGroup(t *testing.T) {
+	for name, edit := range map[string]func(*targetInputs){
+		"controller pods":     func(in *targetInputs) { in.ControllerPods = nil },
+		"controller services": func(in *targetInputs) { in.ControllerServices = nil },
+		"DNS pods":            func(in *targetInputs) { in.DNSPods = nil },
+		"DNS services":        func(in *targetInputs) { in.DNSServices = nil },
+		"ingress":             func(in *targetInputs) { in.IngressPods = nil },
+		"infra nodes":         func(in *targetInputs) { in.InfraNodes = nil },
+		"database":            func(in *targetInputs) { in.Database = "" },
+		"resolver":            func(in *targetInputs) { in.VPCResolver = "" },
+		"API endpoints":       func(in *targetInputs) { in.APIEndpoints = nil },
+		"public API":          func(in *targetInputs) { in.PublicAPI = "" },
+		"kube namespace":      func(in *targetInputs) { in.Namespace = "" },
+	} {
+		in := isoInputs()
+		edit(&in)
+		if targets, err := staticTargets(in); err == nil {
+			t.Errorf("%s missing: discovery passed with %d targets", name, len(targets))
+		}
 	}
 }
 
 func TestContextServerHostReadsTheRedactedKubeconfig(t *testing.T) {
-	config := `{"contexts":[{"name":"kikd-prod","context":{"cluster":"arn:aws:eks:us-west-2:1:cluster/kikd-prod","user":"u"}},{"name":"proxy","context":{"cluster":"proxy"}}],
-"clusters":[{"name":"arn:aws:eks:us-west-2:1:cluster/kikd-prod","cluster":{"server":"https://ABC.gr7.us-west-2.eks.amazonaws.com","certificate-authority-data":"DATA+OMITTED"}},{"name":"proxy","cluster":{"server":"https://proxy.example.ts.net"}}]}`
-	if host, err := contextServerHost(config, "kikd-prod"); err != nil || host != "ABC.gr7.us-west-2.eks.amazonaws.com" {
+	config := `{"contexts":[{"name":"staging-read","context":{"cluster":"arn:aws:eks:us-west-2:1:cluster/example","user":"u"}},{"name":"proxy","context":{"cluster":"proxy"}}],
+"clusters":[{"name":"arn:aws:eks:us-west-2:1:cluster/example","cluster":{"server":"https://ABC.gr7.us-west-2.eks.amazonaws.com","certificate-authority-data":"DATA+OMITTED"}},{"name":"proxy","cluster":{"server":"https://proxy.example.invalid"}}]}`
+	if host, err := contextServerHost(config, "staging-read"); err != nil || host != "ABC.gr7.us-west-2.eks.amazonaws.com" {
 		t.Fatalf("host = %q, %v", host, err)
 	}
 	if _, err := contextServerHost(config, "missing"); err == nil {
@@ -210,7 +251,7 @@ func TestPodsOfRunFollowsTheAwardBinding(t *testing.T) {
 	jobs := []kubeJob{isoJob("sw-1", "run-1", "probe", "stg-iso-a"), isoJob("sw-2", "run-1", "output-sibling", "stg-iso-a"), isoJob("sw-3", "run-2", "probe", "stg-iso-b")}
 	var pods []kubePod
 	for i, job := range []string{"sw-1", "sw-2", "sw-3", "sw-unrelated"} {
-		p := isoPod(fmt.Sprintf("pod-%d", i), fmt.Sprintf("10.0.0.%d", i), true)
+		p := isoPod(fmt.Sprintf("pod-%d", i), fmt.Sprintf("10.9.0.%d", i), true)
 		p.Metadata.Labels = map[string]string{jobPodLabel: job}
 		pods = append(pods, p)
 	}
@@ -271,6 +312,7 @@ func TestPodSpecFindingsMatchTheLaunchersDesign(t *testing.T) {
 		"no seccomp":      func(p *kubePod) { p.Spec.InitContainers[0].SecurityContext.SeccompProfile = nil },
 		"privileged":      func(p *kubePod) { p.Spec.InitContainers[0].SecurityContext.Privileged = &tr },
 		"unmasked runner": func(p *kubePod) { p.Spec.Containers[0].SecurityContext = p.Spec.InitContainers[0].SecurityContext },
+		"masked docker":   func(p *kubePod) { p.Spec.InitContainers[0].SecurityContext.ProcMount = "" },
 	} {
 		p := launcherPod()
 		edit(&p)
@@ -280,47 +322,80 @@ func TestPodSpecFindingsMatchTheLaunchersDesign(t *testing.T) {
 	}
 }
 
-func fullResults(label string, peers map[string]string) []isolationprobe.Result {
+type isoRunFixture struct {
+	label, team, run, node, podIP, hostIP string
+	peers                                 []string
+}
+
+var isoFixtures = []isoRunFixture{
+	{"B1", "stg-iso-b", "run-1", "node-b1", "10.9.20.11", "10.9.20.1", nil},
+	{"A1", "stg-iso-a", "run-2", "node-a1", "10.9.21.21", "10.9.21.1", []string{"B1"}},
+	{"B2", "stg-iso-b", "run-3", "node-b2", "10.9.22.31", "10.9.22.1", []string{"A1", "B1"}},
+}
+
+func fixtureFor(key string) isoRunFixture {
+	for _, fx := range isoFixtures {
+		if fx.run == key || fx.label == key {
+			return fx
+		}
+	}
+	return isoRunFixture{}
+}
+
+func fixturePlan(fx isoRunFixture) isolationprobe.Plan {
+	targets, err := staticTargets(isoInputs())
+	if err != nil {
+		panic(err)
+	}
+	plan := isolationprobe.Plan{Team: fx.team, ControllerURL: "https://staging.sparkwing.dev", ListenPort: fixtureListenPort, Canary: "isolation-canary-" + fx.label, Targets: targets}
+	for _, label := range fx.peers {
+		p := fixtureFor(label)
+		plan.PeerCanaries = append(plan.PeerCanaries, "isolation-canary-"+p.label)
+		plan.PeerRuns = append(plan.PeerRuns, p.run)
+		plan.Targets = append(plan.Targets, peerTargets(peerFacts{Label: p.label, Team: p.team, RunID: p.run, PodIP: p.podIP, HostIP: p.hostIP, ListenPort: fixtureListenPort})...)
+	}
+	return plan
+}
+
+func fixtureReady(fx isoRunFixture) isolationprobe.Ready {
+	return isolationprobe.Ready{PodIPs: []string{fx.podIP}, ListenPort: fixtureListenPort, NetNS: "net:[1]", NodeIP: fx.hostIP, Home: "/home/runner"}
+}
+
+func fixtureResults(plan isolationprobe.Plan, ready isolationprobe.Ready, runID string) []isolationprobe.Result {
 	var out []isolationprobe.Result
-	for ctx, names := range requiredProbes {
-		for _, name := range names {
-			out = append(out, isolationprobe.Result{Item: requiredItem(name), Context: ctx, Probe: name, Verdict: isolationprobe.Pass})
-		}
-		for peer, team := range peers {
-			out = append(out, isolationprobe.Result{Item: "C9", Context: ctx, Probe: "peer " + peer + " (" + team + ") listener", Verdict: isolationprobe.Pass})
-		}
+	for _, k := range isolationprobe.Expected(plan, ready, runID, fixture.SDKKeys()...) {
+		out = append(out, isolationprobe.Result{Item: k.Item, Context: k.Context, Probe: k.Probe, Target: k.Target, Expect: isolationprobe.ExpectBlocked, Outcome: "timeout", Verdict: isolationprobe.Pass})
 	}
 	return out
 }
 
-type isoRunFixture struct {
-	label, team, run, node, podIP, hostIP string
-	peers                                 map[string]string
+func fixturePods(fx isoRunFixture) []isolationPod {
+	return []isolationPod{
+		{Name: fx.label + "-probe", Job: isolationprobe.ProbeJob, Node: fx.node, PodIP: fx.podIP, HostIP: fx.hostIP, Phase: "Running"},
+		{Name: fx.label + "-sibling", Job: isolationprobe.SiblingJob, Node: fx.node},
+		{Name: fx.label + "-allowed", Job: fixture.AllowedJob, Node: fx.node},
+	}
 }
 
-var isoFixtures = []isoRunFixture{
-	{"B1", "stg-iso-b", "run-1", "node-b1", "10.0.10.11", "10.0.10.1", nil},
-	{"A1", "stg-iso-a", "run-2", "node-a1", "10.0.20.21", "10.0.20.1", map[string]string{"B1": "stg-iso-b"}},
-	{"B2", "stg-iso-b", "run-3", "node-b2", "10.0.30.31", "10.0.30.1", map[string]string{"A1": "stg-iso-a", "B1": "stg-iso-b"}},
-}
-
+// safety: every owed result is present and refused and each run has its own fenced node, so each
+// shortfall case isolates exactly one gap.
 func evalFixture() ([]isolationRun, map[string]isolationNode) {
 	var runs []isolationRun
 	nodes := map[string]isolationNode{}
-	for _, f := range isoFixtures {
-		var peers []string
-		for p := range f.peers {
-			peers = append(peers, p)
-		}
-		slices.Sort(peers)
+	for _, fx := range isoFixtures {
+		plan, ready := fixturePlan(fx), fixtureReady(fx)
+		results := fixtureResults(plan, ready, fx.run)
 		runs = append(runs, isolationRun{
-			Label: f.label, Team: f.team, RunTeam: f.team, RunID: f.run, Peers: peers, Results: fullResults(f.label, f.peers),
-			Ready:   []isolationprobe.Ready{{PodIPs: []string{f.podIP}, ListenPort: 18080, NodeIP: f.hostIP}},
-			Summary: []isolationprobe.Summary{{Pass: 1, OK: true}},
-			Pods:    []isolationPod{{Name: f.label + "-probe", Job: "probe", Node: f.node, PodIP: f.podIP, HostIP: f.hostIP}, {Name: f.label + "-sibling", Job: "output-sibling", Node: f.node}},
+			Label: fx.label, Team: fx.team, RunTeam: fx.team, RunID: fx.run, Peers: fx.peers, Plan: plan, Results: results,
+			Ready: []isolationprobe.Ready{ready}, Summary: []isolationprobe.Summary{isolationprobe.Summarize(results)}, Pods: fixturePods(fx),
 		})
-		value := teamNodeValue(isoJobNS, f.team)
-		nodes[f.node] = isolationNode{Name: f.node, IPs: []string{f.hostIP}, TeamNode: value, UsedTeam: value, UsedRun: "sha256-" + f.run}
+		value := teamNodeValue(isoJobNS, fx.team)
+		node := isolationNode{Name: fx.node, IPs: []string{fx.hostIP}, TeamNode: value, UsedTeam: value, UsedRun: runNodeValue(isoJobNS, fx.run), Pool: isoJobNS, Claimed: true}
+		for _, p := range fixturePods(fx) {
+			node.Pods = append(node.Pods, nodePod{Namespace: isoJobNS, Name: p.Name, Run: fx.run})
+		}
+		node.Pods = append(node.Pods, nodePod{Namespace: "kube-system", Name: "aws-node-" + fx.label, DaemonSet: true})
+		nodes[fx.node] = node
 	}
 	return runs, nodes
 }
@@ -335,29 +410,75 @@ func failedItems(e isolationEvaluation) []string {
 	return out
 }
 
+func liveAnchors() map[string]bool { return map[string]bool{"A1": true, "B1": true} }
+
 func TestEvaluateIsolationPassesACompleteRefusedRun(t *testing.T) {
 	runs, nodes := evalFixture()
-	if e := evaluateIsolation(isoJobNS, runs, nodes, map[string]bool{"A1": true, "B1": true}); !e.OK {
+	if e := evaluateIsolation(isoJobNS, runs, nodes, liveAnchors()); !e.OK {
 		t.Fatalf("complete run failed: %+v", e)
 	}
 }
 
-// Each way a run can fall short fails exactly the item it undermines.
+func resummarize(r *isolationRun) {
+	r.Summary = []isolationprobe.Summary{isolationprobe.Summarize(r.Results)}
+}
+
+func dropResult(r *isolationRun, match func(isolationprobe.Result) bool) {
+	n := len(r.Results)
+	r.Results = slices.DeleteFunc(r.Results, match)
+	if len(r.Results) == n {
+		panic("no result matched")
+	}
+	resummarize(r)
+}
+
+// Each way a run can fall short fails exactly the item it undermines, so no shortfall passes and
+// none hides behind another.
 func TestEvaluateIsolationFailsTheItemEachShortfallUndermines(t *testing.T) {
-	alive := map[string]bool{"A1": true, "B1": true}
 	for name, c := range map[string]struct {
 		edit  func([]isolationRun, map[string]isolationNode, map[string]bool)
 		items []string
 	}{
 		"a breach": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
 			r[1].Results = append(r[1].Results, isolationprobe.Result{Item: "C4", Context: "job", Probe: "IMDS", Verdict: isolationprobe.Breach})
+			resummarize(&r[1])
 		}, []string{"C4"}},
 		"a probe that proved nothing": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
 			r[0].Results = append(r[0].Results, isolationprobe.Result{Item: "C10", Context: "dind-privileged", Probe: "mount audit", Verdict: isolationprobe.Inconclusive})
+			resummarize(&r[0])
 		}, []string{"C10"}},
 		"a missing context": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
-			r[2].Results = slices.DeleteFunc(r[2].Results, func(x isolationprobe.Result) bool { return x.Context == isolationprobe.ContextPrivileged })
-		}, []string{"C3", "C4", "C9", "C10", "C11", "C12"}},
+			dropResult(&r[2], func(x isolationprobe.Result) bool { return x.Context == isolationprobe.ContextPrivileged })
+		}, []string{"C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12"}},
+		"the service-account token check": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
+			dropResult(&r[0], func(x isolationprobe.Result) bool { return x.Probe == "credential file token" })
+		}, []string{"C3"}},
+		"an anonymous route": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
+			dropResult(&r[2], func(x isolationprobe.Result) bool { return x.Probe == "anonymous peer-run probe output" })
+		}, []string{"C3"}},
+		"an SDK read": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
+			dropResult(&r[1], func(x isolationprobe.Result) bool { return x.Probe == fixture.ProbeSDKAllowed })
+		}, []string{"C3"}},
+		"one syscall": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
+			dropResult(&r[1], func(x isolationprobe.Result) bool {
+				return x.Context == isolationprobe.ContextPrivileged && x.Probe == "seccomp refuses io_uring_setup"
+			})
+		}, []string{"C12"}},
+		"the cluster DNS control": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
+			dropResult(&r[0], func(x isolationprobe.Result) bool {
+				return x.Context == isolationprobe.ContextBridge && x.Target == "kubernetes.default.svc.cluster.local"
+			})
+		}, []string{"C6"}},
+		"one IPv6 path": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
+			dropResult(&r[0], func(x isolationprobe.Result) bool {
+				return x.Context == isolationprobe.ContextBridge && x.Target == "[fd00:ec2::23]:80"
+			})
+		}, []string{"C5"}},
+		"the database": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
+			dropResult(&r[2], func(x isolationprobe.Result) bool {
+				return x.Context == isolationprobe.ContextJob && x.Probe == "controller database"
+			})
+		}, []string{"C6"}},
 		"a shared node": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
 			r[2].Pods[0].Node = "node-a1"
 		}, []string{"C2", "C8"}},
@@ -371,6 +492,22 @@ func TestEvaluateIsolationFailsTheItemEachShortfallUndermines(t *testing.T) {
 			node.UsedRun = n["node-b1"].UsedRun
 			n["node-b2"] = node
 		}, []string{"C2"}},
+		"unique fences for unrelated runs": {func(_ []isolationRun, n map[string]isolationNode, _ map[string]bool) {
+			for k, node := range n {
+				node.UsedRun = "unrelated-" + k
+				n[k] = node
+			}
+		}, []string{"C2"}},
+		"a node outside the staging pool": {func(_ []isolationRun, n map[string]isolationNode, _ map[string]bool) {
+			node := n["node-b1"]
+			node.Pool = "sparkwing-cloud-jobs"
+			n["node-b1"] = node
+		}, []string{"C2"}},
+		"another run's pod on a node": {func(_ []isolationRun, n map[string]isolationNode, _ map[string]bool) {
+			node := n["node-b1"]
+			node.Pods = append(node.Pods, nodePod{Namespace: isoJobNS, Name: "stranger", Run: "run-9"})
+			n["node-b1"] = node
+		}, []string{"C2"}},
 		"a peer gone before it was probed": {func(_ []isolationRun, _ map[string]isolationNode, a map[string]bool) {
 			a["B1"] = false
 		}, []string{"C9"}},
@@ -378,41 +515,54 @@ func TestEvaluateIsolationFailsTheItemEachShortfallUndermines(t *testing.T) {
 			r[1].RunTeam = "stg-iso-b"
 		}, []string{"C1"}},
 		"own node misidentified": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
-			r[0].Ready[0].NodeIP = "10.0.99.1"
+			r[0].Ready[0].NodeIP = "10.9.99.1"
 		}, []string{"C8"}},
 		"a pod spec drift": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
 			r[0].Pods[0].Spec = []string{"hostUsers is not false"}
 		}, []string{"C3"}},
 		"no summary": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
 			r[0].Summary = nil
-		}, []string{"C12"}},
+		}, []string{"C13"}},
+		"a summary that disagrees": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
+			r[0].Summary[0].Pass++
+		}, []string{"C13"}},
+		"an invalid verdict": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
+			r[0].Results[0].Verdict = "PASS"
+			resummarize(&r[0])
+		}, []string{"C13"}},
+		"a run that never ran": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
+			r[2].RunID, r[2].Results, r[2].Summary, r[2].Pods = "", nil, nil, nil
+		}, []string{"C13"}},
+		"no NodeClaim": {func(_ []isolationRun, n map[string]isolationNode, _ map[string]bool) {
+			node := n["node-a1"]
+			node.Claimed = false
+			n["node-a1"] = node
+		}, []string{"C13"}},
 	} {
 		runs, nodes := evalFixture()
-		a := copyAlive(alive)
-		c.edit(runs, nodes, a)
-		e := evaluateIsolation(isoJobNS, runs, nodes, a)
+		alive := liveAnchors()
+		c.edit(runs, nodes, alive)
+		e := evaluateIsolation(isoJobNS, runs, nodes, alive)
 		if e.OK || strings.Join(failedItems(e), ",") != strings.Join(c.items, ",") {
 			t.Errorf("%s: failed %v, want %v", name, failedItems(e), c.items)
 		}
 	}
 }
 
-func copyAlive(m map[string]bool) map[string]bool {
-	out := map[string]bool{}
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
-}
-
 type isoClusterFake struct {
-	t         *testing.T
-	mu        sync.Mutex
-	triggered []string
-	cancelled map[string]bool
-	breach    bool
-	statusN   map[string]int
-	commands  []string
+	t          *testing.T
+	mu         sync.Mutex
+	triggered  []string
+	cancelled  map[string]bool
+	breach     map[string]bool
+	omit       map[string]bool
+	statusN    map[string]int
+	commands   []string
+	plans      map[string]isolationprobe.Plan
+	teardown   bool
+	deny       string
+	controller map[string]string
+	whoami     map[string]string
 }
 
 func (f *isoClusterFake) run(_ context.Context, c isolationCommand) (string, int, error) {
@@ -426,7 +576,7 @@ func (f *isoClusterFake) run(_ context.Context, c isolationCommand) (string, int
 		return "", 0, nil
 	case "kubectl":
 		if args[0] == "config" {
-			return `{"contexts":[{"name":"kikd-prod","context":{"cluster":"c"}}],"clusters":[{"name":"c","cluster":{"server":"https://public.example:443"}}]}`, 0, nil
+			return `{"contexts":[{"name":"staging-read","context":{"cluster":"c"}}],"clusters":[{"name":"c","cluster":{"server":"https://api.example.invalid:443"}}]}`, 0, nil
 		}
 		return f.kubectl(args[2:])
 	case "sparkwing":
@@ -450,8 +600,32 @@ func list(items any) string {
 	return string(data)
 }
 
+func (f *isoClusterFake) gone(fx isoRunFixture) bool {
+	return f.cancelled[fx.run] || (f.teardown && fx.label == "B2" && f.statusN[fx.run] > 1)
+}
+
+func (f *isoClusterFake) started() []isoRunFixture { return isoFixtures[:len(f.triggered)] }
+
+func (f *isoClusterFake) jobPods(fx isoRunFixture) []kubePod {
+	var pods []kubePod
+	for _, job := range []string{isolationprobe.ProbeJob, isolationprobe.SiblingJob, fixture.AllowedJob} {
+		p := launcherPod()
+		p.Metadata.Name, p.Metadata.Namespace = fx.label+"-"+job, isoJobNS
+		p.Metadata.Labels = map[string]string{jobPodLabel: "sw-" + fx.run + "-" + job}
+		p.Spec.NodeName, p.Status.HostIP, p.Status.Phase = fx.node, fx.hostIP, "Running"
+		if job == isolationprobe.ProbeJob {
+			p.Status.PodIP = fx.podIP
+		}
+		pods = append(pods, p)
+	}
+	return pods
+}
+
 func (f *isoClusterFake) kubectl(args []string) (string, int, error) {
 	kind, ns := args[1], flagValue(args, "-n")
+	if f.deny != "" && strings.Contains(strings.Join(args, " "), f.deny) {
+		return "Error from server (Forbidden)", 1, nil
+	}
 	switch {
 	case kind == "pods" && ns == "sparkwing-staging":
 		return list(isoInputs().ControllerPods), 0, nil
@@ -466,35 +640,60 @@ func (f *isoClusterFake) kubectl(args []string) (string, int, error) {
 		return string(data), 0, nil
 	case kind == "endpointslices":
 		return list(isoInputs().APIEndpoints), 0, nil
-	case kind == "pods" && ns == "traefik":
+	case kind == "pods" && ns == "ingress":
 		return list(isoInputs().IngressPods), 0, nil
 	case kind == "nodes" && flagValue(args, "-l") != "":
 		return list(isoInputs().InfraNodes), 0, nil
 	case kind == "nodes":
 		var nodes []kubeNode
-		for _, fx := range isoFixtures {
+		for _, fx := range f.started() {
 			n := isoNode(fx.node, fx.hostIP)
 			value := teamNodeValue(isoJobNS, fx.team)
-			n.Metadata.Labels = map[string]string{teamNodeLabel: value, usedTeamNodeLabel: value, usedRunNodeLabel: "sha256-" + fx.run}
+			n.Metadata.Labels = map[string]string{teamNodeLabel: value, usedTeamNodeLabel: value, usedRunNodeLabel: runNodeValue(isoJobNS, fx.run), poolNamespaceLabel: isoJobNS}
 			nodes = append(nodes, n)
 		}
 		return list(nodes), 0, nil
+	case kind == "nodeclaims":
+		var claims []kubeNodeClaim
+		for _, fx := range f.started() {
+			var c kubeNodeClaim
+			c.Metadata.Name, c.Status.NodeName = "claim-"+fx.label, fx.node
+			claims = append(claims, c)
+		}
+		return list(claims), 0, nil
 	case kind == "jobs":
 		var jobs []kubeJob
-		for _, fx := range isoFixtures[:len(f.triggered)] {
-			jobs = append(jobs, isoJob("sw-"+fx.run, fx.run, "probe", fx.team))
+		for _, fx := range f.started() {
+			if f.gone(fx) {
+				continue
+			}
+			for _, job := range []string{isolationprobe.ProbeJob, isolationprobe.SiblingJob, fixture.AllowedJob} {
+				jobs = append(jobs, isoJob("sw-"+fx.run+"-"+job, fx.run, job, fx.team))
+			}
 		}
 		return list(jobs), 0, nil
 	case kind == "pods" && ns == isoJobNS:
 		var pods []kubePod
-		for _, fx := range isoFixtures[:len(f.triggered)] {
-			p := launcherPod()
-			p.Metadata.Name, p.Metadata.Labels = fx.label+"-probe", map[string]string{jobPodLabel: "sw-" + fx.run}
-			p.Spec.NodeName, p.Status.PodIP, p.Status.HostIP, p.Status.Phase = fx.node, fx.podIP, fx.hostIP, "Running"
-			if f.cancelled[fx.run] {
-				p.Status.Phase = "Succeeded"
+		for _, fx := range f.started() {
+			if !f.gone(fx) {
+				pods = append(pods, f.jobPods(fx)...)
 			}
-			pods = append(pods, p)
+		}
+		return list(pods), 0, nil
+	case kind == "pods" && flagValue(args, "--field-selector") != "":
+		node := strings.TrimPrefix(flagValue(args, "--field-selector"), "spec.nodeName=")
+		var pods []kubePod
+		for _, fx := range f.started() {
+			if fx.node != node || f.gone(fx) {
+				continue
+			}
+			pods = append(pods, f.jobPods(fx)...)
+			ds := isoPod("aws-node-"+fx.label, fx.hostIP, true)
+			ds.Metadata.Namespace = "kube-system"
+			ds.Metadata.OwnerReferences = append(ds.Metadata.OwnerReferences, struct {
+				Kind string `json:"kind"`
+			}{"DaemonSet"})
+			pods = append(pods, ds)
 		}
 		return list(pods), 0, nil
 	case kind == "networkpolicies" || kind == "validatingadmissionpolicybindings":
@@ -507,6 +706,22 @@ func (f *isoClusterFake) kubectl(args []string) (string, int, error) {
 func (f *isoClusterFake) sparkwing(args []string) (string, int, error) {
 	run := flagValue(args, "--run")
 	switch {
+	case args[0] == "profiles" && args[1] == "list":
+		var b strings.Builder
+		for _, team := range []string{"stg-iso-a", "stg-iso-b"} {
+			controller := "https://staging.sparkwing.dev"
+			if c, ok := f.controller[team]; ok {
+				controller = c
+			}
+			fmt.Fprintf(&b, `{"name":%q,"controller":%q,"token":"swu_***","default":false}`+"\n", team, controller)
+		}
+		return b.String(), 0, nil
+	case args[0] == "tokens" && args[1] == "list":
+		team := flagValue(args, "--profile")
+		if t, ok := f.whoami[team]; ok {
+			team = t
+		}
+		return fmt.Sprintf(`{"kind":"member","prefix":"swu_x","team":%q,"scopes":["runs.read"]}`+"\n", team), 0, nil
 	case args[0] == "pipeline" && args[1] == "new":
 		dir := filepath.Join(flagValue(args, "-C"), ".sparkwing")
 		for name, body := range map[string]string{"go.mod": "module scaffold\n", "go.sum": "", "main.go": "package main\n", "jobs/x.go": "package jobs\n", "README.md": ""} {
@@ -530,6 +745,10 @@ func (f *isoClusterFake) sparkwing(args []string) (string, int, error) {
 		if len(plan.PeerRuns) != len(fx.peers) {
 			f.t.Errorf("%s plan peers = %v, want %d", fx.label, plan.PeerRuns, len(fx.peers))
 		}
+		if f.plans == nil {
+			f.plans = map[string]isolationprobe.Plan{}
+		}
+		f.plans[fx.run] = plan
 		f.triggered = append(f.triggered, fx.run)
 		return `{"run_id":"` + fx.run + `"}`, 0, nil
 	case args[0] == "runs" && args[1] == "status":
@@ -548,18 +767,7 @@ func (f *isoClusterFake) sparkwing(args []string) (string, int, error) {
 		}
 		return `{"id":"` + run + `","team":"` + fx.team + `","status":"` + status + `"}`, code, nil
 	case args[0] == "runs" && args[1] == "logs":
-		fx := fixtureFor(run)
-		var b strings.Builder
-		b.WriteString("probe | " + isolationprobe.FormatLine(isolationprobe.ReadyMarker, isolationprobe.Ready{PodIPs: []string{fx.podIP}, ListenPort: 18080, NodeIP: fx.hostIP}) + "\n")
-		results := fullResults(fx.label, fx.peers)
-		if f.breach && fx.label == "B2" {
-			results = append(results, isolationprobe.Result{Item: "C4", Context: "dind-bridge", Probe: "IMDS", Target: "169.254.169.254:80", Outcome: "connected", Verdict: isolationprobe.Breach})
-		}
-		for _, r := range results {
-			b.WriteString("probe | " + isolationprobe.FormatLine(isolationprobe.ResultMarker, r) + "\n")
-		}
-		b.WriteString(isolationprobe.FormatLine(isolationprobe.SummaryMarker, isolationprobe.Summarize(results)) + "\n")
-		return b.String(), 0, nil
+		return f.log(fixtureFor(run)), 0, nil
 	case args[0] == "runs" && args[1] == "cancel":
 		f.cancelled[run] = true
 		return "{}", 0, nil
@@ -568,22 +776,34 @@ func (f *isoClusterFake) sparkwing(args []string) (string, int, error) {
 	return "", 1, nil
 }
 
-func fixtureFor(run string) isoRunFixture {
-	for _, fx := range isoFixtures {
-		if fx.run == run {
-			return fx
-		}
+func (f *isoClusterFake) log(fx isoRunFixture) string {
+	ready := fixtureReady(fx)
+	results := fixtureResults(f.plans[fx.run], ready, fx.run)
+	if f.omit[fx.label] {
+		results = slices.DeleteFunc(results, func(r isolationprobe.Result) bool { return r.Probe == "credential file token" })
 	}
-	return isoRunFixture{}
+	if f.breach[fx.label] {
+		results = append(results, isolationprobe.Result{Item: "C4", Context: "dind-bridge", Probe: "IMDS", Target: "169.254.169.254:80", Outcome: "connected", Verdict: isolationprobe.Breach})
+	}
+	var b strings.Builder
+	b.WriteString("probe | " + isolationprobe.FormatLine(isolationprobe.ReadyMarker, ready) + "\n")
+	for _, r := range results {
+		b.WriteString("probe | " + isolationprobe.FormatLine(isolationprobe.ResultMarker, r) + "\n")
+	}
+	b.WriteString(isolationprobe.FormatLine(isolationprobe.SummaryMarker, isolationprobe.Summarize(results)) + "\n")
+	return b.String()
 }
 
-func driveIsolation(t *testing.T, breach bool) (*isoClusterFake, string, error) {
+func newIsoFake(t *testing.T) *isoClusterFake {
+	return &isoClusterFake{t: t, cancelled: map[string]bool{}, statusN: map[string]int{}}
+}
+
+func driveFake(t *testing.T, fake *isoClusterFake) (string, error) {
 	t.Helper()
 	root, err := mainModuleRoot()
 	if err != nil {
 		t.Fatal(err)
 	}
-	fake := &isoClusterFake{t: t, cancelled: map[string]bool{}, statusN: map[string]int{}, breach: breach}
 	clock := time.Unix(0, 0)
 	evidence := t.TempDir()
 	d := &isolationDriver{args: isoArgs(), repo: root, tmp: t.TempDir(), evidence: evidence, tools: isolationTools{
@@ -592,7 +812,17 @@ func driveIsolation(t *testing.T, breach bool) (*isoClusterFake, string, error) 
 		now:  func() time.Time { return clock },
 		say:  func(context.Context, string) {},
 	}}
-	return fake, evidence, d.conform(t.Context())
+	return evidence, d.conform(t.Context())
+}
+
+func driveIsolation(t *testing.T, breach bool) (*isoClusterFake, string, error) {
+	t.Helper()
+	fake := newIsoFake(t)
+	if breach {
+		fake.breach = map[string]bool{"B2": true}
+	}
+	evidence, err := driveFake(t, fake)
+	return fake, evidence, err
 }
 
 func TestConformRunsThreePhasesAndKeepsTheEvidence(t *testing.T) {
@@ -604,18 +834,50 @@ func TestConformRunsThreePhasesAndKeepsTheEvidence(t *testing.T) {
 		t.Fatalf("triggered %v, cancelled %v", fake.triggered, fake.cancelled)
 	}
 	report, err := os.ReadFile(filepath.Join(evidence, "REPORT.md"))
-	if err != nil || !strings.HasPrefix(string(report), "# Cloud isolation conformance: PASS") {
-		t.Fatalf("report = %.200s, %v", report, err)
+	if err != nil || !strings.HasPrefix(string(report), "# Cloud isolation conformance: PASS") || !strings.Contains(string(report), "## Gaps (not-probed)") {
+		t.Fatalf("report = %.300s, %v", report, err)
 	}
-	for _, name := range []string{"targets.json", "plans/B2.json", "runs/A1-probe.log", "results.ndjson", "evaluation.json", "cluster/pods-B1.json", "cluster/networkpolicies.json", "SHA256SUMS"} {
+	for _, name := range []string{
+		"preflight.json", "targets.json", "plans/B2.json", "runs/A1-probe.log", "runs/B1-status.json", "runs/B1-status-ready.json",
+		"runs/B1-status-probed.json", "runs/B1-status-end.json", "cluster/phases/B1-ready.json", "cluster/phases/B2-probed.json",
+		"results.ndjson", "evaluation.json", "cluster/pods-B1.json",
+		"cluster/nodes/node-b1.json", "cluster/nodes/node-b1-pods.json", "cluster/nodeclaims.json", "cluster/networkpolicies.json", "SHA256SUMS",
+	} {
 		if _, err := os.Stat(filepath.Join(evidence, name)); err != nil {
 			t.Errorf("evidence %s: %v", name, err)
 		}
 	}
 	for _, c := range fake.commands {
-		if strings.HasPrefix(c, "kubectl ") && !strings.HasPrefix(c, "kubectl --context kikd-prod get ") && !strings.HasPrefix(c, "kubectl config view") {
+		if strings.HasPrefix(c, "kubectl ") && !strings.HasPrefix(c, "kubectl --context staging-read get ") && !strings.HasPrefix(c, "kubectl config view") {
 			t.Errorf("kubectl call outside read-only gets: %s", c)
 		}
+	}
+}
+
+// A probe pod counts as running only while the latest observation still shows it; the record it
+// leaves behind keeps the phase it last had.
+func TestProbeRunningNeedsTheLatestObservation(t *testing.T) {
+	l := newPlacementLog()
+	var p runPod
+	p.Metadata.Name, p.JobID, p.Status.Phase = "B1-probe", isolationprobe.ProbeJob, "Running"
+	l.pods["B1"] = map[string]runPod{p.Metadata.Name: p}
+	l.present["B1"] = map[string]bool{p.Metadata.Name: true}
+	if !l.probeRunning("B1") {
+		t.Fatal("a running probe pod in the latest observation is not running")
+	}
+	l.present["B1"] = map[string]bool{}
+	if l.probeRunning("B1") {
+		t.Fatal("a probe pod gone from the latest observation still counts as running")
+	}
+}
+
+// The launcher deletes a run's Jobs and pods when the run ends; placement recorded while the runs
+// were live still judges every run.
+func TestConformJudgesPlacementRecordedBeforeTeardown(t *testing.T) {
+	fake := newIsoFake(t)
+	fake.teardown = true
+	if _, err := driveFake(t, fake); err != nil {
+		t.Fatalf("healthy runs failed once the launcher tore them down: %v", err)
 	}
 }
 
@@ -626,6 +888,54 @@ func TestConformFailsOnABreachAndStillWritesTheReport(t *testing.T) {
 	}
 	report, rerr := os.ReadFile(filepath.Join(evidence, "REPORT.md"))
 	if rerr != nil || !strings.HasPrefix(string(report), "# Cloud isolation conformance: FAIL") || !strings.Contains(string(report), "B2 dind-bridge BREACH: IMDS") {
-		t.Fatalf("report = %.400s, %v", report, rerr)
+		t.Fatalf("report = %.600s, %v", report, rerr)
+	}
+}
+
+// A breach or a missing result in an anchor stops the sequence before another hostile job starts,
+// cancels the anchor and still reports.
+func TestConformStopsAtTheFirstRunThatFails(t *testing.T) {
+	for name, edit := range map[string]func(*isoClusterFake){
+		"a breach":         func(f *isoClusterFake) { f.breach = map[string]bool{"B1": true} },
+		"a missing result": func(f *isoClusterFake) { f.omit = map[string]bool{"B1": true} },
+	} {
+		fake := newIsoFake(t)
+		edit(fake)
+		evidence, err := driveFake(t, fake)
+		if err == nil || len(fake.triggered) != 1 || !fake.cancelled["run-1"] {
+			t.Errorf("%s: conform = %v, triggered %v, cancelled %v", name, err, fake.triggered, fake.cancelled)
+			continue
+		}
+		report, rerr := os.ReadFile(filepath.Join(evidence, "REPORT.md"))
+		if rerr != nil || !strings.Contains(string(report), "A1 was not run") || !strings.Contains(string(report), "the sequence stopped") {
+			t.Errorf("%s: report = %.600s, %v", name, report, rerr)
+		}
+	}
+}
+
+// A read the driver needs to record placement fails during discovery, before any run starts.
+func TestConformChecksPlacementReadsBeforeAnyRun(t *testing.T) {
+	for _, denied := range []string{"get nodeclaims", "--field-selector"} {
+		fake := newIsoFake(t)
+		fake.deny = denied
+		if _, err := driveFake(t, fake); err == nil || len(fake.triggered) != 0 {
+			t.Errorf("%s denied: conform = %v, triggered %v", denied, err, fake.triggered)
+		}
+	}
+}
+
+// Both profiles must point at staging and authenticate as their own teams before any upload.
+func TestConformRefusesAProfileOffStagingOrAsAnotherTeam(t *testing.T) {
+	for name, edit := range map[string]func(*isoClusterFake){
+		"production controller": func(f *isoClusterFake) {
+			f.controller = map[string]string{"stg-iso-a": "https://api.sparkwing.dev"}
+		},
+		"another team's token": func(f *isoClusterFake) { f.whoami = map[string]string{"stg-iso-b": "stg-iso-a"} },
+	} {
+		fake := newIsoFake(t)
+		edit(fake)
+		if _, err := driveFake(t, fake); err == nil || len(fake.triggered) != 0 {
+			t.Errorf("%s: conform = %v, triggered %v", name, err, fake.triggered)
+		}
 	}
 }

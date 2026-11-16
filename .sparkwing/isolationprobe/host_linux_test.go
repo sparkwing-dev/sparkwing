@@ -5,9 +5,13 @@ package isolationprobe
 import (
 	"encoding/binary"
 	"fmt"
+	"io/fs"
 	"os"
+	"slices"
+	"strings"
 	"syscall"
 	"testing"
+	"testing/fstest"
 )
 
 func TestUIDMapVerdictFailsTheInitialNamespace(t *testing.T) {
@@ -20,8 +24,12 @@ func TestUIDMapVerdictFailsTheInitialNamespace(t *testing.T) {
 		"root unmapped":     {"      1000       1000          1\n", Inconclusive},
 		"unreadable":        {"", Inconclusive},
 	} {
-		if _, got := uidMapVerdict(c.text); got != c.want {
+		outcome, got := uidMapVerdict(c.text)
+		if got != c.want {
 			t.Errorf("%s: %s, want %s", name, got, c.want)
+		}
+		if strings.Contains(outcome, "123863040") {
+			t.Errorf("%s: outcome %q carries the mapped uid", name, outcome)
 		}
 	}
 }
@@ -70,6 +78,55 @@ func TestSyscallTriesExpectTheDinDProfilesErrnos(t *testing.T) {
 	if len(names) != 17 {
 		t.Fatalf("syscall tries = %d, want the profile's 17 refusals", len(names))
 	}
+	var tried []string
+	for _, s := range syscallTries() {
+		tried = append(tried, s.name)
+	}
+	if !slices.Equal(tried, syscallNames) {
+		t.Fatalf("syscall tries %v differ from the manifest's %v", tried, syscallNames)
+	}
+}
+
+// No call passes the kernel a usable pointer, so a missing filter cannot turn a probe into a real
+// operation; delete_module in particular gets an address the kernel cannot read.
+func TestSyscallTriesPassNoUsablePointer(t *testing.T) {
+	for _, s := range syscallTries() {
+		if s.name == "delete_module" && s.args[0] != 1 {
+			t.Fatalf("delete_module name pointer = %#x, want the unreadable address 1", s.args[0])
+		}
+	}
+}
+
+func refuseAsTheProfile(s syscallTry) (uintptr, syscall.Errno) { return 0, s.want }
+
+func emptyWalk(_ string, fn fs.WalkDirFunc) error { return fs.WalkDir(fstest.MapFS{}, ".", fn) }
+
+// Each context's host checks answer every key the driver requires of them, so a check that is
+// renamed or dropped fails coverage instead of vanishing.
+func TestHostChecksAnswerTheManifest(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("as root the mount and device-node checks would act on this machine")
+	}
+	for _, where := range []string{ContextJob, ContextPrivileged} {
+		results := hostProbes(hostOptions{where: where, workDir: t.TempDir(), podNetNS: readNetNS(), walk: emptyWalk, invoke: refuseAsTheProfile})
+		if missing := Missing(hostKeys(where), results); len(missing) > 0 {
+			t.Errorf("%s host checks miss %v", where, missing)
+		}
+	}
+}
+
+// The NET_ADMIN control passes only with NET_ADMIN over the namespace, which an unprivileged test
+// process lacks whatever else it holds.
+func TestNetAdminControlNeedsNetAdmin(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root holds NET_ADMIN")
+	}
+	if r := netAdminProbe(ContextPrivileged); r.Verdict != Inconclusive || r.Target != "lo" || r.Outcome != "EPERM" {
+		t.Fatalf("privileged control without NET_ADMIN = %+v, want inconclusive EPERM", r)
+	}
+	if r := netAdminProbe(ContextJob); r.Verdict != Observed {
+		t.Fatalf("job control = %+v, want observed", r)
+	}
 }
 
 func TestErrnoNameNamesTheRefusal(t *testing.T) {
@@ -101,11 +158,11 @@ func recvErr(origin byte, family uint16, addr [4]byte) []byte {
 }
 
 func TestParseOffenderReadsTheHopThatAnswered(t *testing.T) {
-	got, err := parseOffender(recvErr(2, syscall.AF_INET, [4]byte{10, 0, 51, 209}))
-	if err != nil || got != "10.0.51.209" {
+	got, err := parseOffender(recvErr(2, syscall.AF_INET, [4]byte{10, 9, 8, 7}))
+	if err != nil || got != "10.9.8.7" {
 		t.Fatalf("offender = %q, %v", got, err)
 	}
-	if _, err := parseOffender(recvErr(1, syscall.AF_INET, [4]byte{10, 0, 51, 209})); err == nil {
+	if _, err := parseOffender(recvErr(1, syscall.AF_INET, [4]byte{10, 9, 8, 7})); err == nil {
 		t.Fatal("a local error was read as an ICMP offender")
 	}
 	if _, err := parseOffender(recvErr(2, syscall.AF_INET6, [4]byte{})); err == nil {

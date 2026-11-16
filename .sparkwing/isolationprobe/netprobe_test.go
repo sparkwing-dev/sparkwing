@@ -3,6 +3,7 @@ package isolationprobe
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -186,7 +187,11 @@ func TestBlockedTargetThatAnswersStaysABreachWithItsAnswerRecorded(t *testing.T)
 
 func TestPositiveControlsNeedTheWholePublicPath(t *testing.T) {
 	open := newNetwork()
-	open.lookup = func(context.Context, string) ([]string, error) { return []string{"192.0.2.1"}, nil }
+	var looked []string
+	open.lookup = func(_ context.Context, host string) ([]string, error) {
+		looked = append(looked, host)
+		return []string{"192.0.2.1"}, nil
+	}
 	open.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusMovedPermanently, Body: http.NoBody}, nil
 	})}
@@ -200,6 +205,9 @@ func TestPositiveControlsNeedTheWholePublicPath(t *testing.T) {
 			t.Errorf("working network: %+v, want pass", r)
 		}
 	}
+	if strings.Join(looked, ",") != "github.com,kubernetes.default.svc.cluster.local" {
+		t.Fatalf("lookups = %v, want a public name and the cluster's own", looked)
+	}
 	broken := newNetwork()
 	broken.lookup = func(context.Context, string) ([]string, error) {
 		return nil, &net.DNSError{Err: "no such host", IsNotFound: true}
@@ -207,8 +215,8 @@ func TestPositiveControlsNeedTheWholePublicPath(t *testing.T) {
 	broken.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) { return nil, timeoutErr{} })}
 	broken.dial = func(context.Context, string, string) (net.Conn, error) { return nil, dialErr(syscall.ENETUNREACH) }
 	results := broken.positive(t.Context(), ContextJob)
-	if len(results) != 3 {
-		t.Fatalf("positive controls = %d, want 3", len(results))
+	if len(results) != len(positiveChecks) {
+		t.Fatalf("positive controls = %d, want %d", len(results), len(positiveChecks))
 	}
 	for _, r := range results {
 		if r.Verdict != Inconclusive {
@@ -244,7 +252,7 @@ func TestProbeAllKeepsTargetOrder(t *testing.T) {
 	}
 	var targets []Target
 	for i := range 9 {
-		host := "10.0.0." + strconv.Itoa(i)
+		host := "10.9.0." + strconv.Itoa(i)
 		if i%2 == 1 {
 			host = "192.0.2." + strconv.Itoa(i)
 		}
@@ -257,25 +265,92 @@ func TestProbeAllKeepsTargetOrder(t *testing.T) {
 	}
 }
 
-func TestOwnNodeTargetsGradeOnlyTheKubelet(t *testing.T) {
+// The own node's kubelet may answer only to refuse; every other port on the own node must stay out
+// of reach, the read-only kubelet and kube-proxy metrics included.
+func TestOwnNodeTargetsJudgeEveryPort(t *testing.T) {
 	if got := ownNodeTargets(""); got != nil {
 		t.Fatalf("no node gives %v, want none", got)
 	}
-	graded := 0
-	for _, tg := range ownNodeTargets("10.0.51.209") {
+	ports := map[string]Expect{}
+	for _, tg := range ownNodeTargets("10.9.1.1") {
 		if err := tg.validate(); err != nil {
 			t.Errorf("%s: %v", tg.Name, err)
 		}
-		if tg.Expect == ExpectDenied {
-			graded++
-			if tg.Grade != GradeKubelet || tg.Address != "10.0.51.209:10250" {
-				t.Errorf("graded own-node target %+v, want the kubelet", tg)
-			}
-		} else if tg.Expect != ExpectObserved {
-			t.Errorf("%s expects %s, want observed", tg.Name, tg.Expect)
+		_, port, _ := net.SplitHostPort(tg.Address)
+		ports[port] = tg.Expect
+		if tg.Expect == ExpectDenied && tg.Grade != GradeKubelet {
+			t.Errorf("graded own-node target %+v, want the kubelet", tg)
 		}
 	}
-	if graded != 1 {
-		t.Fatalf("graded own-node targets = %d, want 1", graded)
+	want := map[string]Expect{"10250": ExpectDenied, "10255": ExpectBlocked, "10249": ExpectBlocked, "10256": ExpectBlocked, "22": ExpectBlocked, "61678": ExpectBlocked, "61679": ExpectBlocked, "61680": ExpectBlocked}
+	if len(ports) != len(want) {
+		t.Fatalf("own-node ports = %v, want %v", ports, want)
+	}
+	for port, expect := range want {
+		if ports[port] != expect {
+			t.Errorf("own-node port %s expects %q, want %q", port, ports[port], expect)
+		}
+	}
+}
+
+func TestReachableOwnReadOnlyKubeletFails(t *testing.T) {
+	ln := listener(t)
+	for _, tg := range ownNodeTargets("192.0.2.1") {
+		if strings.HasSuffix(tg.Address, ":10255") {
+			tg.Address = ln.Addr().String()
+			if r := newNetwork().probe(t.Context(), ContextJob, tg); r.Verdict != Breach {
+				t.Fatalf("reachable read-only kubelet = %+v, want breach", r)
+			}
+			return
+		}
+	}
+	t.Fatal("no read-only kubelet target")
+}
+
+func TestOwnPodDockerTargetsCoverLoopbackAndPodAddresses(t *testing.T) {
+	var got []string
+	for _, tg := range ownPodDockerTargets([]string{"10.9.2.2"}) {
+		if tg.Expect != ExpectBlocked || tg.Listening || tg.Item != "C9" {
+			t.Errorf("own pod Docker target %+v", tg)
+		}
+		got = append(got, tg.Address)
+	}
+	if strings.Join(got, ",") != "127.0.0.1:2375,127.0.0.1:2376,10.9.2.2:2375,10.9.2.2:2376" {
+		t.Fatalf("own pod Docker targets = %v", got)
+	}
+}
+
+// The kube API grade asks about the deployment's own namespace: its secrets, the caller's rules
+// there and a dry-run Job that mounts a secret. All three must be refused.
+func TestKubeAPIGradeAsksAboutTheDeploymentsNamespace(t *testing.T) {
+	var requests []string
+	status := http.StatusForbidden
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests = append(requests, r.Method+" "+r.URL.RequestURI()+" "+string(body))
+		if r.Header.Get("Authorization") != "" {
+			t.Errorf("grade request carried a credential")
+		}
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+	target := Target{Item: "C7", Name: "kube API public endpoint", Address: srv.Listener.Addr().String(), Expect: ExpectDenied, Listening: true, Grade: GradeKubeAPI, Namespace: "staging-ns"}
+	r := newNetwork().probe(t.Context(), ContextJob, target)
+	if r.Verdict != Pass || r.Outcome != "connected; http-403,http-403,http-403" {
+		t.Fatalf("refused kube API = %+v, want pass on three refusals", r)
+	}
+	if len(requests) != 3 ||
+		!strings.HasPrefix(requests[0], "GET /api/v1/namespaces/staging-ns/secrets ") ||
+		!strings.HasPrefix(requests[1], "POST /apis/authorization.k8s.io/v1/selfsubjectrulesreviews ") || !strings.Contains(requests[1], `"namespace":"staging-ns"`) ||
+		!strings.HasPrefix(requests[2], "POST /apis/batch/v1/namespaces/staging-ns/jobs?dryRun=All ") || !strings.Contains(requests[2], `"secretName"`) {
+		t.Fatalf("kube API grade requests = %q", requests)
+	}
+	requests, status = nil, http.StatusCreated
+	if r := newNetwork().probe(t.Context(), ContextJob, target); r.Verdict != Breach {
+		t.Fatalf("admitted dry-run Job = %+v, want breach", r)
+	}
+	target.Namespace = ""
+	if _, err := newNetwork().grade(t.Context(), target); err == nil {
+		t.Fatal("a kube API grade ran without the namespace it asks about")
 	}
 }

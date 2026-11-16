@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,14 +30,6 @@ const (
 	outcomeNoAddress       = "no-address"
 	outcomeDNSFailure      = "dns-failure"
 	outcomeError           = "error"
-)
-
-// safety: public destinations every Cloud job is promised. A missed one means the probe's own
-// network is broken, so its refusals elsewhere prove nothing.
-const (
-	publicHTTPS = "https://github.com/"
-	publicTCP   = "1.1.1.1:53"
-	publicName  = "github.com"
 )
 
 type network struct {
@@ -195,27 +189,46 @@ func (n network) probe(ctx context.Context, where string, t Target) Result {
 	return r
 }
 
-const rulesReview = `{"apiVersion":"authorization.k8s.io/v1","kind":"SelfSubjectRulesReview","spec":{"namespace":"kube-system"}}`
-
-// safety: grading requests carry no credential and only read, so an open endpoint answers with
-// what an anonymous caller may do and nothing changes on it.
-func (n network) grade(ctx context.Context, t Target) ([]int, error) {
-	type req struct {
-		method, url string
-		body        []byte
-		header      map[string]string
+// safety: the dry-run Job mounts a secret, so an API that admits it would let an anonymous caller
+// read the namespace's secrets through a pod; dryRun=All persists nothing either way.
+func kubeAPIRequests(base, namespace string) []gradeRequest {
+	ns := url.PathEscape(namespace)
+	rules, _ := json.Marshal(map[string]any{ //nolint:errcheck // a map of strings always marshals
+		"apiVersion": "authorization.k8s.io/v1", "kind": "SelfSubjectRulesReview", "spec": map[string]string{"namespace": namespace},
+	})
+	jsonHeader := map[string]string{"Content-Type": "application/json"}
+	return []gradeRequest{
+		{http.MethodGet, base + "/api/v1/namespaces/" + ns + "/secrets", nil, nil},
+		{http.MethodPost, base + "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews", rules, jsonHeader},
+		{http.MethodPost, base + "/apis/batch/v1/namespaces/" + ns + "/jobs?dryRun=All", []byte(dryRunJob), jsonHeader},
 	}
-	var reqs []req
+}
+
+const dryRunJob = `{"apiVersion":"batch/v1","kind":"Job","metadata":{"generateName":"isolation-probe-"},` +
+	`"spec":{"template":{"spec":{"restartPolicy":"Never","automountServiceAccountToken":false,` +
+	`"containers":[{"name":"probe","image":"isolation-probe.invalid/none","command":["true"],"volumeMounts":[{"name":"secret","mountPath":"/secret"}]}],` +
+	`"volumes":[{"name":"secret","secret":{"secretName":"isolation-probe-absent"}}]}}}}`
+
+type gradeRequest struct {
+	method, url string
+	body        []byte
+	header      map[string]string
+}
+
+// safety: grading requests carry no credential and either only read or are dry runs, so an open
+// endpoint answers with what an anonymous caller may do and nothing changes on it.
+func (n network) grade(ctx context.Context, t Target) ([]int, error) {
+	var reqs []gradeRequest
 	switch t.Grade {
 	case GradeKubelet:
-		reqs = []req{{http.MethodGet, "https://" + t.Address + "/pods", nil, nil}}
+		reqs = []gradeRequest{{http.MethodGet, "https://" + t.Address + "/pods", nil, nil}}
 	case GradeKubeAPI:
-		reqs = []req{
-			{http.MethodGet, "https://" + t.Address + "/api/v1/namespaces/kube-system/secrets", nil, nil},
-			{http.MethodPost, "https://" + t.Address + "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews", []byte(rulesReview), map[string]string{"Content-Type": "application/json"}},
+		if !validName(t.Namespace) {
+			return nil, errors.New("a kube API grade needs the namespace it asks about")
 		}
+		reqs = kubeAPIRequests("https://"+t.Address, t.Namespace)
 	case GradeIMDS:
-		reqs = []req{
+		reqs = []gradeRequest{
 			{http.MethodPut, "http://" + t.Address + "/latest/api/token", nil, map[string]string{"X-aws-ec2-metadata-token-ttl-seconds": "60"}},
 			{http.MethodGet, "http://" + t.Address + "/latest/meta-data/", nil, nil},
 		}
@@ -254,29 +267,33 @@ func (n network) status(ctx context.Context, method, url string, body []byte, he
 	return resp.StatusCode, nil
 }
 
-// safety: positive controls run in every context, so a refusal elsewhere in that context is the
-// fence's, not a broken network's.
 func (n network) positive(ctx context.Context, where string) []Result {
-	start := n.now()
-	lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	_, lerr := n.lookup(lctx, publicName)
-	cancel()
-	dns := Result{Item: "C6", Context: where, Probe: "public name resolves through cluster DNS", Target: publicName, Expect: ExpectOpen, Outcome: "resolved", Verdict: Pass}
-	if lerr != nil {
-		dns.Outcome, dns.Verdict = classifyDial(lerr), Inconclusive
+	out := make([]Result, 0, len(positiveChecks))
+	for _, c := range positiveChecks {
+		if c.kind == checkTCP {
+			out = append(out, n.probe(ctx, where, Target{Item: "C6", Name: c.name, Address: c.target, Expect: ExpectOpen}))
+			continue
+		}
+		start := n.now()
+		r := Result{Item: "C6", Context: where, Probe: c.name, Target: c.target, Expect: ExpectOpen, Verdict: Pass}
+		var err error
+		if c.kind == checkDNS {
+			lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			_, err = n.lookup(lctx, c.target)
+			cancel()
+			r.Outcome = "resolved"
+		} else {
+			var code int
+			code, err = n.status(ctx, http.MethodGet, c.target, nil, nil)
+			r.Outcome = "http-" + strconv.Itoa(code)
+		}
+		if err != nil {
+			r.Outcome, r.Verdict = classifyDial(err), Inconclusive
+		}
+		r.Millis = n.now().Sub(start).Milliseconds()
+		out = append(out, r)
 	}
-	dns.Millis = n.now().Sub(start).Milliseconds()
-
-	start = n.now()
-	code, herr := n.status(ctx, http.MethodGet, publicHTTPS, nil, nil)
-	https := Result{Item: "C6", Context: where, Probe: "public HTTPS answers", Target: publicHTTPS, Expect: ExpectOpen, Outcome: "http-" + strconv.Itoa(code), Verdict: Pass}
-	if herr != nil {
-		https.Outcome, https.Verdict = classifyDial(herr), Inconclusive
-	}
-	https.Millis = n.now().Sub(start).Milliseconds()
-
-	tcp := n.probe(ctx, where, Target{Item: "C6", Name: "public non-web TCP port answers", Address: publicTCP, Expect: ExpectOpen})
-	return []Result{dns, https, tcp}
+	return out
 }
 
 // safety: peers must fail to reach this listener while a connection from inside the pod succeeds,
@@ -328,28 +345,46 @@ func dockerInterface(name string) bool {
 
 func (n network) selfConnect(ctx context.Context, where string, ips []string, port int) []Result {
 	if len(ips) == 0 {
-		return []Result{{Item: "C9", Context: where, Probe: "own listener answers on the pod address", Expect: ExpectOpen, Outcome: "no pod address", Verdict: Inconclusive}}
+		return []Result{{Item: "C9", Context: where, Probe: probeSelfConnect, Expect: ExpectOpen, Outcome: "no pod address", Verdict: Inconclusive}}
 	}
 	var out []Result
 	for _, ip := range ips {
-		out = append(out, n.probe(ctx, where, Target{Item: "C9", Name: "own listener answers on the pod address", Address: net.JoinHostPort(ip, strconv.Itoa(port)), Expect: ExpectOpen}))
+		out = append(out, n.probe(ctx, where, Target{Item: "C9", Name: probeSelfConnect, Address: net.JoinHostPort(ip, strconv.Itoa(port)), Expect: ExpectOpen}))
 	}
 	return out
 }
 
-// safety: the own node's kubelet must refuse an anonymous caller whether or not the fence covers
-// the pod's own node; its other ports are recorded, not judged.
+// safety: the own node's kubelet must refuse an anonymous caller even where the fence lets the pod
+// reach its own node, and every other node port must stay out of reach; a node never discovered
+// is reported as a gap rather than passed.
 func ownNodeTargets(node string) []Target {
 	if node == "" {
 		return nil
 	}
 	at := func(port string) string { return net.JoinHostPort(node, port) }
+	blocked := func(name, port string) Target {
+		return Target{Item: "C8", Name: "own node " + name, Address: at(port), Expect: ExpectBlocked}
+	}
 	return []Target{
 		{Item: "C8", Name: "own node kubelet", Address: at("10250"), Expect: ExpectDenied, Listening: true, Grade: GradeKubelet},
-		{Item: "C8", Name: "own node kubelet read-only port", Address: at("10255"), Expect: ExpectObserved},
-		{Item: "C8", Name: "own node kube-proxy health", Address: at("10256"), Expect: ExpectObserved},
-		{Item: "C8", Name: "own node ssh", Address: at("22"), Expect: ExpectObserved},
-		{Item: "C8", Name: "own node VPC CNI metrics", Address: at("61678"), Expect: ExpectObserved},
-		{Item: "C8", Name: "own node network policy agent metrics", Address: at("61680"), Expect: ExpectObserved},
+		blocked("kubelet read-only port", "10255"),
+		blocked("kube-proxy metrics", "10249"),
+		blocked("kube-proxy health", "10256"),
+		blocked("ssh", "22"),
+		blocked("VPC CNI metrics", "61678"),
+		blocked("VPC CNI introspection", "61679"),
+		blocked("network policy agent metrics", "61680"),
 	}
+}
+
+// safety: dockerd listens only on the scratch socket, so a Docker TCP port on the pod's own
+// addresses would hand the daemon to anything that reaches the pod.
+func ownPodDockerTargets(ips []string) []Target {
+	var out []Target
+	for _, ip := range append([]string{"127.0.0.1"}, ips...) {
+		for _, port := range []string{"2375", "2376"} {
+			out = append(out, Target{Item: "C9", Name: "own pod Docker TCP port", Address: net.JoinHostPort(ip, port), Expect: ExpectBlocked})
+		}
+	}
+	return out
 }

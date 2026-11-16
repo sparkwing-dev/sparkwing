@@ -2,9 +2,11 @@ package jobs
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"sparkwing-pipelines/isolationprobe"
+	"sparkwing-pipelines/isolationprobe/fixture"
 	"strings"
 )
 
@@ -16,6 +18,7 @@ type isolationRun struct {
 	Status  string                   `json:"status"`
 	RunTeam string                   `json:"run_team"`
 	Peers   []string                 `json:"peers"`
+	Plan    isolationprobe.Plan      `json:"-"`
 	Results []isolationprobe.Result  `json:"-"`
 	Ready   []isolationprobe.Ready   `json:"ready"`
 	Summary []isolationprobe.Summary `json:"summary"`
@@ -34,11 +37,25 @@ type isolationPod struct {
 }
 
 type isolationNode struct {
-	Name     string   `json:"name"`
-	IPs      []string `json:"ips"`
-	TeamNode string   `json:"team_node"`
-	UsedTeam string   `json:"used_team"`
-	UsedRun  string   `json:"used_run"`
+	Name      string    `json:"name"`
+	IPs       []string  `json:"ips"`
+	TeamNode  string    `json:"team_node"`
+	UsedTeam  string    `json:"used_team"`
+	UsedRun   string    `json:"used_run"`
+	Pool      string    `json:"pool_namespace"`
+	NodePool  string    `json:"nodepool"`
+	NodeClass string    `json:"nodeclass"`
+	Claimed   bool      `json:"nodeclaim_captured"`
+	Pods      []nodePod `json:"pods"`
+}
+
+// safety: a pod seen on a tested node is allowed there only as a DaemonSet's or as one of the
+// node's own run's, which the launcher's award binding records.
+type nodePod struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	DaemonSet bool   `json:"daemonset,omitempty"`
+	Run       string `json:"run,omitempty"`
 }
 
 type itemVerdict struct {
@@ -66,25 +83,7 @@ var isolationItems = []struct{ id, title string }{
 	{"C10", "The node's filesystem outside scratch"},
 	{"C11", "The host network"},
 	{"C12", "DinD capabilities and /proc"},
-}
-
-// safety: every context must report the probes that settle its items, so a run that skipped a
-// context, crashed early or lost lines fails coverage instead of passing on what it did report.
-var requiredProbes = map[string][]string{
-	isolationprobe.ContextJob: {
-		"user namespace maps root away from host root", "seccomp filter applied", "mount audit", "IMDS",
-		"IMDS over IPv6", "kube API service", "kube API public endpoint", "own listener answers on the pod address",
-		"own Docker daemon answers", "runtime sockets outside scratch", "peer canary files", "block devices in /dev",
-		"credential-named environment variable",
-	},
-	isolationprobe.ContextBridge: {"public HTTPS answers", "IMDS", "IMDS over IPv6", "kube API service"},
-	isolationprobe.ContextPrivileged: {
-		"user namespace maps root away from host root", "seccomp filter applied", "mount audit", "IMDS",
-		"node markers under /host", "node markers under /proc/1/root", "host PID namespace shows no node process",
-		"host network is the pod's network namespace", "kernel file opens for writing", "cgroup v1 hierarchy mounts",
-		"tmpfs mounts inside the pod's namespace", "NET_ADMIN works inside the pod's namespace", "seccomp refuses bpf",
-		"block device node creation",
-	},
+	{"C13", "Every phase ran and was captured"},
 }
 
 func evaluateIsolation(namespace string, runs []isolationRun, nodes map[string]isolationNode, anchorsAlive map[string]bool) isolationEvaluation {
@@ -104,83 +103,28 @@ func evaluateIsolation(namespace string, runs []isolationRun, nodes map[string]i
 		add("C1", "runs used %d teams, want 2", len(teams))
 	}
 
-	nodeRun, fenceRun := map[string]string{}, map[string]string{}
-	for _, r := range runs {
-		probe := probePod(r)
-		if probe == nil {
-			add("C2", "%s has no probe pod in %s", r.Label, namespace)
+	nodeRun := map[string]*isolationRun{}
+	for i := range runs {
+		r := &runs[i]
+		if r.RunID == "" {
+			add("C13", "%s was not run; the sequence stopped before it", r.Label)
 			continue
 		}
-		for _, p := range r.Pods {
-			if other, ok := nodeRun[p.Node]; ok && other != r.Label {
-				add("C2", "%s and %s share node %s", other, r.Label, p.Node)
-			}
-			nodeRun[p.Node] = r.Label
-			n, ok := nodes[p.Node]
-			want := teamNodeValue(namespace, r.Team)
-			switch {
-			case !ok:
-				add("C2", "%s pod %s runs on unknown node %s", r.Label, p.Name, p.Node)
-			case n.TeamNode != want || n.UsedTeam != want:
-				add("C2", "%s node %s carries team labels %q/%q, want %q", r.Label, p.Node, n.TeamNode, n.UsedTeam, want)
-			case n.UsedRun == "":
-				add("C2", "%s node %s has no used-run fence", r.Label, p.Node)
-			case fenceRun[n.UsedRun] != "" && fenceRun[n.UsedRun] != r.Label:
-				add("C2", "%s and %s carry the same used-run fence", fenceRun[n.UsedRun], r.Label)
-			default:
-				fenceRun[n.UsedRun] = r.Label
-			}
-			for _, s := range p.Spec {
-				add("C3", "%s pod %s: %s", r.Label, p.Name, s)
-			}
+		judgePlacement(namespace, r, nodes, nodeRun, add)
+		for _, f := range probeFindings(*r) {
+			add(f.item, "%s", f.text)
 		}
-		if len(r.Ready) == 0 {
-			add("C9", "%s never announced its listener", r.Label)
-			continue
-		}
-		ready := r.Ready[0]
-		if !slices.Contains(ready.PodIPs, probe.PodIP) {
-			add("C11", "%s reported pod addresses %v, but its pod is %s", r.Label, ready.PodIPs, probe.PodIP)
-		}
-		if probe.PodIP == probe.HostIP || slices.Contains(ready.PodIPs, probe.HostIP) {
-			add("C11", "%s runs with its node's address %s", r.Label, probe.HostIP)
-		}
-		if ready.NodeIP != "" {
-			if n, ok := nodes[probe.Node]; !ok || !slices.Contains(n.IPs, ready.NodeIP) {
-				add("C8", "%s discovered %s as its node, but it runs on %s", r.Label, ready.NodeIP, probe.Node)
+		for _, peer := range r.Peers {
+			if !anchorsAlive[peer] {
+				add("C9", "peer %s was not running after %s probed it, so its listener proves nothing", peer, r.Label)
 			}
 		}
 	}
-
-	for _, r := range runs {
-		if len(r.Summary) == 0 {
-			add("C12", "%s reported no summary; its probes did not finish", r.Label)
-		}
-		seen := map[string]map[string]bool{}
-		for _, res := range r.Results {
-			if seen[res.Context] == nil {
-				seen[res.Context] = map[string]bool{}
-			}
-			seen[res.Context][res.Probe] = true
-			if res.Verdict.Fails() {
-				add(itemOf(res.Item), "%s %s %s: %s %s (%s)", r.Label, res.Context, res.Verdict, res.Probe, res.Target, res.Outcome)
-			}
-		}
-		for ctx, names := range requiredProbes {
-			for _, name := range names {
-				if !seen[ctx][name] {
-					add(requiredItem(name), "%s %s never reported %q", r.Label, ctx, name)
-				}
-			}
-		}
-		for _, peer := range r.Peers {
-			for _, ctx := range []string{isolationprobe.ContextJob, isolationprobe.ContextBridge, isolationprobe.ContextPrivileged} {
-				if !seenPeerListener(r.Results, ctx, peer) {
-					add("C9", "%s %s never probed peer %s's listener", r.Label, ctx, peer)
-				}
-			}
-			if !anchorsAlive[peer] {
-				add("C9", "peer %s was not running after %s probed it, so its listener proves nothing", peer, r.Label)
+	for _, name := range slices.Sorted(maps.Keys(nodeRun)) {
+		owner := nodeRun[name]
+		for _, p := range nodes[name].Pods {
+			if !p.DaemonSet && p.Run != owner.RunID {
+				add("C2", "node %s of %s also held pod %s/%s", name, owner.Label, p.Namespace, p.Name)
 			}
 		}
 	}
@@ -195,6 +139,107 @@ func evaluateIsolation(namespace string, runs []isolationRun, nodes map[string]i
 	return eval
 }
 
+// safety: a node passes only when it carries this staging pool's namespace, the run's own team
+// labels and the used-run fence the launcher computes for this exact run, so a node fenced to any
+// other run, team or pool fails even when each value is unique.
+func judgePlacement(namespace string, r *isolationRun, nodes map[string]isolationNode, nodeRun map[string]*isolationRun, add func(string, string, ...any)) {
+	probe := probePod(*r)
+	if probe == nil {
+		add("C2", "%s has no probe pod in %s", r.Label, namespace)
+		return
+	}
+	team, fence := teamNodeValue(namespace, r.Team), runNodeValue(namespace, r.RunID)
+	for _, p := range r.Pods {
+		for _, s := range p.Spec {
+			add("C3", "%s pod %s: %s", r.Label, p.Name, s)
+		}
+		if p.Node == "" {
+			add("C2", "%s pod %s was never seen on a node", r.Label, p.Name)
+			continue
+		}
+		if other, ok := nodeRun[p.Node]; ok && other.Label != r.Label {
+			add("C2", "%s and %s share node %s", other.Label, r.Label, p.Node)
+		}
+		nodeRun[p.Node] = r
+		n, ok := nodes[p.Node]
+		switch {
+		case !ok:
+			add("C13", "%s pod %s ran on node %s, which was never captured", r.Label, p.Name, p.Node)
+		case n.Pool != namespace:
+			add("C2", "%s node %s belongs to pool namespace %q, want %q", r.Label, p.Node, n.Pool, namespace)
+		case n.TeamNode != team || n.UsedTeam != team:
+			add("C2", "%s node %s carries team labels %q/%q, want %q", r.Label, p.Node, n.TeamNode, n.UsedTeam, team)
+		case n.UsedRun != fence:
+			add("C2", "%s node %s is fenced to %q, want this run's %q", r.Label, p.Node, n.UsedRun, fence)
+		}
+		if ok && !n.Claimed {
+			add("C13", "%s node %s has no captured NodeClaim", r.Label, p.Node)
+		}
+	}
+	if len(r.Ready) == 0 {
+		return
+	}
+	ready := r.Ready[0]
+	if !slices.Contains(ready.PodIPs, probe.PodIP) {
+		add("C11", "%s reported pod addresses %v, but its pod is %s", r.Label, ready.PodIPs, probe.PodIP)
+	}
+	if probe.PodIP == probe.HostIP || slices.Contains(ready.PodIPs, probe.HostIP) {
+		add("C11", "%s runs with its node's address %s", r.Label, probe.HostIP)
+	}
+	if ready.NodeIP != "" {
+		if n, ok := nodes[probe.Node]; !ok || !slices.Contains(n.IPs, ready.NodeIP) {
+			add("C8", "%s discovered %s as its node, but it runs on %s", r.Label, ready.NodeIP, probe.Node)
+		}
+	}
+}
+
+type finding struct{ item, text string }
+
+// safety: a run passes only on the full result set its plan owes, every verdict one the probe
+// emits and one summary that agrees with them, so a vanished probe, a context that never ran or a
+// garbled log fails the run instead of passing on what it did report.
+func probeFindings(r isolationRun) []finding {
+	var out []finding
+	add := func(item, format string, args ...any) {
+		out = append(out, finding{item, fmt.Sprintf(format, args...)})
+	}
+	for _, res := range r.Results {
+		switch {
+		case !res.Verdict.Valid():
+			add("C13", "%s %s reported verdict %q for %s", r.Label, res.Context, res.Verdict, res.Probe)
+		case res.Verdict.Fails():
+			add(itemOf(res.Item), "%s %s %s: %s %s (%s)", r.Label, res.Context, res.Verdict, res.Probe, res.Target, res.Outcome)
+		}
+	}
+	switch {
+	case len(r.Summary) == 0:
+		add("C13", "%s reported no summary; its probes did not finish", r.Label)
+	case len(r.Summary) > 1:
+		add("C13", "%s reported %d summaries, want one", r.Label, len(r.Summary))
+	case r.Summary[0] != isolationprobe.Summarize(r.Results):
+		add("C13", "%s summary %+v disagrees with its %d results", r.Label, r.Summary[0], len(r.Results))
+	}
+	if len(r.Ready) == 0 {
+		add("C13", "%s never announced its listener, so the checks it owes are unknown", r.Label)
+		return out
+	}
+	type gap struct{ context, item string }
+	missing := map[gap][]isolationprobe.Key{}
+	var order []gap
+	for _, k := range isolationprobe.Missing(isolationprobe.Expected(r.Plan, r.Ready[0], r.RunID, fixture.SDKKeys()...), r.Results) {
+		g := gap{k.Context, itemOf(k.Item)}
+		if missing[g] == nil {
+			order = append(order, g)
+		}
+		missing[g] = append(missing[g], k)
+	}
+	for _, g := range order {
+		first := missing[g][0]
+		add(g.item, "%s %s never reported %d owed %s checks, first %q %s", r.Label, g.context, len(missing[g]), g.item, first.Probe, first.Target)
+	}
+	return out
+}
+
 func probePod(r isolationRun) *isolationPod {
 	for i := range r.Pods {
 		if r.Pods[i].Job == isolationprobe.ProbeJob {
@@ -204,45 +249,13 @@ func probePod(r isolationRun) *isolationPod {
 	return nil
 }
 
-func seenPeerListener(results []isolationprobe.Result, ctx, peer string) bool {
-	for _, r := range results {
-		if r.Context == ctx && strings.HasPrefix(r.Probe, "peer "+peer+" ") && strings.HasSuffix(r.Probe, " listener") {
-			return true
-		}
-	}
-	return false
-}
-
 func itemOf(item string) string {
 	for _, it := range isolationItems {
 		if it.id == item {
 			return item
 		}
 	}
-	return "C12"
-}
-
-func requiredItem(probe string) string {
-	switch {
-	case strings.Contains(probe, "IPv6"):
-		return "C5"
-	case strings.HasPrefix(probe, "IMDS"):
-		return "C4"
-	case strings.Contains(probe, "kube API"):
-		return "C7"
-	case strings.Contains(probe, "listener") || strings.Contains(probe, "Docker") || strings.Contains(probe, "sockets"):
-		return "C9"
-	case strings.Contains(probe, "mount audit") || strings.Contains(probe, "markers") || strings.Contains(probe, "canary") || strings.Contains(probe, "block"):
-		return "C10"
-	case strings.Contains(probe, "network namespace"):
-		return "C11"
-	case strings.Contains(probe, "public"):
-		return "C6"
-	case strings.Contains(probe, "user namespace") || strings.Contains(probe, "credential"):
-		return "C3"
-	default:
-		return "C12"
-	}
+	return "C13"
 }
 
 // safety: the pod spec is checked as the launcher submitted it, so a drift between the code and
@@ -283,6 +296,9 @@ func podSpecFindings(p kubePod) []string {
 		}
 		if strings.Join(caps, ",") != "NET_ADMIN,SYS_ADMIN,SYS_PTRACE" {
 			out = append(out, "docker adds capabilities "+strings.Join(caps, ","))
+		}
+		if sc == nil || sc.ProcMount != "Unmasked" {
+			out = append(out, "docker does not mount /proc unmasked as designed")
 		}
 		if sc == nil || sc.SeccompProfile == nil || sc.SeccompProfile.Type != "Localhost" || sc.SeccompProfile.LocalhostProfile != "profiles/sparkwing-dind.json" {
 			out = append(out, "docker lacks the Localhost DinD seccomp profile")

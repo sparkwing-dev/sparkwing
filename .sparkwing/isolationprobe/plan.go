@@ -47,7 +47,8 @@ type Grade string
 const (
 	// GradeKubelet asks the kubelet for its pods.
 	GradeKubelet Grade = "kubelet"
-	// GradeKubeAPI lists secrets and reviews the caller's rules.
+	// GradeKubeAPI lists the target namespace's secrets, reviews the caller's rules there and
+	// submits a dry-run Job that mounts a secret.
 	GradeKubeAPI Grade = "kube-api"
 	// GradeIMDS asks for an IMDSv2 token and IMDSv1 metadata.
 	GradeIMDS Grade = "imds"
@@ -55,6 +56,7 @@ const (
 
 // Target is one network destination and what reaching it means. Listening marks a destination
 // the driver knows answers, so a refused connection there proves the packet reached the host.
+// Namespace names the deployment's namespace a kube API grade asks about.
 type Target struct {
 	Item      string `json:"item"`
 	Name      string `json:"name"`
@@ -62,6 +64,7 @@ type Target struct {
 	Expect    Expect `json:"expect"`
 	Listening bool   `json:"listening,omitempty"`
 	Grade     Grade  `json:"grade,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // Plan is everything one probe run needs that it cannot discover from inside the job.
@@ -131,7 +134,12 @@ func (t Target) validate() error {
 		return fmt.Errorf("unknown expect %q", t.Expect)
 	}
 	switch t.Grade {
-	case "", GradeKubelet, GradeKubeAPI, GradeIMDS:
+	case "", GradeKubelet, GradeIMDS:
+		return nil
+	case GradeKubeAPI:
+		if !validName(t.Namespace) {
+			return errors.New("a kube API grade needs the namespace it asks about")
+		}
 		return nil
 	default:
 		return fmt.Errorf("unknown grade %q", t.Grade)

@@ -46,12 +46,14 @@ type Result struct {
 	Millis  int64   `json:"ms"`
 }
 
-// Ready is what a run announces once its listener is up, so the driver can aim later runs at it.
+// Ready is what a run announces once its listener is up, so the driver can aim later runs at it
+// and knows which checks the run owes.
 type Ready struct {
 	PodIPs     []string `json:"pod_ips"`
 	ListenPort int      `json:"listen_port"`
 	NetNS      string   `json:"netns"`
 	NodeIP     string   `json:"node_ip,omitempty"`
+	Home       string   `json:"home,omitempty"`
 }
 
 // Summary counts a run's verdicts. OK is false when any verdict fails the run or no result exists.

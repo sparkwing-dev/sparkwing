@@ -41,26 +41,28 @@ func planFixture(t *testing.T, args map[string]string) (planDocument, error) {
 	return out, nil
 }
 
-// The probe job runs beside the sibling whose output it must not read, never after it, and its
-// timeout bounds an anchor's hold.
+// The probe job depends on the job whose output it may read and runs beside the sibling whose
+// output it must not read, and its timeout bounds an anchor's hold.
 func TestFixturePlansTheProbeBesideItsSibling(t *testing.T) {
 	doc, err := planFixture(t, map[string]string{"role": "anchor", "hold": "15m"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(doc.Jobs) != 2 {
-		t.Fatalf("jobs = %+v, want the sibling and the probe", doc.Jobs)
-	}
+	needs := map[string]string{}
 	for _, j := range doc.Jobs {
-		if len(j.Needs) != 0 {
-			t.Errorf("%s needs %v; the probe must not depend on the sibling", j.ID, j.Needs)
-		}
+		needs[j.ID] = strings.Join(j.Needs, ",")
 		if j.ID == isolationprobe.ProbeJob && time.Duration(j.TimeoutMS)*time.Millisecond != JobTimeout {
 			t.Errorf("probe timeout = %dms, want %s", j.TimeoutMS, JobTimeout)
 		}
 	}
-	if doc.Jobs[0].ID != isolationprobe.SiblingJob || doc.Jobs[1].ID != isolationprobe.ProbeJob {
-		t.Fatalf("jobs = %+v", doc.Jobs)
+	want := map[string]string{isolationprobe.SiblingJob: "", AllowedJob: "", isolationprobe.ProbeJob: AllowedJob}
+	if len(needs) != len(want) {
+		t.Fatalf("jobs = %+v, want the sibling, the allowed producer and the probe", doc.Jobs)
+	}
+	for id, deps := range want {
+		if got, ok := needs[id]; !ok || got != deps {
+			t.Errorf("%s needs %q, want %q", id, got, deps)
+		}
 	}
 }
 
@@ -104,13 +106,48 @@ func TestSDKOutputProbePassesOnlyTheReadSetRefusal(t *testing.T) {
 	if wrapped.Verdict != isolationprobe.Pass {
 		t.Fatalf("wrapped read-set refusal = %+v, want pass", wrapped)
 	}
-	other := sdkOutputProbe("read", func() { panic("controller\nunavailable") })
-	if other.Verdict != isolationprobe.Inconclusive || other.Outcome != "failed without the read-set refusal: controller unavailable" {
-		t.Fatalf("other failure = %+v, want inconclusive naming the failure", other)
+	other := sdkOutputProbe("read", func() { panic("controller unavailable: VALUE_FROM_THE_HOST") })
+	if other.Verdict != isolationprobe.Inconclusive || other.Outcome != "failed without a binding refusal" {
+		t.Fatalf("other failure = %+v, want inconclusive with a fixed category", other)
 	}
 	read := sdkOutputProbe("read", func() {})
 	if read.Verdict != isolationprobe.Breach || strings.Contains(read.Outcome, "isolation-probe") {
 		t.Fatalf("successful read = %+v, want a breach that carries no value", read)
+	}
+}
+
+// The allowed read is the control for the refusals: it passes only on the value its producer
+// wrote, and neither a value nor a failure's text reaches the result.
+func TestAllowedReadProbeIsTheReadPathsControl(t *testing.T) {
+	if r := allowedReadProbe(func() string { return allowedMarker }); r.Verdict != isolationprobe.Pass || r.Probe != ProbeSDKAllowed {
+		t.Fatalf("allowed read = %+v, want pass", r)
+	}
+	wrong := allowedReadProbe(func() string { return "VALUE_READ" })
+	failed := allowedReadProbe(func() string { panic("host gone: VALUE_FROM_THE_HOST") })
+	for _, r := range []isolationprobe.Result{wrong, failed} {
+		if r.Verdict != isolationprobe.Inconclusive || strings.Contains(r.Outcome, "VALUE") {
+			t.Errorf("result = %+v, want inconclusive without the value", r)
+		}
+	}
+}
+
+// Every SDK probe answers to a key the driver requires, and a read outside a running job fails
+// without a binding refusal rather than passing.
+func TestSDKProbesReportTheDriversKeys(t *testing.T) {
+	results := (&probeJob{}).sdkOutputProbes(t.Context())
+	var got []string
+	for _, r := range results {
+		got = append(got, r.Context+"|"+r.Item+"|"+r.Probe)
+		if r.Verdict == isolationprobe.Pass {
+			t.Errorf("%s passed outside a Cloud job: %+v", r.Probe, r)
+		}
+	}
+	var want []string
+	for _, k := range SDKKeys() {
+		want = append(want, k.Context+"|"+k.Item+"|"+k.Probe)
+	}
+	if strings.Join(got, ";") != strings.Join(want, ";") {
+		t.Fatalf("probe keys = %v, want %v", got, want)
 	}
 }
 

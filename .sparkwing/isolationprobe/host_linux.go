@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -20,39 +21,57 @@ import (
 type hostOptions struct {
 	where        string
 	workDir      string
-	privileged   bool
 	podNetNS     string
-	markerBases  []string
-	walkSkip     []string
+	own          []string
 	peerCanaries []string
-	scanCanaries bool
+	walk         func(string, fs.WalkDirFunc) error
+	invoke       func(syscallTry) (uintptr, syscall.Errno)
 }
 
+// safety: the job container and the privileged DinD container run the same host checks, and only
+// the privileged one is held to the DinD profile's exact refusals, since it asks for every
+// privilege the sidecar could pass on.
 func hostProbes(o hostOptions) []Result {
+	privileged := o.where == ContextPrivileged
 	var out []Result
 	out = append(out, uidMapProbe(o.where))
 	out = append(out, seccompProbe(o.where))
 	out = append(out, kernelFileProbes(o.where)...)
-	out = append(out, mountProbes(o)...)
-	out = append(out, mknodProbes(o)...)
-	out = append(out, socketMarkProbe(o))
-	out = append(out, syscallProbes(o)...)
+	out = append(out, mountProbes(o.where, o.workDir)...)
+	out = append(out, mknodProbes(o.where, o.workDir)...)
+	out = append(out, netAdminProbe(o.where))
+	invoke := o.invoke
+	if invoke == nil {
+		invoke = rawSyscall
+	}
+	out = append(out, syscallProbes(o.where, invoke)...)
 	out = append(out, deviceProbe(o.where))
 	if data, err := os.ReadFile("/proc/self/mountinfo"); err == nil {
 		out = append(out, auditMounts(o.where, parseMountinfo(string(data)))...)
 	} else {
-		out = append(out, Result{Item: "C10", Context: o.where, Probe: "mount audit", Expect: ExpectBlocked, Outcome: "mountinfo unreadable", Verdict: Inconclusive})
+		out = append(out, Result{Item: "C10", Context: o.where, Probe: probeMountAudit, Expect: ExpectBlocked, Outcome: "mountinfo unreadable", Verdict: Inconclusive})
 	}
-	for _, base := range o.markerBases {
+	for _, base := range markerBases(o.where) {
 		out = append(out, markerProbes(o.where, base, exists)...)
 	}
-	f := walkTree("/", o.walkSkip, o.peerCanaries, 300000, filepath.WalkDir)
-	out = append(out, walkResults(o.where, f, o.scanCanaries)...)
-	if o.privileged {
-		out = append(out, processProbe(o.where))
-		out = append(out, netnsProbe(o.where, o.podNetNS))
+	walk := o.walk
+	if walk == nil {
+		walk = filepath.WalkDir
+	}
+	start := time.Now()
+	expired := func() bool { return time.Since(start) > walkTimeout }
+	f := walkTree("/", walkExemptions(o.where, o.own), o.peerCanaries, walkBudget, expired, walk)
+	out = append(out, walkResults(o.where, f)...)
+	if privileged {
+		out = append(out, processProbe(o.where), netnsProbe(o.where, o.podNetNS), spoofGap(o.where))
 	}
 	return out
+}
+
+// safety: forging a source address takes raw packets, which this connect-only probe never sends,
+// so the vector is reported as a gap rather than passed.
+func spoofGap(where string) Result {
+	return Result{Item: "C12", Context: where, Probe: probeSpoofGap, Expect: ExpectBlocked, Outcome: "not probed: needs raw packets", Verdict: NotProbed}
 }
 
 func exists(path string) bool {
@@ -85,9 +104,9 @@ var errnoNames = map[syscall.Errno]string{
 }
 
 // safety: an identity map means root in the job is root on the node; the kernel shows the
-// initial namespace as "0 0 4294967295".
+// initial namespace as "0 0 4294967295". The outcome never carries the mapped uid.
 func uidMapProbe(where string) Result {
-	r := Result{Item: "C3", Context: where, Probe: "user namespace maps root away from host root", Target: "/proc/self/uid_map", Expect: ExpectBlocked}
+	r := Result{Item: "C3", Context: where, Probe: probeUIDMap, Target: "/proc/self/uid_map", Expect: ExpectBlocked}
 	data, err := os.ReadFile("/proc/self/uid_map")
 	if err != nil {
 		r.Outcome, r.Verdict = errnoName(err), Inconclusive
@@ -111,7 +130,7 @@ func uidMapVerdict(text string) (string, Verdict) {
 		if outside == 0 {
 			return "uid 0 is host uid 0", Breach
 		}
-		return "uid 0 maps to host uid " + f[1], Pass
+		return "uid 0 maps to a nonzero host uid", Pass
 	}
 	return "no mapping for uid 0", Inconclusive
 }
@@ -119,7 +138,7 @@ func uidMapVerdict(text string) (string, Verdict) {
 // safety: mode 2 is a seccomp filter; every Cloud container runs under one, and the DinD sidecar's
 // covers every container it starts because filters stack.
 func seccompProbe(where string) Result {
-	r := Result{Item: "C12", Context: where, Probe: "seccomp filter applied", Target: "/proc/self/status", Expect: ExpectBlocked}
+	r := Result{Item: "C12", Context: where, Probe: probeSeccomp, Target: "/proc/self/status", Expect: ExpectBlocked}
 	data, err := os.ReadFile("/proc/self/status")
 	if err != nil {
 		r.Outcome, r.Verdict = errnoName(err), Inconclusive
@@ -143,20 +162,14 @@ func seccompVerdict(status string) (string, Verdict) {
 	return "seccomp mode not reported", Inconclusive
 }
 
-// safety: write targets are opened and closed without a write. Permission is checked at open, so
-// a successful open is the breach and nothing on the node changes.
-var (
-	kernelWriteTargets = []string{"/proc/sys/kernel/core_pattern", "/proc/sys/kernel/modprobe", "/proc/sysrq-trigger", "/proc/sys/vm/drop_caches", "/sys/kernel/uevent_helper"}
-	kernelReadTargets  = []string{"/proc/kcore", "/dev/mem", "/dev/kmem", "/dev/port"}
-)
-
 func kernelFileProbes(where string) []Result {
-	var out []Result
-	for _, p := range kernelWriteTargets {
-		out = append(out, openProbe(where, p, os.O_WRONLY, "kernel file opens for writing"))
-	}
-	for _, p := range kernelReadTargets {
-		out = append(out, openProbe(where, p, os.O_RDONLY, "kernel memory opens for reading"))
+	out := make([]Result, 0, len(kernelFiles))
+	for _, f := range kernelFiles {
+		flag := os.O_RDONLY
+		if f.write {
+			flag = os.O_WRONLY
+		}
+		out = append(out, openProbe(where, f.path, flag, f.probe))
 	}
 	return out
 }
@@ -173,31 +186,16 @@ func openProbe(where, path string, flag int, name string) Result {
 	return r
 }
 
-type mountTry struct {
-	fstype, data, name string
-	hostLevel          bool
-}
-
-// safety: cgroup v1 is the release_agent route off the node, and debugfs, securityfs and tracefs
-// expose kernel internals; tmpfs is the control that proves SYS_ADMIN works inside the namespace.
-var mountTries = []mountTry{
-	{"cgroup", "none,name=isolation-probe", "cgroup v1 hierarchy mounts", true},
-	{"debugfs", "", "debugfs mounts", true},
-	{"securityfs", "", "securityfs mounts", true},
-	{"tracefs", "", "tracefs mounts", true},
-	{"tmpfs", "size=1m", "tmpfs mounts inside the pod's namespace", false},
-}
-
-func mountProbes(o hostOptions) []Result {
+func mountProbes(where, workDir string) []Result {
 	var out []Result
 	for _, m := range mountTries {
-		dir := filepath.Join(o.workDir, "mnt-"+m.fstype)
-		r := Result{Item: "C12", Context: o.where, Probe: m.name, Target: dir, Expect: ExpectBlocked}
-		if !m.hostLevel {
+		dir := filepath.Join(workDir, "mnt-"+m.fstype)
+		r := Result{Item: "C12", Context: where, Probe: m.name, Target: m.fstype, Expect: ExpectBlocked}
+		switch {
+		case m.kind == mountRecorded, m.kind == mountControl && where != ContextPrivileged:
 			r.Expect = ExpectObserved
-			if o.privileged {
-				r.Expect = ExpectOpen
-			}
+		case m.kind == mountControl:
+			r.Expect = ExpectOpen
 		}
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			r.Outcome, r.Verdict = errnoName(err), Inconclusive
@@ -236,11 +234,11 @@ func mountVerdict(expect Expect, mounted bool) Verdict {
 
 // safety: a block device node for the node's disk would open its filesystem outside every mount
 // check; the node is created in scratch and removed at once if the kernel ever allows it.
-func mknodProbes(o hostOptions) []Result {
+func mknodProbes(where, workDir string) []Result {
 	var out []Result
-	for _, dev := range []struct{ major, minor int }{{259, 0}, {202, 0}} {
-		path := filepath.Join(o.workDir, "blk-"+strconv.Itoa(dev.major)+"-"+strconv.Itoa(dev.minor))
-		r := Result{Item: "C10", Context: o.where, Probe: "block device node creation", Target: strconv.Itoa(dev.major) + ":" + strconv.Itoa(dev.minor), Expect: ExpectBlocked}
+	for _, dev := range blockDevices {
+		path := filepath.Join(workDir, "blk-"+strconv.Itoa(dev.major)+"-"+strconv.Itoa(dev.minor))
+		r := Result{Item: "C10", Context: where, Probe: probeMknod, Target: deviceTarget(dev.major, dev.minor), Expect: ExpectBlocked}
 		err := syscall.Mknod(path, syscall.S_IFBLK|0o600, dev.major<<8|dev.minor)
 		if err == nil {
 			_ = os.Remove(path) //nolint:errcheck // the node existing at all is the finding
@@ -253,16 +251,27 @@ func mknodProbes(o hostOptions) []Result {
 	return out
 }
 
-// safety: SO_MARK on the probe's own socket needs NET_ADMIN over the pod's network namespace, so
-// it proves the privileged context holds that capability without touching the pod's network.
-func socketMarkProbe(o hostOptions) Result {
-	r := Result{Item: "C12", Context: o.where, Probe: "NET_ADMIN works inside the pod's namespace", Expect: ExpectObserved}
-	if o.privileged {
+type ifreqFlags struct {
+	name  [syscall.IFNAMSIZ]byte
+	flags uint16
+	_     [22]byte
+}
+
+// safety: setting an interface's flags needs CAP_NET_ADMIN over the namespace and nothing less, so
+// writing back the loopback flags just read proves the privileged context holds NET_ADMIN in the
+// pod's namespace while changing nothing on it.
+func netAdminProbe(where string) Result {
+	r := Result{Item: "C12", Context: where, Probe: probeNetAdmin, Target: "lo", Expect: ExpectObserved}
+	if where == ContextPrivileged {
 		r.Expect = ExpectOpen
 	}
 	fd, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_DGRAM|syscall.SOCK_CLOEXEC, 0)
 	if err == nil {
-		err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_MARK, 1)
+		var ifr ifreqFlags
+		copy(ifr.name[:], "lo")
+		if err = ifreqIoctl(fd, syscall.SIOCGIFFLAGS, &ifr); err == nil {
+			err = ifreqIoctl(fd, syscall.SIOCSIFFLAGS, &ifr)
+		}
 		_ = syscall.Close(fd) //nolint:errcheck // a probe socket
 	}
 	r.Outcome = "allowed"
@@ -273,17 +282,24 @@ func socketMarkProbe(o hostOptions) Result {
 	return r
 }
 
+func ifreqIoctl(fd int, request uintptr, ifr *ifreqFlags) error {
+	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(fd), request, uintptr(unsafe.Pointer(ifr))); errno != 0 {
+		return errno
+	}
+	return nil
+}
+
 type syscallTry struct {
 	name string
 	nr   uintptr
 	args [6]uintptr
-	str  string
 	want syscall.Errno
 	fd   bool
 }
 
-// safety: every call carries arguments the kernel rejects, so none can succeed even unfiltered;
-// the errno says which layer refused. The DinD profile returns exactly EPERM or ENOSYS for each.
+// safety: every call carries arguments the kernel rejects, pointers included, so none can succeed
+// even unfiltered; the errno says which layer refused. The DinD profile returns exactly EPERM or
+// ENOSYS for each.
 func syscallTries() []syscallTry {
 	atFDCWD := ^uintptr(99)
 	neg := ^uintptr(0)
@@ -295,7 +311,7 @@ func syscallTries() []syscallTry {
 		{name: "kexec_file_load", nr: sysKexecFileLoad, args: [6]uintptr{neg, neg, 0, 0, 0xfffffff0}, want: syscall.EPERM},
 		{name: "init_module", nr: sysInitModule, want: syscall.EPERM},
 		{name: "finit_module", nr: sysFinitModule, args: [6]uintptr{neg}, want: syscall.EPERM},
-		{name: "delete_module", nr: sysDeleteModule, args: [6]uintptr{0, syscall.O_NONBLOCK}, str: "isolation_probe_absent", want: syscall.EPERM},
+		{name: "delete_module", nr: sysDeleteModule, args: [6]uintptr{1, syscall.O_NONBLOCK}, want: syscall.EPERM},
 		{name: "open_by_handle_at", nr: sysOpenByHandleAt, args: [6]uintptr{atFDCWD}, want: syscall.EPERM, fd: true},
 		{name: "fanotify_init", nr: sysFanotifyInit, args: [6]uintptr{0xffffffff}, want: syscall.EPERM, fd: true},
 		{name: "keyctl", nr: sysKeyctl, args: [6]uintptr{0xffff}, want: syscall.ENOSYS},
@@ -308,11 +324,16 @@ func syscallTries() []syscallTry {
 	}
 }
 
-func syscallProbes(o hostOptions) []Result {
+func rawSyscall(s syscallTry) (uintptr, syscall.Errno) {
+	r1, _, errno := syscall.Syscall6(s.nr, s.args[0], s.args[1], s.args[2], s.args[3], s.args[4], s.args[5])
+	return r1, errno
+}
+
+func syscallProbes(where string, invoke func(syscallTry) (uintptr, syscall.Errno)) []Result {
 	var out []Result
 	for _, s := range syscallTries() {
 		r1, errno := invoke(s)
-		r := Result{Item: "C12", Context: o.where, Probe: "seccomp refuses " + s.name, Target: s.name, Expect: ExpectObserved}
+		r := Result{Item: "C12", Context: where, Probe: "seccomp refuses " + s.name, Target: s.name, Expect: ExpectObserved}
 		if errno == 0 {
 			if s.fd {
 				_ = syscall.Close(int(r1)) //nolint:errcheck // close whatever the impossible success returned
@@ -322,7 +343,7 @@ func syscallProbes(o hostOptions) []Result {
 			r.Outcome = errnoName(errno)
 		}
 		r.Verdict = Observed
-		if o.privileged {
+		if where == ContextPrivileged {
 			r.Expect = ExpectBlocked
 			r.Verdict = Breach
 			if errno == s.want {
@@ -334,21 +355,8 @@ func syscallProbes(o hostOptions) []Result {
 	return out
 }
 
-func invoke(s syscallTry) (uintptr, syscall.Errno) {
-	if s.str == "" {
-		r1, _, errno := syscall.Syscall6(s.nr, s.args[0], s.args[1], s.args[2], s.args[3], s.args[4], s.args[5])
-		return r1, errno
-	}
-	p, err := syscall.BytePtrFromString(s.str)
-	if err != nil {
-		return 0, syscall.EINVAL
-	}
-	r1, _, errno := syscall.Syscall6(s.nr, uintptr(unsafe.Pointer(p)), s.args[1], s.args[2], s.args[3], s.args[4], s.args[5])
-	return r1, errno
-}
-
 func deviceProbe(where string) Result {
-	r := Result{Item: "C10", Context: where, Probe: "block devices in /dev", Target: "/dev", Expect: ExpectBlocked, Outcome: "none", Verdict: Pass}
+	r := Result{Item: "C10", Context: where, Probe: probeDevices, Target: "/dev", Expect: ExpectBlocked, Outcome: "none", Verdict: Pass}
 	entries, err := os.ReadDir("/dev")
 	if err != nil {
 		r.Outcome, r.Verdict = errnoName(err), Inconclusive
@@ -375,7 +383,7 @@ var nodeProcesses = map[string]bool{
 }
 
 func processProbe(where string) Result {
-	r := Result{Item: "C12", Context: where, Probe: "host PID namespace shows no node process", Target: "/proc", Expect: ExpectBlocked}
+	r := Result{Item: "C12", Context: where, Probe: probeProcesses, Target: "/proc", Expect: ExpectBlocked}
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		r.Outcome, r.Verdict = errnoName(err), Inconclusive
@@ -418,7 +426,7 @@ func readNetNS() string {
 // safety: a container given the host network must land in the pod's namespace, which the job
 // container reports; any other namespace could be the node's.
 func netnsProbe(where, podNetNS string) Result {
-	r := Result{Item: "C11", Context: where, Probe: "host network is the pod's network namespace", Target: "/proc/self/ns/net", Expect: ExpectBlocked}
+	r := Result{Item: "C11", Context: where, Probe: probeNetNS, Target: "/proc/self/ns/net", Expect: ExpectBlocked}
 	own := readNetNS()
 	switch {
 	case podNetNS == "" || own == "":

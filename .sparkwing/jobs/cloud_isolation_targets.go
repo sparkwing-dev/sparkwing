@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -18,10 +19,13 @@ type kubeList[T any] struct {
 }
 
 type kubeMeta struct {
-	Name        string            `json:"name"`
-	Namespace   string            `json:"namespace"`
-	Labels      map[string]string `json:"labels"`
-	Annotations map[string]string `json:"annotations"`
+	Name            string            `json:"name"`
+	Namespace       string            `json:"namespace"`
+	Labels          map[string]string `json:"labels"`
+	Annotations     map[string]string `json:"annotations"`
+	OwnerReferences []struct {
+		Kind string `json:"kind"`
+	} `json:"ownerReferences"`
 }
 
 type kubeProbe struct {
@@ -146,6 +150,9 @@ const (
 	teamNodeLabel          = "node-restriction.kubernetes.io/sparkwing-team-node"
 	usedTeamNodeLabel      = "node-restriction.kubernetes.io/sparkwing-used-team"
 	usedRunNodeLabel       = "node-restriction.kubernetes.io/sparkwing-used-run"
+	poolNamespaceLabel     = "sparkwing.dev/launcher-namespace"
+	nodePoolLabel          = "karpenter.sh/nodepool"
+	nodeClassLabel         = "karpenter.k8s.aws/ec2nodeclass"
 )
 
 // safety: the launcher labels a team's nodes with this hash of the job namespace and team, and the
@@ -153,6 +160,13 @@ const (
 func teamNodeValue(namespace, team string) string {
 	sum := sha256.Sum256([]byte(namespace + "/" + team))
 	return "sha256-" + hex.EncodeToString(sum[:])[:40]
+}
+
+// safety: the launcher fences a node to the one run it first served with this hash of the job
+// namespace and run ID, recomputed here for the same reason.
+func runNodeValue(namespace, runID string) string {
+	sum := sha256.Sum256([]byte(namespace + "/" + runID))
+	return "run-" + hex.EncodeToString(sum[:20])
 }
 
 func decodeList[T any](raw string) ([]T, error) {
@@ -245,6 +259,7 @@ func nodeTargets(item, what string, ips []string) []isolationprobe.Target {
 		out = append(out,
 			isolationprobe.Target{Item: item, Name: what + " kubelet", Address: at("10250"), Expect: isolationprobe.ExpectBlocked, Listening: true, Grade: isolationprobe.GradeKubelet},
 			isolationprobe.Target{Item: item, Name: what + " kubelet read-only port", Address: at("10255"), Expect: isolationprobe.ExpectBlocked},
+			isolationprobe.Target{Item: item, Name: what + " kube-proxy metrics", Address: at("10249"), Expect: isolationprobe.ExpectBlocked},
 			isolationprobe.Target{Item: item, Name: what + " kube-proxy health", Address: at("10256"), Expect: isolationprobe.ExpectBlocked},
 			isolationprobe.Target{Item: item, Name: what + " ssh", Address: at("22"), Expect: isolationprobe.ExpectBlocked},
 			isolationprobe.Target{Item: item, Name: what + " VPC CNI metrics", Address: at("61678"), Expect: isolationprobe.ExpectBlocked},
@@ -271,8 +286,8 @@ func metadataTargets() []isolationprobe.Target {
 	}
 }
 
-// safety: addresses in 10/8 outside the VPC answer nowhere, so they show the fence covers the
-// whole range without claiming anything listens there.
+// safety: addresses in 10/8 outside the VPC answer nowhere, so a refusal there cannot tell the
+// fence from a missing route; they are recorded, and the deployment's own listeners decide C6.
 var outsideVPCPrivate = []string{"10.1.0.1:443", "10.100.0.1:443", "10.200.0.1:443", "10.255.255.254:443"}
 
 type peerFacts struct {
@@ -299,6 +314,7 @@ func peerTargets(p peerFacts) []isolationprobe.Target {
 }
 
 type targetInputs struct {
+	Namespace          string
 	ControllerPods     []kubePod
 	ControllerServices []kubeService
 	DNSPods            []kubePod
@@ -312,7 +328,29 @@ type targetInputs struct {
 	VPCResolver        string
 }
 
+// safety: each group is a listener the fence must hide, so discovery that finds none of one fails
+// rather than letting the run pass without probing it.
 func staticTargets(in targetInputs) ([]isolationprobe.Target, error) {
+	var errs []error
+	need := func(ok bool, what string) {
+		if !ok {
+			errs = append(errs, fmt.Errorf("discovery found no %s", what))
+		}
+	}
+	need(len(in.ControllerPods) > 0, "controller namespace pods")
+	need(len(in.ControllerServices) > 0, "controller namespace services")
+	need(len(in.DNSPods) > 0, "cluster DNS pods")
+	need(len(in.DNSServices) > 0, "cluster DNS services")
+	need(len(in.IngressPods) > 0, "ingress pods")
+	need(len(in.InfraNodes) > 0, "controller nodes")
+	need(in.Database != "", "controller database endpoint")
+	need(in.VPCResolver != "", "VPC resolver address")
+	need(in.APIService.Spec.ClusterIP != "", "ClusterIP on the kubernetes Service")
+	need(in.PublicAPI != "", "public kube API endpoint")
+	need(in.Namespace != "", "controller namespace for the kube API grade")
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
+	}
 	var out []isolationprobe.Target
 	out = append(out, metadataTargets()...)
 	out = append(out, podTargets("C6", "controller namespace", in.ControllerPods, nil)...)
@@ -329,19 +367,17 @@ func staticTargets(in targetInputs) ([]isolationprobe.Target, error) {
 	for _, n := range in.InfraNodes {
 		out = append(out, nodeTargets("C6", "controller node "+n.Metadata.Name, n.internalIPs())...)
 	}
-	if in.Database != "" {
-		out = append(out, isolationprobe.Target{Item: "C6", Name: "controller database", Address: in.Database, Expect: isolationprobe.ExpectBlocked, Listening: true})
-	}
-	if in.VPCResolver != "" {
-		out = append(out, isolationprobe.Target{Item: "C6", Name: "VPC resolver", Address: net.JoinHostPort(in.VPCResolver, "53"), Expect: isolationprobe.ExpectBlocked, Listening: true})
-	}
+	out = append(out,
+		isolationprobe.Target{Item: "C6", Name: "controller database", Address: in.Database, Expect: isolationprobe.ExpectBlocked, Listening: true},
+		isolationprobe.Target{Item: "C6", Name: "VPC resolver", Address: net.JoinHostPort(in.VPCResolver, "53"), Expect: isolationprobe.ExpectBlocked, Listening: true},
+	)
 	for _, addr := range outsideVPCPrivate {
-		out = append(out, isolationprobe.Target{Item: "C6", Name: "10/8 outside the VPC", Address: addr, Expect: isolationprobe.ExpectBlocked})
+		out = append(out, isolationprobe.Target{Item: "C6", Name: "10/8 outside the VPC", Address: addr, Expect: isolationprobe.ExpectObserved})
 	}
-	if in.APIService.Spec.ClusterIP == "" {
-		return nil, fmt.Errorf("the kubernetes Service has no ClusterIP")
+	kube := func(name, addr string, expect isolationprobe.Expect) isolationprobe.Target {
+		return isolationprobe.Target{Item: "C7", Name: name, Address: addr, Expect: expect, Listening: true, Grade: isolationprobe.GradeKubeAPI, Namespace: in.Namespace}
 	}
-	out = append(out, isolationprobe.Target{Item: "C7", Name: "kube API service", Address: net.JoinHostPort(in.APIService.Spec.ClusterIP, "443"), Expect: isolationprobe.ExpectBlocked, Listening: true, Grade: isolationprobe.GradeKubeAPI})
+	out = append(out, kube("kube API service", net.JoinHostPort(in.APIService.Spec.ClusterIP, "443"), isolationprobe.ExpectBlocked))
 	endpoints := 0
 	for _, slice := range in.APIEndpoints {
 		port := 443
@@ -351,28 +387,25 @@ func staticTargets(in targetInputs) ([]isolationprobe.Target, error) {
 		for _, e := range slice.Endpoints {
 			for _, addr := range e.Addresses {
 				endpoints++
-				out = append(out, isolationprobe.Target{Item: "C7", Name: "kube API private endpoint", Address: net.JoinHostPort(addr, strconv.Itoa(port)), Expect: isolationprobe.ExpectBlocked, Listening: true, Grade: isolationprobe.GradeKubeAPI})
+				out = append(out, kube("kube API private endpoint", net.JoinHostPort(addr, strconv.Itoa(port)), isolationprobe.ExpectBlocked))
 			}
 		}
 	}
 	if endpoints == 0 {
-		return nil, fmt.Errorf("the kubernetes Service has no endpoints")
+		return nil, errors.New("the kubernetes Service has no endpoints")
 	}
-	if in.PublicAPI == "" {
-		return nil, fmt.Errorf("the public kube API endpoint is required")
-	}
-	out = append(out, isolationprobe.Target{Item: "C7", Name: "kube API public endpoint", Address: net.JoinHostPort(in.PublicAPI, "443"), Expect: isolationprobe.ExpectDenied, Listening: true, Grade: isolationprobe.GradeKubeAPI})
-	for _, req := range []string{"C4", "C5", "C6", "C7"} {
-		if !hasItem(out, req) {
-			return nil, fmt.Errorf("discovery found no %s targets", req)
+	out = append(out, kube("kube API public endpoint", net.JoinHostPort(in.PublicAPI, "443"), isolationprobe.ExpectDenied))
+	for _, item := range []string{"C4", "C5", "C6", "C7"} {
+		if !hasJudgedItem(out, item) {
+			return nil, fmt.Errorf("discovery found no %s targets", item)
 		}
 	}
 	return out, nil
 }
 
-func hasItem(targets []isolationprobe.Target, item string) bool {
+func hasJudgedItem(targets []isolationprobe.Target, item string) bool {
 	for _, t := range targets {
-		if t.Item == item {
+		if t.Item == item && t.Expect != isolationprobe.ExpectObserved {
 			return true
 		}
 	}
