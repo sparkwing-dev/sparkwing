@@ -33,8 +33,8 @@ type templateDetailJSON struct {
 	RenderedBody string             `json:"rendered_body,omitempty"`
 }
 
-// exampleEntry is one listed example: a sparks-core Go template or a
-// TypeScript example embedded from sdk/typescript/examples.
+// safety: a TypeScript entry's Body is its finished source; only Go entries go
+// through the template renderer.
 type exampleEntry struct {
 	templates.Template
 	Language string
