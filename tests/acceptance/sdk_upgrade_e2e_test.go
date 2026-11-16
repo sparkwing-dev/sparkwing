@@ -193,7 +193,6 @@ func (u *upgradeUser) sparkwing(step string, args ...string) []byte {
 	return output
 }
 
-// runFlagNamesEngine is the first engine that parses the run flags without the sw- prefix.
 const runFlagNamesEngine = "v0.74.0"
 
 // safety: this CLI refuses a renamed run flag for an engine that predates it and names
