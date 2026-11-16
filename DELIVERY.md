@@ -624,7 +624,9 @@ backlink lists.
 The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
-`.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
+`.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`. A
+change that reaches only `docs/` Markdown runs just the SDK suite's type-check of
+the docs' TypeScript blocks and its generated-reference check.
 A docs, UI or process change runs its own tests (affected packages, frontend
 suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
 review. `sparkwing run gate -- --full` keeps the broad verification. Pass

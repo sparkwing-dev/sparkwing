@@ -621,9 +621,40 @@ func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
 		if err != nil || !strings.Contains(string(body), "Say hello") {
 			t.Fatalf("pipeline source: %s: %v", body, err)
 		}
+		assertTypeScriptDocsPointer(t, filename, string(body))
 	}
 	if _, err := os.Stat(filepath.Join(dir, "go.mod")); !os.IsNotExist(err) {
 		t.Fatalf("TypeScript scaffold wrote a Go module: %v", err)
+	}
+}
+
+func TestPipelineNewMergeQueueTypeScriptPointsAtTheTypeScriptDocs(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	t.Setenv("PATH", t.TempDir())
+	var commandErr error
+	captureStdout(t, func() {
+		commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "land", "--template", "merge-queue-typescript", "-o", "json"})
+	})
+	if commandErr != nil {
+		t.Fatal(commandErr)
+	}
+	body, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "jobs", "land.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTypeScriptDocsPointer(t, "jobs/land.ts", string(body))
+}
+
+// safety: an agent reads the scaffold before any docs, so the first lines must
+// name where the TypeScript API is documented.
+func assertTypeScriptDocsPointer(t *testing.T, filename, body string) {
+	t.Helper()
+	head := strings.Join(strings.SplitN(body, "\n", 4)[:3], "\n")
+	for _, want := range []string{"sparkwing docs read --topic sdk", "sparkwing docs read --topic sdk-typescript-reference"} {
+		if !strings.Contains(head, want) {
+			t.Errorf("%s does not open with %q:\n%s", filename, want, head)
+		}
 	}
 }
 

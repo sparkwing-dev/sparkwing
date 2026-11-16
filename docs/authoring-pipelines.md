@@ -383,6 +383,18 @@ for _, member := range matrix.Members() {
 }
 ```
 
+```ts
+const matrix = plan.jobFanOut("matrix", ["22", "24"], (version) => [
+  `test-node${version}`,
+  async (ctx) => {
+    await ctx.bash('npx -y "node@$NODE_VERSION" --test').env("NODE_VERSION", version).run();
+  },
+]);
+for (const member of matrix.members) {
+  member.memo(() => memoKey("tests", member.id));
+}
+```
+
 A key callback returns `(MemoValue, error)`. Return errors when inputs
 cannot be read; return `sparkwing.NoMemo, nil` to bypass memoization.
 The executing host hashes the returned JSON value. Errors, panics, empty
@@ -574,6 +586,11 @@ work distinct keys, including each matrix member's identity. Return `noMemo`
 to bypass reuse. Key callbacks can reject when inputs cannot be read.
 `.cache(...)` restores dependency directories before the body runs. Memoized
 results and dependency caches serve different purposes.
+
+`plan.jobFanOut(id, items, fn)` declares one job per item and groups them, like
+Go's `JobFanOut`; `.needs(group)` waits for every member. The
+[Pipeline SDK](sdk.md) page pairs every Go example with its TypeScript form, and
+the [TypeScript API reference](sdk-typescript-reference.md) lists every export.
 
 Use `source.generate((generated, output, ctx) => { ... })` to declare jobs from
 a source job's recorded output. Apply `.requires(...)`, `.retry(...)`,

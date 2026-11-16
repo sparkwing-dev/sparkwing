@@ -20,7 +20,17 @@ sparkwing.Job(plan, "build", func(context.Context) error { return nil }).
     ), sparkwing.MemoTTL(7*24*time.Hour))
 ```
 
-The `sparkwing/inputs` helpers declare recipes in the plan. `Files` selects
+```ts
+plan
+  .job("build", () => undefined)
+  .memo(compose(files("**/*.ts", "package.json", "package-lock.json"), env("NODE_ENV"), constant("toolchain-v1")), {
+    ttlMs: 7 * 24 * 60 * 60_000,
+  });
+```
+
+The `sparkwing/inputs` helpers declare recipes in the plan; TypeScript imports
+the same recipes (`files`, `repoFiles`, `ignore`, `tree`, `env`, `parts`,
+`constant` and `compose`) from `@sparkwing/sdk`. `Files` selects
 tracked files, `RepoFiles` selects all tracked files with optional `Ignore`
 patterns, and `Tree` includes every regular file recursively, including untracked
 files, while skipping symlinks. Tree roots must be relative paths inside the
@@ -71,6 +81,17 @@ sparkwing.Job(plan, "deploy", func(context.Context) error { return nil }).
     })
 ```
 
+```ts
+const build = plan.job("build", () => ({ digest: "sha256:example" }));
+plan
+  .job("deploy", () => undefined)
+  .needs(build)
+  .memo(async (ctx) => memoKey("deploy", (await ctx.output(build))?.digest));
+```
+
+A TypeScript output read needs a declared edge, so the deploy job also names
+`build` in `.needs`.
+
 Choose stable key parts that distinguish different work. Each member of a group
 needs its own key when its inputs differ.
 
@@ -84,7 +105,7 @@ machine. Declare file results with
 
 ## Opting out per invocation
 
-Return `sparkwing.NoMemo, nil` from a key callback to bypass reuse for that job.
+Return `sparkwing.NoMemo, nil` (TypeScript `noMemo`) from a key callback to bypass reuse for that job.
 `sparkwing run <pipeline> --sw-no-memo` bypasses memoization for the invocation.
 Dependency directory caches remain a separate declaration.
 
@@ -104,6 +125,18 @@ sparkwing.Job(plan, "web-test", func(context.Context) error { return nil }).
 
 sparkwing.Job(plan, "gems", func(context.Context) error { return nil }).
     Cache(sparkwing.Dir("vendor/bundle", sparkwing.KeyFromFile("Gemfile.lock")))
+```
+
+```ts
+plan
+  .job("test", async (ctx) => {
+    await ctx.exec(["go", "test", "./..."]).run();
+  })
+  .cache(goModules());
+
+plan.job("web-test", () => undefined).cache(npm());
+
+plan.job("gems", () => undefined).cache(dir("vendor/bundle", "Gemfile.lock"));
 ```
 
 ### Directory helpers

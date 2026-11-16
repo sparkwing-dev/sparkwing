@@ -14,6 +14,9 @@ import (
 
 const typeScriptSDKVersion = "0.72.4"
 
+const typeScriptDocsPointer = "// TypeScript API: `sparkwing docs read --topic sdk` pairs each Go example with its\n" +
+	"// TypeScript form, and `sparkwing docs read --topic sdk-typescript-reference` lists every export.\n"
+
 func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode string) error {
 	name := inv.Value("pipeline")
 	trigger, err := resolveTrigger(builtinShape{}, parseOnFlag(inv.Flags["on"]), inv.Has("on"))
@@ -82,6 +85,7 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 	if inv.Value("template") == "merge-queue-typescript" {
 		source = renderBuiltinTemplate(name, short, mergeQueueTypeScriptTemplate)
 	}
+	source = typeScriptDocsPointer + source
 	// #nosec G703 -- the pipeline name is validated as kebab-case before scaffolding in the selected project
 	if err := os.WriteFile(file, []byte(source), 0o644); err != nil {
 		return err
