@@ -48,7 +48,7 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 			}
 		case errors.As(err, &field), errors.Is(err, configguard.ErrOutsideSandboxHome), errors.Is(err, secrets.ErrKeyRefused):
 			failure.Code = apierr.BadRequest
-		case errors.Is(err, docs.ErrNotFound):
+		case isNotFound(err):
 			failure.Code = apierr.NotFound
 		case errors.Is(err, context.Canceled):
 			failure.Code = hosterr.Cancelled
@@ -101,6 +101,12 @@ func writeInvocationError(w io.Writer, err error, encode func(io.Writer, *apierr
 		return writeErr
 	}
 	return nil
+}
+
+// safety: rendering and the exit code classify not-found the same way, so a not_found body always exits 4.
+func isNotFound(err error) bool {
+	var failure *apierr.Error
+	return errors.As(err, &failure) && failure.Code == apierr.NotFound || errors.Is(err, docs.ErrNotFound)
 }
 
 // safety: the controller route never reaches the user; the subject they typed and its list command do.
