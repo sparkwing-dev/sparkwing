@@ -118,7 +118,7 @@ func TestInfoAgentReportsTypeScriptAuthoringBoundaries(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	for _, want := range []string{"Go or TypeScript programs", "Go shapes compile, lint", "Node 22.18+", "npm lockfile", "detached CLI runs", "schedules", "TypeScript lint is unsupported", "zero exit does not validate source", "docs read --topic sdk-typescript-reference"} {
+	for _, want := range []string{"Go or TypeScript programs", "Go shapes compile, lint", "Node 22.18+", "npm lockfile", "detached CLI runs", "schedules", "TypeScript lint is unsupported", "zero exit does not validate source", "docs read --topic sdk-typescript-reference", "sparkwing examples --language typescript"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("agent info missing %q", want)
 		}

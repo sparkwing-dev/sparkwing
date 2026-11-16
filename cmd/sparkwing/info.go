@@ -269,6 +269,8 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"  enforces for Go, TypeScript differences, triggers and config, in one call\n" +
 	"- `sparkwing docs read --topic sdk` -- every SDK feature with Go and TypeScript side by\n" +
 	"  side; `sparkwing docs read --topic sdk-typescript-reference` lists every TypeScript export\n" +
+	"- `sparkwing examples --language typescript` (or `go`) -- complete working pipelines;\n" +
+	"  `sparkwing examples --example <name> --body` prints one in full\n" +
 	"- Go: `sparkwing pipeline lint` then `sparkwing run <n>`. TypeScript: describe,\n" +
 	"  plan and run; use your TypeScript checker for source validation.\n"
 
