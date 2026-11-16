@@ -38,8 +38,9 @@ Login services on Linux and macOS use a foreground controller process with an
 absolute home. The CLI adapter forwards home, version and standalone mode
 to that runtime and waits for it to return. Signal cancellation reaches the same
 runtime context. Startup reconciliation and shutdown draining belong to the
-runtime. Windows supports the foreground controller and daemon schedules, without a
-login-service installer.
+runtime. Windows supports the foreground controller without a login-service
+installer. It records schedules but does not fire them; run one with
+`sparkwing schedules run --profile= --schedule NAME`.
 
 Managed schedule timers use one stable hidden entrypoint with the captured home.
 Machine updates refresh both timer and controller units. The controller runtime,

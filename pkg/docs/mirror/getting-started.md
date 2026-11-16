@@ -25,6 +25,10 @@ then [Sparkwing Cloud](#sparkwing-cloud) when you want a team to see the
 same runs. [Self-hosted runners](self-hosting.md#add-workstation-capacity)
 adds capacity from your own machines to Cloud.
 
+Coming from GitHub Actions? [Migrate from GitHub Actions](migrate-from-github-actions.md)
+maps each workflow feature to its Sparkwing equivalent, and
+[known limitations](known-limitations.md) lists what has none yet.
+
 ## Install
 
 Building Sparkwing requires Go 1.26.0 or later. Pipeline modules that use only
@@ -119,6 +123,9 @@ both admin / inspection (`sparkwing dashboard open`,
 > `go install ./cmd/sparkwing` from the repo root.
 
 ### Windows
+
+Windows support is experimental. Use WSL2 with systemd enabled and the Linux
+installer above; see [known limitations](known-limitations.md#windows-is-experimental).
 
 Prebuilt Windows binaries are published to GitHub Releases:
 `sparkwing-windows-amd64.exe` and `sparkwing-windows-arm64.exe`. They

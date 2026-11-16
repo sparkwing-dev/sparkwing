@@ -4,6 +4,8 @@
       "label": "Getting Started",
       "slugs": [
         "getting-started",
+        "migrate-from-github-actions",
+        "known-limitations",
         "updates",
         "support",
         "architecture",
@@ -59,6 +61,7 @@
       "label": "Operations",
       "slugs": [
         "observability",
+        "run-events",
         "debugging",
         "diagnosing-admission",
         "security",
