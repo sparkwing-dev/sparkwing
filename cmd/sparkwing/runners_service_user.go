@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	runnerservice "github.com/sparkwing-dev/sparkwing/internal/runners/service"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
@@ -420,7 +421,11 @@ func writeRunnerAccount(payload serviceUserEnrollment, runnerBinary string) (res
 	if err != nil {
 		return result, err
 	}
-	result = accountWritten{Config: filepath.Join(fssecure.ConfigDirIn(home), userconfig.Filename), Binary: filepath.Join(home, ".local", "bin", runnerBinaryName), StateHome: filepath.Join(home, ".sparkwing")}
+	state, err := paths.DefaultPaths()
+	if err != nil {
+		return result, err
+	}
+	result = accountWritten{Config: filepath.Join(fssecure.ConfigDirIn(home), userconfig.Filename), Binary: filepath.Join(home, ".local", "bin", runnerBinaryName), StateHome: state.Root}
 	written, err := writeRunnerConfig(result.Config, payload.Runner, payload.Credential, payload.Force)
 	defer func() {
 		if err != nil {
