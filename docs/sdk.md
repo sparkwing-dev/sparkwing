@@ -9,7 +9,9 @@ SDK processes execute the callbacks the host selects.
 Each Go example on this page is followed by its TypeScript form. Where only one
 SDK has a feature, the text says so. Every export is listed in the
 [Go API reference](sdk-reference.md) and the
-[TypeScript API reference](sdk-typescript-reference.md).
+[TypeScript API reference](sdk-typescript-reference.md). Porting a GitHub
+Actions workflow? [Migrating from GitHub Actions](migrate-from-github-actions.md)
+maps each workflow concept to these APIs.
 
 ```go
 import sw "github.com/sparkwing-dev/sparkwing/sparkwing"
