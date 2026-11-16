@@ -204,7 +204,6 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 	return t, nil
 }
 
-// checkOTLPEndpoints refuses an endpoint the OTLP exporters cannot parse.
 // safety: the exporters replace an unparseable endpoint with localhost:4318
 // and still send OTEL_EXPORTER_OTLP_HEADERS there. The error names the
 // variable only, because the value can carry credentials.
