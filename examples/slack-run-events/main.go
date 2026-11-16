@@ -62,6 +62,7 @@ func handler(secret, slackURL string, client *http.Client) http.HandlerFunc {
 			http.Error(w, "cannot encode the message", http.StatusInternalServerError)
 			return
 		}
+		// #nosec G704 -- slackURL is the operator's SLACK_WEBHOOK_URL; the signed event only supplies the message text.
 		resp, err := client.Post(slackURL, "application/json", bytes.NewReader(message))
 		if err != nil {
 			http.Error(w, "slack unreachable", http.StatusBadGateway)

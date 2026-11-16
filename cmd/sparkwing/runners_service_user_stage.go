@@ -54,6 +54,7 @@ func stageServiceBinaries(goos, runnerBinary string) (self, runner string, clean
 }
 
 func copyExecutable(source, target string) (err error) {
+	// #nosec G703 -- source is the running executable or the runner binary the invoking operator installed.
 	in, err := os.Open(source)
 	if err != nil {
 		return err

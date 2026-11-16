@@ -287,6 +287,7 @@ func (d *isolationDriver) save(name string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	// #nosec G703 -- evidence is the operator's --evidence directory or this run's temp dir; names are fixed.
 	return os.WriteFile(path, data, 0o644)
 }
 
@@ -641,6 +642,7 @@ func (d *isolationDriver) fixtureTemplate(ctx context.Context) (string, error) {
 		return "", err
 	}
 	yaml := "pipelines:\n  - name: " + fixture.Pipeline + "\n    entrypoint: " + fixture.Entrypoint + "\n"
+	// #nosec G703 -- module sits in this run's MkdirTemp checkout and both file names are fixed.
 	if err := errors.Join(os.WriteFile(filepath.Join(module, "main.go"), main, 0o644), os.WriteFile(filepath.Join(module, "sparkwing.yaml"), []byte(yaml), 0o644)); err != nil {
 		return "", err
 	}
@@ -670,6 +672,7 @@ func copyGoSources(from, to string) error {
 		if err != nil {
 			return err
 		}
+		// #nosec G703 -- to is inside this run's fixture checkout and name comes from this repository's probe sources.
 		if err := os.WriteFile(filepath.Join(to, name), data, 0o644); err != nil {
 			return err
 		}
