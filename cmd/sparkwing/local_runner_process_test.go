@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -301,19 +302,26 @@ func TestLocalRunnerSupervisorBacksOffFailedStartupWithoutStoppingController(t *
 func TestLocalRunnerSupervisorReportsRecoveryAndServingPredecessor(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		failure := errors.New("manager unavailable")
+		// safety: time.Sleep gives no happens-before edge to the supervisor goroutine it wakes,
+		// so state shared with the start and report hooks needs its own lock.
+		var mu sync.Mutex
 		fails := true
 		var reports []error
+		setFails := func(v bool) { mu.Lock(); defer mu.Unlock(); fails = v }
+		snapshot := func() []error { mu.Lock(); defer mu.Unlock(); return append([]error(nil), reports...) }
 		active := localhostwire.LocalRunnerInstance{}
 		supervisor := localRunnerProcessSupervisor{
 			version: "v1", build: "build",
 			alive: func(localhostwire.LocalRunnerInstance) (bool, error) { return true, nil },
 			start: func(context.Context, string) error {
+				mu.Lock()
+				defer mu.Unlock()
 				if fails {
 					return failure
 				}
 				return nil
 			},
-			report: func(err error) { reports = append(reports, err) },
+			report: func(err error) { mu.Lock(); defer mu.Unlock(); reports = append(reports, err) },
 		}
 		supervisor.registry = runnerDiscoveryFixture{active: active, read: func(id string) (localhostwire.LocalRunnerInstance, error) {
 			return localhostwire.LocalRunnerInstance{ID: id, State: "active", Version: "v1", BuildIdentity: "build"}, nil
@@ -322,22 +330,21 @@ func TestLocalRunnerSupervisorReportsRecoveryAndServingPredecessor(t *testing.T)
 		done := make(chan error, 1)
 		go func() { done <- supervisor.run(ctx) }()
 		synctest.Wait()
-		if len(reports) != 1 || !errors.Is(reports[0], failure) {
-			t.Fatalf("first failed start reported %v", reports)
+		if got := snapshot(); len(got) != 1 || !errors.Is(got[0], failure) {
+			t.Fatalf("first failed start reported %v", got)
 		}
-		fails = false
+		setFails(false)
 		time.Sleep(localRunnerMaxRetry)
 		synctest.Wait()
-		if len(reports) < 2 || reports[len(reports)-1] != nil {
-			t.Fatalf("recovered start reported %v", reports)
+		if got := snapshot(); len(got) < 2 || got[len(got)-1] != nil {
+			t.Fatalf("recovered start reported %v", got)
 		}
 		cancel()
 		if err := <-done; !errors.Is(err, context.Canceled) {
 			t.Fatal(err)
 		}
 
-		reports = nil
-		fails = true
+		setFails(true)
 		supervisor.registry = runnerDiscoveryFixture{active: localhostwire.LocalRunnerInstance{ID: "old", Version: "v0", BuildIdentity: "old-build"}}
 		if serving, err := supervisor.ensure(t.Context()); !errors.Is(err, failure) || !serving {
 			t.Fatalf("outdated live runner: serving=%t err=%v", serving, err)
