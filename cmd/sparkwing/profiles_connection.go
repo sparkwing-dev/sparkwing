@@ -49,20 +49,26 @@ func addProfile(inv clisurface.Invocation, format string) error {
 			return err
 		}
 	}
+	var replaced *namedProfile
 	profiles = nil
 	err = userconfig.Update(path, userconfig.Profiles, "profiles", &profiles, func(bool) error {
-		if _, exists := profiles[name]; exists && !inv.Bool("force") {
+		previous, exists := profiles[name]
+		if exists && !inv.Bool("force") {
 			return fmt.Errorf("profiles add: profile %q already exists in %s; use --force to replace it", name, displayConfigPath(path))
 		}
 		if profiles == nil {
 			profiles = make(map[string]userconfig.Profile)
 		}
-		p.Default = profiles[name].Default
+		replaced = &namedProfile{Name: name, Profile: previous}
+		p.Default = previous.Default
 		profiles[name] = p.Profile
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+	if err := revokeAdminToken(replaced, base); err != nil {
+		return fmt.Errorf("profiles add: saved profile %q, but %w", name, err)
 	}
 	return writeProfile(p, format)
 }
@@ -93,7 +99,7 @@ func removeProfile(inv clisurface.Invocation, format string) error {
 	p := &namedProfile{Name: name, Profile: connection}
 	if !inv.Bool("keep-token") {
 		if err := revokeProfileToken(p); err != nil {
-			return err
+			return fmt.Errorf("profiles remove: %w; use --keep-token to remove only the connection", err)
 		}
 	}
 	profiles = nil
@@ -126,20 +132,29 @@ func revokeProfileToken(p *namedProfile) error {
 // safety: each revocation is judged on its own, so an ended member token never hides a live administration
 // token; admin is non-nil only while that token may still be live.
 func revokeProfileTokens(p *namedProfile) (member, admin error) {
-	member = revokeToken(p.ControllerURL(), p.MemberToken())
+	return revokeToken(p.ControllerURL(), p.MemberToken()), revokeAdminToken(p, p.ControllerURL())
+}
+
+// safety: p is the profile before a command replaced it and saved the controller it names afterwards, so the token
+// is revoked where it was issued; the error is non-nil only while that token may still be live.
+func revokeAdminToken(p *namedProfile, saved string) error {
 	raw := p.liveAdminToken(time.Now())
 	if raw == "" {
-		return member, nil
+		return nil
 	}
-	if err := revokeToken(p.ControllerURL(), raw); err != nil && !credentialEnded(err) {
-		prefix, prefixErr := tokenPrefix(raw)
-		if prefixErr != nil {
-			return member, fmt.Errorf("the previous administration token may still be live because revoking it failed (%w); revoke it from the console's Machines page", err)
-		}
-		admin = fmt.Errorf("the previous administration token %s is still live because revoking it failed (%w); revoke it with sparkwing tokens revoke --profile %s --token %s or from the console's Machines page",
-			prefix, err, p.Name, prefix)
+	err := revokeToken(p.ControllerURL(), raw)
+	if err == nil || credentialEnded(err) {
+		return nil
 	}
-	return member, admin
+	prefix, prefixErr := tokenPrefix(raw)
+	if prefixErr != nil {
+		return fmt.Errorf("the previous administration token may still be live on %s because revoking it failed (%w); revoke it from the Machines page of the console at %s", p.ControllerURL(), err, p.ControllerURL())
+	}
+	how := fmt.Sprintf("with sparkwing tokens revoke --profile %s --token %s or from the console's Machines page", p.Name, prefix)
+	if saved != p.ControllerURL() {
+		how = "from the Machines page of the console at " + p.ControllerURL()
+	}
+	return fmt.Errorf("the previous administration token %s is still live on %s because revoking it failed (%w); revoke it %s", prefix, p.ControllerURL(), err, how)
 }
 
 func revokeToken(base, raw string) error {
@@ -148,7 +163,7 @@ func revokeToken(base, raw string) error {
 	}
 	prefix, err := tokenPrefix(raw)
 	if err != nil {
-		return fmt.Errorf("profiles remove: %w; use --keep-token to remove only the connection", err)
+		return err
 	}
 	ctx := context.Background()
 	c, err := client.NewTokenManager(client.EngineOptions{URL: base, Bearer: func(context.Context) (string, error) { return raw, nil }}, false)
@@ -157,14 +172,14 @@ func revokeToken(base, raw string) error {
 	}
 	found, err := c.ReadToken(ctx, prefix)
 	if err != nil {
-		return fmt.Errorf("profiles remove: cannot look up token %s: %w; use --keep-token to remove only the connection", prefix, err)
+		return fmt.Errorf("cannot look up token %s: %w", prefix, err)
 	}
 	// safety: removing a connection must not revoke a runner's machine credential.
 	if found.Kind != "member" {
-		return errors.New("profiles remove: the connection holds a machine credential; use --keep-token to remove only the connection")
+		return errors.New("the connection holds a machine credential")
 	}
 	if _, err := c.RevokeToken(ctx, prefix); err != nil {
-		return fmt.Errorf("profiles remove: cannot revoke token %s: %w; use --keep-token to remove only the connection", prefix, err)
+		return fmt.Errorf("cannot revoke token %s: %w", prefix, err)
 	}
 	return nil
 }

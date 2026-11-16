@@ -66,12 +66,14 @@ func setProfile(inv clisurface.Invocation, format string) error {
 		}
 	}
 	var updated userconfig.Profile
+	var replaced *namedProfile
 	profiles = nil
 	err = userconfig.Update(path, userconfig.Profiles, "profiles", &profiles, func(bool) error {
 		p, ok := profiles[name]
 		if !ok {
 			return missingProfile(name, path, profiles)
 		}
+		replaced = &namedProfile{Name: name, Profile: p}
 		if inv.Has("controller") {
 			p.Controller.URL = base
 		}
@@ -96,6 +98,11 @@ func setProfile(inv clisurface.Invocation, format string) error {
 	})
 	if err != nil {
 		return err
+	}
+	if updated.Controller.AdminToken == nil {
+		if err := revokeAdminToken(replaced, updated.Controller.URL); err != nil {
+			return fmt.Errorf("profiles set: saved profile %q, but %w", name, err)
+		}
 	}
 	return writeProfile(&namedProfile{Name: name, Profile: updated}, format)
 }

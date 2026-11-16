@@ -9,7 +9,10 @@
   that expires after one hour beside a re-issued member token with the same
   grants and expiry as the one it replaces. The profile uses it
   until it expires and then falls back to the member token. Ordinary
-  `sparkwing login` tokens still never carry `team.admin`.
+  `sparkwing login` tokens still never carry `team.admin`. `sparkwing login`,
+  `profiles add --force` and `profiles set` revoke a replaced administration
+  token at the controller that issued it, even when they point the profile at
+  another controller, and fail when that revocation cannot be confirmed.
 
 ### Changed
 

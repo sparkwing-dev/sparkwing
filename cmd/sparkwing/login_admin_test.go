@@ -304,3 +304,120 @@ func TestLoginFailsClosedWhenTheOldAdminTokenCannotBeRevoked(t *testing.T) {
 		t.Fatalf("the new member login was not saved before the failure: %+v", c)
 	}
 }
+
+func (f *deviceLoginFixture) stepUp(t *testing.T) userconfig.Connection {
+	t.Helper()
+	captureStdout(t, func() {
+		if err := f.run(t, "login", "--controller", "https://controller.example", "--profile", "work"); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.run(t, "login", "--admin", "--profile", "work"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	profiles, _, err := loadProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := profiles["work"].Controller
+	if c.AdminToken == nil {
+		t.Fatal("precondition: the step-up saved no administration token")
+	}
+	return c
+}
+
+func unreachable(t *testing.T, host, bearer string) *[]string {
+	t.Helper()
+	transport, hosts := http.DefaultTransport, &[]string{}
+	http.DefaultTransport = profileTransport(func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("Authorization") == "Bearer "+bearer {
+			*hosts = append(*hosts, r.URL.Host)
+		}
+		if r.URL.Host == host {
+			return nil, errors.New("connection refused")
+		}
+		return transport.RoundTrip(r)
+	})
+	t.Cleanup(func() { http.DefaultTransport = transport })
+	return hosts
+}
+
+func TestEveryReplacementRevokesTheOldAdminTokenAtItsController(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stdin string
+		args  []string
+	}{
+		{"login to another controller", "", []string{"login", "--controller", "https://new.example", "--profile", "work", "--force"}},
+		{"profiles set controller", "", []string{"profiles", "set", "--profile", "work", "--controller", "https://new.example"}},
+		{"profiles set token", "swu_replacement\n", []string{"profiles", "set", "--profile", "work", "--token-stdin"}},
+		{"profiles add force", "", []string{"profiles", "add", "--profile", "work", "--controller", "https://new.example", "--force", "--no-probe"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeProfilesFixture(t, "profiles: {}\n")
+			f := newDeviceLoginFixtureAs(t, "approve", "owner")
+			old := f.stepUp(t)
+			hosts := unreachable(t, "", *old.AdminToken)
+			if tc.stdin != "" {
+				withStdin(t, tc.stdin)
+			}
+			captureStdout(t, func() {
+				if err := f.runAny(t, tc.args...); err != nil {
+					t.Fatal(err)
+				}
+			})
+			if code := f.status(t, *old.AdminToken, http.MethodGet, "/api/v1/subscriptions"); code != http.StatusUnauthorized {
+				t.Fatalf("the replaced administration token answered %d, want 401", code)
+			}
+			for _, host := range *hosts {
+				if host != "controller.example" {
+					t.Fatalf("the administration token went to %s, not the controller that issued it", host)
+				}
+			}
+		})
+	}
+}
+
+func TestEveryReplacementFailsWhenTheOldControllerCannotRevokeTheAdminToken(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		stdin string
+		args  []string
+		hint  string
+	}{
+		{"login to another controller", "", []string{"login", "--controller", "https://new.example", "--profile", "work", "--force"}, "console at https://controller.example"},
+		{"profiles set controller", "", []string{"profiles", "set", "--profile", "work", "--controller", "https://new.example"}, "console at https://controller.example"},
+		{"profiles set token", "swu_replacement\n", []string{"profiles", "set", "--profile", "work", "--token-stdin"}, "sparkwing tokens revoke --profile work --token "},
+		{"profiles add force", "", []string{"profiles", "add", "--profile", "work", "--controller", "https://new.example", "--force", "--no-probe"}, "console at https://controller.example"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			writeProfilesFixture(t, "profiles: {}\n")
+			f := newDeviceLoginFixtureAs(t, "approve", "owner")
+			old := f.stepUp(t)
+			hosts := unreachable(t, "controller.example", *old.AdminToken)
+			if tc.stdin != "" {
+				withStdin(t, tc.stdin)
+			}
+			var err error
+			captureStdout(t, func() { err = f.runAny(t, tc.args...) })
+			if len(*hosts) == 0 {
+				t.Fatal("the old administration token was never revoked")
+			}
+			prefix, _ := tokenPrefix(*old.AdminToken)
+			if err == nil || !strings.Contains(err.Error(), prefix+" is still live on https://controller.example") || !strings.Contains(err.Error(), tc.hint) {
+				t.Fatalf("%v = %v, want a failure naming the unreachable controller and %q", tc.args, err, tc.hint)
+			}
+			if strings.Contains(err.Error(), "--keep-token") {
+				t.Fatalf("the failure suggests a profiles remove flag: %v", err)
+			}
+		})
+	}
+}
+
+func (f *deviceLoginFixture) runAny(t *testing.T, args ...string) error {
+	t.Helper()
+	if args[0] == "profiles" {
+		return runProfilesArgs(args[1:])
+	}
+	return f.run(t, args...)
+}

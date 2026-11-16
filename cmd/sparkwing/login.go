@@ -112,7 +112,7 @@ func login(inv clisurface.Invocation, console deviceConsole) error {
 		if profiles == nil {
 			profiles = make(map[string]userconfig.Profile)
 		}
-		if previous, ok := profiles[name]; ok && previous.Controller.Token != nil && *previous.Controller.Token != token.Capability {
+		if previous, ok := profiles[name]; ok && (previous.Controller.AdminToken != nil || previous.Controller.Token != nil && *previous.Controller.Token != token.Capability) {
 			replaced = &namedProfile{Name: name, Profile: previous}
 		}
 		p.Default = profiles[name].Default
@@ -122,15 +122,15 @@ func login(inv clisurface.Invocation, console deviceConsole) error {
 	if err != nil {
 		return err
 	}
-	if replaced != nil && replaced.ControllerURL() == base {
-		member, admin := revokeProfileTokens(replaced)
-		var failure *apierr.Error
-		if member != nil && !(errors.As(member, &failure) && (failure.Code == hosterr.Unauthenticated || failure.Code == apierr.NotFound)) {
+	if replaced != nil && replaced.ControllerURL() == base && replaced.MemberToken() != token.Capability {
+		if err := revokeToken(base, replaced.MemberToken()); err != nil && !credentialEnded(err) {
 			fmt.Fprintf(os.Stderr, "warning: the profile's previous token was not revoked; revoke it from the console's Machines page or with sparkwing tokens revoke --profile %s\n", opsview.DisplayText(name))
 		}
-		// safety: a live administration token left behind is a failure, not a warning, so scripts cannot miss it.
-		if admin != nil {
-			return fmt.Errorf("login: saved the new token in profile %q, but %w", name, admin)
+	}
+	// safety: a live administration token left behind is a failure, not a warning, so scripts cannot miss it.
+	if replaced != nil {
+		if err := revokeAdminToken(replaced, base); err != nil {
+			return fmt.Errorf("login: saved the new token in profile %q, but %w", name, err)
 		}
 	}
 	return writeProfile(p, format)
