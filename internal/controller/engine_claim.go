@@ -110,10 +110,32 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
-	claim, err := s.authority.ClaimUnit(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch, Kubernetes: body.Kubernetes})
-	if target == nil && errors.Is(err, store.ErrNotFound) {
+	var held time.Time
+	if s.ClaimWake != nil && target == nil && body.Wait > 0 {
+		held = time.Now().Add(min(body.Wait, controllerwire.MaxClaimWait))
+	}
+	var claim store.UnitClaim
+	for {
+		var committed <-chan struct{}
+		if !held.IsZero() {
+			// safety: taken before the search, so a commit racing it still wakes the hold.
+			committed = s.ClaimWake.NextCommit()
+		}
+		claim, err = s.authority.ClaimUnit(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch, Kubernetes: body.Kubernetes})
+		if target != nil || !errors.Is(err, store.ErrNotFound) {
+			break
+		}
+		if !held.IsZero() {
+			again, err := s.awaitClaimable(ctx, committed, held)
+			if err != nil {
+				return controllerwire.ClaimResponse{}, err
+			}
+			if again {
+				continue
+			}
+		}
 		observeEmptyClaim(principal.Capability)
-		return controllerwire.ClaimResponse{}, nil
+		return controllerwire.ClaimResponse{Held: !held.IsZero()}, nil
 	}
 	var refused *store.InsufficientCreditsError
 	if errors.As(err, &refused) {
@@ -127,6 +149,34 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 		return controllerwire.ClaimResponse{}, err
 	}
 	return controllerwire.ClaimResponse{Claim: &unit}, nil
+}
+
+// perf: reports whether to search again, which only a commit or a lapsing
+// group wait can make worthwhile; false once the hold reaches until or the claimant leaves.
+func (s *EngineController) awaitClaimable(ctx context.Context, committed <-chan struct{}, until time.Time) (bool, error) {
+	wait := time.Until(until)
+	if wait <= 0 {
+		return false, nil
+	}
+	// perf: the search settles a group wait that has run out, so the hold wakes
+	// for it. A deadline already past was seen by the search that just ran.
+	lapse, timed, err := s.ClaimWake.NextGroupWaitDeadline(ctx)
+	if err != nil {
+		return false, err
+	}
+	if timed && lapse > 0 {
+		wait = min(wait, lapse)
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-committed:
+		return true, nil
+	case <-timer.C:
+		return time.Now().Before(until), nil
+	case <-ctx.Done():
+		return false, nil
+	}
 }
 
 func engineClaimTarget(body controllerwire.ClaimRequest) (*store.UnitRef, error) {

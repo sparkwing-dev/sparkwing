@@ -64,6 +64,9 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 	if claim, ok := input.(controllerwire.ClaimRequest); ok && claim.MaxConcurrent > 0 {
 		req.Header.Set(controllerwire.RunnerMaxConcurrentHeader, strconv.Itoa(claim.MaxConcurrent))
 	}
+	if claim, ok := input.(controllerwire.ClaimRequest); ok && claim.Wait > 0 {
+		req.Header.Set(controllerwire.ClaimWaitHeader, strconv.FormatInt(claim.Wait.Milliseconds(), 10))
+	}
 	if command, ok := input.(runstate.NodeCommandPayload); ok && command.Extra.ExitedAt != nil {
 		req.Header.Set(controllerwire.NodeExitedAtHeader, command.Extra.ExitedAt.UTC().Format(time.RFC3339Nano))
 	}
@@ -239,6 +242,7 @@ func (c *engineClient) readResponse(resp *http.Response, output any) (bool, erro
 	}
 	if claim, ok := output.(*controllerwire.ClaimResponse); ok {
 		claim.PollAfter, _ = parseDelaySeconds(resp.Header.Get(controllerwire.ClaimPollAfterHeader))
+		claim.Held = resp.Header.Get(controllerwire.ClaimHeldHeader) != ""
 	}
 	return false, nil
 }

@@ -145,6 +145,7 @@ type storeTx struct {
 	claimCapacity *claimCapacitySearch
 	snapshotRead  bool
 	rowsOpen      bool
+	wrote         bool
 	rotatingRoot  *capability.Capability
 	createdTeam   *TeamInfo
 	blobIO        *blobIO
@@ -298,12 +299,23 @@ func (t *storeTx) Commit() error {
 		}
 		return err
 	}
+	if t.wrote {
+		t.store.commits.fire()
+	}
 	for _, key := range t.finishedLocalSecrets {
 		t.store.localSecrets.Delete(key)
 	}
 	return t.notifyRunCancellations()
 }
 func (t *storeTx) Rollback() error { return rollbackTx(t.tx) }
+
+// safety: a query writes only through RETURNING, and a missed write would leave
+// a held claim asleep until its bound.
+func (t *storeTx) noteReturningWrite(q string) {
+	if strings.Contains(strings.ToUpper(q), "RETURNING") {
+		t.wrote = true
+	}
+}
 
 // Cancellation may have already rolled back the transaction in database/sql.
 func rollbackTx(tx *sql.Tx) error {
@@ -339,6 +351,7 @@ func (t *storeTx) execContext(ctx context.Context, q string, args ...any) (sql.R
 	if err := t.checkSQL(q); err != nil {
 		return nil, err
 	}
+	t.wrote = true
 	return t.tx.ExecContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
@@ -346,6 +359,7 @@ func (t *storeTx) queryContext(ctx context.Context, q string, args ...any) (rowC
 	if err := t.checkSQL(q); err != nil {
 		return nil, err
 	}
+	t.noteReturningWrite(q)
 	rows, err := t.tx.QueryContext(ctx, rewritePh(t.dialect, q), args...)
 	if err != nil {
 		return nil, err
@@ -358,6 +372,7 @@ func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) ro
 	if err := t.checkSQL(q); err != nil {
 		return refusedLedgerRow{err}
 	}
+	t.noteReturningWrite(q)
 	row := t.tx.QueryRowContext(ctx, rewritePh(t.dialect, q), args...)
 	t.rowsOpen = true
 	return &storeRow{Row: row, tx: t}

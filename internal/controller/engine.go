@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -27,6 +28,17 @@ type EngineController struct {
 	ResolveOperator   func(context.Context) (AuthorityRevoker, error)
 	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
 	ReadRunStatus     func(context.Context, store.Team, string) (RunStatusFacts, error)
+	// ClaimWake lets an empty untargeted claim that asks to wait be held until
+	// work may have arrived. Nil answers every claim at once.
+	ClaimWake ClaimWake
+}
+
+// ClaimWake reports when held claims should search again. It must see every
+// write that can make work claimable, so only a controller that is its store's
+// sole writer may supply one.
+type ClaimWake interface {
+	NextCommit() <-chan struct{}
+	NextGroupWaitDeadline(context.Context) (time.Duration, bool, error)
 }
 
 // ReconcileJob uses C1 ReconcileRequest and returns its persisted node and claim.
