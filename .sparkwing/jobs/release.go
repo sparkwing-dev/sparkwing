@@ -654,11 +654,11 @@ func (j *pushTagJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 func (j *pushTagJob) run(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	exists, err := tagExistsOnRemote(ctx, j.RepoDir, version)
+	remote, err := releaseGit(ctx, j.RepoDir, "ls-remote", "--tags", "origin", "refs/tags/"+version)
 	if err != nil {
 		return fmt.Errorf("release: re-check remote tags: %w", err)
 	}
-	if exists {
+	if strings.TrimSpace(remote) != "" {
 		return fmt.Errorf("release: tag %s appeared on origin between validate and push (race); abort", version)
 	}
 	if j.Source == "" {
@@ -668,7 +668,15 @@ func (j *pushTagJob) run(ctx context.Context) error {
 	if commit == "" {
 		return errors.New("release: missing changelog commit; run commit-changelog before push-tag")
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "tag", "-a", version, commit, "-m", "Release "+version); err != nil {
+	stale, err := staleReleaseTag(ctx, j.RepoDir, version)
+	if err != nil {
+		return err
+	}
+	tag := []string{"tag", "-a", version, commit, "-m", "Release " + version}
+	if stale {
+		tag = []string{"tag", "-f", "-a", version, commit, "-m", "Release " + version}
+	}
+	if _, err := releaseGit(ctx, j.RepoDir, tag...); err != nil {
 		return fmt.Errorf("release: create tag: %w", err)
 	}
 	return publishRelease(ctx, j.RepoDir, j.Source, commit, version)
@@ -676,7 +684,7 @@ func (j *pushTagJob) run(ctx context.Context) error {
 
 func (j *pushTagJob) dryRun(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	sparkwing.Info(ctx, "dry-run: would tag the detached changelog commit as %s, merge its metadata into fresh main, and atomically push main + tag", version)
+	sparkwing.Info(ctx, "dry-run: would tag the detached changelog commit as %s (replacing an unpushed local tag left by an interrupted cut), merge its metadata into fresh main, and atomically push main + tag with --no-verify, each git command bounded by a timeout", version)
 	return nil
 }
 

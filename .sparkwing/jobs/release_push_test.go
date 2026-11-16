@@ -99,7 +99,7 @@ func TestReleasePushKeepsTheChosenSourceWhileMainMoves(t *testing.T) {
 				writeDeliveryTool(t, filepath.Join(bin, "git"), `#!/bin/sh
 set -eu
 if [ "$1" = push ] && [ "$RELEASE_TEST_MODE" = "push refused" ]; then exit 1; fi
-if [ "$1" = push ] && [ "$2" = --atomic ] && [ ! -f "$RELEASE_TEST_ONCE" ]; then
+if [ "$1" = push ] && [ "$2" = --no-verify ] && [ "$3" = --atomic ] && [ ! -f "$RELEASE_TEST_ONCE" ]; then
  touch "$RELEASE_TEST_ONCE"
  "$RELEASE_TEST_REAL_GIT" --git-dir="$RELEASE_TEST_ORIGIN" update-ref refs/heads/main "$RELEASE_TEST_ADVANCED"
 fi

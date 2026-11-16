@@ -2886,6 +2886,14 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
   with the same release commit and tag. A conflict or repeated contention
   stops publication for manual recovery; it does not require freezing main.
   Failed cuts retain their worktrees at the paths printed in the logs.
+  The publication push passes `--no-verify` and logs that it skips the
+  checkout's pre-push hook: the cut already ran its gates, and the hook's
+  gate output never reaches the release log. Each git command in `push-tag`
+  logs before it runs and has its own deadline, five minutes for fetch,
+  ls-remote and push and two for local commands, so a hang fails naming the
+  command. A retry replaces a local tag that origin lacks when no remote ref
+  contains its commit, which is what an interrupted cut leaves. It refuses any
+  other existing local tag and never touches a tag on origin.
   Preview with
   `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run -- --commit SHA`,
   then use `--sw-allow-risk destructive,prod` for publication. Within one controller, manual and weekly
