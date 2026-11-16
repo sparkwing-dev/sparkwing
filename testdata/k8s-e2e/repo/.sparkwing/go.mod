@@ -6,7 +6,7 @@ toolchain go1.26.11
 
 require (
 	github.com/sparkwing-dev/sparkwing v0.72.0
-	github.com/sparkwing-dev/sparkwing/sparkwing v0.2.0
+	github.com/sparkwing-dev/sparkwing/sparkwing v0.3.0
 )
 
 require (
