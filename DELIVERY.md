@@ -1495,9 +1495,12 @@ With each identity it tries a dry-run pod create in the job namespace and in
 the controller namespace. It also tries a dry-run patch and update of the owner
 references and annotations of its own pod, each peer's pod and a controller
 pod. Both teams' jobs share the one job namespace, so trying it covers the other
-team's namespace as well. Every attempt must be refused, and an endpoint the
-job cannot reach passes because the job cannot use it either. These fail the
-grade:
+team's namespace as well. In the controller namespace it also lists secrets,
+reviews its own rules and submits a dry-run Job. Any authenticated caller may
+review its own rules, so any credential the API accepts fails the grade. A job
+must hold no cluster identity at all. Every attempt must be refused, and an
+endpoint the job cannot reach passes because the job cannot use it either.
+These fail the grade:
 
 - an allowed attempt;
 - an answer that does not prove a refusal;

@@ -193,6 +193,24 @@ func TestKubeAPIGradeTriesEveryCredentialTheJobFinds(t *testing.T) {
 	}
 }
 
+// Every authenticated caller may review its own rules, which is how a real kube-apiserver answered a
+// service-account token with no other power. A job must hold no cluster identity, so a credential
+// the API accepts for that alone still fails the grade.
+func TestKubeAPIGradeFailsAnyCredentialTheAPIAccepts(t *testing.T) {
+	fake := &kubeFake{answer: func(r *http.Request) int {
+		if r.Header.Get("Authorization") == "Bearer powerless-token" && r.URL.Path == "/apis/authorization.k8s.io/v1/selfsubjectrulesreviews" {
+			return http.StatusCreated
+		}
+		return http.StatusForbidden
+	}}
+	srv := httptest.NewTLSServer(fake)
+	defer srv.Close()
+	creds := []credential{{kind: "anonymous"}, {kind: "credential-named environment value", bearer: "powerless-token"}}
+	if r := gradingNetwork(gradePlan(), creds).probe(t.Context(), ContextJob, kubeTarget(srv.Listener.Addr().String())); r.Verdict != Breach {
+		t.Fatalf("a credential allowed only its own rules review = %+v, want breach", r)
+	}
+}
+
 func TestNodeRoleReadableNeedsInstanceMetadataToHandOutARole(t *testing.T) {
 	for name, c := range map[string]struct {
 		token, role int
