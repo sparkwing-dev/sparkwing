@@ -143,13 +143,21 @@ func createAccount(ctx context.Context, h AccountHost, name string) (Account, er
 	}
 	switch h.GOOS {
 	case "linux":
+		// safety: useradd --user-group would join a same-named group, which this account must not inherit.
+		if out, err := h.run(ctx, "getent", "group", name); err == nil && strings.TrimSpace(out) != "" {
+			return Account{}, existingGroupError(name)
+		}
 		if err := runCommandArgs(ctx, h.run, "useradd", "--system", "--user-group", "--create-home", "--home-dir", home, "--shell", "/usr/sbin/nologin", "--comment", "Sparkwing runner", name); err != nil {
 			return Account{}, err
 		}
 	case "darwin":
-		id, err := freeDarwinID(ctx, h)
+		id, groups, err := freeDarwinID(ctx, h)
 		if err != nil {
 			return Account{}, err
+		}
+		// safety: dscl -create on an existing group rewrites its id and password, so refuse before any write.
+		if groups[name] {
+			return Account{}, existingGroupError(name)
 		}
 		value := strconv.Itoa(id)
 		group, user := "/Groups/"+name, "/Users/"+name
@@ -193,16 +201,19 @@ func createAccount(ctx context.Context, h AccountHost, name string) (Account, er
 	return account, nil
 }
 
-func freeDarwinID(ctx context.Context, h AccountHost) (int, error) {
-	used := map[int]bool{}
+func freeDarwinID(ctx context.Context, h AccountHost) (int, map[string]bool, error) {
+	used, groups := map[int]bool{}, map[string]bool{}
 	for _, list := range [][]string{{"/Users", "UniqueID"}, {"/Groups", "PrimaryGroupID"}} {
 		out, err := h.run(ctx, "dscl", ".", "-list", list[0], list[1])
 		if err != nil {
-			return 0, fmt.Errorf("service user: dscl list %s: %w: %s", list[0], err, strings.TrimSpace(out))
+			return 0, nil, fmt.Errorf("service user: dscl list %s: %w: %s", list[0], err, strings.TrimSpace(out))
 		}
 		for _, line := range strings.Split(out, "\n") {
 			fields := strings.Fields(line)
 			if len(fields) == 2 {
+				if list[0] == "/Groups" {
+					groups[fields[0]] = true
+				}
 				if id, err := strconv.Atoi(fields[1]); err == nil {
 					used[id] = true
 				}
@@ -211,10 +222,14 @@ func freeDarwinID(ctx context.Context, h AccountHost) (int, error) {
 	}
 	for id := 400; id < 500; id++ {
 		if !used[id] {
-			return id, nil
+			return id, groups, nil
 		}
 	}
-	return 0, errors.New("service user: no free user and group id between 400 and 499")
+	return 0, nil, errors.New("service user: no free user and group id between 400 and 499")
+}
+
+func existingGroupError(name string) error {
+	return fmt.Errorf("service user %s: group %s already exists without that user, and sparkwing only creates its own group; choose another name or remove that group", name, name)
 }
 
 func checkAccount(ctx context.Context, h AccountHost, a Account) error {

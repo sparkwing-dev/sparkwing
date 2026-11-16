@@ -21,6 +21,8 @@ type fakeAccounts struct {
 	homes   string
 	nextUID int
 	fail    map[string]string
+
+	existingGroups map[string]bool
 }
 
 func (f *fakeAccounts) run(_ context.Context, name string, args ...string) (string, error) {
@@ -32,6 +34,11 @@ func (f *fakeAccounts) run(_ context.Context, name string, args ...string) (stri
 		}
 	}
 	switch {
+	case name == "getent" && args[0] == "group":
+		if f.existingGroups[args[1]] {
+			return args[1] + ":x:123:\n", nil
+		}
+		return "", errors.New("exit status 2")
 	case name == "getent":
 		entry, ok := f.passwd[args[1]]
 		if !ok {
@@ -347,5 +354,39 @@ func TestServicePathDropsEntriesUnderPeoplesHomes(t *testing.T) {
 	}
 	if !slices.Equal(dropped, []string{"/home/korey/.asdf/installs/golang/1.26/go/bin", "/Users/k/bin", "/root/bin"}) {
 		t.Fatalf("dropped = %q", dropped)
+	}
+}
+
+func TestEnsureAccountRefusesAnExistingDarwinGroupBeforeWritingIt(t *testing.T) {
+	f, h := newFakeAccounts(t)
+	h.GOOS = "darwin"
+	base := h.Exec
+	h.Exec = func(ctx context.Context, name string, args ...string) (string, error) {
+		out, err := base(ctx, name, args...)
+		if name == "dscl" && len(args) > 2 && args[1] == "-list" && args[2] == "/Groups" {
+			out += "sw-ci 123\n"
+		}
+		return out, err
+	}
+	_, _, err := EnsureAccount(t.Context(), h, "sw-ci")
+	if err == nil || !strings.Contains(err.Error(), "group sw-ci already exists") {
+		t.Fatalf("err = %v, want a refusal naming the existing group", err)
+	}
+	for _, call := range f.calls {
+		if strings.HasPrefix(call, "dscl . -create") {
+			t.Errorf("provisioning wrote despite the existing group: %s", call)
+		}
+	}
+}
+
+func TestEnsureAccountRefusesAnExistingLinuxGroupBeforeWritingIt(t *testing.T) {
+	f, h := newFakeAccounts(t)
+	f.existingGroups = map[string]bool{"sw-ci": true}
+	_, _, err := EnsureAccount(t.Context(), h, "sw-ci")
+	if err == nil || !strings.Contains(err.Error(), "group sw-ci already exists") {
+		t.Fatalf("err = %v, want a refusal naming the existing group", err)
+	}
+	if slices.ContainsFunc(f.calls, func(call string) bool { return strings.HasPrefix(call, "useradd") }) {
+		t.Fatalf("useradd ran despite the existing group: %q", f.calls)
 	}
 }
