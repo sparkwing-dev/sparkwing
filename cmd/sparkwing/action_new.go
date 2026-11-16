@@ -20,8 +20,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
-
-	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
 
 func runPipelineNew(inv clisurface.Invocation) error {
@@ -86,7 +84,7 @@ func runPipelineNew(inv clisurface.Invocation) error {
 }
 
 func printExamplesHint() {
-	list, err := templates.List()
+	list, err := exampleCatalog()
 	if err != nil || len(list) == 0 {
 		return
 	}

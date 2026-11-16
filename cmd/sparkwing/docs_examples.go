@@ -5,8 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	templates "github.com/sparkwing-dev/sparks-core/templates"
-
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -21,7 +19,7 @@ func searchExamples(query string) []exampleHit {
 	if len(tokens) == 0 {
 		return nil
 	}
-	list, err := templates.List()
+	list, err := exampleCatalog()
 	if err != nil {
 		return nil
 	}
@@ -30,7 +28,7 @@ func searchExamples(query string) []exampleHit {
 		m := t.Manifest
 		summary := strings.Join(strings.Fields(firstSentence(m.WhenToUse, m.Description)), " ")
 		name := strings.ToLower(m.Name)
-		hay := strings.ToLower(name + " " + m.WhenToUse + " " + m.Description + " " +
+		hay := strings.ToLower(name + " " + t.Language + " " + m.WhenToUse + " " + m.Description + " " +
 			m.Applicability.Category + " " + strings.Join(m.Applicability.Cloud, " "))
 
 		score, all := 0, true
