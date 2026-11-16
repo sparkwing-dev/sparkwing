@@ -283,7 +283,7 @@ func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.To
 	if installed != nil {
 		renderServiceUserEnrollment(enrollment, *installed)
 		fmt.Println("what a shared runner trusts and isolates: sparkwing docs read --topic shared-runners")
-		fmt.Printf("revoke this runner with:\n  sparkwing runners remove --profile %s --service-user %s\n", opsview.DisplayText(enrollment.profileName), opsview.DisplayText(enrollment.serviceUser))
+		fmt.Printf("revoke this runner with:\n  sparkwing runners delete --profile %s --service-user %s\n", opsview.DisplayText(enrollment.profileName), opsview.DisplayText(enrollment.serviceUser))
 		fmt.Printf("or revoke its token with:\n  sparkwing tokens revoke --profile %s --token %s\n", opsview.DisplayText(enrollment.profileName), token.Prefix)
 		return nil
 	}
@@ -299,7 +299,7 @@ func renderRunnerEnrollment(enrollment runnerEnrollment, token controllerwire.To
 		fmt.Printf("start the runner with argv: %q\n", service.Command)
 	}
 	fmt.Println("what this machine accepts and isolates: sparkwing docs read --topic threat-model")
-	fmt.Printf("revoke this runner with:\n  sparkwing runners remove --profile %s --config %s\n", opsview.DisplayText(enrollment.profileName), opsview.DisplayText(enrollment.path))
+	fmt.Printf("revoke this runner with:\n  sparkwing runners delete --profile %s --config %s\n", opsview.DisplayText(enrollment.profileName), opsview.DisplayText(enrollment.path))
 	fmt.Printf("or revoke its token with:\n  sparkwing tokens revoke --profile %s --token %s\n", opsview.DisplayText(enrollment.profileName), token.Prefix)
 	return nil
 }
@@ -356,7 +356,7 @@ func prepareRunnerRemoval(inv clisurface.Invocation) (runnerRemoval, *namedProfi
 	if err != nil {
 		return removal, nil, err
 	}
-	if err := requireController(prof, "runners remove"); err != nil {
+	if err := requireController(prof, "runners delete"); err != nil {
 		return removal, nil, err
 	}
 	selected, err := normalizeControllerURL(prof.ControllerURL())

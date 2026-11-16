@@ -99,7 +99,7 @@ func removeProfile(inv clisurface.Invocation, format string) error {
 	err = userconfig.Update(path, userconfig.Profiles, "profiles", &profiles, func(bool) error {
 		current, found := profiles[name]
 		if !found || current.Controller.URL != connection.Controller.URL || !sameProfileToken(current.Controller.Token, connection.Controller.Token) {
-			return fmt.Errorf("profiles remove: profile %q changed; reload it before removing it", name)
+			return fmt.Errorf("profiles delete: profile %q changed; reload it before removing it", name)
 		}
 		delete(profiles, name)
 		return nil
@@ -124,7 +124,7 @@ func revokeProfileToken(p *namedProfile) error {
 	}
 	prefix, err := tokenPrefix(raw)
 	if err != nil {
-		return fmt.Errorf("profiles remove: %w; use --keep-token to remove only the connection", err)
+		return fmt.Errorf("profiles delete: %w; use --keep-token to remove only the connection", err)
 	}
 	ctx := context.Background()
 	c, err := client.NewTokenManager(client.EngineOptions{URL: p.ControllerURL(), Bearer: func(context.Context) (string, error) { return raw, nil }}, false)
@@ -133,14 +133,14 @@ func revokeProfileToken(p *namedProfile) error {
 	}
 	found, err := c.ReadToken(ctx, prefix)
 	if err != nil {
-		return fmt.Errorf("profiles remove: cannot look up token %s: %w; use --keep-token to remove only the connection", prefix, err)
+		return fmt.Errorf("profiles delete: cannot look up token %s: %w; use --keep-token to remove only the connection", prefix, err)
 	}
 	// safety: removing a connection must not revoke a runner's machine credential.
 	if found.Kind != "member" {
-		return errors.New("profiles remove: the connection holds a machine credential; use --keep-token to remove only the connection")
+		return errors.New("profiles delete: the connection holds a machine credential; use --keep-token to remove only the connection")
 	}
 	if _, err := c.RevokeToken(ctx, prefix); err != nil {
-		return fmt.Errorf("profiles remove: cannot revoke token %s: %w; use --keep-token to remove only the connection", prefix, err)
+		return fmt.Errorf("profiles delete: cannot revoke token %s: %w; use --keep-token to remove only the connection", prefix, err)
 	}
 	return nil
 }

@@ -51,7 +51,7 @@ func runTeamDeleteCommand(ctx context.Context, inv clisurface.Invocation, out io
 	_, err = fmt.Fprintf(out, "Team %s is being deleted (%s). Within a few minutes the controller purges its runs, logs, artifacts, cache, secrets and other operational data.\n"+
 		"Kept: credit and payment records, the operator's audit log and the reserved slug. Copies in backups and old object versions age out on the deployment's schedule, on Sparkwing Cloud about 7 days later.\n"+
 		"See sparkwing docs read --topic auth, section Deleting a team or account.\n"+
-		"This profile's token is revoked; remove the profile with sparkwing profiles remove --profile %s --keep-token.\n",
+		"This profile's token is revoked; remove the profile with sparkwing profiles delete --profile %s --keep-token.\n",
 		deletion.Slug, deletion.State, inv.Value("profile"))
 	return err
 }

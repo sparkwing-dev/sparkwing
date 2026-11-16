@@ -319,12 +319,11 @@ func TestCommonGuessesSuggestTheRealCommandWithoutRunningIt(t *testing.T) {
 		{[]string{"pipeline", "show", "--pipeline", "build"}, []string{"sparkwing pipeline describe"}},
 		{[]string{"secrets", "remove", "--secret", "X"}, []string{"sparkwing secrets delete"}},
 		{[]string{"secrets", "add", "--secret", "X"}, []string{"sparkwing secrets set"}},
-		{[]string{"profiles", "delete", "--profile", "p"}, []string{"sparkwing profiles remove", ""}},
-		{[]string{"profiles", "rm", "--profile", "p"}, []string{"sparkwing profiles remove", "sparkwing profiles delete"}},
+		{[]string{"profiles", "rm", "--profile", "p"}, []string{"sparkwing profiles delete"}},
 		{[]string{"schedules", "delete", "--schedule", "s"}, []string{"sparkwing schedules uninstall"}},
 		{[]string{"teams"}, []string{"sparkwing team"}},
 		{[]string{"teams", "settings"}, []string{"sparkwing team settings"}},
-		{[]string{"logout"}, []string{"sparkwing profiles remove", "sparkwing profiles delete"}},
+		{[]string{"logout"}, []string{"sparkwing profiles delete"}},
 		{[]string{"tokens", "ls"}, []string{"sparkwing tokens list"}},
 	} {
 		_, err := Parse("sparkwing", tc.args)
@@ -357,5 +356,24 @@ func TestSameNamedFlagsKeepTheirOwnCommandsArity(t *testing.T) {
 	inv, err = Parse("sparkwing", []string{"run", "build", "--route", "local", "-o", "json"})
 	if err != nil || inv.Value("route") != "local" || inv.Value("output") != "json" {
 		t.Fatalf("run --route: %v %+v", err, inv.Flags)
+	}
+}
+
+func TestRemoveSuggestsDeleteWithoutRunningIt(t *testing.T) {
+	for _, tc := range []struct {
+		args  []string
+		group string
+	}{
+		{[]string{"profiles", "remove", "--profile", "prod"}, "sparkwing profiles"},
+		{[]string{"repos", "remove"}, "sparkwing repos"},
+		{[]string{"runners", "remove", "--profile", "prod"}, "sparkwing runners"},
+		{[]string{"pipeline", "sparks", "remove", "--spark", "lib"}, "sparkwing pipeline sparks"},
+	} {
+		_, err := Parse("sparkwing", tc.args)
+		want := "unknown command; did you mean " + tc.group + " delete? Run " + tc.group + " --help"
+		var usage *UsageError
+		if !errors.As(err, &usage) || usage.Message != want {
+			t.Errorf("%v: error %v, want %q", tc.args, err, want)
+		}
 	}
 }

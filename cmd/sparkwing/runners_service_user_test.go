@@ -102,7 +102,7 @@ func TestRunnersAddServiceUserHandsTheCredentialToThePrivilegedStep(t *testing.T
 	if slices.ContainsFunc(*f.calls, func(call string) bool { return strings.Contains(call, "--user") }) {
 		t.Fatalf("a user service was installed: %q", *f.calls)
 	}
-	for _, want := range []string{"runs as sw-ci", "/var/lib/sparkwing/sw-ci/.config/sparkwing/config.yaml", "--max-concurrent is the only cap", "/home/korey/.asdf/shims", "runners remove --profile prod --service-user sw-ci"} {
+	for _, want := range []string{"runs as sw-ci", "/var/lib/sparkwing/sw-ci/.config/sparkwing/config.yaml", "--max-concurrent is the only cap", "/home/korey/.asdf/shims", "runners delete --profile prod --service-user sw-ci"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output lacks %q:\n%s", want, out)
 		}

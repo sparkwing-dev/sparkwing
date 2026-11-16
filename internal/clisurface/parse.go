@@ -198,7 +198,7 @@ var commandSynonyms = map[string][]string{
 	"create":       {"create", "add", "new", "set"},
 	"pipelines":    {"pipeline"},
 	"teams":        {"team"},
-	"logout":       {"profiles delete", "profiles remove"},
+	"logout":       {"profiles delete"},
 	"secret":       {"secrets"},
 	"schedule":     {"schedules"},
 	"profile":      {"profiles"},
@@ -234,6 +234,9 @@ func suggestCommand(commands []Command, parent, word, next string) string {
 	}
 	slices.Sort(names)
 	slices.Sort(withNext)
+	if verb, ok := verbSynonyms[word]; ok && slices.Contains(names, verb) {
+		return parent + " " + verb
+	}
 	if suggestion := sparkwingruntime.SuggestClosest(word, withNext); suggestion != "" {
 		return parent + " " + suggestion
 	}

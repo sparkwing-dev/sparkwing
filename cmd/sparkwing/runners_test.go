@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -71,22 +72,25 @@ func newRunnersFixture(t *testing.T) *runnersFixture {
 
 func (f *runnersFixture) run(args []string) error {
 	ctx := context.Background()
-	args = append(args, "--output", "pretty")
-	switch args[0] {
-	case "add":
-		enrollment, _, err := prepareRunnerEnrollmentArgs(args[1:])
+	inv, err := clisurface.Parse("sparkwing", append(append([]string{"runners"}, args...), "--output", "pretty"))
+	if err != nil {
+		return err
+	}
+	switch inv.Command.Path {
+	case "sparkwing runners add":
+		enrollment, _, err := prepareRunnerEnrollment(inv)
 		if err != nil {
 			return err
 		}
 		return enrollRunner(ctx, f, enrollment)
-	case "remove":
-		removal, _, err := prepareRunnerRemovalArgs(args[1:])
+	case "sparkwing runners delete":
+		removal, _, err := prepareRunnerRemoval(inv)
 		if err != nil {
 			return err
 		}
 		return removeRunner(ctx, f, removal)
 	}
-	return errors.New("unexpected command")
+	return errors.New("unexpected command " + inv.Command.Path)
 }
 
 func (f *runnersFixture) ListTokens(context.Context, controllerwire.TokenQuery) (controllerwire.Tokens, error) {
@@ -234,7 +238,7 @@ func TestRunnersAddMintsAScopedTokenAndWritesTheClaimModeConfig(t *testing.T) {
 		t.Errorf("service calls = %v, want %v", *f.calls, wantCalls)
 	}
 	for _, want := range []string{
-		minted.Prefix, "wrote the runner section of " + f.config, "runners remove --profile prod",
+		minted.Prefix, "wrote the runner section of " + f.config, "runners delete --profile prod",
 		"docs read --topic threat-model",
 	} {
 		if !strings.Contains(out, want) {
@@ -338,8 +342,8 @@ func TestRunnersRemoveStopsTheServiceThenRevokesTheToken(t *testing.T) {
 	*f.calls = nil
 
 	out := captureStdout(t, func() {
-		if err := f.run([]string{"remove", "--profile", "prod", "--config", f.config}); err != nil {
-			t.Fatalf("runners remove: %v", err)
+		if err := f.run([]string{"delete", "--profile", "prod", "--config", f.config}); err != nil {
+			t.Fatalf("runners delete: %v", err)
 		}
 	})
 
@@ -348,7 +352,7 @@ func TestRunnersRemoveStopsTheServiceThenRevokesTheToken(t *testing.T) {
 		t.Fatalf("listed %d runner tokens, want 1", len(tokens))
 	}
 	if tokens[0].RevokedAt == nil {
-		t.Error("runners remove left the token live")
+		t.Error("runners delete left the token live")
 	}
 	if !slices.Contains(*f.calls, "systemctl --user disable --now sparkwing-runner.service") {
 		t.Errorf("service calls = %v, want the unit disabled", *f.calls)
@@ -360,9 +364,9 @@ func TestRunnersRemoveStopsTheServiceThenRevokesTheToken(t *testing.T) {
 
 func TestRunnersRemoveWithoutAConfigSaysSo(t *testing.T) {
 	f := newRunnersFixture(t)
-	err := f.run([]string{"remove", "--profile", "prod", "--config", f.config})
+	err := f.run([]string{"delete", "--profile", "prod", "--config", f.config})
 	if err == nil || !strings.Contains(err.Error(), f.config) {
-		t.Fatalf("runners remove with no config = %v, want an error naming the path", err)
+		t.Fatalf("runners delete with no config = %v, want an error naming the path", err)
 	}
 }
 
@@ -548,9 +552,9 @@ func TestRunnersRemoveRefusesANonRunnerToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := f.run([]string{"remove", "--profile", "prod", "--config", f.config})
+	err := f.run([]string{"delete", "--profile", "prod", "--config", f.config})
 	if err == nil {
-		t.Fatal("runners remove revoked a member token inferred from principal text")
+		t.Fatal("runners delete revoked a member token inferred from principal text")
 	}
 	for _, want := range []string{"member", "deploy-bot", "not a runner token"} {
 		if !strings.Contains(err.Error(), want) {
@@ -681,9 +685,9 @@ func TestRunnersRemoveRejectsAnotherNameOrControllerBeforeStopping(t *testing.T)
 					t.Fatal(err)
 				}
 			})
-			args := []string{"remove", "--profile", "prod", "--runner", "other", "--config", f.config}
+			args := []string{"delete", "--profile", "prod", "--runner", "other", "--config", f.config}
 			if scenario == "controller" {
-				args = []string{"remove", "--profile", "prod", "--config", f.config}
+				args = []string{"delete", "--profile", "prod", "--config", f.config}
 				body, err := os.ReadFile(f.config)
 				if err != nil {
 					t.Fatal(err)
@@ -864,7 +868,7 @@ func TestRunnersRemovalStopsBeforeRevocation(t *testing.T) {
 	})
 	f.timeline = nil
 	captureStdout(t, func() {
-		if err := f.run([]string{"remove", "--profile", "prod", "--config", f.config}); err != nil {
+		if err := f.run([]string{"delete", "--profile", "prod", "--config", f.config}); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -885,7 +889,7 @@ func TestRunnersRemovalKeepsCredentialLiveWhenStoppingFails(t *testing.T) {
 	f.failExec["systemctl --user disable"] = "service cannot stop"
 	f.timeline = nil
 	var runErr error
-	out := captureStdout(t, func() { runErr = f.run([]string{"remove", "--profile", "prod", "--config", f.config}) })
+	out := captureStdout(t, func() { runErr = f.run([]string{"delete", "--profile", "prod", "--config", f.config}) })
 	if runErr == nil || out != "" || slices.Contains(f.timeline, "revoke") || f.tokens[0].RevokedAt != nil {
 		t.Fatalf("failed stop: %q %v %v %+v", out, runErr, f.timeline, f.tokens)
 	}
@@ -900,7 +904,7 @@ func TestRunnersRemovalDoesNotReportSuccessWhenRevocationFails(t *testing.T) {
 	})
 	f.revokeErr = &apierr.Error{Code: hosterr.Forbidden, Message: "revocation refused"}
 	var runErr error
-	out := captureStdout(t, func() { runErr = f.run([]string{"remove", "--profile", "prod", "--config", f.config, "--no-service"}) })
+	out := captureStdout(t, func() { runErr = f.run([]string{"delete", "--profile", "prod", "--config", f.config, "--no-service"}) })
 	if !errors.Is(runErr, f.revokeErr) || out != "" || f.tokens[0].RevokedAt != nil {
 		t.Fatalf("failed revoke: %q %v %+v", out, runErr, f.tokens)
 	}

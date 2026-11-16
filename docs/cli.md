@@ -30,7 +30,7 @@ Interactive debug sessions and compiler/install diagnostic streams retain their
 terminal behavior.
 
 Repository registration uses `repos add --checkout PATH` and
-`repos remove --checkout PATH`. Their JSON receipts include the action,
+`repos delete --checkout PATH`. Their JSON receipts include the action,
 absolute path and affected count. `version hold` and
 `pipeline sparks lint|update` also honor the selected output format.
 
@@ -167,7 +167,7 @@ indexed in [cli-reference.md](cli-reference.md):
 | `run` | Run a pipeline locally: `sparkwing run <pipeline>` |
 | `schedules` | Arm and manage local or controller schedules |
 | `runs` | Inspect and manage runs: list / status / logs / stats / retry / cancel / prune, plus `approvals` and `annotations` |
-| `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update / add / remove / prune |
+| `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update / add / delete / prune |
 | `queue` | `list` reads admission or a selected concurrency group. `priority` changes a queued run's rank. See [Queue views](diagnosing-admission.md#queue-views). |
 | `cache` | The compiled pipeline binary cache and the docs cache: info / prune / explain / warm |
 | `daemon` | The local controller: status / events / restart / stop |

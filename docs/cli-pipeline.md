@@ -204,7 +204,7 @@ Manage sparks libraries declared in .sparkwing/sparkwing.yaml
 - `inflate` -- Copy a spark library's source into this repo so you can edit it
 - `lint` -- Validate a spark.json library manifest
 - `list` -- Show declared sparks libraries and their resolved versions
-- `remove` -- Remove a library from the sparks: block
+- `delete` -- Remove a library from the sparks: block
 - `update` -- Re-resolve every declared library
 
 ### Flags
@@ -246,6 +246,20 @@ List the blocks a spark library offers
 | `--help-all` | Include uncommon flags in command help. |
 | `--library MODULE` | Full Go module path of the library whose blocks to list, sparks-core by default, at the version the project declares or latest. |
 | `--path DIR` | Path to select. |
+
+## `sparkwing pipeline sparks delete`
+
+Remove a library from the sparks: block
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--spark NAME` | Name or source module path of the library to remove from the project's spark list. (required) |
 
 ## `sparkwing pipeline sparks inflate`
 
@@ -290,20 +304,6 @@ Show declared sparks libraries and their resolved versions
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--no-resolve` | Show declared versions only, skipping the module lookup that resolves each to a concrete version. |
-
-## `sparkwing pipeline sparks remove`
-
-Remove a library from the sparks: block
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--spark NAME` | Name or source module path of the library to remove from the project's spark list. (required) |
 
 ## `sparkwing pipeline sparks update`
 

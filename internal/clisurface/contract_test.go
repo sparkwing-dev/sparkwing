@@ -62,7 +62,7 @@ func TestRegistryRejectsGrammarDrift(t *testing.T) {
 }
 
 func TestFinalSurfaceHasNoRemovedCommands(t *testing.T) {
-	cuts := []string{"sparkwing cluster", "sparkwing cloud", "sparkwing configure", "sparkwing serve", "sparkwing crons", "sparkwing runs consumer", "sparkwing runs bounce", "sparkwing runs reattach", "sparkwing debug rerun", "sparkwing debug run", "sparkwing debug release", "sparkwing dashboard restart", "sparkwing dashboard start", "sparkwing dashboard stop", "sparkwing dashboard install", "sparkwing dashboard uninstall", "sparkwing pipeline sparks resolve", "sparkwing pipeline sparks warmup", "sparkwing-runner agent", "sparkwing-runner runner", "sparkwing-runner wingd", "sparkwing wingd supervise"}
+	cuts := []string{"sparkwing cluster", "sparkwing cloud", "sparkwing configure", "sparkwing serve", "sparkwing crons", "sparkwing runs consumer", "sparkwing runs bounce", "sparkwing runs reattach", "sparkwing debug rerun", "sparkwing debug run", "sparkwing debug release", "sparkwing dashboard restart", "sparkwing dashboard start", "sparkwing dashboard stop", "sparkwing dashboard install", "sparkwing dashboard uninstall", "sparkwing pipeline sparks resolve", "sparkwing pipeline sparks warmup", "sparkwing-runner agent", "sparkwing-runner runner", "sparkwing-runner wingd", "sparkwing wingd supervise", "sparkwing pipeline sparks remove", "sparkwing profiles remove", "sparkwing repos remove", "sparkwing runners remove"}
 	for _, c := range Registry() {
 		for _, cut := range cuts {
 			if c.Path == cut || strings.HasPrefix(c.Path, cut+" ") {

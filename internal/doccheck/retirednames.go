@@ -57,6 +57,10 @@ var retiredNames = []struct{ name, use string }{
 	{"--grace-seconds", "prepaid credits; there is no grace window"},
 	{"--max-charge-seconds", "prepaid credits; there is no post-paid charge"},
 	{"trigger_claim_tokens", "awarded claim capabilities (swk_/swn_)"},
+	{"sparks remove", "sparkwing pipeline sparks delete"},
+	{"profiles remove", "sparkwing profiles delete"},
+	{"repos remove", "sparkwing repos delete"},
+	{"runners remove", "sparkwing runners delete"},
 }
 
 var retiredExtraGlobs = []string{

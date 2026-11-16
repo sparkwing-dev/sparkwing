@@ -255,7 +255,7 @@ func Registry() []Command {
 		{Path: "sparkwing pipeline sparks list", Flags: []Flag{
 			{Name: "no-resolve"},
 		}},
-		{Path: "sparkwing pipeline sparks remove", Flags: []Flag{
+		{Path: "sparkwing pipeline sparks delete", Flags: []Flag{
 			{Name: "spark", Argument: "NAME", Required: true},
 		}},
 		{Path: "sparkwing pipeline sparks update", Flags: []Flag{}},
@@ -352,7 +352,7 @@ func Registry() []Command {
 			{Name: "no-probe"},
 		}},
 		{Path: "sparkwing profiles list", Flags: []Flag{}},
-		{Path: "sparkwing profiles remove", Flags: []Flag{
+		{Path: "sparkwing profiles delete", Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "keep-token"},
 		}},
@@ -382,7 +382,7 @@ func Registry() []Command {
 			{Name: "pipelines"},
 		}},
 		{Path: "sparkwing repos prune", Flags: []Flag{}},
-		{Path: "sparkwing repos remove", Rules: []string{"--checkout is required; registry basename fallback is refused."}, Flags: []Flag{}},
+		{Path: "sparkwing repos delete", Rules: []string{"--checkout is required; registry basename fallback is refused."}, Flags: []Flag{}},
 		{Path: "sparkwing repos update", Rules: []string{"Apply by default; --dry-run previews. --all-repos requires --yes for bulk changes."}, Flags: []Flag{
 			{Name: "version", Argument: "TAG"},
 			{Name: "verify"},
@@ -452,7 +452,7 @@ func Registry() []Command {
 		{Path: "sparkwing runners install-service", Platforms: []string{"linux", "darwin"}, Rules: []string{"The privileged step of sparkwing runners add --service-user, which runs it through sudo with the enrollment as JSON on stdin. Requires root. Creates or reuses the OS user named by --service-user, writes the runner section and credential as that user into its own home, copies sparkwing-runner into its ~/.local/bin, records the runner name, controller and token prefix in a root-only directory beside the account homes, and installs a systemd system service (User=, ProtectHome=yes, NoNewPrivileges=yes, PrivateTmp=yes) or a launchd daemon (UserName) running as it. The service PATH leaves out entries under /home, /Users and /root. JSON reports the account, config path, service file and left-out PATH entries."}, Flags: []Flag{
 			{Name: "service-user", Argument: "USER", Required: true, Meaning: "Dedicated OS user the runner service runs as."},
 		}},
-		{Path: "sparkwing runners uninstall-service", Platforms: []string{"linux", "darwin"}, Rules: []string{"The privileged step of sparkwing runners remove --service-user, which runs it through sudo and then revokes the token it reports. Requires root. Stops and removes the system service of the OS user named by --service-user first, then reports the runner name, controller and token prefix from the root-owned enrollment record runners install-service wrote, falling back to that user's config. When neither names the token, it says the service is stopped and how to find and revoke the token. The OS user and its home remain. JSON reports the account, home, runner, controller and token prefix."}, Flags: []Flag{
+		{Path: "sparkwing runners uninstall-service", Platforms: []string{"linux", "darwin"}, Rules: []string{"The privileged step of sparkwing runners delete --service-user, which runs it through sudo and then revokes the token it reports. Requires root. Stops and removes the system service of the OS user named by --service-user first, then reports the runner name, controller and token prefix from the root-owned enrollment record runners install-service wrote, falling back to that user's config. When neither names the token, it says the service is stopped and how to find and revoke the token. The OS user and its home remain. JSON reports the account, home, runner, controller and token prefix."}, Flags: []Flag{
 			{Name: "service-user", Argument: "USER", Required: true, Meaning: "Dedicated OS user the runner service runs as."},
 		}},
 		{Path: "sparkwing runners list", Authority: teamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. The local controller lists this machine as one local runner named after its host, with the runner.labels the daemon read at start and a last_seen of the read time. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
@@ -465,7 +465,7 @@ func Registry() []Command {
 		{Path: "sparkwing runners resume", Rules: []string{"Resume the runner enrolled on this machine after runners pause; it claims work again on its next poll, without a restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
 		}},
-		{Path: "sparkwing runners remove", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. With --service-user, stop the system service through sudo, then check the controller and runner name it reports before revoking, and print how to delete the OS user. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners delete", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. With --service-user, stop the system service through sudo, then check the controller and runner name it reports before revoking, and print how to delete the OS user. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},

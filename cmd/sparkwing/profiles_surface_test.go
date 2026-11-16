@@ -20,7 +20,7 @@ func TestProfilesSurfaceMutationOutputs(t *testing.T) {
 				{"set", "--profile", "prod", "--controller", "https://other.example"},
 				{"show", "--profile", "prod"},
 				{"list"},
-				{"remove", "--profile", "prod", "--keep-token"},
+				{"delete", "--profile", "prod", "--keep-token"},
 			} {
 				out := captureStdout(t, func() {
 					if err := runProfilesArgs(append(args, "-o", format)); err != nil {
@@ -57,7 +57,7 @@ func TestProfilesSurfaceRejectsOldFlagsBeforeWriting(t *testing.T) {
 		{"show"},
 		{"show", "--profile", "prod", "--show-token"},
 		{"set", "--name", "prod"},
-		{"remove", "--name", "prod"},
+		{"delete", "--name", "prod"},
 		{"add", "--controller", "https://api.example", "--no-probe", "-o", "table"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {

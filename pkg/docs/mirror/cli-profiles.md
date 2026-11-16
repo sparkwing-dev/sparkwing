@@ -12,7 +12,7 @@ Manage controller connection profiles
 
 - `add` -- Add a controller connection profile
 - `list` -- Print every registered profile
-- `remove` -- Remove a controller connection profile
+- `delete` -- Remove a controller connection profile
 - `set` -- Update a profile's controller URL or token
 - `show` -- Print one controller connection profile
 
@@ -50,20 +50,7 @@ Add a controller connection profile
 sparkwing profiles add --controller https://ci.example.com --profile prod --token-stdin
 ```
 
-## `sparkwing profiles list`
-
-Print every registered profile
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-
-## `sparkwing profiles remove`
+## `sparkwing profiles delete`
 
 Remove a controller connection profile
 
@@ -77,6 +64,19 @@ Remove a controller connection profile
 | `--help-all` | Include uncommon flags in command help. |
 | `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
 | `--keep-token` | Remove only the local connection, without revoking its token at the controller. |
+
+## `sparkwing profiles list`
+
+Print every registered profile
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
 
 ## `sparkwing profiles set`
 
