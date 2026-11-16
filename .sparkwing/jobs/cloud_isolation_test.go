@@ -439,6 +439,58 @@ func TestEvaluateIsolationPassesACompleteRefusedRun(t *testing.T) {
 	}
 }
 
+// Placement trusts controller-written owner metadata only because the kube API grade shows tenant
+// jobs cannot create pods to forge it, so a kube API probe that failed, proved nothing or never
+// reported leaves placement untrusted: C2 fails and the report header says why.
+func TestPlacementTrustNeedsThePassingKubeAPIGrade(t *testing.T) {
+	runs, nodes := evalFixture()
+	report := isolationReport(isoArgs(), runs, evaluateIsolation(isoJobNS, runs, nodes, liveAnchors()), nil)
+	if !strings.Contains(report, "That trust holds only because the kube API grade passed in every run here") {
+		t.Fatalf("passing report header = %.500s; want the trust assumption stated", report)
+	}
+	kubeAPI := func(x isolationprobe.Result) bool { return x.Item == "C7" && x.Probe == "kube API public endpoint" }
+	for name, c := range map[string]struct {
+		edit  func([]isolationRun)
+		items []string
+	}{
+		"a kube API probe that answered": {func(r []isolationRun) {
+			i := slices.IndexFunc(r[1].Results, kubeAPI)
+			r[1].Results[i].Verdict, r[1].Results[i].Outcome = isolationprobe.Breach, "connected; http-201"
+			resummarize(&r[1])
+		}, []string{"C2", "C7"}},
+		"a kube API probe that proved nothing": {func(r []isolationRun) {
+			i := slices.IndexFunc(r[0].Results, kubeAPI)
+			r[0].Results[i].Verdict = isolationprobe.Inconclusive
+			resummarize(&r[0])
+		}, []string{"C2", "C7"}},
+		"a kube API probe never reported": {func(r []isolationRun) {
+			dropResult(&r[2], kubeAPI)
+		}, []string{"C2", "C7"}},
+		"a run that never probed": {func(r []isolationRun) {
+			r[2].RunID, r[2].Results, r[2].Summary, r[2].Pods = "", nil, nil, nil
+		}, []string{"C2", "C13"}},
+	} {
+		runs, nodes := evalFixture()
+		c.edit(runs)
+		e := evaluateIsolation(isoJobNS, runs, nodes, liveAnchors())
+		if strings.Join(failedItems(e), ",") != strings.Join(c.items, ",") {
+			t.Errorf("%s: failed %v, want %v", name, failedItems(e), c.items)
+		}
+		var c2 []string
+		for _, it := range e.Items {
+			if it.Item == "C2" {
+				c2 = it.Failures
+			}
+		}
+		if len(c2) != 1 || !strings.HasPrefix(c2[0], "placement is untrusted: ") {
+			t.Errorf("%s: C2 failures = %q, want only the untrusted placement", name, c2)
+		}
+		if report := isolationReport(isoArgs(), runs, e, nil); !strings.Contains(report, "**Placement is UNTRUSTED:** ") {
+			t.Errorf("%s: report header does not mark placement untrusted: %.500s", name, report)
+		}
+	}
+}
+
 func resummarize(r *isolationRun) {
 	r.Summary = []isolationprobe.Summary{isolationprobe.Summarize(r.Results)}
 }
@@ -469,7 +521,7 @@ func TestEvaluateIsolationFailsTheItemEachShortfallUndermines(t *testing.T) {
 		}, []string{"C10"}},
 		"a missing context": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
 			dropResult(&r[2], func(x isolationprobe.Result) bool { return x.Context == isolationprobe.ContextPrivileged })
-		}, []string{"C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12"}},
+		}, []string{"C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9", "C10", "C11", "C12"}},
 		"the service-account token check": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
 			dropResult(&r[0], func(x isolationprobe.Result) bool { return x.Probe == "credential file token" })
 		}, []string{"C3"}},
@@ -552,7 +604,7 @@ func TestEvaluateIsolationFailsTheItemEachShortfallUndermines(t *testing.T) {
 		}, []string{"C13"}},
 		"a run that never ran": {func(r []isolationRun, _ map[string]isolationNode, _ map[string]bool) {
 			r[2].RunID, r[2].Results, r[2].Summary, r[2].Pods = "", nil, nil, nil
-		}, []string{"C13"}},
+		}, []string{"C2", "C13"}},
 		"no NodeClaim": {func(_ []isolationRun, n map[string]isolationNode, _ map[string]bool) {
 			node := n["node-a1"]
 			node.Claimed = false
@@ -1147,7 +1199,8 @@ func TestConformRunsThreePhasesAndKeepsTheEvidence(t *testing.T) {
 		t.Fatalf("triggered %v, cancelled %v", fake.triggered, fake.cancelled)
 	}
 	report, err := os.ReadFile(filepath.Join(evidence, "REPORT.md"))
-	if err != nil || !strings.HasPrefix(string(report), "# Cloud isolation conformance: PASS") || !strings.Contains(string(report), "## Gaps (not-probed)") {
+	if err != nil || !strings.HasPrefix(string(report), "# Cloud isolation conformance: PASS") || !strings.Contains(string(report), "## Gaps (not-probed)") ||
+		!strings.Contains(string(report), "trust holds only because the kube API grade passed") {
 		t.Fatalf("report = %.300s, %v", report, err)
 	}
 	for _, name := range []string{

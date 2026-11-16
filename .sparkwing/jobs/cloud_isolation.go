@@ -946,17 +946,21 @@ func (l *placementLog) usedNodes() []string {
 
 // safety: an occupant counts as a DaemonSet's only when its controller is a DaemonSet the cluster
 // lists in the pod's namespace, and as a run's only when its controller is one of that run's Jobs,
-// both by UID. Labels, annotations and claimed owner kinds never suffice, so a capacity placeholder,
-// which the conformance run cannot authenticate, fails like any other occupant.
+// both by UID. Anyone able to create pods could copy a listed UID, so this trusts controller-written
+// metadata, which kubeAPIProof makes the run earn; a capacity placeholder is never exempt.
 func (l *placementLog) nodePod(p kubePod, jobNamespace string) nodePod {
 	np := nodePod{Namespace: p.Metadata.Namespace, Name: p.Metadata.Name}
 	owner, owned := p.Metadata.controller()
 	switch {
 	case !owned:
 	case owner.Kind == "DaemonSet":
+		// bug: a pod copying a listed DaemonSet's UID is exempt whatever it runs; its image and
+		// command are not compared with the DaemonSet's template.
 		ns, known := l.daemonSets[owner.UID]
 		np.DaemonSet = known && ns == p.Metadata.Namespace
 	case owner.Kind == "Job" && p.Metadata.Namespace == jobNamespace:
+		// bug: a pod copying a run's Job UID without the Job label is exempt here but skipped by
+		// podsOfRun, so its spec is never checked; membership is decided in two places.
 		np.Run = l.jobRun[owner.UID]
 	}
 	return np
@@ -1380,6 +1384,14 @@ func isolationReport(args CloudIsolationArgs, runs []isolationRun, eval isolatio
 		limit = d.String()
 	}
 	fmt.Fprintf(&b, "Controller %s, job namespace %s, teams %s and %s, anchor job limit %s. Every result is in results.ndjson.\n\n", args.ControllerURL, args.JobNamespace, args.TeamA, args.TeamB, limit)
+	if trusted, reason := kubeAPIProof(runs); trusted {
+		b.WriteString("Placement trusts the owner references that cluster controllers write on each pod. That trust holds only " +
+			"because the kube API grade passed in every run here, the dry-run Job included, which shows no tenant job could " +
+			"create or rewrite a pod to forge them.\n\n")
+	} else {
+		fmt.Fprintf(&b, "**Placement is UNTRUSTED:** %s. The placement checks trust owner references that cluster controllers "+
+			"write, and that trust holds only when the kube API grade passes in the same run, so C2 fails.\n\n", reason)
+	}
 	b.WriteString("| Run | Team | Role | Run ID | Status | Probe pod | Node | Pod IP | Node IP |\n|---|---|---|---|---|---|---|---|---|\n")
 	for _, r := range runs {
 		pod := probePod(r)

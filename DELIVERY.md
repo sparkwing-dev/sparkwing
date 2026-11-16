@@ -1468,11 +1468,20 @@ these records.
 Conformance needs tested nodes without capacity placeholders. Only two kinds of
 pod may share a tested node. One is a pod whose controller is a DaemonSet the
 cluster lists. The other is a pod whose controller is one of the run's own Jobs.
-Both are matched by UID. A label, an annotation or a claimed owner kind never
+Both are matched by UID. A label, an annotation or an owner kind alone never
 counts. A capacity placeholder fails the run even when it belongs to the run
 that owns the node, because the conformance run cannot prove who created it.
 The launcher creates placeholders only while a job waits for a node. If a
-report names one, rerun once the run's nodes are free of them. Every result the plan owed must be present, from one manifest
+report names one, rerun once the run's nodes are free of them.
+
+Placement rests on one assumption, which the report header states. Pod metadata
+cannot be authenticated from inside the cluster. Anyone able to create pods
+through the kube API could copy a real Job's or DaemonSet's UID into one, so
+the placement checks trust the owner references that cluster controllers
+write. That trust is sound only because the kube API grade passes in the same
+run: every run's kube API probes, the dry-run Job included, must report and
+pass, which shows tenant jobs cannot create pods. If any of those probes fails
+or did not run, the report marks placement untrusted and the run fails C2. Every result the plan owed must be present, from one manifest
 shared by the probe and the driver. `REPORT.md` counts the verdicts by
 checklist item, lists each failure, and lists every check that was not probed.
 `results.ndjson` holds every result.

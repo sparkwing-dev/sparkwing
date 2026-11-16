@@ -116,7 +116,46 @@ func evaluateIsolation(namespace string, runs []isolationRun, nodes map[string]i
 		}
 	}
 	placementFindings(namespace, runs, nodes, true, add)
+	if trusted, reason := kubeAPIProof(runs); !trusted {
+		add("C2", "placement is untrusted: %s", reason)
+	}
 	return verdict(fails)
+}
+
+// safety: pod metadata cannot be authenticated from inside the cluster, so the placement checks
+// trust the owner references cluster controllers write. Forging one takes the power to create pods
+// through the kube API, which the kube API grade, the dry-run Job included, shows tenant jobs lack.
+// That trust holds only when every run reported every kube API probe its plan owed, all passing.
+func kubeAPIProof(runs []isolationRun) (bool, string) {
+	for _, r := range runs {
+		if r.RunID == "" || len(r.Ready) == 0 {
+			return false, r.Label + " did not run its kube API probes"
+		}
+		verdicts := map[isolationprobe.Key][]isolationprobe.Verdict{}
+		for _, res := range r.Results {
+			verdicts[res.Key()] = append(verdicts[res.Key()], res.Verdict)
+		}
+		owed := 0
+		for _, k := range isolationprobe.Expected(r.Plan, r.Ready[0], r.RunID) {
+			if k.Item != "C7" {
+				continue
+			}
+			owed++
+			got := verdicts[k]
+			if len(got) == 0 {
+				return false, fmt.Sprintf("%s %s never reported kube API probe %q %s", r.Label, k.Context, k.Probe, k.Target)
+			}
+			for _, v := range got {
+				if v != isolationprobe.Pass {
+					return false, fmt.Sprintf("%s %s kube API probe %q %s did not pass (%s)", r.Label, k.Context, k.Probe, k.Target, v)
+				}
+			}
+		}
+		if owed == 0 {
+			return false, r.Label + " owed no kube API probe"
+		}
+	}
+	return true, ""
 }
 
 func verdict(fails map[string][]string) isolationEvaluation {
