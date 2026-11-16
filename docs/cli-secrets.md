@@ -42,7 +42,7 @@ Delete the exact pipeline or unscoped row. A pipeline row is named by --repo and
 | `--secret NAME` | Secret name. (required) |
 | `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
 | `--pipeline NAME` | Pipeline name. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ### Examples
 
@@ -68,7 +68,7 @@ Read a value stored with --variable. A masked secret is readable only by a pipel
 | `--secret NAME` | Secret name. (required) |
 | `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
 | `--pipeline NAME` | Pipeline name. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ### Examples
 
@@ -94,7 +94,7 @@ List metadata without values, including each pipeline row's repository and pipel
 | `--search PATTERN` | Text to match against record names and summaries; log text is not searched. |
 | `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
 | `--pipeline NAME` | Pipeline name. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ### Examples
 
@@ -117,7 +117,7 @@ Retain rotated counts and skipped row names/pipelines. The previous key is still
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing secrets set`
 
@@ -146,7 +146,7 @@ Local unscoped writes are shared with local pipelines. Controller writes preserv
 | `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
 | `--pipeline NAME` | Pipeline name. |
 | `--shared` | Store a team-wide secret that every pipeline of every repository in the team reads, including uploaded, local and --runner here runs. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 | `--only-on POOL` | Release the secret only to jobs placed on this reserved runner pool, never to here machines; omitted when replacing a secret, its existing pool restriction is kept. |
 
 ### Examples

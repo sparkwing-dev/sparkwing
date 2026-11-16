@@ -257,9 +257,6 @@ func runSparkwing(args []string) (result error) {
 		help.ShowAll = inv.Bool("help-all")
 		return writeCommandHelp(help, os.Stdout, invocationOutput(inv))
 	}
-	if err := applyConfiguredProfile(&inv); err != nil {
-		return err
-	}
 
 	replayDirectory := ""
 	if checkout := inv.Value("checkout"); checkout != "" {

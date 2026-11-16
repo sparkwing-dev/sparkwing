@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 )
 
 func setProfileCmdFixture(t *testing.T, body string) {
@@ -105,76 +107,39 @@ func TestControllerURLDiagnosticNamesInputAndRepair(t *testing.T) {
 	}
 }
 
-func TestProfileDefaultSwitchControlsCLIAndKeepsLocalHelpersLocal(t *testing.T) {
-	firstCalls, secondCalls := 0, 0
-	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		firstCalls++
+func TestOnlyAnExplicitProfileReachesASavedController(t *testing.T) {
+	calls := 0
+	far := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
 		json.NewEncoder(w).Encode(controllerwire.RunPage{Runs: []controllerwire.RunDetail{}})
 	}))
-	defer first.Close()
-	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		secondCalls++
-		json.NewEncoder(w).Encode(controllerwire.RunPage{Runs: []controllerwire.RunDetail{}})
-	}))
-	defer second.Close()
+	defer far.Close()
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	setProfileCmdFixture(t, fmt.Sprintf("profiles:\n  first: {controller: {url: %s}}\n  second: {controller: {url: %s}}\n", first.URL, second.URL))
-	for _, args := range [][]string{
-		{"profiles", "set", "--profile", "first", "--default"},
-		{"runs", "list"},
-		{"profiles", "set", "--profile", "second", "--default"},
-		{"runs", "list"},
-		{"runs", "list", "--profile", "first"},
-	} {
-		var commandErr error
-		captureStdout(t, func() { commandErr = runSparkwing(args) })
-		if commandErr != nil {
-			t.Fatalf("%v: %v", args, commandErr)
-		}
-	}
-	if firstCalls != 2 || secondCalls != 1 {
-		t.Fatalf("profile selection calls = %d, %d", firstCalls, secondCalls)
-	}
-	profiles, _, err := loadProfiles()
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err := json.Marshal(profiles)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), `"default":true`) {
-		t.Fatalf("default not saved: %s", raw)
-	}
-	if profiles["first"].Default || !profiles["second"].Default {
-		t.Fatalf("default did not switch: %s", raw)
-	}
-	for _, args := range [][]string{{"runs", "list", "--profile="}, {"run", "hello"}, {"schedules", "install", "--all-repos"}} {
-		inv, err := clisurface.Parse("sparkwing", args)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := applyConfiguredProfile(&inv); err != nil || inv.Value("profile") != "" {
-			t.Fatalf("saved default changed a local invocation: %+v: %v", inv, err)
-		}
-	}
-
-	local, err := resolveProfileFlag("")
-	if err != nil || local != nil {
-		t.Fatalf("local helper selected a remote default: %+v: %v", local, err)
-	}
+	t.Setenv("SPARKWING_PROFILE", "far")
+	setProfileCmdFixture(t, fmt.Sprintf("profiles:\n  far: {controller: {url: %s}}\n", far.URL))
 	captureStdout(t, func() {
-		if err := runSparkwing([]string{"profiles", "set", "--profile", "second", "--default=false"}); err != nil {
+		if err := runSparkwing([]string{"runs", "list", "--profile", "far"}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	for _, args := range [][]string{{"runs", "list", "--profile="}, {"run", "hello"}, {"runs", "list"}} {
-		inv, err := clisurface.Parse("sparkwing", args)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := applyConfiguredProfile(&inv); err != nil || inv.Value("profile") != "" {
-			t.Fatalf("local selection changed: %+v: %v", inv, err)
-		}
+	if calls == 0 {
+		t.Fatal("--profile far did not reach the saved controller")
+	}
+	local, err := resolveProfileFlag("")
+	if err != nil || local != nil {
+		t.Fatalf("an empty --profile resolved a remote: %+v %v", local, err)
+	}
+}
+
+func TestSavedDefaultProfileIsGone(t *testing.T) {
+	setProfileCmdFixture(t, "profiles:\n  prod: {controller: {url: https://ci.example.com}}\n")
+	if _, err := clisurface.Parse("sparkwing", []string{"profiles", "set", "--profile", "prod", "--default"}); err == nil {
+		t.Fatal("profiles set accepted the removed --default")
+	}
+	setProfileCmdFixture(t, "profiles:\n  prod: {controller: {url: https://ci.example.com}, default: true}\n")
+	err := runSparkwing([]string{"runs", "list", "-o", "json"})
+	var field *userconfig.FieldError
+	if !errors.As(err, &field) || field.Key != "profiles.prod.default" {
+		t.Fatalf("a saved default was accepted: %v", err)
 	}
 }

@@ -652,8 +652,8 @@ Explicit Cloud routing never falls back to local compute, including on a
 connection or upload failure. It selects Cloud immediately, without the machine
 `prefer` holds or personal runners. Cloud credits and team admission limits apply.
 The machine's burst `overflow_minutes` allowance applies to overflow, rather than
-these directly selected Cloud jobs. `--profile` requires `--sw-route cloud`.
-Omit it to use machine `run.routing.profile`. `--sw-route local` selects local
+these directly selected Cloud jobs. `--profile` requires `--sw-route cloud` or
+`--sw-route burst`. Omit it to use machine `run.routing.profile`. `--sw-route local` selects local
 execution for one invocation. Repository `run.route: local` still forbids Cloud.
 
 Source-file approval, secret scanning, requester secret selection and masking
@@ -678,15 +678,16 @@ a local pipeline that invokes the remote checks and waits for their result.
 
 ### Machine overflow
 
-Configure a Cloud connection and opt in through machine `run.routing`.
-The machine file selects overflow preferences, local secret sources, overflow
-limit and untracked source files. Repository configuration
+Configure a Cloud connection and the preferences in machine `run.routing`, then
+pass `--sw-route burst` on each run that may leave this machine. A run without
+`--sw-route` stays local whatever the machine file says, so a script or hook shows
+where its work can go. The machine file selects overflow preferences, local
+secret sources, overflow limit and untracked source files. Repository configuration
 can restrict execution to this machine and declare required secret names.
 
 ```yaml
 run:
   routing:
-    route: cloud
     profile: work
     prefer:
       - target: here
@@ -699,7 +700,7 @@ run:
     overflow_minutes: 120
 ```
 
-The route defaults to `local`. The example gives this machine the first chance,
+With `sparkwing run deploy --sw-route burst`, the example gives this machine the first chance,
 then the user's registered personal machines, then Cloud. Holds apply
 while an eligible preferred claimant is live. An absent claimant does not delay
 later capacity. Omit `prefer` to use `here` for five seconds, `machines` for five

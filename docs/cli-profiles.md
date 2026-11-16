@@ -13,7 +13,7 @@ Manage controller connection profiles
 - `add` -- Add a controller connection profile
 - `list` -- Print every registered profile
 - `remove` -- Remove a controller connection profile
-- `set` -- Update a connection or select the default profile
+- `set` -- Update a profile's controller URL or token
 - `show` -- Print one controller connection profile
 
 ### Flags
@@ -80,7 +80,7 @@ Remove a controller connection profile
 
 ## `sparkwing profiles set`
 
-Update a connection or select the default profile
+Update a profile's controller URL or token
 
 ### Flags
 
@@ -93,7 +93,6 @@ Update a connection or select the default profile
 | `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
 | `--controller URL` | Controller URL for this connection profile. |
 | `--token-stdin` | Read the controller credential from standard input. |
-| `--default` | Use this profile when an optional --profile is omitted. --default=false restores local selection if this is the default. |
 
 ## `sparkwing profiles show`
 

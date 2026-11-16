@@ -68,7 +68,7 @@ Plain emits run/job[/step]. JSON retains the controller replay result.
 | `--job JOB` | Job within the selected run. |
 | `--step STEP_ID` | Step within the selected job. |
 | `--message TEXT` | Text of the info-level annotation to attach to the job, or to the step named by --step. (required) |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing runs annotations list`
 
@@ -88,7 +88,7 @@ JSON emits job_id, optional step_id, level, message and source location per anno
 | `--job JOB` | Job within the selected run. |
 | `--step STEP_ID` | Step within the selected job. |
 | `--steps` | Also list annotations recorded on the run's steps, not only those on its jobs; --step implies this. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing runs approvals`
 
@@ -126,7 +126,7 @@ The controller derives the approver from authentication. Plain emits run/job. JS
 | `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
 | `--comment STR` | Comment recorded with the approval. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing runs approvals deny`
 
@@ -145,7 +145,7 @@ The controller derives the approver from authentication. Plain emits run/job. JS
 | `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
 | `--comment STR` | Comment recorded with the denial. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing runs approvals list`
 
@@ -162,7 +162,7 @@ Without --run, list pending approvals. With --run, include resolved history. Pla
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--run RUN_ID` | Run ID or per-team run number. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing runs artifacts`
 
@@ -190,7 +190,7 @@ Reads use the selected controller profile or the local controller and require cu
 | `--dest FILE` | Write the verified file to this new destination; its parent directory must exist. |
 | `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing runs cancel`
 
@@ -205,7 +205,7 @@ Request cancellation of in-flight runs
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--run RUN_ID` | Run ID or per-team run number. (required) |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ### Examples
 
@@ -233,7 +233,7 @@ JSON emits matching records and a page record with next_cursor and truncated. Qu
 | `--job JOB` | Job within the selected run. |
 | `--grep PATTERN` | Show only log lines matching this text. |
 | `--since DURATION` | Search only runs that started within this lookback, such as 24h, 7d or 2w; 0 sets no bound, and the later of --since and --started-after wins. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 | `--pipeline NAME` | Pipeline name. |
 | `--status STATUS` | Search only runs whose status matches exactly; prefix with ! to exclude a status. |
 | `--branch BRANCH` | Search only runs on this exact branch name; several names match any of them, and a ! prefix excludes a branch. Repeatable; comma-separated values are accepted. |
@@ -288,7 +288,7 @@ JSON emits compact run records and a page record with next_cursor and truncated.
 | `--wait` | Poll every 2 seconds until at least one matching run exists, exiting 3 if --wait-timeout passes first. |
 | `--wait-timeout DURATION` | How long --wait polls before giving up, as a Go duration such as 30s or 5m, 2m by default; ignored without --wait. |
 | `-f, --follow` | Keep streaming until the observed work finishes. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ### Examples
 
@@ -329,7 +329,7 @@ JSON emits tagged log records. Plain emits log lines. Pretty starts each line wi
 | `--events-only` | Print only lifecycle events, leaving out log output. |
 | `--no-events` | Print only log output, leaving out lifecycle events. |
 | `-f, --follow` | Keep streaming until the observed work finishes. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 | `--pipeline NAME` | Pipeline name. |
 | `--status STATUS` | When searching with --grep and no --run, search only runs whose status matches exactly; prefix with ! to exclude a status. |
 | `--branch BRANCH` | When searching with --grep and no --run, search only runs on this exact branch name; a ! prefix excludes a branch. Repeatable; comma-separated values are accepted. |
@@ -373,7 +373,7 @@ Select --run, including --run - for IDs on stdin, or --older-than. Age selection
 | `--older-than DURATION` | Delete every finished run that started longer ago than this, such as 72h, 30d or 4w; cannot be combined with --run. |
 | `--run RUN_ID` | Run ID or per-team run number. |
 | `--dry-run` | Show what would change without changing anything. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing runs retry`
 
@@ -402,7 +402,7 @@ An agent retry without --reason exits 2 with bad_request. The repair hint asks f
 | `--all-jobs` | Start a new run that runs every job of the source run's plan again. |
 | `--reason TEXT` | Why the retry should pass, such as "flake: DNS timeout in TestX" or "fixed X in commit Y"; recorded on the new run and required when an agent retries. |
 | `--agent NAME` | Coding agent requesting the retry, such as claude-code:land-agent; an agent must give --reason, and none records no agent. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ### Examples
 
@@ -435,7 +435,7 @@ Sizing reset requires an authorized controller route. Until that contract exists
 | `--reset` | Clear learned sizing for --pipeline or --all-pipelines while keeping resource pins; the controller has no route for this yet, so it fails with policy_missing and changes nothing. |
 | `--all-pipelines` | Apply --reset to every pipeline; requires --reset and --yes. |
 | `--yes` | Confirm a destructive change without prompting. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing runs status`
 
@@ -465,7 +465,7 @@ Cloud awards awaiting activation show "Waiting for dedicated Cloud capacity" wit
 | `--width N` | Width in characters of the timeline view's bars, 60 by default. |
 | `--timeout DURATION` | With --follow, stop after this Go duration, such as 30m, and exit 3 if the run has not ended; refused without --follow. |
 | `--poll DURATION` | Time between checks of the run with --follow, as a Go duration, 3s by default. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ### Examples
 
@@ -501,4 +501,4 @@ Text prints run-level and per-job P50 and P90, the five longest waits, and faile
 | `--last N` | Number of finished runs to read, newest first, 20 by default. Must be at least 1. |
 | `--job JOB` | Report only these jobs in the job, wait and failure sections; run-level phases still cover every job. Repeatable; comma-separated values are accepted. |
 | `--top N` | Most jobs and most failure groups to show, 20 by default; the page record and text say how many were left out. Must be at least 1. |
-| `--profile NAME` | Controller connection profile from your config. Optional profiles use the saved default, then local; --profile= selects local. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
