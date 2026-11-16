@@ -78,7 +78,7 @@ func TestNextGroupWaitDeadlineNamesTheEarliestLapse(t *testing.T) {
 	if _, err := f.tenant.TransitionNode(t.Context(), store.ReadyNode{Ref: ref, Actor: owner}); err != nil {
 		t.Fatal(err)
 	}
-	if _, timed, err := f.s.NextGroupWaitDeadline(t.Context(), f.tenant.Team()); err != nil || timed {
+	if _, timed, err := f.s.NextGroupWaitDeadline(t.Context(), f.tenant.Team(), time.Time{}); err != nil || timed {
 		t.Fatalf("deadline before any group wait started: timed=%v err=%v", timed, err)
 	}
 	now, err := f.s.TestOnlyDatabaseTime(t.Context())
@@ -91,12 +91,14 @@ func TestNextGroupWaitDeadlineNamesTheEarliestLapse(t *testing.T) {
 	if _, err := f.s.AsOperator().ClaimUnit(t.Context(), demand); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("full group claim: %v", err)
 	}
-	f.s.SetTestClock(t, func() time.Time { return now.Add(400 * time.Millisecond) })
-	wait, timed, err := f.s.NextGroupWaitDeadline(t.Context(), f.tenant.Team())
-	if err != nil || !timed || wait != 600*time.Millisecond {
-		t.Fatalf("deadline 400ms into a 1s group wait: wait=%s timed=%v err=%v, want 600ms", wait, timed, err)
+	lapse := now.Add(time.Second)
+	if deadline, timed, err := f.s.NextGroupWaitDeadline(t.Context(), f.tenant.Team(), now); err != nil || !timed || !deadline.Equal(lapse) {
+		t.Fatalf("deadline of a 1s group wait started at %s: %s timed=%v err=%v, want %s", now, deadline, timed, err, lapse)
 	}
-	if _, timed, err := f.s.NextGroupWaitDeadline(t.Context(), "other-team"); err != nil || timed {
+	if _, timed, err := f.s.NextGroupWaitDeadline(t.Context(), f.tenant.Team(), lapse); err != nil || timed {
+		t.Fatalf("a lapse the caller already saw was reported again: timed=%v err=%v", timed, err)
+	}
+	if _, timed, err := f.s.NextGroupWaitDeadline(t.Context(), "other-team", time.Time{}); err != nil || timed {
 		t.Fatalf("another team's claim woke for this group wait: timed=%v err=%v", timed, err)
 	}
 }

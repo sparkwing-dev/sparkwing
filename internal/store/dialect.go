@@ -312,7 +312,10 @@ func (t *storeTx) Rollback() error { return rollbackTx(t.tx) }
 // safety: a query writes only through RETURNING, and a missed write would leave
 // a held claim asleep until its bound.
 func (t *storeTx) noteReturningWrite(q string) {
-	if strings.Contains(strings.ToUpper(q), "RETURNING") {
+	if !t.store.commits.tracking.Load() {
+		return
+	}
+	if strings.Contains(q, "RETURNING") || strings.Contains(q, "returning") {
 		t.wrote = true
 	}
 }

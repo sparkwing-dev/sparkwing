@@ -71,9 +71,9 @@ type waitingWake struct {
 	waiting chan struct{}
 }
 
-func (w waitingWake) NextGroupWaitDeadline(ctx context.Context, team store.Team) (time.Duration, bool, error) {
+func (w waitingWake) NextGroupWaitDeadline(ctx context.Context, team store.Team, after time.Time) (time.Time, bool, error) {
 	w.waiting <- struct{}{}
-	return w.ClaimWake.NextGroupWaitDeadline(ctx, team)
+	return w.ClaimWake.NextGroupWaitDeadline(ctx, team, after)
 }
 
 // Runs on the real clock because the award checks leases the fixture took on it.
@@ -121,6 +121,8 @@ type countingWake struct {
 	ClaimWake
 	searches atomic.Int32
 	lapse    time.Duration
+	lapseAt  time.Time
+	lookup   func()
 }
 
 func (c *countingWake) NextCommit() <-chan struct{} {
@@ -128,8 +130,14 @@ func (c *countingWake) NextCommit() <-chan struct{} {
 	return c.ClaimWake.NextCommit()
 }
 
-func (c *countingWake) NextGroupWaitDeadline(context.Context, store.Team) (time.Duration, bool, error) {
-	return c.lapse, true, nil
+func (c *countingWake) NextGroupWaitDeadline(_ context.Context, _ store.Team, after time.Time) (time.Time, bool, error) {
+	if c.lookup != nil {
+		c.lookup()
+	}
+	if c.lapseAt.IsZero() {
+		c.lapseAt = time.Now().Add(c.lapse)
+	}
+	return c.lapseAt, c.lapseAt.After(after), nil
 }
 
 // A group wait that runs out is settled by a search, so the hold searches again
@@ -150,6 +158,54 @@ func TestHeldClaimSearchesAgainWhenAGroupWaitRunsOut(t *testing.T) {
 			t.Fatalf("searches once the group wait ran out: %d, want 2", n)
 		}
 		<-done
+	})
+}
+
+// A group wait can run out between the search and the deadline lookup, so the
+// lookup must still wake the hold for it rather than treat it as already settled.
+func TestHeldClaimSearchesAgainWhenAGroupWaitRunsOutDuringTheSearch(t *testing.T) {
+	wake := &countingWake{}
+	wake.lookup = func() {
+		if wake.searches.Load() == 1 {
+			time.Sleep(2 * time.Second)
+		}
+	}
+	f := newClaimHoldFixture(t, func(s *store.Store) ClaimWake { wake.ClaimWake = s; return wake })
+	synctest.Test(t, func(t *testing.T) {
+		wake.lapseAt = time.Now().Add(time.Second)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := f.claim(ctx, "/api/v1/runners/claim", controllerwire.MaxClaimWait)
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		searches := wake.searches.Load()
+		cancel()
+		<-done
+		if searches != 2 {
+			t.Fatalf("searches after a group wait lapsed during the lookup: %d, want 2", searches)
+		}
+	})
+}
+
+// A lapse the last search already saw, such as a job this claimant cannot take,
+// must not wake the hold again, or it would search in a loop until the bound.
+func TestHeldClaimDoesNotSpinOnAGroupWaitItAlreadySaw(t *testing.T) {
+	wake := &countingWake{}
+	f := newClaimHoldFixture(t, func(s *store.Store) ClaimWake { wake.ClaimWake = s; return wake })
+	synctest.Test(t, func(t *testing.T) {
+		wake.lapseAt = time.Now().Add(-time.Second)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		wake.lookup = func() {
+			if wake.searches.Load() > 2 {
+				cancel()
+			}
+		}
+		start := time.Now()
+		<-f.claim(ctx, "/api/v1/runners/claim", controllerwire.MaxClaimWait)
+		if n, elapsed := wake.searches.Load(), time.Since(start); n != 1 || elapsed != controllerwire.MaxClaimWait {
+			t.Fatalf("hold with an already-lapsed group wait: %d searches over %s, want 1 over %s", n, elapsed, controllerwire.MaxClaimWait)
+		}
 	})
 }
 
