@@ -792,6 +792,10 @@ selected engine source's SDK requirement from go.mod, while its cache directory
 keeps the engine version used by bootstrap. The default Dockerfile target still
 builds from source.
 
+The `validate-tag` job refuses a tag whose commit is not reachable from the
+default branch, for tag pushes and manual rebuilds alike. A hotfix therefore
+lands on `main` before it is tagged.
+
 One final job assembles image manifests, signs the assets, and publishes the
 complete release. Publication is serialized across tags; builds remain
 parallel. Only a stable version above every published stable release may
