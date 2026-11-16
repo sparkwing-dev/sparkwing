@@ -1,6 +1,6 @@
 ### Fixed
 
-- **cli (Breaking):** `admission.budget: …,enforce` caps the local runner's jobs on Linux
+- **cli + wingwire + api (Breaking):** `admission.budget: …,enforce` caps the local runner's jobs on Linux
   The local runner's systemd user service starts with `CPUQuota` at the budget's
   cores, `MemoryMax` when the budget names memory, and nice 10. Jobs the CLI hosts
   are niced on Linux too. `sparkwing queue list` now reads the limits back from the

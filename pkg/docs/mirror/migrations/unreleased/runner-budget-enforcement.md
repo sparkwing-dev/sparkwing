@@ -19,6 +19,8 @@ enforcement. It reports what the kernel applies to the local runner right now:
 The plain row's sixth column prints `enforced`, `not-enforced` or `-` (not
 requested). Go callers of `pkg/wingwire` replace `BudgetState.Enforce` with
 `BudgetState.Enforcement`, a `*BudgetEnforcement`.
+The daemon's `QueueState.budget.enforce` and the OpenAPI
+`components.schemas.pkg.wingwire.BudgetState.properties.enforce` change the same way.
 
 - Treat `budget.enforcement.applied` as the answer to "is Sparkwing capped by the
   OS?" A missing object means enforcement was not requested.
