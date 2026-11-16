@@ -263,12 +263,14 @@ they finish. A healthy drain has no kill deadline. Controller replacement does
 not cancel these runner processes. Existing execution leases still apply during
 an outage. An idle local runner's claim waits at the controller, which answers
 as soon as a commit makes work claimable, or empty after 10 s. The runner then
-claims again at once, so a new run or a released job starts within milliseconds
-of intake. An idle machine sends one claim and records the runner as live once
-every 10 s. A claim also wakes when a job's concurrency-group queue timeout runs
-out, which settles that job. While the runner holds work, it polls every 500 ms.
-Shared controllers never hold claims, and unlike them the local controller never
-advises an idle runner to poll less often.
+claims again at once, so a run submitted to an idle runner starts within
+milliseconds of intake. An idle machine sends one claim and records the runner
+as live once every 10 s. A waiting claim also wakes when a job's
+concurrency-group queue timeout runs out, which settles that job. While the
+runner holds work, such as a run's trigger, it polls every 500 ms instead, so a
+job the plan releases starts within half a second. Shared controllers never hold
+claims, and unlike them the local controller never advises an idle runner to
+poll less often.
 
 A systemd-booted Linux host requires a working user manager. Each runner has its
 own systemd user service and cgroup, separate from the controller. A Linux host
