@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
@@ -97,4 +98,13 @@ type ConcurrencyHolder struct {
 	// for admission and the operator budget view.
 	Cost             int
 	DeclaredCapacity int
+}
+
+// OwnerClaimTime is the original award's persisted issuance boundary, retained independently of its live lease.
+type OwnerClaimTime struct {
+	Kind             capability.UnitKind `json:"kind"`
+	JobID            string              `json:"job_id,omitempty"`
+	Generation       int64               `json:"generation"`
+	SourceGeneration int64               `json:"source_generation,omitempty"`
+	AwardedAt        time.Time           `json:"awarded_at"`
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -11,6 +12,9 @@ import (
 
 // Validate checks the award fence without granting authority to its reported state.
 func (o LauncherObservation) Validate() error {
+	if o.Startup != nil && (o.Startup.PodUID == "" || len(o.Startup.PodUID) > 128 || o.Reservation || o.Rejected) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "startup timing requires an execution Pod observation"}
+	}
 	if o.Award.ID == "" || o.Award.Holder == "" || o.Award.Generation <= 0 {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "launcher observation requires a complete award fence"}
 	}
@@ -67,14 +71,57 @@ type CloudCapacityGrant struct {
 
 // LauncherObservation reports one award's preparation state without Kubernetes identities.
 type LauncherObservation struct {
-	Award                LeaseRef `json:"award"`
-	Reservation          bool     `json:"reservation,omitempty"`
-	Rejected             bool     `json:"rejected,omitempty"`
-	WaitedForFreshNode   bool     `json:"waited_for_fresh_node,omitempty"`
-	CapacityUnconfigured bool     `json:"capacity_unconfigured,omitempty"`
-	CapacityUnavailable  bool     `json:"capacity_unavailable,omitempty"`
+	Startup              *PodStartup `json:"startup,omitempty"`
+	Award                LeaseRef    `json:"award"`
+	Reservation          bool        `json:"reservation,omitempty"`
+	Rejected             bool        `json:"rejected,omitempty"`
+	WaitedForFreshNode   bool        `json:"waited_for_fresh_node,omitempty"`
+	CapacityUnconfigured bool        `json:"capacity_unconfigured,omitempty"`
+	CapacityUnavailable  bool        `json:"capacity_unavailable,omitempty"`
 	// CapacityCeiling is the launcher's resource ceiling when the request exceeded it.
 	CapacityCeiling *match.Resources `json:"capacity_ceiling,omitempty"`
+}
+
+// PodStartup contains Kubernetes timestamps for the awarded run-node container.
+// Absent events remain unknown; container start is not evidence of an image pull time.
+type PodStartup struct {
+	PodUID             string     `json:"pod_uid"`
+	JobCreatedAt       *time.Time `json:"job_created_at,omitempty"`
+	JobActivatedAt     *time.Time `json:"job_activated_at,omitempty"`
+	PodCreatedAt       *time.Time `json:"pod_created_at,omitempty"`
+	ScheduledAt        *time.Time `json:"scheduled_at,omitempty"`
+	ImagePullStartedAt *time.Time `json:"image_pull_started_at,omitempty"`
+	ImagePulledAt      *time.Time `json:"image_pulled_at,omitempty"`
+	ContainerStartedAt *time.Time `json:"container_started_at,omitempty"`
+}
+
+// Retain preserves known boundaries when a later poll omits an event.
+func (p PodStartup) Retain(prior PodStartup) PodStartup {
+	if p.PodUID != prior.PodUID {
+		return p
+	}
+	if prior.JobCreatedAt != nil {
+		p.JobCreatedAt = prior.JobCreatedAt
+	}
+	if prior.JobActivatedAt != nil {
+		p.JobActivatedAt = prior.JobActivatedAt
+	}
+	if prior.PodCreatedAt != nil {
+		p.PodCreatedAt = prior.PodCreatedAt
+	}
+	if prior.ScheduledAt != nil {
+		p.ScheduledAt = prior.ScheduledAt
+	}
+	if prior.ImagePullStartedAt != nil {
+		p.ImagePullStartedAt = prior.ImagePullStartedAt
+	}
+	if prior.ImagePulledAt != nil {
+		p.ImagePulledAt = prior.ImagePulledAt
+	}
+	if prior.ContainerStartedAt != nil {
+		p.ContainerStartedAt = prior.ContainerStartedAt
+	}
+	return p
 }
 
 // LauncherActivation binds a verified execution reservation before its Job is unsuspended.

@@ -202,3 +202,22 @@ func TestEngineRunDetailSkipsVersionPolicyForSDKReplacement(t *testing.T) {
 		t.Fatalf("a pinned engine skipped version policy: evaluated=%q err=%v", policy.evaluated, err)
 	}
 }
+
+func TestEngineRunDetailDerivesOwnerClaimTiming(t *testing.T) {
+	server, _ := engineRuntimeStore(t)
+	owner := engineRuntimeClaim(t, server, capability.UnitTrigger)
+	got, err := server.RunDetail(t.Context(), owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.OwnerClaims) != 1 || got.OwnerClaims[0].Kind != capability.UnitTrigger || got.OwnerClaims[0].Generation != owner.Binding.Generation || got.OwnerClaims[0].AwardedAt.IsZero() {
+		t.Fatalf("owner timing=%+v", got.OwnerClaims)
+	}
+	body, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte(`"owner_claims"`)) || !bytes.Contains(body, []byte(`"awarded_at"`)) || bytes.Contains(body, []byte("capability")) {
+		t.Fatalf("unsafe or missing owner timing: %s", body)
+	}
+}

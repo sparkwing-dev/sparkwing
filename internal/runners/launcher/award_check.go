@@ -92,12 +92,14 @@ func (l *Launcher) checkJob(ctx context.Context, job *batchv1.Job, binding Cloud
 		}
 		owned++
 		if l.podChecked(job.UID, pod.UID) {
+			l.observeStartup(ctx, job, binding, r, pod)
 			continue
 		}
 		if err := awardPod(template, &corev1.PodTemplateSpec{ObjectMeta: pod.ObjectMeta, Spec: pod.Spec}); err != nil {
 			return &podMismatch{message: fmt.Sprintf("Cloud Pod %s: %v", pod.Name, err)}
 		}
 		l.markPodChecked(job.UID, pod.UID)
+		l.observeStartup(ctx, job, binding, r, pod)
 	}
 	if !current && owned == 0 && (job.Spec.Suspend == nil || !*job.Spec.Suspend) {
 		return &podMismatch{message: fmt.Sprintf("Cloud Job %s pins images admission no longer allows", job.Name), unadmittable: true}
@@ -134,6 +136,10 @@ func (l *Launcher) markPodChecked(job, pod types.UID) {
 func (l *Launcher) forgetJobChecks(job types.UID) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	for pod := range l.checked[job] {
+		delete(l.startupObserved, pod)
+		delete(l.startupImageProbes, pod)
+	}
 	delete(l.checked, job)
 }
 

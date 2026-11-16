@@ -361,7 +361,7 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 	if err != nil {
 		return nil, err
 	}
-	_, copyErr := io.Copy(archive, preparedReader{ctx, reader})
+	fetched, copyErr := io.Copy(archive, preparedReader{ctx, reader})
 	if err := errors.Join(copyErr, archive.Close()); err != nil {
 		return nil, err
 	}
@@ -438,7 +438,7 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 		}
 		command = []string{node, filepath.Join(directory, manifest.Main)}
 	}
-	return &Entry{Engine: resolved, Directory: directory, Command: command, RepoKey: spec.RepoKey, SHA: spec.SHA, DefaultBranch: manifest.DefaultBranch, ownedDirectory: rootPath, checkoutDirectory: filepath.Join(rootPath, "checkout"), pipelineCheckout: filepath.Join(rootPath, manifest.CodeRoot)}, nil
+	return &Entry{Engine: resolved, Directory: directory, Command: command, RepoKey: spec.RepoKey, SHA: spec.SHA, DefaultBranch: manifest.DefaultBranch, ownedDirectory: rootPath, cacheBytesFetched: fetched, checkoutDirectory: filepath.Join(rootPath, "checkout"), pipelineCheckout: filepath.Join(rootPath, manifest.CodeRoot)}, nil
 }
 
 func extractPrepared(directory string) (err error) {

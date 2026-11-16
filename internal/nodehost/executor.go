@@ -155,6 +155,17 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 	if err != nil {
 		return h.report(ctx, input, h.failure(err), err)
 	}
+	// safety: source acquisition precedes attempt creation; upload its receipts only after the attempt's log fence exists.
+	observe := preparationObserver(nil, h.deps.Masker, func(ctx context.Context, frame nodewire.FrameLog) error {
+		if h.deps.Log == nil {
+			return nil
+		}
+		return h.deps.Log(ctx, input, frame)
+	})
+	for _, timing := range input.Preparation {
+		observe(ctx, timing)
+	}
+	input.Preparation = nil
 	decision, err := h.skipIf(ctx, input, spec, job)
 	if err != nil {
 		return h.report(ctx, input, h.failure(err), err)

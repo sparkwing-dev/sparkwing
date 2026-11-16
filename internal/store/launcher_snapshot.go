@@ -83,6 +83,11 @@ func (o *Operator) ReconcileLauncherAwards(ctx context.Context, authority capabi
 		}
 	}
 	for _, host := range hosts {
+		if host.Startup != nil && owner.owned[host.Award] && owner.failed[host.Award] == nil {
+			if err := o.s.recordLauncherStartup(ctx, authority, host); err != nil {
+				slog.WarnContext(ctx, "Cloud startup timing could not be recorded")
+			}
+		}
 		if host.WaitedForFreshNode {
 			if err := owner.apply(ctx, host.Award, func() error { return o.s.recordLauncherCapacityWait(ctx, authority, host.Award) }); err != nil {
 				return nil, nil, err

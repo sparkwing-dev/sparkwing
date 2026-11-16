@@ -51,6 +51,7 @@ type CloudCapacityObservation struct {
 
 // CloudJobObservation retains the identities needed to reconcile after launcher restart.
 type CloudJobObservation struct {
+	Startup       *capability.PodStartup
 	Binding       CloudJobBinding
 	Capacity      *CloudCapacityObservation
 	Activation    *CloudNodeReservation
@@ -93,10 +94,12 @@ type Launcher struct {
 	// safety: unlocked because only Run's loop takes the warm sample.
 	foreignClassLogged time.Time
 
-	mu       sync.Mutex
-	waiting  map[string]*CloudJobAward
-	identity string
-	checked  map[types.UID]map[types.UID]bool
+	mu                 sync.Mutex
+	waiting            map[string]*CloudJobAward
+	identity           string
+	checked            map[types.UID]map[types.UID]bool
+	startupObserved    map[types.UID]capability.PodStartup
+	startupImageProbes map[types.UID]imageProbeBudget
 }
 
 func (l *Launcher) logger() *slog.Logger {

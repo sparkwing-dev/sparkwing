@@ -39,7 +39,7 @@ func TestGoSDKInstallCacheIgnoresDisabledWorkspace(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, cached, err := installGoSDK(t.Context(), dir, engine.SDKInstallRequest{ExecutableDirectory: t.TempDir()}, pin, environment, &diagnostics, masker)
+		_, cached, _, err := installGoSDK(t.Context(), dir, engine.SDKInstallRequest{ExecutableDirectory: t.TempDir()}, pin, environment, &diagnostics, masker)
 		if err != nil {
 			t.Fatalf("install: %v: %s", err, &diagnostics)
 		}
