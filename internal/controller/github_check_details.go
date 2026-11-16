@@ -36,10 +36,9 @@ type githubCheckResult struct {
 
 // safety: labels are positions, never job or step IDs: a stored secret read may occur in an accepted ID and
 // is masked only in text. Steps of superseded attempts are dropped, so a retried job reports its latest attempt.
-// A step's position is its index in the job's declared steps, not its start order, because a step may need one
-// declared after it; a step the plan does not declare follows the declared ones.
-func githubCheckResults(plan []byte, nodes []*store.Node, steps []*store.NodeStep) []githubCheckResult {
-	declared := githubDeclaredSteps(plan)
+// A step's position is its index in the job's accepted declaration, not its start order, because a step may need
+// one declared after it; a step the declaration does not name follows the declared ones.
+func githubCheckResults(nodes []*store.Node, steps []*store.NodeStep) []githubCheckResult {
 	byJob := map[string][]*store.NodeStep{}
 	for _, step := range steps {
 		byJob[step.NodeID] = append(byJob[step.NodeID], step)
@@ -51,7 +50,7 @@ func githubCheckResults(plan []byte, nodes []*store.Node, steps []*store.NodeSte
 			label: job, failed: n.Outcome == string(runstate.NodeFailed), err: n.Error,
 			summary: n.Summary, annotations: n.Annotations,
 		})
-		index := declared[n.NodeID]
+		index := githubDeclaredSteps(n.Spec)
 		type positioned struct {
 			position int
 			step     *store.NodeStep
@@ -80,29 +79,21 @@ func githubCheckResults(plan []byte, nodes []*store.Node, steps []*store.NodeSte
 	return out
 }
 
-// safety: an unreadable plan yields no positions, so steps fall back to start order instead of failing the report.
-func githubDeclaredSteps(plan []byte) map[string]map[string]int {
-	var doc nodewire.PlanDoc
-	if len(plan) == 0 || json.Unmarshal(plan, &doc) != nil {
+// safety: an unreadable declaration yields no positions, so steps fall back to start order instead of failing the report.
+func githubDeclaredSteps(spec []byte) map[string]int {
+	var job nodewire.JobSpec
+	if len(spec) == 0 || json.Unmarshal(spec, &job) != nil {
 		return nil
 	}
-	declared := make(map[string]map[string]int, len(doc.Jobs))
-	for _, job := range doc.Jobs {
-		index := make(map[string]int, len(job.Steps))
-		for i, step := range job.Steps {
-			index[step.ID] = i
-		}
-		declared[job.ID] = index
+	index := make(map[string]int, len(job.Steps))
+	for i, step := range job.Steps {
+		index[step.ID] = i
 	}
-	return declared
+	return index
 }
 
 func githubCheckDetails(run *store.Run, nodes []*store.Node, steps []*store.NodeStep, conclusion, link string) (*githubapp.CheckRunOutput, []githubapp.CheckRunAnnotation) {
-	var plan []byte
-	if run != nil {
-		plan = run.PlanSnapshot
-	}
-	results := githubCheckResults(plan, nodes, steps)
+	results := githubCheckResults(nodes, steps)
 	failedJobs := 0
 	for _, n := range nodes {
 		if n.Outcome == string(runstate.NodeFailed) {

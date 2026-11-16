@@ -131,15 +131,18 @@ WHERE team=$6 AND run_id=$7 AND node_id=$8`
 	return nil
 }
 
-// SeedNode adds reporting facts without admitting or executing work.
+// SeedNode adds reporting facts without admitting or executing work. A set Spec is stored as the job's
+// declaration; otherwise one is built from the job's dependencies and labels.
 func SeedNode(s *store.Store, ctx context.Context, n store.Node) error {
 	deps, err := json.Marshal(n.Deps)
 	if err != nil {
 		return err
 	}
-	spec, err := json.Marshal(nodewire.JobSpec{ID: n.NodeID, Needs: n.Deps, Requires: n.NeedsLabels, Prefers: n.PrefersLabels})
-	if err != nil {
-		return err
+	spec := []byte(n.Spec)
+	if len(spec) == 0 {
+		if spec, err = json.Marshal(nodewire.JobSpec{ID: n.NodeID, Needs: n.Deps, Requires: n.NeedsLabels, Prefers: n.PrefersLabels}); err != nil {
+			return err
+		}
 	}
 	query := `INSERT INTO nodes(team,run_id,node_id,status,outcome,deps_json,started_at,finished_at,spec_json,spec_hash,execution_json,attempt,requested_cores,requested_memory_bytes,requested_slots,claimed_by,capability_prefix,lease_expires_at,generation,seq)
 SELECT team,id,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,(SELECT COALESCE(MAX(seq),0)+1 FROM nodes WHERE run_id=?) FROM runs WHERE id=?`

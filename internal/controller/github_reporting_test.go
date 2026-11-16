@@ -40,7 +40,7 @@ func (f *githubCompletionFixture) pending() func() {
 	}
 }
 
-func (f *githubCompletionFixture) addReportingNode(id string, outcome runstate.NodeState, text string) {
+func (f *githubCompletionFixture) addReportingNode(id string, outcome runstate.NodeState, text string, steps ...nodewire.StepSpec) {
 	f.t.Helper()
 	run, err := f.tenant.ReadRun(f.t.Context(), "run")
 	if err != nil {
@@ -50,13 +50,18 @@ func (f *githubCompletionFixture) addReportingNode(id string, outcome runstate.N
 	if err := json.Unmarshal(run.Plan, &plan); err != nil {
 		f.t.Fatal(err)
 	}
-	plan.Jobs = append(plan.Jobs, nodewire.JobSpec{ID: id})
+	job := nodewire.JobSpec{ID: id, Steps: steps}
+	plan.Jobs = append(plan.Jobs, job)
 	encoded, err := json.Marshal(plan)
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	engineSQL(f.t, f.server.store, `UPDATE runs SET plan_json=? WHERE team='a' AND id='run'`, encoded)
-	if err := teststore.SeedNode(f.server.store, f.t.Context(), store.Node{RunID: "run", NodeID: id, Status: "pending"}); err != nil {
+	spec, err := json.Marshal(job)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err := teststore.SeedNode(f.server.store, f.t.Context(), store.Node{RunID: "run", NodeID: id, Status: "pending", Spec: spec}); err != nil {
 		f.t.Fatal(err)
 	}
 	if err := teststore.SeedNodeFinish(f.server.store, f.t.Context(), "a", runspec.NodeRef{RunID: "run", NodeID: runspec.NodeID(id)}, runstate.NodeResult{Outcome: outcome, MaskedError: text}); err != nil {
@@ -625,31 +630,15 @@ func TestGitHubAppCheckRunFailedVisibilityLookupRetries(t *testing.T) {
 func TestGitHubAppCheckRunNumbersStepsByDeclaredPosition(t *testing.T) {
 	f := newGitHubCompletion(t)
 	f.api.private = true
-	f.addReportingNode("ship", runstate.NodeFailed, "deploy failed")
+	f.addReportingNode("ship", runstate.NodeFailed, "deploy failed", nodewire.StepSpec{ID: "deploy", Needs: []string{"build"}}, nodewire.StepSpec{ID: "build"})
 	f.report("ship", "", nil, 1,
 		seededStep{id: "build", attempt: 1, status: "passed", summary: "build summary", annotations: []nodewire.Annotation{{Level: "warn", Message: "build warning", File: "main.go", Line: 2}}},
 		seededStep{id: "deploy", attempt: 1, status: "failed", err: "deploy error"})
 	engineSQL(t, f.server.store, `UPDATE node_steps SET started_at=started_at+1,finished_at=finished_at+1 WHERE team='a' AND run_id='run' AND node_id='ship' AND step_id='deploy'`)
 	f.finish(runstate.RunFailed)
-	// hack: the seeded job spec declares no steps, so the steps join the plan after finish validates it.
-	run, err := f.tenant.ReadRun(t.Context(), "run")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var plan nodewire.PlanDoc
-	if err := json.Unmarshal(run.Plan, &plan); err != nil {
-		t.Fatal(err)
-	}
-	plan.Jobs[1].Steps = []nodewire.StepSpec{{ID: "deploy", Needs: []string{"build"}}, {ID: "build"}}
-	encoded, err := json.Marshal(plan)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engineSQL(t, f.server.store, `UPDATE runs SET plan_json=? WHERE team='a' AND id='run'`, encoded)
 	f.reconcile()
 	out := f.completedCheck().Output
-	job := "Job 2"
-	for _, want := range []string{"**" + job + ", step 1**: deploy error", "### " + job + ", step 2\n\nbuild summary"} {
+	for _, want := range []string{"**Job 2, step 1**: deploy error", "### Job 2, step 2\n\nbuild summary"} {
 		if !strings.Contains(out.Summary, want) {
 			t.Fatalf("summary lacks %q:\n%s", want, out.Summary)
 		}
@@ -658,7 +647,22 @@ func TestGitHubAppCheckRunNumbersStepsByDeclaredPosition(t *testing.T) {
 	for _, a := range append(out.Annotations, f.api.annotations[101]...) {
 		titles = append(titles, a.Title)
 	}
-	if !slices.Contains(titles, job+", step 2") || slices.Contains(titles, job+", step 1") {
-		t.Fatalf("build annotation titles=%q, want %s, step 2", titles, job)
+	if !slices.Contains(titles, "Job 2, step 2") || slices.Contains(titles, "Job 2, step 1") {
+		t.Fatalf("build annotation titles=%q, want Job 2, step 2", titles)
+	}
+}
+
+// A generated job is absent from plan_json; store.TestListNodesCarriesAcceptedGeneratedDeclaration shows its
+// accepted declaration reaches the reporter as the node's Spec, byte for byte what expansion acceptance writes.
+func TestGitHubCheckResultsNumberGeneratedStepsByAcceptedSpec(t *testing.T) {
+	spec, err := json.Marshal(nodewire.JobSpec{ID: "ship", Groups: []string{"targets"}, Steps: []nodewire.StepSpec{{ID: "deploy", Needs: []string{"build"}}, {ID: "build"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := []*store.Node{{NodeID: "generator"}, {NodeID: "ship", AttemptsConsumed: 1, Spec: spec}}
+	steps := []*store.NodeStep{{NodeID: "ship", StepID: "build", Attempt: 1, Summary: "build summary"}, {NodeID: "ship", StepID: "deploy", Attempt: 1, Summary: "deploy summary"}}
+	got := githubCheckResults(nodes, steps)
+	if len(got) != 4 || got[2].label != "Job 2, step 1" || got[2].summary != "deploy summary" || got[3].label != "Job 2, step 2" || got[3].summary != "build summary" {
+		t.Fatalf("generated [deploy needs build, build] run build-first reported %+v; want deploy step 1, build step 2", got)
 	}
 }
