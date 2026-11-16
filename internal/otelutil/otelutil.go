@@ -6,6 +6,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -78,6 +79,9 @@ func meter(name string) metric.Meter {
 }
 
 func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
+	if err := checkOTLPEndpoints(cfg.TracesOnly); err != nil {
+		return nil, err
+	}
 	t := &Telemetry{redactErrors: cfg.TracesOnly}
 	if cfg.TracesOnly {
 		// safety: OTel's internal logger prints raw endpoint values, including userinfo, path and query.
@@ -198,6 +202,28 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 	))
 
 	return t, nil
+}
+
+// checkOTLPEndpoints refuses an endpoint the OTLP exporters cannot parse.
+// safety: the exporters replace an unparseable endpoint with localhost:4318
+// and still send OTEL_EXPORTER_OTLP_HEADERS there. The error names the
+// variable only, because the value can carry credentials.
+func checkOTLPEndpoints(tracesOnly bool) error {
+	keys := []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"}
+	if !tracesOnly {
+		keys = append(keys, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+	}
+	for _, key := range keys {
+		value := os.Getenv(key)
+		if value == "" {
+			continue
+		}
+		u, err := url.Parse(value)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("%s is not a valid OTLP endpoint: want an http:// or https:// URL with a host", key)
+		}
+	}
+	return nil
 }
 
 // Go's built-in slog handler writes through log.Default, and slog.SetDefault
