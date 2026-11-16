@@ -8,7 +8,7 @@ import (
 
 func TestExamplesJSONListsSummariesNotManifests(t *testing.T) {
 	out := captureStdout(t, func() {
-		if err := listTemplates("", "", "json"); err != nil {
+		if err := listTemplates("", "", "", "json"); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -21,8 +21,8 @@ func TestExamplesJSONListsSummariesNotManifests(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			t.Fatalf("record %q: %v", line, err)
 		}
-		if len(record) != 3 || record["name"] == "" || record["category"] == "" {
-			t.Fatalf("list record %s, want only name, category and summary", line)
+		if len(record) != 4 || record["name"] == "" || record["category"] == "" || record["language"] == "" {
+			t.Fatalf("list record %s, want only name, category, summary and language", line)
 		}
 	}
 	if len(out) > 16<<10 {

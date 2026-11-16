@@ -167,6 +167,64 @@ test("generators label expansions and insert replay code atomically", async () =
 
 });
 
+test("jobFanOut declares one job per item and groups them for dependents and modifiers", async () => {
+  const plan = new Plan();
+  const seen: [string, number][] = [];
+  const cells = plan
+    .jobFanOut("test", ["22", "24"], (version, index) => {
+      seen.push([version, index]);
+      return [`test-node${version}`, () => version];
+    })
+    .retry(2)
+    .cache(npm());
+  plan.job("build", () => undefined).needs(cells);
+  assert.deepEqual(seen, [
+    ["22", 0],
+    ["24", 1],
+  ]);
+  assert.deepEqual(
+    cells.members.map((job) => job.id),
+    ["test-node22", "test-node24"],
+  );
+  const doc = plan.toDoc();
+  for (const id of ["test-node22", "test-node24"]) {
+    const spec = doc.jobs.find((job) => job.id === id);
+    assert.deepEqual(spec?.groups, ["test"]);
+    assert.equal(spec?.retry?.attempts, 2);
+    assert.deepEqual(spec?.caches?.map((cache) => cache.name), ["npm"]);
+  }
+  assert.deepEqual(doc.jobs.find((job) => job.id === "build")?.deps, ["test-node22", "test-node24"]);
+  assert.equal(await plan.findJob("test-node24")?.findStep("run")?.body({} as Context), "24");
+  assert.throws(() => plan.jobFanOut("test", [], () => ["x", () => undefined]), /duplicate job group test/);
+});
+
+test("jobFanOut over no items gives an empty group that blocks nothing", () => {
+  const plan = new Plan();
+  const none = plan.jobFanOut("none", [] as string[], (item) => [item, () => undefined]);
+  plan.job("after", () => undefined).needs(none);
+  assert.deepEqual(none.members, []);
+  assert.deepEqual(plan.toDoc().jobs.map((job) => [job.id, job.deps ?? []]), [["after", []]]);
+});
+
+test("generators fan out with jobFanOut", async () => {
+  const plan = new Plan();
+  const source = plan.job("source", () => ["a", "b"]);
+  const generator = source.generate((generated, output) => {
+    generated.jobFanOut("shards", output, (shard) => [`shard-${shard}`, () => shard]);
+  });
+  const closure = plan.findClosure(generator.id);
+  if (closure?.kind !== "generate") throw new Error("missing generator closure");
+  const generated = new Generated(source, generator.id, plan);
+  await closure.fn(generated, ["a", "b"], {} as Context);
+  assert.deepEqual(
+    generated.toDoc().jobs.map((job) => [job.id, job.deps, job.groups]),
+    [
+      ["shard-a", ["source"], [generator.id, "shards"]],
+      ["shard-b", ["source"], [generator.id, "shards"]],
+    ],
+  );
+});
+
 test("builder forwards graph declarations and preserves host-owned ceilings", () => {
   const cycle = new Plan();
   cycle.job("a", () => undefined).needs("b");

@@ -344,6 +344,22 @@ images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string
 sw.Job(plan, "artifact", &Artifact{}).Needs(images)
 ```
 
+```ts
+const images = plan
+  .jobFanOut("image-builds", ["api", "web"], (name) => [
+    `build-${name}`,
+    async (ctx) => {
+      await ctx.exec(["docker", "build", "-t", name, name]).run();
+    },
+  ])
+  .retry(2);
+
+plan.job("artifact", () => undefined).needs(images);
+```
+
+TypeScript's `plan.jobFanOut(id, items, fn)` takes a callback that returns the
+member's job ID and body, and also receives the item's index.
+
 The chained `.Needs(...)` / `.Retry(...)` apply to every member; see
 *Group modifiers* below.
 
@@ -504,8 +520,9 @@ sources, and artifact packaging; gate external side effects with
 
 ## Secrets
 
-A pipeline declares its secrets with a `Secrets()` struct, each field
-required unless its `sw` tag ends in `,optional` (see
+A Go pipeline declares its secrets with a `Secrets()` struct, each field
+required unless its `sw` tag ends in `,optional`, and a TypeScript pipeline
+lists them in `definePipeline({ secrets: [...] })` (see
 [Declaring secrets](sdk.md#declaring-secrets)). The declaration is checked
 before the first node runs, so a run never fails halfway through a deploy
 for a secret it could have named at the start.

@@ -130,6 +130,7 @@ func Registry() []Command {
 			{Name: "body", Requires: []string{"example"}},
 			{Name: "category", Argument: "CATEGORY"},
 			{Name: "cloud", Argument: "CLOUD"},
+			{Name: "language", Argument: "LANGUAGE"},
 		}},
 		{Path: "sparkwing info", Flags: []Flag{
 			{Name: "for-agent"},
