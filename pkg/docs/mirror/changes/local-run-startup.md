@@ -10,4 +10,4 @@
   hidden-lockfile check, skip `npm ci --dry-run` and `npm install`, saving 1-2 s
   each time the CLI, trigger or job prepares the pipeline. Root lifecycle scripts
   still run on every preparation. Version-manager shims hide node and npm switches
-  from the receipt. See [versioning](../versioning.md).
+  from the receipt. See [versioning](docs/versioning.md).
