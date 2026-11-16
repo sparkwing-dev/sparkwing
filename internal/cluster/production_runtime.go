@@ -48,9 +48,12 @@ func productionRuntime(version string) clusterRuntime {
 			if err != nil {
 				return runners.RuntimeConfig{}, err
 			}
-			var open func(client.EngineOptions) (controllerwire.Controller, error)
+			open := client.NewEngineClient
 			if options.Config.LocalAdmission != nil && *options.Config.LocalAdmission {
 				open = nativeCapacityClient(home, version)
+			}
+			if options.Config.CredentialsDir != nil {
+				open = pausableClient(open, *options.Config.CredentialsDir)
 			}
 			return runners.RuntimeConfig{
 				NewController: open,
@@ -83,6 +86,17 @@ func productionRuntime(version string) clusterRuntime {
 				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.ModuleCache, false, procenv.SubmitAcceptAll(), nil)}, nil, nil
 			},
 		},
+	}
+}
+
+// safety: the owner's pause wraps every other claim adjustment, so a paused runner offers nothing.
+func pausableClient(open func(client.EngineOptions) (controllerwire.Controller, error), credentialsDir string) func(client.EngineOptions) (controllerwire.Controller, error) {
+	return func(options client.EngineOptions) (controllerwire.Controller, error) {
+		controller, err := open(options)
+		if err != nil {
+			return nil, err
+		}
+		return runners.NewPausableController(controller, credentialsDir), nil
 	}
 }
 

@@ -487,6 +487,20 @@ filter claims before preferences order eligible work. Labels grant no pool
 membership or repository permission. See [scheduling](scheduling.md),
 [Git credentials](git-credentials.md) and the [threat model](threat-model.md).
 
+### Pausing a registered machine
+
+`sparkwing runners pause` stops the runner enrolled on this machine from claiming
+new work, planning included. Jobs it already holds run to completion and report
+normally. The runner keeps polling with no free slots, so it stays online.
+`sparkwing runners resume` lets it claim again on its next poll, without a
+restart. The pause survives a runner restart.
+
+The pause is local to the machine: a `paused` file beside the runner credential
+in `runner.credentials_dir`. `sparkwing runners list` on this machine shows the
+runner as `paused`. Other machines and the console see it as idle with no
+claims. To stop the runner entirely, stop its service or run
+`sparkwing runners remove`.
+
 ## Environment and secrets
 
 A local run captures its environment once. Children retain its captured snapshot

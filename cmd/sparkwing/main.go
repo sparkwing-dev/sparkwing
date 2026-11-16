@@ -373,6 +373,10 @@ func runSparkwing(args []string) (result error) {
 		return runRunnersAdd(inv)
 	case "sparkwing runners remove":
 		return runRunnersRemove(inv)
+	case "sparkwing runners pause":
+		return runRunnersPause(inv)
+	case "sparkwing runners resume":
+		return runRunnersResume(inv)
 	case "sparkwing completion":
 		return runCompletion(inv)
 	case "sparkwing runs logs", "sparkwing runs grep":

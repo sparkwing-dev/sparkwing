@@ -15,6 +15,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runners"
+	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -31,15 +33,46 @@ func runRunnersList(ctx context.Context, inv clisurface.Invocation) error {
 	if err != nil {
 		return err
 	}
-	return listRunners(ctx, inv, reader, os.Stdout)
+	return listRunners(ctx, inv, reader, os.Stdout, locallyPausedRunner(options.URL))
 }
 
-func listRunners(ctx context.Context, inv clisurface.Invocation, reader controllerwire.RunnerReader, out io.Writer) error {
+// safety: the pause is a local file, so only this machine's enrolled runner, enrolled with the
+// listed controller, can be shown paused.
+func locallyPausedRunner(controllerURL string) string {
+	path, err := agentConfigPath("")
+	if err != nil {
+		return ""
+	}
+	cfg, err := userconfig.ReadConfig(path)
+	if err != nil || cfg.Runner == nil || cfg.Runner.Controller == nil || cfg.Runner.HolderPrefix == nil || cfg.Runner.CredentialsDir == nil {
+		return ""
+	}
+	configured, err := normalizeControllerURL(*cfg.Runner.Controller)
+	if err != nil {
+		return ""
+	}
+	if listed, err := normalizeControllerURL(controllerURL); err != nil || listed != configured {
+		return ""
+	}
+	if paused, err := runners.Paused(*cfg.Runner.CredentialsDir); err != nil || !paused {
+		return ""
+	}
+	return *cfg.Runner.HolderPrefix
+}
+
+func listRunners(ctx context.Context, inv clisurface.Invocation, reader controllerwire.RunnerReader, out io.Writer, pausedName string) error {
 	result, err := reader.ListRunners(ctx)
 	if err != nil {
 		return err
 	}
 	rows := result.Runners
+	if pausedName != "" {
+		for i := range rows {
+			if rows[i].Name == pausedName {
+				rows[i].Status = "paused"
+			}
+		}
+	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].Class == rows[j].Class {
 			return rows[i].Name < rows[j].Name
