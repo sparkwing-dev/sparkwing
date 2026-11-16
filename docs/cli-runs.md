@@ -222,6 +222,8 @@ Search controller logs across matching runs. Filters apply before the run page l
 
 JSON emits matching records and a page record with next_cursor and truncated. Quiet JSON emits run_id records and sends continuation metadata to stderr. Plain emits matching lines, or run IDs with --quiet.
 
+--run searches one run's logs and prints its matching records in the runs logs formats. The cross-run filters, --limit, --max-matches, --quiet and --cursor do not apply to it.
+
 ### Flags
 
 | Flag | Description |
@@ -230,9 +232,10 @@ JSON emits matching records and a page record with next_cursor and truncated. Qu
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+| `--run RUN_ID` | Run ID or per-team run number. |
 | `--job JOB` | Job within the selected run. |
 | `--grep PATTERN` | Show only log lines matching this text. |
-| `--since DURATION` | Search only runs that started within this lookback, such as 24h, 7d or 2w; 0 sets no bound, and the later of --since and --started-after wins. |
+| `--since DURATION` | Search only runs that started within this lookback, such as 24h, 7d or 2w; 0 sets no bound, and the later of --since and --started-after wins. With --run, search only lines within it. |
 | `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 | `--pipeline NAME` | Pipeline name. |
 | `--status STATUS` | Search only runs whose status matches exactly; prefix with ! to exclude a status. |
@@ -308,7 +311,7 @@ Read job-attempt and trigger, plan or eval logs through the controller. --job se
 
 Every read consumes all available pages. Without --follow, a snapshot with pending final log segments reports logs incomplete and exits 3. --follow waits for new records until final log segments are complete. An interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.
 
-JSON emits tagged log records. Plain emits log lines. Pretty starts each line with its job, leaves out scheduling events, and ends a failed run with each failed job's step and error and the commands to read its log and retry it. Use --grep without --run to search across runs with the same filters and pagination as runs grep.
+JSON emits tagged log records. Plain emits log lines. Pretty starts each line with its job, leaves out scheduling events, and ends a failed run with each failed job's step and error and the commands to read its log and retry it. Search log text with runs grep.
 
 ### Flags
 
@@ -323,22 +326,12 @@ JSON emits tagged log records. Plain emits log lines. Pretty starts each line wi
 | `--tail N` | Print only the last N lines of each job or owner log; by default every line is printed. |
 | `--head N` | Print only the first N lines of each job or owner log; cannot be combined with --tail. |
 | `--lines A:B` | Print only lines A through B, inclusive and counted from 1, of each job or owner log. |
-| `--grep PATTERN` | Show only log lines matching this text. |
-| `--since DURATION` | With --run, print only lines and events within this lookback, such as 10m or 2d, keeping lines without a timestamp; with --grep and no --run, search only runs that started within it. |
+| `--since DURATION` | Print only lines and events within this lookback, such as 10m or 2d, keeping lines without a timestamp. |
 | `--tree` | Also include logs from the runs this run started, and from the runs those started. |
 | `--events-only` | Print only lifecycle events, leaving out log output. |
 | `--no-events` | Print only log output, leaving out lifecycle events. |
 | `-f, --follow` | Keep streaming until the observed work finishes. |
 | `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
-| `--pipeline NAME` | Pipeline name. |
-| `--status STATUS` | When searching with --grep and no --run, search only runs whose status matches exactly; prefix with ! to exclude a status. |
-| `--branch BRANCH` | When searching with --grep and no --run, search only runs on this exact branch name; a ! prefix excludes a branch. Repeatable; comma-separated values are accepted. |
-| `--sha PREFIX` | When searching with --grep and no --run, search only runs whose commit SHA starts with this prefix, ignoring case. |
-| `--started-after DATE` | When searching with --grep and no --run, search only runs that started at or after this time: today, yesterday, a lookback such as 7d, YYYY-MM-DD or RFC 3339. |
-| `--started-before DATE` | When searching with --grep and no --run, search only runs that started at or before this time, in the same formats as --started-after. |
-| `--limit N` | Maximum number of records to print, at least one. Continue with --cursor when more exist. |
-| `--max-matches N` | When searching with --grep and no --run, the most matching lines returned from each log, 5 by default; zero removes the cap. |
-| `-q, --quiet` | When searching with --grep and no --run, print each matching run ID once instead of the matching lines. |
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 
 ### Examples

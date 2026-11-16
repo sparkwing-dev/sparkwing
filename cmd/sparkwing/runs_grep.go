@@ -72,9 +72,6 @@ func parseLogSearch(inv clisurface.Invocation, now time.Time) (controllerwire.Lo
 		query.MaxMatches = logFlagInt(inv, "max-matches")
 	}
 	if query.Pattern == "" {
-		if inv.Command.Path == "sparkwing runs logs" && !inv.Has("grep") {
-			return query, logUsage(inv, "pass --run <id> to read a run's logs, or --grep <pattern> to search across runs; sparkwing runs list shows run IDs")
-		}
 		return query, logUsage(inv, "--grep requires a pattern")
 	}
 	if query.MaxMatches < 0 {

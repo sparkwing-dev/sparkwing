@@ -257,8 +257,8 @@ func TestCheckCLIVerbsShellExamples(t *testing.T) {
 		"$ sparkwing runs status --run <id> -o json | jq .status\n"+
 		"sparkwing run deploy -- --arbitrary='two words' # author flags\n"+
 		"sparkwing profiles add --profile prod --controller https://example.com --token-stdin < token\n"+
-		"sparkwing runs logs --run <id> --grep '|' >/tmp/result\n"+
-		"sparkwing runs logs --run <id> --grep '>' 2>/tmp/errors\n"+
+		"sparkwing runs grep --run <id> --grep '|' >/tmp/result\n"+
+		"sparkwing runs grep --run <id> --grep '>' 2>/tmp/errors\n"+
 		"# sparkwing run deploy --obsolete is a shell comment\n"+
 		"```\nInline fragments remain valid: `sparkwing runs status`.\n")
 	if !checkCLIVerbs(content) {
