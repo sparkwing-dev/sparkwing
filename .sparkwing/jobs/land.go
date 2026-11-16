@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
@@ -20,8 +21,9 @@ type Land struct{ sparkwing.Base }
 
 // LandArgs supplies the local review inputs.
 type LandArgs struct {
-	Queued        bool `flag:"queued" desc:"Queue a focused owned-hardware land: merge main, policy, pre-push/review, then push the unchanged commit. Use --sw-detached; a non-empty --brief is required."`
-	PrePushReview bool `flag:"pre-push-review" desc:"Run the unchanged pre-push tier alongside review in one fail-fast job; intended for the focused queue."`
+	Queued        bool   `flag:"queued" desc:"Queue through main's bin/queue-land.sh: merge main, policy and fast checks, review alongside affected Go tests, then push the unchanged commit."`
+	QueuedMain    string `flag:"queued-main" desc:"Exact main SHA supplied by the trusted queue submission script. Must match origin/main at execution."`
+	PrePushReview bool   `flag:"pre-push-review" desc:"Run pre-push's fast checks alongside review in one fail-fast job; ordinary land's Gate covers the affected tests."`
 	ReviewArgs
 }
 
@@ -31,16 +33,17 @@ func (Land) ShortHelp() string {
 
 func (Land) Help() string {
 	return "Run policy, gate, review and push on owned hardware. " +
-		"All lands share one serial run slot. With --queued, require a non-empty --brief (for example, --brief 'Short intent'), merge origin/main before checks, run policy and pre-push/review against the merged checkout, and push only the unchanged checked commit. Submit with --sw-detached; track its run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
+		"For ordinary Land, fetch origin/main and pass --sw-pipeline-ref <fetched-main-SHA> so the candidate does not define its own gate. " +
+		"All lands share one serial run slot. Extract bin/queue-land.sh from freshly fetched origin/main and run that copy against the candidate with --brief 'Short intent' (see DELIVERY.md). The script verifies itself against fetched main and pins the pipeline definition to that SHA. With --queued, require that --queued-main still matches origin/main, merge it before checks, then run policy and fast pre-push checks against the merged checkout. After both pass and release their reservations, run review alongside the shared affected short and critical Go tests in one fail-fast job. A review or test failure cancels its sibling and refuses the land. Push only the unchanged commit whose policy, fast checks, review and tests passed. The queued push proves fast-forward ancestry, atomically leases the planned main SHA, and refuses already-at-target results. Track the run ID in the dashboard or runs status --follow. A failed entry releases the slot for the next. " +
 		"Refuses a dirty checkout, a detached HEAD, main itself, a CHANGELOG.md that repeats a ### heading within a release, and a branch whose merge with origin/main (after fetching it) conflicts, " +
 		"naming the command that fixes each. Then runs the gate's policy job (the cheap source-policy checks) alongside the review " +
 		"(the same job as `sparkwing run review`, which reads .review.yaml and takes --brief and --skip). " +
 		"Once policy passes, the rest of the gate (the same jobs as `sparkwing run gate`) starts while review continues. " +
 		"The review always runs, whatever the change's size or paths. When both pass and the review record's tree is HEAD's tree with result pass, " +
-		"the land job re-checks that HEAD did not move, fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
-		"with no force, adding --no-verify when the pushed tree is the tree the gate and review judged, since the gate covers every check the pre-push hook makes; " +
-		"a merged tree pushes through the hook. When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
-		"into the branch (a merge commit under the default git identity, never a rebase), builds the affected package closure and runs the affected tests over the files " +
+		"the land job re-checks that HEAD did not move. Ordinary Land fetches origin/main and runs `git push origin <HEAD>:refs/heads/main` " +
+		"with no force, adding --no-verify after the gate and any merge-delta tests pass, since those checks cover the pushed tree; " +
+		"When origin/main is not an ancestor of HEAD, or the push is refused because main moved, the push step merges origin/main " +
+		"into the branch (a merge commit under the default git identity, never a rebase), builds the affected package closure, repeats the fast push checks including qatrust vet and the contract checks, and runs affected tests once over the files " +
 		"that differ between the gated tree and the merged tree, then pushes the merge; the review is not run again. It merges at most 3 times; a conflict fails " +
 		"and names the merge to run by hand. The push step carries the destructive and prod risks, " +
 		"so a real landing needs --sw-allow-risk destructive,prod. The land job's output is the landing record: branch, the commit and tree pushed, " +
@@ -49,10 +52,9 @@ func (Land) Help() string {
 
 func (Land) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Preview the landing without pushing", Command: "sparkwing run land --sw-dry-run"},
-		{Comment: "Gate and review without pushing", Command: "sparkwing run land --sw-stop-at verify --sw-allow-risk destructive,prod"},
-		{Comment: "Land the branch on main", Command: "sparkwing run land --sw-allow-risk destructive,prod"},
-		{Comment: "Enqueue a focused owned-hardware landing", Command: "sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --queued --brief 'Describe the goal'"},
+		{Comment: "Preview with freshly fetched main's pipeline", Command: "sparkwing run land --sw-pipeline-ref <fetched-main-SHA> --sw-dry-run"},
+		{Comment: "Gate and review without pushing", Command: "sparkwing run land --sw-pipeline-ref <fetched-main-SHA> --sw-stop-at verify --sw-allow-risk destructive,prod"},
+		{Comment: "Land the branch with main's pipeline", Command: "sparkwing run land --sw-pipeline-ref <fetched-main-SHA> --sw-allow-risk destructive,prod"},
 	}
 }
 
@@ -63,15 +65,30 @@ const (
 )
 
 func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc sparkwing.RunContext) error {
-	// safety: Plan reads WorkDir rather than running git, because planning does
-	// no I/O. The inline jobs run git in this checkout, not a job snapshot, so
-	// the commit they push is the one the developer is on.
+	if err := refuseLandStepBounds(rc); err != nil {
+		return err
+	}
+	// safety: immutable local repository metadata retains the owner path when
+	// a later SDK process starts in a snapshot of the pre-merge commit. Planning
+	// does no I/O; authorizing callbacks bind to and verify that owner at runtime.
 	repoDir := sparkwing.WorkDir()
+	var checks *queuedChecks
+	if in.Queued {
+		if rc.Git != nil && filepath.IsAbs(rc.Git.Repo) {
+			repoDir = filepath.Clean(rc.Git.Repo)
+		}
+		checks = &queuedChecks{Owner: repoDir, RunID: rc.RunID}
+		in.ReviewArgs.base, in.ReviewArgs.checkout = in.QueuedMain, repoDir
+		in.ReviewArgs.checks = checks
+	}
 	if repoDir == "" {
 		return errors.New("land: no working directory; run this pipeline from a checkout with a .sparkwing directory")
 	}
 	if in.Queued && strings.TrimSpace(in.Brief) == "" {
 		return errors.New("land: --queued requires a non-empty --brief with the goal to review; for example: --brief 'BW" + "-1234: short intent'")
+	}
+	if in.Queued && in.QueuedMain == "" {
+		return errors.New("land queue: submit through bin/queue-land.sh extracted from freshly fetched origin/main so the plan uses main's gate")
 	}
 	plan.Concurrency(sparkwing.NewConcurrencyGroup("sparkwing-land", sparkwing.ConcurrencyLimit{Capacity: 1}))
 	branch, submitted := "", ""
@@ -79,13 +96,24 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 		branch = rc.Git.Branch
 		submitted = rc.Git.SHA
 	}
-	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir, Queued: in.Queued, Submitted: submitted}).Inline().Cores(lightJobCores)
+	pre := sparkwing.Job(plan, "preconditions", &landPreconditionsJob{RepoDir: repoDir, Queued: in.Queued, Submitted: submitted, QueuedMain: in.QueuedMain, Checks: checks}).Inline().Cores(lightJobCores)
+	if checks != nil {
+		checks.Head = sparkwing.RefTo[landHead](pre)
+		in.ReviewArgs.head = checks.Head
+	}
 
 	var needs []sparkwing.Dep
 	if in.Queued {
-		policy := sparkwing.Job(plan, policyJobID, &policyJob{}).Inline().Timeout(policyJobTimeout).Needs(pre)
-		review := reviewJobNode(plan, in.ReviewArgs, branch, true).Needs(pre)
-		needs = []sparkwing.Dep{policy, review}
+		policy := sparkwing.Job(plan, policyJobID, &policyJob{Checks: checks, Head: checks.Head}).Inline().Timeout(policyJobTimeout).Needs(pre)
+		// perf: the fast steps size their compilers from runtime.NumCPU, not the
+		// submitter's GOMAXPROCS, so the reservation counts the same CPUs.
+		fast := sparkwing.Job(plan, "fast", &PrePush{Checks: checks, Head: checks.Head}).Inline().
+			Timeout(queuedFastTimeout).NoProgressTimeout(queuedFastNoProgressTimeout).
+			Cores(float64(prePushReservationCores(runtime.NumCPU()))).Needs(pre)
+		joined := sparkwing.Job(plan, "affected-tests", &queuedLandChecks{args: in.ReviewArgs, branch: branch, Checks: checks, Head: checks.Head}).Inline().
+			Timeout(affectedPushTestsTimeout).NoProgressTimeout(affectedPushTestsTimeout).
+			Cores(lightJobCores+float64(goStepParallelism(affectedPushHost()))).Needs(policy, fast)
+		needs = []sparkwing.Dep{policy, fast, joined}
 	} else {
 		gate := gateJobs(plan, &Gate{}, "gate", false)
 		gate[0].Needs(pre)
@@ -120,31 +148,41 @@ func gitIn(dir string) gitRunner {
 
 // safety: the commit the preconditions accepted; every later check compares against it.
 type landHead struct {
-	Branch string `json:"branch"`
-	Commit string `json:"commit"`
-	Tree   string `json:"tree"`
-	Base   string `json:"base"`
+	Branch string                 `json:"branch"`
+	Commit string                 `json:"commit"`
+	Tree   string                 `json:"tree"`
+	Base   string                 `json:"base"`
+	Checks *landCheckRequirements `json:"checks,omitempty"`
 }
 
 type landPreconditionsJob struct {
 	sparkwing.Base
 	sparkwing.Produces[landHead]
-	RepoDir   string
-	Queued    bool
-	Submitted string
+	RepoDir    string
+	Queued     bool
+	Submitted  string
+	QueuedMain string
+	Checks     *queuedChecks
 }
 
 func (j *landPreconditionsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return sparkwing.Step(w, "check", func(ctx context.Context) (landHead, error) {
 		git := gitIn(j.RepoDir)
 		if j.Queued && !sparkwing.IsDryRun(ctx) {
-			if err := prepareQueuedLanding(ctx, git, j.RepoDir, j.Submitted); err != nil {
+			if err := prepareQueuedLanding(ctx, git, j.RepoDir, j.Submitted, j.QueuedMain); err != nil {
 				return landHead{}, err
 			}
 		}
 		head, err := checkLandPreconditions(ctx, git, j.RepoDir)
 		if err != nil {
 			return landHead{}, err
+		}
+		if j.Queued && head.Base != j.QueuedMain {
+			return landHead{}, queuedMainMoved(j.QueuedMain, head.Base)
+		}
+		if j.Checks != nil {
+			head.Checks = &landCheckRequirements{RunID: j.Checks.RunID, Required: j.Checks.names()}
+			sparkwing.Info(ctx, "landing check set: run=%s tree=%s required=%v", head.Checks.RunID, head.Tree, head.Checks.Required)
 		}
 		sparkwing.Info(ctx, "landing %s at %s (tree %s) onto %s %s", head.Branch, short(head.Commit), short(head.Tree), landBaseRef, short(head.Base))
 		return head, nil
@@ -254,6 +292,9 @@ type landJob struct {
 
 func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	verify := sparkwing.Step(w, "verify", func(ctx context.Context) error {
+		if j.Queued && !sparkwing.IsDryRun(ctx) && j.Head.Get(ctx).Checks == nil {
+			return errors.New("land: queued landing has no authorizing check receipts")
+		}
 		review, ok, err := j.review(ctx)
 		if err != nil {
 			return err
@@ -278,6 +319,11 @@ func (j *landJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 		j.landed = &landed
 		return nil
 	}).DryRun(func(ctx context.Context) error {
+		if j.Queued {
+			head := j.Head.Get(ctx)
+			sparkwing.Info(ctx, "dry run: would prove a fast-forward from planned main %s and atomically push gated commit %s with an exact base lease; already-at-target results refuse", short(head.Base), short(head.Commit))
+			return nil
+		}
 		sparkwing.Info(ctx, "dry run: would fetch %s, merge it into %s when it moved (at most %d times, re-checking the files each merge changed), then run git %s",
 			landBaseRef, j.Head.Get(ctx).Branch, landMaxMerges, strings.Join(landPushArgs("<HEAD or the merge>", false), " "))
 		return nil
@@ -370,6 +416,11 @@ func verifyLanding(ctx context.Context, git gitRunner, dir string, head landHead
 	if err := verifyLandingCheckout(ctx, git, dir, head); err != nil {
 		return err
 	}
+	if !sparkwing.IsDryRun(ctx) {
+		if err := verifyLandChecks(ctx, git, head); err != nil {
+			return err
+		}
+	}
 	sparkwing.Info(ctx, "review %s on tree %s, HEAD still %s", review.Result, short(head.Tree), short(head.Commit))
 	return nil
 }
@@ -447,7 +498,7 @@ func landOnto(ctx context.Context, dir string, head landHead, recheck mergeReche
 			}
 		}
 		target.Base = base
-		refused = pushLanding(ctx, git, dir, target.Commit, head.Tree)
+		refused = pushLanding(ctx, git, dir, target.Commit, target.Tree)
 		if refused == nil {
 			return target, nil
 		}
@@ -511,7 +562,7 @@ func changelogRepeatedHeadings(dir string) (string, error) {
 // safety: -z and no trimming, so a name holding a newline or leading space
 // still reaches the affected-test selection intact.
 func changedBetween(ctx context.Context, dir, from, to string) ([]string, error) {
-	out, err := runGitIn(ctx, dir, "diff", "-z", "--name-only", "--no-renames", "--diff-filter=ACMRD", from, to)
+	out, err := runGitIn(ctx, dir, "diff", "-z", "--name-only", "--no-renames", from, to)
 	if err != nil {
 		return nil, fmt.Errorf("land: list the files the merge changed: %w", err)
 	}
@@ -524,16 +575,38 @@ func changedBetween(ctx context.Context, dir, from, to string) ([]string, error)
 	return files, nil
 }
 
-// safety: build catches compile errors before the merge delta runs its fast
-// dependency closure and the full critical set.
+// safety: the merge must retain every fast push check before skipping the
+// hook, while affected tests run once over the merge delta.
 func recheckMergeDelta(ctx context.Context, files []string) error {
 	if err := runAffectedCompileFiles(ctx, "build", files); err != nil {
+		return err
+	}
+	// safety: main's new packages can interact with this branch even though
+	// origin/main..HEAD no longer lists them after the merge.
+	branchFiles, _, err := pushRangeScope(ctx, "file(s)", func(files []string) []string { return files })
+	if err != nil {
+		return err
+	}
+	mergedFiles := append(append([]string(nil), files...), branchFiles...)
+	if err := runPublishedSDKBuildFiles(ctx, mergedFiles, goStepParallelism(currentHost())); err != nil {
+		return err
+	}
+	scope := fmt.Sprintf("%d file(s) in the branch and merge delta", len(mergedFiles))
+	for _, check := range []func(context.Context) error{checkChangelogRequired, checkAPISpec, checkAPISnapshot} {
+		if err := check(ctx); err != nil {
+			return err
+		}
+	}
+	if err := overPackageFiles(ctx, "vet-touched", "compile", existingGoFiles(mergedFiles), scope, vetTouchedCommand); err != nil {
+		return err
+	}
+	if err := overPackageFiles(ctx, "lint-touched", "lint", existingGoFiles(mergedFiles), scope, fastLintTouchedCommand); err != nil {
 		return err
 	}
 	if err := ensureFrontendDeps(ctx); err != nil {
 		return err
 	}
-	return runAffectedTestFiles(ctx, files, fmt.Sprintf("%d file(s) the merge of %s changed", len(files), landBaseRef))
+	return runAffectedTestFiles(ctx, files, fmt.Sprintf("%d file(s) the merge of %s changed", len(files), landBaseRef), currentHost(), false)
 }
 
 // safety: no --force and an explicit commit, so the remote accepts the push
@@ -548,8 +621,8 @@ func landPushArgs(commit string, gated bool) []string {
 	return []string{"push", landBaseRemote, commit + ":refs/heads/" + landBaseBranch}
 }
 
-// safety: the hook is skipped only when the pushed commit's tree is the one the
-// gate and review judged; anything else is judged by the hook as a human push is.
+// safety: the checked tree includes any successful merge-delta recheck; a
+// different pushed tree must still pass the hook.
 func pushLanding(ctx context.Context, git gitRunner, dir, commit, gatedTree string) error {
 	tree, err := git(ctx, "rev-parse", commit+"^{tree}")
 	gated := err == nil && tree == gatedTree

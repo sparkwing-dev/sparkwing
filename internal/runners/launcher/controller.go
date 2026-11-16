@@ -44,43 +44,45 @@ func NewControllerControl(client LauncherController, demand controllerwire.Claim
 }
 
 // Claim delivers a bootstrap once; uncertain transport delivery recovers through lease expiry.
-func (c *ControllerControl) Claim(ctx context.Context, namespace string, excludedTeamLabels []string) (*CloudJobAward, error) {
+// Its second result is the controller's poll floor, capped at the supported idle interval.
+func (c *ControllerControl) Claim(ctx context.Context, namespace string, excludedTeamLabels []string) (*CloudJobAward, time.Duration, error) {
 	if err := context.Cause(ctx); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	demand := c.demand
 	demand.Kinds, demand.Labels = slices.Clone(demand.Kinds), slices.Clone(demand.Labels)
 	demand.JobNamespace = namespace
 	demand.ExcludedTeamLabels = slices.Clone(excludedTeamLabels)
 	response, err := c.client.Claim(ctx, demand)
+	pollAfter := min(max(response.PollAfter, 0), controllerwire.MaxHonoredIdleClaimPoll)
 	if err != nil || response.Claim == nil {
-		return nil, err
+		return nil, pollAfter, err
 	}
 	unit := *response.Claim
 	binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
 	if err != nil {
-		return nil, err
+		return nil, pollAfter, err
 	}
 	if !slices.Contains(c.demand.Kinds, unit.Unit) || unit.Capability == "" {
-		return nil, errors.New("controller returned an unexpected launcher award")
+		return nil, pollAfter, errors.New("controller returned an unexpected launcher award")
 	}
 	resources := unit.CloudResources
 	if resources == nil {
-		return nil, errors.New("Cloud award is missing its committed allocation")
+		return nil, pollAfter, errors.New("cloud award is missing its committed allocation")
 	}
 	award := &CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: resources.Cores, Memory: resources.MemoryBytes, UpsizeEnabled: unit.CloudUpsizeEnabled}
 	if err := validateAward(*award); err != nil {
-		return nil, err
+		return nil, pollAfter, err
 	}
 	award.Source, err = cloudSource(unit)
 	if err != nil {
-		return nil, err
+		return nil, pollAfter, err
 	}
 	captured, err := captureAward(*award)
 	if err != nil {
-		return nil, err
+		return nil, pollAfter, err
 	}
-	return &captured, nil
+	return &captured, pollAfter, nil
 }
 
 func cloudSource(unit controllerwire.ClaimedUnit) (source.Spec, error) {

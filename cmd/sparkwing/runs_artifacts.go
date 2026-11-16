@@ -12,15 +12,17 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"syscall"
-	"unicode"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func validateRunArtifacts(inv clisurface.Invocation) error {
@@ -86,17 +88,29 @@ func observeRunArtifacts(ctx context.Context, inv clisurface.Invocation, reader 
 		}
 		defer func() {
 			_ = file.Close()
+			// #nosec G703 -- CreateTemp generated this file name in the operator-selected destination directory.
 			if removeErr := os.Remove(file.Name()); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 				err = errors.Join(err, removeErr)
 			}
 		}()
 		entry, readErr := reader.DownloadArtifact(ctx, run, job, path, file)
+		var failure *apierr.Error
+		if errors.Is(readErr, blob.ErrIntegrity) {
+			failure = &apierr.Error{Code: hosterr.IntegrityFailure, Message: "object integrity mismatch"}
+		}
+		if failure != nil || errors.As(readErr, &failure) && failure.Code == apierr.Conflict {
+			diagnostic := *failure
+			diagnostic.Message = fmt.Sprintf("artifact %q from job %q in run %q: %s", path, job, run, failure.Message)
+			diagnostic.Hint = "Ask the controller operator to restore the stored artifact from a trusted copy, then repeat this download"
+			readErr = &diagnostic
+		}
 		if err := errors.Join(readErr, file.Close(), ctx.Err()); err != nil {
 			return err
 		}
 		if err := artifactDestinationAvailable(dest); err != nil {
 			return err
 		}
+		// #nosec G703 -- The local operator selects --dest and CreateTemp owns the source name.
 		if err := os.Rename(file.Name(), dest); err != nil {
 			return err
 		}
@@ -207,31 +221,28 @@ func writeArtifact(out io.Writer, record artifactRecord, format string) error {
 		return json.NewEncoder(out).Encode(record)
 	}
 	if format == "plain" && record.SavedTo == "" {
-		_, err := fmt.Fprintln(out, artifactDisplayText(record.Path))
+		_, err := fmt.Fprintln(out, opsview.DisplayText(record.Path))
 		return err
 	}
 	if record.SavedTo != "" {
-		_, err := fmt.Fprintln(out, artifactDisplayText(record.SavedTo))
+		_, err := fmt.Fprintln(out, opsview.DisplayText(record.SavedTo))
 		return err
 	}
-	_, err := fmt.Fprintf(out, "%s\t%s\t%d\t%s\n", artifactDisplayText(record.JobID), artifactDisplayText(record.Path), record.Size, record.Digest)
+	_, err := fmt.Fprintf(out, "%s\t%s\t%d\t%s\n", opsview.DisplayText(record.JobID), opsview.DisplayText(record.Path), record.Size, record.Digest)
 	return err
 }
 
 func artifactDestinationAvailable(dest string) error {
+	// #nosec G703 -- The local operator selects --dest; the controller cannot select this path.
 	_, err := os.Lstat(dest)
 	if err == nil {
-		return &os.PathError{Op: "create", Path: dest, Err: os.ErrExist}
+		return errors.Join(
+			&clisurface.UsageError{Path: "sparkwing runs artifacts", Message: fmt.Sprintf("destination %q already exists; choose a distinct --dest", dest)},
+			&os.PathError{Op: "create", Path: dest, Err: os.ErrExist},
+		)
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	return err
-}
-
-func artifactDisplayText(value string) string {
-	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
-		return strconv.Quote(value)
-	}
-	return value
 }

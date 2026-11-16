@@ -113,7 +113,7 @@ func prepareNativeBurst(ctx context.Context, pipeline string, flags runFlags, ar
 	if machine.Run != nil {
 		allow = machine.Run.SubmitEnvAllow
 	}
-	submitted, err := procenv.Submit(captured, allow, masker)
+	submitted, err := captureSubmittedEnvironment(captured, allow, masker)
 	if err != nil {
 		return controllerwire.CreateRunRequest{}, err
 	}

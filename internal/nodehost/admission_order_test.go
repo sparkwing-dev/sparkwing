@@ -17,6 +17,22 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
+type capacityDispatchProbe struct {
+	NativeHostStore
+	blocked chan<- struct{}
+}
+
+func (s capacityDispatchProbe) ReconcileNode(ctx context.Context, request store.ReconcileRequest) (runstate.ReconciledNode, error) {
+	result, err := s.NativeHostStore.ReconcileNode(ctx, request)
+	if err == nil && result.Kind == runstate.Dispatch && request.Ref.NodeID == "b" {
+		select {
+		case s.blocked <- struct{}{}:
+		default:
+		}
+	}
+	return result, err
+}
+
 func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t *testing.T) {
 	plan := capacityPlan("queue", 0, "a", "b")
 	for i := range plan.Jobs {
@@ -45,16 +61,10 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 		return machine.Acquire(ctx, request, queued)
 	})
 	config, _, _, _ := nativeHostFixture(t)
-	config.Store, config.Owner = fixture.Tenant, ownerOperationsFixture(fixture.Host)
+	ownerBlocked := make(chan struct{}, 1)
+	config.Store, config.Owner = capacityDispatchProbe{NativeHostStore: fixture.Tenant, blocked: ownerBlocked}, ownerOperationsFixture(fixture.Host)
 	config.Owner.Local = func(row runstate.NodeRow) bool { return row.Ref.NodeID == "b" }
 	config.Admission = ComposeStartGate(fixture.Tenant, &LocalAdmission{Daemon: admitter}, false)
-	ownerQueued := make(chan struct{}, 1)
-	config.Admission.Queued = func(_ context.Context, ref runspec.NodeRef, _ runstate.AcquireSlotResponse) error {
-		if ref.NodeID == "b" {
-			ownerQueued <- struct{}{}
-		}
-		return nil
-	}
 	owner, claimed, _, err := NewNativeHost(config)
 	if err != nil {
 		t.Fatal(err)
@@ -93,11 +103,15 @@ func TestNativeOwnerAndClaimedContentionNeverHoldComputeBeforeLogicalCapacity(t 
 		done <- err
 	})
 	select {
-	case <-ownerQueued:
+	case <-ownerBlocked:
 	case err := <-done:
-		t.Fatalf("owner did not wait for the claimed group: %v", err)
+		t.Fatalf("owner did not leave the full group unclaimed: %v", err)
 	case <-ctx.Done():
 		t.Fatal(context.Cause(ctx))
+	}
+	row := capacityRow(t, fixture, "b")
+	if row.ClaimedBy != "" || row.ReadyAt == nil {
+		t.Fatalf("owner claimed work in the full group: %+v", row)
 	}
 	if live, _, _ := machine.counts(); live != 0 {
 		t.Errorf("owner held machine admission while waiting for logical capacity: live=%d", live)

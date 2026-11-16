@@ -403,9 +403,9 @@ func TestReaperSamplesTheOperationalSeries(t *testing.T) {
 		t.Fatalf("create node: %v", err)
 	}
 
-	srv := New(st, nil)
 	const interval = time.Second
 	synctest.Test(t, func(t *testing.T) {
+		srv := New(st, nil)
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		stopped := make(chan struct{})

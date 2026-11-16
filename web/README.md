@@ -90,9 +90,10 @@ session. Page and API requests revalidate the session, so logout or
 controller-side revocation takes effect on the next request. Immutable build
 assets do not resolve a session.
 
-Session cookies are `Secure`; reach the controller over HTTPS, or pass the
-controller `--insecure-cookies` for a dashboard published over plain HTTP,
-which accepts session cookies travelling without TLS.
+Session cookies are always Secure `__Host-sw_session` and `__Host-sw_csrf`.
+Browser login works over HTTPS or loopback (`localhost` or `127.0.0.1`), including
+port-forwards and SSH tunnels. The client reads only the prefixed CSRF cookie.
+See [Serving the dashboard over HTTPS](../docs/self-hosting.md#serving-the-dashboard-over-https).
 
 ## Learn more
 

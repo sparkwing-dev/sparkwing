@@ -25,7 +25,7 @@ func refreshVersionPolicy(ctx context.Context) versionPolicyStatus {
 		return versionPolicyStatus{Status: "unavailable", Reason: err.Error()}
 	}
 	result, err := resolver.Index(ctx, time.Now())
-	return describeVersionPolicy(result, err, true, time.Now())
+	return describeVersionPolicy(result, err, time.Now())
 }
 
 // safety: doctor and update --dry-run stay read-only, so an absent cache is reported without creating it.
@@ -42,10 +42,10 @@ func cachedVersionPolicy(ctx context.Context) versionPolicyStatus {
 		return versionPolicyStatus{Status: "unavailable", Reason: err.Error()}
 	}
 	result, err := resolver.Index(ctx, time.Now())
-	return describeVersionPolicy(result, err, false, time.Now())
+	return describeVersionPolicy(result, err, time.Now())
 }
 
-func describeVersionPolicy(result engine.IndexResult, err error, refreshed bool, now time.Time) versionPolicyStatus {
+func describeVersionPolicy(result engine.IndexResult, err error, now time.Time) versionPolicyStatus {
 	switch {
 	case err != nil:
 		return versionPolicyStatus{Status: "unavailable", Reason: err.Error()}
@@ -57,8 +57,7 @@ func describeVersionPolicy(result engine.IndexResult, err error, refreshed bool,
 	policy := result.Index.Policy()
 	published := policy.PublishedAt.UTC()
 	status := versionPolicyStatus{Status: "cached", Latest: policy.Latest, PublishedAt: &published, Age: max(0, now.Sub(published)).Truncate(time.Minute).String()}
-	// hack: a local-only read always reports its cache as a fallback; only a failed refresh is stale.
-	if refreshed && result.Fallback && len(result.Notices) > 0 {
+	if result.Fallback && len(result.Notices) > 0 {
 		status.Status, status.Reason = "stale", result.Notices[0].Reason
 	}
 	return status

@@ -26,12 +26,14 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/githubapp"
 	"github.com/sparkwing-dev/sparkwing/internal/googleauth"
+	"github.com/sparkwing-dev/sparkwing/internal/rsatest"
 )
 
 // AppID is the App the fake serves.
 const AppID = 4242
 
 // webhookSecret signs the deliveries [Sign] produces.
+// #nosec G101 -- This signing string belongs only to the in-process fake GitHub server.
 const webhookSecret = "fake-app-webhook-secret"
 
 // Repo is a repository an installation covers.
@@ -135,10 +137,7 @@ type GitHub struct {
 // New starts the fake and stops it when t ends.
 func New(t testing.TB) *GitHub {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("githubapptest: generate key: %v", err)
-	}
+	key := rsatest.New(t)
 	g := &GitHub{
 		Key: key, t: t,
 		insts:           map[int64]*Installation{},
@@ -183,6 +182,7 @@ func New(t testing.TB) *GitHub {
 
 // Config is an App configuration that talks to this fake.
 func (g *GitHub) Config() githubapp.Config {
+	// #nosec G101 -- These credentials authenticate only the in-process fake GitHub server.
 	return githubapp.Config{
 		AppID: AppID, Slug: "sparkwing-test", ClientID: "Iv1.fake", ClientSecret: "fake-client-secret",
 		WebhookSecret: webhookSecret, PrivateKey: g.Key, WebURL: g.URL, APIURL: g.URL,

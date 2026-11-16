@@ -82,6 +82,7 @@ func (c Command) Identity(directory, runtimeVersion string) (string, error) {
 				fmt.Fprintf(sum, "directory:%s\x00%s\x00", filepath.ToSlash(relative), filepath.ToSlash(binding))
 				return walk(path, relative)
 			}
+			// #nosec G122 -- Pipeline identity follows installed dependency symlinks, including the external pnpm store.
 			body, err := os.ReadFile(path)
 			if err != nil {
 				return err

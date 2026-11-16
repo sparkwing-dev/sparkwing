@@ -512,12 +512,13 @@ for a secret it could have named at the start.
 - **On a controller,** the run's plan is refused when a required secret is
   neither set for the run's repository and pipeline (read only by runs
   whose code Sparkwing fetched from the repository) nor set team-wide and shared with runs. A child at its parent's exact revision reads its parent pipeline's secrets, and any other child only shared ones (see [secrets](secrets.md)). The run fails before any of its nodes runs. Its error names the
-  declared secrets the run cannot read, and `sparkwing runs status --run
-  RUN_ID --profile PROFILE` shows the team which scope each is missing from
-  and the command that fixes it: `sparkwing secrets set --secret NAME --file
-  <path> --pipeline PIPELINE --profile PROFILE` for this pipeline only, or
-  `--shared` instead of `--pipeline` for a team-wide secret every pipeline
-  may read. That detail is a `secret_preflight_refused` run event, read with
+  declared secrets the run cannot read. Team members can read the
+  `secret_preflight_refused` notice with
+  `sparkwing runs status --run RUN_ID --profile PROFILE` for
+  the missing scopes and repair commands: `sparkwing secrets set --secret NAME --file
+  <path> --repo OWNER/REPO --pipeline PIPELINE --profile PROFILE` for this pipeline only, or
+  `--shared` instead of `--repo` and `--pipeline` for a team-wide secret every pipeline
+  may read. Status includes this notice in JSON, plain and errors views. The detail is read with
   the team's `runs.read` access and never by the run's claim tokens, because
   it names secrets and pipelines the run has no access to.
 - **On a laptop,** `sparkwing run` checks the same declarations against the

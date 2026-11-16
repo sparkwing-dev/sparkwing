@@ -1335,8 +1335,15 @@ without cycling through runspec. Plan claims use `log.tail` on
 `CredentialEval` alternative requiring `expansion.submit`, `ownEval` and
 `LiveExpansion` on those same routes and heartbeat. Eval carries
 `expansion.submit`, `data.read`, `secrets.release` and `refs.read`.
-The latter two require a pending approval predicate under the exact live
-evaluation fence. Generator expansion cannot read approval secrets or pipeline
+Self-hosted eval hosts also receive `source.read` to fetch and build the sealed
+run source under the independent live eval lease after the source job finishes.
+Cloud evals restore the planning owner's verified executable and receive no
+post-exchange source grant. Native owners cannot publish prepared executables.
+The self-hosted source grant also opens the eval's own run details, receipt,
+attempts, steps, approvals and debug pauses, plus its bound pipeline's sizing.
+SDK evaluation-process delegation omits this host-only grant.
+`secrets.release` and `refs.read` require a pending approval predicate under the
+exact live evaluation fence. Generator expansion cannot read approval secrets or pipeline
 references. Approval dependency outputs use the same accepted `Needs` rule as
 run-host evaluation. Authentication accepts a pending approval source only from
 the store-derived eligibility fact, under the exact source, evaluation and
@@ -3522,3 +3529,40 @@ retry, without reclassifying the source envelope.
 Secret preflight, plan validation, pool restrictions and release use the same row
 selector. Its explicit scope is pipeline, shared-only or none. Shared-only scope
 cannot select an unshared team secret or a pipeline secret.
+
+### Claim concurrency precheck
+
+Claim search and its transactional award recheck leave a job unclaimed when its
+queue-policy group cannot admit it. They reuse admission's scope key, effective
+weighted capacity and earlier-waiter checks. Selection reserves no concurrency
+holder and does not change readiness or queue order. A later poll and another
+runner see current capacity, so releasing a group makes the job eligible again.
+Run-host self-claims return a dispatch miss while the group is full; the owner
+retries the ready job without taking machine compute.
+Skip, fail and cancel-others policies continue through the admission boundary.
+Box-scoped checks use the authenticated execution host. Launcher awards whose
+host is not selected yet defer that check to admission after activation.
+
+Each search reuses group accounting only within its read snapshot. Saturated
+groups are filtered before per-job eligibility; bound searches page blocked
+nodes by arrival and identity. Retained holders, weighted backfill and admission
+validation remain eligible. Unseen and expired timed jobs still reach the fenced
+clock writer, while live clocks can use the group filter. The next poll and the
+award transaction recompute current capacity.
+
+Capacity can change after selection. The runner keeps at most its concurrency
+limit in suspended admission waits, polls those waits with exponential backoff
+up to one second, and returns further unstarted race losses to the store.
+A suspended waiter does not consume work inventory for a runnable child job.
+Only successful admission reacquires work inventory before source preparation.
+
+A positive job group `QueueTimeout` includes pre-award waiting. The first eligible
+full-group check records a private per-node wait start after rechecking current
+claim authority, requirements, bindings and the unclaimed row under writer
+fences. A read snapshot itself writes no state. Observations carry the node's
+claim generation and queue identity, so an intervening award or retry discards
+a stale observation. This clock creates no holder or waiter and changes no FIFO
+arrival. Claim polls and reconciliation route expiry through the existing
+unclaimed `queue_timeout` transition, including materialize-only reconciliation.
+`MayStart` retains the same clock through an award; a successful grant clears it.
+State schema 38 adds the nullable clock and upgrades schema 37 automatically.

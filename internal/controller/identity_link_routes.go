@@ -91,8 +91,8 @@ func (s *Server) verifyIdentityLinkStart(r *http.Request) error {
 	if err := r.ParseForm(); err != nil {
 		return invalidEngineBody("invalid linking form")
 	}
-	if len(r.PostForm) != 1 || len(r.PostForm["csrf_token"]) != 1 || len(r.CookiesNamed(cookieName(csrfCookieName, s.cookiesSecure()))) != 1 ||
-		!validFormCSRF(r, s.cookiesSecure()) || !constantTimeEqual(r.PostForm.Get("csrf_token"), session.CSRFToken) {
+	if len(r.PostForm) != 1 || len(r.PostForm["csrf_token"]) != 1 || len(r.CookiesNamed(csrfCookieName)) != 1 ||
+		!validFormCSRF(r) || !constantTimeEqual(r.PostForm.Get("csrf_token"), session.CSRFToken) {
 		return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	if err := s.admitIdentityLink(session); err != nil {
@@ -226,7 +226,7 @@ func (s *Server) handleIdentityLinkStart(w http.ResponseWriter, r *http.Request,
 		return routepolicy.MissingEndpointPolicy()
 	}
 	grant, label := proof.grant, providerLabels[r.PathValue("provider")]
-	if !setFlowCookie(w, oauthFlowCookieName, oauthFlow{Provider: r.PathValue("provider"), State: grant.State, Verifier: grant.Verifier, Mode: oauthFlowLink}, s.cookiesSecure()) {
+	if !setFlowCookie(w, oauthFlowCookieName, oauthFlow{Provider: r.PathValue("provider"), State: grant.State, Verifier: grant.Verifier, Mode: oauthFlowLink}) {
 		return &apierr.Error{Code: hosterr.Internal, Message: "could not start linking"}
 	}
 	renderFlowPage(w, http.StatusOK, flowPage{Title: "Linking " + label, Message: "Continuing to " + label + " to confirm the account.", Refresh: grant.AuthorizeURL, ActionHref: grant.AuthorizeURL, ActionLabel: "Continue to " + label})
@@ -237,7 +237,7 @@ func (s *Server) handleIdentityLinkComplete(w http.ResponseWriter, r *http.Reque
 	if _, ok := r.Context().Value(identityLinkProofKey{}).(identityLinkProof); !ok {
 		return routepolicy.MissingEndpointPolicy()
 	}
-	clearFlowCookie(w, oauthFlowCookieName, s.cookiesSecure())
+	clearFlowCookie(w, oauthFlowCookieName)
 	noteAuditWrite(r.Context())
 	http.Redirect(w, r, "/account/sign-ins?"+url.Values{"linked": {r.PathValue("provider")}}.Encode(), http.StatusSeeOther)
 	return nil

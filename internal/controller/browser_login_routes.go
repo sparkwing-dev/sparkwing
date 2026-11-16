@@ -33,7 +33,7 @@ func (s *Server) verifyLoginPage(r *http.Request) error {
 	if len(r.Header.Values("Authorization")) != 0 {
 		return sessionUnavailable()
 	}
-	if len(r.CookiesNamed(cookieName(sessionCookieName, s.cookiesSecure()))) != 0 {
+	if len(r.CookiesNamed(sessionCookieName)) != 0 {
 		var err error
 		proof.session, err = s.readSessionFlow(r)
 		var failure *apierr.Error
@@ -87,7 +87,7 @@ func (s *Server) readLoginForm(r *http.Request) error {
 	if len(r.Header.Values("Authorization")) != 0 {
 		return sessionUnavailable()
 	}
-	if len(r.CookiesNamed(cookieName(sessionCookieName, s.cookiesSecure()))) > 1 {
+	if len(r.CookiesNamed(sessionCookieName)) > 1 {
 		return sessionUnavailable()
 	}
 	if !sameOriginRequest(r) {
@@ -97,7 +97,7 @@ func (s *Server) readLoginForm(r *http.Request) error {
 	if err := r.ParseForm(); err != nil {
 		return invalidEngineBody("invalid sign-in form")
 	}
-	if len(r.CookiesNamed(cookieName(csrfCookieName, s.cookiesSecure()))) != 1 || len(r.PostForm["csrf_token"]) != 1 || !validFormCSRF(r, s.cookiesSecure()) {
+	if len(r.CookiesNamed(csrfCookieName)) != 1 || len(r.PostForm["csrf_token"]) != 1 || !validFormCSRF(r) {
 		return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	for key, values := range r.PostForm {

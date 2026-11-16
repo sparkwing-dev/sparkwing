@@ -57,6 +57,10 @@ func TestAuthGuideCLIExamplesUseFinalGrammar(t *testing.T) {
 				continue
 			}
 			args := strings.Fields(unit)
+			// hack: the shell consumes a trailing output redirection before invoking the CLI.
+			if len(args) >= 3 && args[len(args)-2] == ">" {
+				args = args[:len(args)-2]
+			}
 			if _, err := clisurface.Parse("sparkwing", args[1:]); err != nil {
 				t.Errorf("auth example %q: %v", unit, err)
 			}

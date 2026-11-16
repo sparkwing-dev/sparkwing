@@ -143,11 +143,11 @@ Maintain the controller's sealed values
 
 Reseal every stored secret and key under the current key
 
-Reseal every team's secrets, git credentials and submitted run environments, and the session signing key, under the controller's current key. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.
+Reseal every team's secrets, git credentials, run arguments and submitted run environments, and the session signing key, under the controller's current key. Run arguments stored before argument sealing are sealed for the first time. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.
 
-Repeats safely. JSON retains the counts, previous_key_only and each unreadable row's purpose, team and name; values never appear.
+Repeats safely. JSON retains the counts, previous_key_only, plaintext_run_arguments and each unreadable row's purpose, team and name; values never appear.
 
---verify writes nothing and counts the rows that still open only under the previous key; retire the previous key when it reports zero and nothing unreadable.
+--verify writes nothing and counts the rows that still open only under the previous key and the run documents still holding plaintext arguments; retire the previous key when previous_key_only is zero and nothing is unreadable.
 
 ### Flags
 

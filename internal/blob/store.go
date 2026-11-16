@@ -34,18 +34,29 @@ func (s *signedStore) Put(ctx context.Context, req PutRequest) (Receipt, error) 
 	if !validUpload(req.Identity) || !validDigest(req.Digest) || req.Size < 0 || req.Body == nil {
 		return Receipt{}, fmt.Errorf("invalid blob upload")
 	}
-	ticket, err := s.signer.Upload(ctx, UploadIntent{Identity: req.Identity, Authority: req.Authority, Digest: req.Digest, Size: req.Size})
+	intent := UploadIntent{Identity: req.Identity, Authority: req.Authority, Digest: req.Digest, Size: req.Size}
+	var ticket UploadTicket
+	renew := func(ctx context.Context) (SignedTransfer, error) {
+		var err error
+		ticket, err = s.signer.Upload(ctx, intent)
+		if err != nil {
+			return SignedTransfer{}, err
+		}
+		if ticket.ID == "" || ticket.Transfer.Digest != req.Digest || ticket.Transfer.Size != req.Size {
+			return SignedTransfer{}, ErrIntegrity
+		}
+		return ticket.Transfer, nil
+	}
+	signed, err := renew(ctx)
 	if err != nil {
 		return Receipt{}, err
 	}
-	if ticket.ID == "" || ticket.Transfer.Digest != req.Digest || ticket.Transfer.Size != req.Size {
-		return Receipt{}, ErrIntegrity
+	reader := newVerifiedReader(ctx, io.NopCloser(req.Body), signed)
+	var body io.Reader = reader
+	if source, ok := req.Body.(io.ReadSeeker); ok {
+		body = &verifiedUploadReader{verifiedReader: reader, source: source, transfer: signed}
 	}
-	if err := ctx.Err(); err != nil {
-		return Receipt{}, err
-	}
-	reader := newVerifiedReader(ctx, io.NopCloser(req.Body), ticket.Transfer)
-	response, err := s.client.Transfer(ctx, ticket.Transfer, reader)
+	response, err := Upload(ctx, s.client, signed, body, renew)
 	if response != nil {
 		err = errors.Join(err, response.Close())
 	}
@@ -223,3 +234,18 @@ func (r *verifiedReader) Close() error {
 }
 
 func (r *verifiedReader) Verified() bool { return r.verified }
+
+// safety: each replay must verify the same signed digest and size from a fresh hash state.
+type verifiedUploadReader struct {
+	*verifiedReader
+	source   io.ReadSeeker
+	transfer SignedTransfer
+}
+
+func (r *verifiedUploadReader) Seek(offset int64, whence int) (int64, error) {
+	position, err := r.source.Seek(offset, whence)
+	if err == nil {
+		*r.verifiedReader = *newVerifiedReader(r.ctx, io.NopCloser(r.source), r.transfer)
+	}
+	return position, err
+}

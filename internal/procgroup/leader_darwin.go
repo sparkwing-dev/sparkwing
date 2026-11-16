@@ -3,6 +3,7 @@
 package procgroup
 
 import (
+	"encoding/binary"
 	"errors"
 	"syscall"
 	"unsafe"
@@ -11,6 +12,15 @@ import (
 )
 
 func waitLeaderExit(pid int) error {
+	_, err := leaderExit(pid, unix.WEXITED|unix.WNOWAIT)
+	return err
+}
+
+func leaderExitedNow(pid int) (bool, error) {
+	return leaderExit(pid, unix.WEXITED|unix.WNOHANG|unix.WNOWAIT)
+}
+
+func leaderExit(pid, options int) (bool, error) {
 	for {
 		// safety: waitid writes a siginfo_t here; 128 bytes exceeds its size on every darwin ABI.
 		var info [128]byte
@@ -20,7 +30,7 @@ func waitLeaderExit(pid int) error {
 			uintptr(pid),
 			// #nosec G103 -- hands the kernel a stack buffer larger than the siginfo_t it writes
 			uintptr(unsafe.Pointer(&info[0])),
-			uintptr(unix.WEXITED|unix.WNOWAIT),
+			uintptr(options),
 			0,
 			0,
 		)
@@ -28,8 +38,8 @@ func waitLeaderExit(pid int) error {
 			continue
 		}
 		if errno != 0 {
-			return errno
+			return false, errno
 		}
-		return nil
+		return binary.NativeEndian.Uint32(info[:4]) != 0, nil
 	}
 }

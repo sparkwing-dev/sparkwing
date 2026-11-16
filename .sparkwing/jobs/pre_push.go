@@ -5,22 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"go/build"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// PrePush is the fast tier at the push boundary, and it repeats nothing the
-// commit tier already ran: the contract gates a single commit cannot answer,
-// and a compile, a vet and a fast lint of the packages the whole push touches.
-// Everything that races, lints or tests a whole module is Gate, which runs on
-// demand and in hosted CI.
-type PrePush struct{ sparkwing.Base }
+// PrePush runs fast push checks and adds affected Go tests for main updates.
+type PrePush struct {
+	sparkwing.Base
+	Head   sparkwing.Ref[landHead]
+	Checks *queuedChecks
+}
 
 func (PrePush) ShortHelp() string {
-	return "Fast gate for the push boundary: contract gates, and a compile, vet and fast lint of the touched packages"
+	return "Push gate: fast checks, plus affected short and critical Go tests for main updates"
 }
 
 func (PrePush) Help() string {
@@ -28,15 +31,16 @@ func (PrePush) Help() string {
 		"a CHANGELOG.md entry for every covered surface the push changes (bin/check-changelog.sh), " +
 		"api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), the public API " +
 		"surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh), and `go build`, `go vet` and the " +
-		"fast linter subset, including depguard dependency rules, over every package holding changed Go files. It repeats " +
+		"fast linter subset, including depguard dependency rules, over every package holding changed Go files. After the workspace build, it builds root release commands with CGO disabled against the published SDK pin, without workspace, SDK replacement, vendor or alternate-modfile overrides. Publish SDK API changes and update the root pin before using them. It repeats " +
 		"nothing `pre-commit` already ran per file: the formatters, the comment, sleep and regex sweeps, the " +
 		"docs mirror and home resolution are the commit tier's, and a push whose commits skipped that hook is " +
-		"judged by `gate`. Every step reads the commits being pushed, the range origin/main..HEAD, and never " +
-		"the index, so whatever is staged cannot narrow what the push is judged against. The tier has a " +
-		"one-minute budget on each step's own run time; a step past it warns, naming the slowest, and the tier still passes when every check did. Run timings measure " +
-		"progress toward its ten-second warm-cache target; the run has no compiler-cache temperature signal. The full test suite, " +
-		"golangci-lint over every module, the race gate, the Postgres suite and the dashboard suites run in " +
-		"`gate`, which hosted CI runs on every pull request and every push to main."
+		"judged by `gate`. Every fast check reads the committed change from the merge base with origin/main to HEAD, and never " +
+		"the index, so whatever is staged cannot narrow what the push is judged against. The fast checks have a " +
+		"one-minute budget on each step's own run time; a step past it warns, naming the slowest, and the fast phase still passes when every check did. Run timings measure " +
+		"progress toward their ten-second warm-cache target; the run has no compiler-cache temperature signal. " +
+		"Affected tests use Git's advertised remote OID for main, never local tracking, including type changes and both paths of renames. Non-fast-forward main updates are refused; creating main runs every committed Go module's short tests and the full critical set. Main hook updates must push the checked-out HEAD; check out a different source commit before retrying. Deletions add no tests. For hook updates to refs/heads/main, or an explicit run outside the hook, the affected-tests job then runs the hosted gate's reverse dependency selection with go test -short, including test imports and file readers, plus every critical test without -short when Go inputs changed. Branch pushes keep only the fast checks. " +
+		"It has a separate 45-minute execution deadline and reports package and test timings. Changelog-only changes select no tests; documentation with registered readers runs those readers. " +
+		"Broader lint, race and dashboard checks remain in `gate`; full Go and PostgreSQL verification run with `gate -- --full` and at the release boundary. Hosted CI provides additional verification."
 }
 
 func (PrePush) Examples() []sparkwing.Example {
@@ -47,8 +51,131 @@ func (PrePush) Examples() []sparkwing.Example {
 
 func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Priority(hookTierPriority)
-	sparkwing.Job(plan, rc.Pipeline, p)
+	fast := sparkwing.Job(plan, rc.Pipeline, p)
+	refs, hook := os.LookupEnv(gitenv.PushRefsVar)
+	updates, err := mainPushUpdates(refs)
+	if err != nil {
+		return err
+	}
+	if !hook || len(updates) > 0 {
+		affectedPushTestsJobNode(plan).Needs(fast)
+	}
 	return nil
+}
+
+type mainPushUpdate struct {
+	local, remote string
+}
+
+func mainPushUpdates(refs string) ([]mainPushUpdate, error) {
+	var updates []mainPushUpdate
+	for line := range strings.SplitSeq(refs, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 4 {
+			return nil, fmt.Errorf("pre-push: invalid Git ref update %q", line)
+		}
+		if fields[2] == "refs/heads/main" && strings.Trim(fields[1], "0") != "" {
+			updates = append(updates, mainPushUpdate{local: fields[1], remote: fields[3]})
+		}
+	}
+	return updates, nil
+}
+
+// safety: a plan error hides its remedy until secret discovery completes.
+// The job judges Git's advertised destination, which local tracking may not match.
+func mainPushScope(ctx context.Context) ([]string, string, error) {
+	refs, hook := os.LookupEnv(gitenv.PushRefsVar)
+	if !hook {
+		return pushRangeScope(ctx, "file(s)", func(files []string) []string { return files })
+	}
+	updates, err := mainPushUpdates(refs)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(updates) == 0 {
+		return nil, "no main updates", nil
+	}
+	git := gitIn(sparkwing.WorkDir())
+	head, err := git(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, "", fmt.Errorf("pre-push: resolve checked-out HEAD: %w", err)
+	}
+	whole := false
+	for _, update := range updates {
+		if update.local != head {
+			return nil, "", fmt.Errorf("pre-push: refusing main update from %s: checked-out HEAD is %s; check out the commit being pushed and retry", update.local, head)
+		}
+		if strings.Trim(update.remote, "0") == "" {
+			whole = true
+			continue
+		}
+		if _, err := git(ctx, "merge-base", "--is-ancestor", update.remote, update.local); err != nil {
+			return nil, "", fmt.Errorf("pre-push: refusing non-fast-forward or unverifiable main update %s -> %s; fetch the destination and push a descendant of its main: %w", update.remote, update.local, err)
+		}
+	}
+	var commands [][]string
+	scope := "file(s) since Git's advertised main destination"
+	if whole {
+		commands = [][]string{{"ls-tree", "-r", "--name-only", "-z", head}}
+		scope = "committed file(s) for new main; every Go module and critical test"
+	} else {
+		for _, update := range updates {
+			commands = append(commands, []string{"diff", "-z", "--name-only", "--no-renames", update.remote, update.local})
+		}
+	}
+	files := map[string]bool{}
+	for _, args := range commands {
+		out, err := runGitIn(ctx, sparkwing.WorkDir(), args...)
+		if err != nil {
+			return nil, "", fmt.Errorf("pre-push: list committed main update files: %w", err)
+		}
+		for file := range strings.SplitSeq(out, "\x00") {
+			if file != "" {
+				files[file] = true
+			}
+		}
+	}
+	return mapKeys(files), fmt.Sprintf("%d %s", len(files), scope), nil
+}
+
+// perf: a warm broad short replay exceeded twenty minutes, so tests have a
+// separate deadline from the fast checks' one-minute warning budget.
+const affectedPushTestsTimeout = 45 * time.Minute
+
+type affectedPushTestsJob struct {
+	sparkwing.Base
+	queued bool
+	Head   sparkwing.Ref[landHead]
+	Checks *queuedChecks
+}
+
+func affectedPushTestsJobNode(plan *sparkwing.Plan) *sparkwing.JobNode {
+	return sparkwing.Job(plan, "affected-tests", &affectedPushTestsJob{}).
+		Timeout(affectedPushTestsTimeout).
+		NoProgressTimeout(affectedPushTestsTimeout).
+		Cores(float64(goStepParallelism(affectedPushHost())))
+}
+
+// perf: a submitter's Go limits describe its own work, not the runner. Local
+// landing always shares the machine, including when the SDK sets CI.
+func affectedPushHost() hostShape {
+	return hostShape{cpus: runtime.NumCPU()}
+}
+
+func (j *affectedPushTestsJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "test", j.Checks.wrap("affected-tests/test", j.Head, func(ctx context.Context) error { return runAffectedPushTests(ctx, j.queued) }))
+	return nil, nil
+}
+
+func runAffectedPushTests(ctx context.Context, queued bool) error {
+	files, scope, err := mainPushScope(ctx)
+	if err != nil {
+		return err
+	}
+	return runAffectedTestFiles(ctx, files, scope, affectedPushHost(), queued)
 }
 
 // Work declares the fast push-boundary steps.
@@ -60,10 +187,12 @@ func (p *PrePush) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.FailurePolicy(sparkwing.FailFast)
 	budget := newTierBudget("pre-push", prePushBudget).over(pushRangeScope)
+	budget.checks, budget.head = p.Checks, p.Head
 	budget.step(w, "changelog", checkChangelogRequired)
 	budget.step(w, "api-spec", checkAPISpec)
 	budget.step(w, "api-snapshot", checkAPISnapshot)
-	budget.step(w, "build-touched", runBuildTouched)
+	build := budget.step(w, "build-touched", runBuildTouched)
+	budget.step(w, "build-published-sdk", runPublishedSDKBuildTouched).Needs(build)
 	budget.step(w, "vet-touched", runVetTouched)
 	budget.step(w, "lint-touched", runFastLintTouched)
 	budget.verdict(w)
@@ -124,15 +253,16 @@ func runBuildTouched(ctx context.Context) error {
 // that does not compile fails here rather than in the first suite that runs.
 // It also vets the qatrust flavor, which no default build compiles.
 func runVetTouched(ctx context.Context) error {
-	return overTouchedPackages(ctx, "vet-touched", "compile", "Go file(s)", existingGoFiles,
-		func(module string, pkgs []string) string {
-			cores := prePushTaskCores(runtime.NumCPU())
-			qa := goCommandAt(cores, "vet", "-tags qatrust "+strings.Join(pkgs, " "))
-			if def := defaultBuildPackages(module, pkgs, true); len(def) > 0 {
-				return goCommandAt(cores, "vet", strings.Join(def, " ")) + " && " + qa
-			}
-			return qa
-		})
+	return overTouchedPackages(ctx, "vet-touched", "compile", "Go file(s)", existingGoFiles, vetTouchedCommand)
+}
+
+func vetTouchedCommand(module string, pkgs []string) string {
+	cores := prePushTaskCores(runtime.NumCPU())
+	qa := goCommandAt(cores, "vet", "-tags qatrust "+strings.Join(pkgs, " "))
+	if def := defaultBuildPackages(module, pkgs, true); len(def) > 0 {
+		return goCommandAt(cores, "vet", strings.Join(def, " ")) + " && " + qa
+	}
+	return qa
 }
 
 // safety: the gate vets the qatrust flavor of the packages a change touches, so
@@ -148,14 +278,15 @@ func runQATrustVetTouched(ctx context.Context) error {
 // set measured ninety seconds over both modules, which is the release cut's
 // price to pay, not the push boundary's.
 func runFastLintTouched(ctx context.Context) error {
-	return overTouchedPackages(ctx, "lint-touched", "lint", "Go file(s)", existingGoFiles,
-		func(module string, pkgs []string) string {
-			pkgs = defaultBuildPackages(module, pkgs, true)
-			if len(pkgs) == 0 {
-				return "true"
-			}
-			return fastLintCommand(prePushTaskCores(runtime.NumCPU()), pkgs)
-		})
+	return overTouchedPackages(ctx, "lint-touched", "lint", "Go file(s)", existingGoFiles, fastLintTouchedCommand)
+}
+
+func fastLintTouchedCommand(module string, pkgs []string) string {
+	pkgs = defaultBuildPackages(module, pkgs, true)
+	if len(pkgs) == 0 {
+		return "true"
+	}
+	return fastLintCommand(prePushTaskCores(runtime.NumCPU()), pkgs)
 }
 
 func goOverTouchedPackages(ctx context.Context, verb, noun string, keep func([]string) []string) error {
@@ -181,6 +312,10 @@ func overTouchedPackages(ctx context.Context, step, verb, noun string, keep func
 	if err != nil {
 		return err
 	}
+	return overPackageFiles(ctx, step, verb, files, scope, command)
+}
+
+func overPackageFiles(ctx context.Context, step, verb string, files []string, scope string, command func(module string, pkgs []string) string) error {
 	modules, err := committedModuleDirs(ctx)
 	if err != nil {
 		return err

@@ -14,6 +14,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/buildinfo"
@@ -110,7 +112,7 @@ func updateBinary(version string, force, overrideHold bool) (updateReceipt, erro
 		if !overrideHold {
 			return result, holdRefusal(resolved, hold)
 		}
-		fmt.Fprintf(os.Stderr, "update: crossing operator version hold %s (%s) via --override-hold\n", hold.Value, hold.Source)
+		fmt.Fprintf(os.Stderr, "update: crossing operator version hold %s (%s) via --override-hold\n", opsview.DisplayText(hold.Value), opsview.DisplayText(hold.Source))
 	}
 	downgrade := classifyDowngrade(current, resolved)
 	if local && downgrade == downgradeNeedsForce {
@@ -291,12 +293,12 @@ func updateSDK(version string) (updateReceipt, error) {
 	if out, err := runGoModCmd(buildCtx, dir, "get", target); err != nil {
 		return result, fmt.Errorf("go get failed; SDK files may have changed: %w: %s", err, out)
 	} else if out != "" {
-		fmt.Fprintln(os.Stderr, out)
+		fmt.Fprintln(os.Stderr, opsview.DisplayText(out))
 	}
 	if out, err := runGoModCmd(buildCtx, dir, "mod", "tidy"); err != nil {
 		return result, fmt.Errorf("go mod tidy failed after go get; SDK files may have changed: %w: %s", err, out)
 	} else if out != "" {
-		fmt.Fprintln(os.Stderr, out)
+		fmt.Fprintln(os.Stderr, opsview.DisplayText(out))
 	}
 	after, err := readSDKUpdateIdentity(dir)
 	if err != nil {

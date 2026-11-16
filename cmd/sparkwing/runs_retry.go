@@ -9,6 +9,8 @@ import (
 	"io"
 	"os"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -144,13 +146,13 @@ func writeRetryResult(out io.Writer, result retryResult, format string) error {
 		return nil
 	}
 	if format == "plain" {
-		_, err := fmt.Fprintln(out, result.RunID)
+		_, err := fmt.Fprintln(out, opsview.DisplayText(result.RunID))
 		return err
 	}
 	message := "submitted"
 	if result.Replayed {
 		message = "already submitted"
 	}
-	_, err := fmt.Fprintf(out, "run %s %s (retry of %s)\n", result.RunID, message, result.SourceRunID)
+	_, err := fmt.Fprintf(out, "run %s %s (retry of %s)\n", opsview.DisplayText(result.RunID), message, opsview.DisplayText(result.SourceRunID))
 	return err
 }

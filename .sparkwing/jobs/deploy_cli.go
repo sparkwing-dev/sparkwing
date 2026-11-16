@@ -25,6 +25,7 @@ func (d *deployer) productionCLI(ctx context.Context, commit string) error {
 					if err := os.MkdirAll(filepath.Join(d.tmp, "cli-home"), 0o700); err != nil {
 						return err
 					}
+					// #nosec G703 -- The deployment owns this temporary directory and cliBin selects its fixed CLI path.
 					return os.WriteFile(d.cliBin(), data, 0o700)
 				})
 			}

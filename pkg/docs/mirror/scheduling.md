@@ -197,6 +197,22 @@ account's manual, asserted runs. Personal runners never take repository-proven
 work, including App deliveries, even if their labels match a repository tier.
 Browser approval accepts personal runners with an empty allowed label set.
 
+After 30 seconds without a claim, status names the required labels and suggests
+matching enrollment. For working-tree or other code without repository proof,
+the submitting account can enroll a personal runner for its own manual runs:
+
+```bash
+sparkwing runners add --runner build-box --profile prod --personal --label gpu --session-stdin
+```
+
+Omit `--repos` for that personal runner. Repository-scoped runners require
+repository-proven code, even when their labels match. Status names that refusal
+when a matching online runner is blocked by it. To use a repository-scoped runner,
+commit and push, then start a new run through the GitHub App. For repository-proven
+runs, the enrollment suggestion keeps `--repos REPOSITORY`. The sealed repository
+proof decides this, because an `asserted` trust class can still carry repository
+proof. See [sealed execution trust](auth.md#sealed-execution-trust).
+
 An enrolled runner may advertise a subset of its allowed labels. Extra labels
 refuse the claim, including when an administrator removed a label after a run
 started. Updating `runner.labels` alone cannot expand the allowed set. A

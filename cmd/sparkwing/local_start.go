@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"time"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func ensureLocalController(ctx context.Context, home string, resolve func(context.Context) (dashboardServices, error)) (status wingd.LocalStatus, err error) {
@@ -49,4 +52,33 @@ func ensureLocalController(ctx context.Context, home string, resolve func(contex
 		return wingd.LocalStatus{}, errors.New("local controller has not established API readiness")
 	}
 	return status, nil
+}
+
+const localRunnerStatusPoll = 100 * time.Millisecond
+
+// safety: a controller that predates runner reporting leaves Runner empty, which must not refuse its runs.
+func localRunnerUnavailable(ctx context.Context, status func(context.Context) (wingd.LocalStatus, error)) (*apierr.Error, error) {
+	poll := time.NewTicker(localRunnerStatusPoll)
+	defer poll.Stop()
+	for {
+		current, err := status(ctx)
+		if err != nil {
+			return nil, err
+		}
+		switch current.Runner {
+		case wingd.LocalRunnerUnavailable:
+			if current.RunnerError != nil {
+				return current.RunnerError, nil
+			}
+			return &apierr.Error{Code: hosterr.Unavailable, Message: "the local runner cannot start", Hint: "run sparkwing daemon status"}, nil
+		case wingd.LocalRunnerStarting:
+		default:
+			return nil, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-poll.C:
+		}
+	}
 }

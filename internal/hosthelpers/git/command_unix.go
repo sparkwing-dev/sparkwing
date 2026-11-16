@@ -2,6 +2,9 @@
 
 package git
 
-import "os/exec"
+import (
+	"context"
+	"os/exec"
+)
 
-func runGitCommand(cmd *exec.Cmd) error { return cmd.Run() }
+func runGitCommand(_ context.Context, cmd *exec.Cmd) error { return cmd.Run() }

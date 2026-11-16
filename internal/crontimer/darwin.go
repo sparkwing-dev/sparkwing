@@ -60,6 +60,9 @@ func installDarwin(ctx context.Context, h Host) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
+	if err := unitfile.PrepareWorkingDirectory(h.SparkwingHome); err != nil {
+		return State{}, err
+	}
 	if err := ensureLogDir(h.LogPath); err != nil {
 		return State{Path: path}, err
 	}
@@ -133,6 +136,7 @@ func agentPlist(h Host) string {
 		fmt.Fprintf(&b, "    <string>%s</string>\n", unitfile.XMLText(arg))
 	}
 	b.WriteString("  </array>\n\n")
+	fmt.Fprintf(&b, "  <key>WorkingDirectory</key>\n  <string>%s</string>\n", unitfile.XMLText(h.SparkwingHome))
 	b.WriteString("  <key>StartInterval</key>\n  <integer>60</integer>\n")
 	b.WriteString("  <key>RunAtLoad</key>\n  <false/>\n")
 	// safety: __tick ensures the local controller, then invokes its tick.

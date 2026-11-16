@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 
 	"golang.org/x/mod/modfile"
@@ -549,13 +551,13 @@ func writeUpdateCheck(w io.Writer, report updateCheckReport, mode string) error 
 	var text strings.Builder
 	fmt.Fprintf(&text, "sparkwing %s update check\n  installed: %s\n  available: %s\n  status:    %s\n", report.Target, updateIdentityLabel(report.Installed), updateIdentityLabel(report.Available), report.Status)
 	if report.Installed.Path != "" {
-		fmt.Fprintf(&text, "  path:      %s\n", report.Installed.Path)
+		fmt.Fprintf(&text, "  path:      %s\n", opsview.DisplayText(report.Installed.Path))
 	}
 	if report.Reason != "" {
-		fmt.Fprintf(&text, "  reason:    %s\n", report.Reason)
+		fmt.Fprintf(&text, "  reason:    %s\n", opsview.DisplayText(report.Reason))
 	}
 	if report.BlockedReason != "" {
-		fmt.Fprintf(&text, "  blocked:   %s\n", report.BlockedReason)
+		fmt.Fprintf(&text, "  blocked:   %s\n", opsview.DisplayText(report.BlockedReason))
 	}
 	writeVersionPolicyLine(&text, report.VersionPolicy)
 	_, err := io.WriteString(w, text.String())
@@ -573,13 +575,13 @@ func writeUpdateReceipt(w io.Writer, result updateReceipt, mode string) error {
 	var text strings.Builder
 	fmt.Fprintf(&text, "sparkwing %s %s\n  before:    %s\n  installed: %s\n", result.Target, result.Status, updateIdentityLabel(result.Before), updateIdentityLabel(result.After))
 	if result.After.Path != "" {
-		fmt.Fprintf(&text, "  path:      %s\n", result.After.Path)
+		fmt.Fprintf(&text, "  path:      %s\n", opsview.DisplayText(result.After.Path))
 	}
 	if result.Digest != "" {
 		fmt.Fprintf(&text, "  sha256:    %s\n", result.Digest)
 	}
 	if result.Replacement != "" {
-		fmt.Fprintf(&text, "  replace:   %s\n", result.Replacement)
+		fmt.Fprintf(&text, "  replace:   %s\n", opsview.DisplayText(result.Replacement))
 	}
 	if result.ResolvedRelease != "" && result.After.Version == "" {
 		fmt.Fprintf(&text, "  release:   %s\n", result.ResolvedRelease)
@@ -588,7 +590,7 @@ func writeUpdateReceipt(w io.Writer, result updateReceipt, mode string) error {
 		fmt.Fprintf(&text, "  managed units: %s\n", result.ManagedUnits)
 	}
 	if result.RunnerServices != "" {
-		fmt.Fprintf(&text, "%s\n", result.RunnerServices)
+		fmt.Fprintf(&text, "%s\n", opsview.DisplayText(result.RunnerServices))
 	}
 	writeVersionPolicyLine(&text, result.VersionPolicy)
 	_, err := io.WriteString(w, text.String())
@@ -606,5 +608,5 @@ func writeVersionPolicyLine(text *strings.Builder, policy *versionPolicyStatus) 
 	if policy.Reason != "" {
 		line += ": " + policy.Reason
 	}
-	fmt.Fprintf(text, "  policy:    %s\n", line)
+	fmt.Fprintf(text, "  policy:    %s\n", opsview.DisplayText(line))
 }

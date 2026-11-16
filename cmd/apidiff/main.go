@@ -53,6 +53,7 @@ func main() {
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".txt") && !written[entry.Name()] {
+			// #nosec G703 -- The operator selects the snapshot directory and ReadDir supplies base names.
 			if err := os.Remove(filepath.Join(outDir, entry.Name())); err != nil {
 				die("remove stale snapshot: %v", err)
 			}

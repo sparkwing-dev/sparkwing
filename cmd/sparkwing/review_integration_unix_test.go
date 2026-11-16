@@ -11,12 +11,15 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
+
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/sessionledger"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestReviewProductionExecutionBindings(t *testing.T) {
+	testmanager.Require(t)
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	home := t.TempDir()

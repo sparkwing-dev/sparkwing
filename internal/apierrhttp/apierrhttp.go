@@ -33,7 +33,7 @@ func Write(w http.ResponseWriter, failure *apierr.Error) error {
 	return err
 }
 
-// NoteResponseError retains the first cause for the request's masked diagnostic.
+// NoteResponseError passes a private cause to the request's masked diagnostic recorder.
 func NoteResponseError(w http.ResponseWriter, err error) {
 	for {
 		if recorder, ok := w.(interface{ ResponseError(error) }); ok {

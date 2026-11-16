@@ -36,7 +36,7 @@ func TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					control.award, err = projector.Claim(t.Context(), "cloud", nil)
+					control.award, _, err = projector.Claim(t.Context(), "cloud", nil)
 					if err != nil {
 						t.Fatal(err)
 					}

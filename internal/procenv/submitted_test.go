@@ -238,3 +238,45 @@ func TestRemoteInstallsKeepTheRunnerOperatorsCgoSetting(t *testing.T) {
 		}
 	}
 }
+
+func TestSubmittedRefusalsDoNotEchoInvalidValuesOrNames(t *testing.T) {
+	const value = "private-submitted-value-3483"
+	for _, tc := range []struct{ name, value, want string }{
+		{"BUILD_NOTE", value + "\x00", "BUILD_NOTE"},
+		{"BAD=" + value, value, "invalid variable name"},
+		{"SPARKWING_RUN_ID", value, "controlled by Sparkwing"},
+		{"APP_TOKEN", value, "pipeline secret"},
+	} {
+		err := CheckSubmitted(map[string][]byte{tc.name: []byte(tc.value)}, secrets.NewMasker())
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("refusal lacks %q: %v", tc.want, err)
+		}
+		if strings.Contains(err.Error(), value) {
+			t.Fatal("refusal echoes private data")
+		}
+	}
+}
+
+func TestReservedSubmitWarningsDoNotChangeCaptureOrHostInheritance(t *testing.T) {
+	for _, name := range []string{"APPDATA", "XDG_DATA_HOME", "PSModulePath"} {
+		captured, err := Submit([]string{name + "=requester-value", "BUILD_REGION=eu"}, []string{name, "BUILD_*"}, secrets.NewMasker())
+		if err != nil || len(captured) != 1 || string(captured["BUILD_REGION"]) != "eu" {
+			t.Fatalf("capture policy changed: %v %v", captured, err)
+		}
+		for _, allowed := range []bool{false, true} {
+			base := Base{Ambient: []string{name + "=host-value"}, Masker: secrets.NewMasker()}
+			if allowed {
+				base.SubmitEnvAllow = []string{name}
+			}
+			for _, kind := range []Kind{Plan, Attempt, Eval, Install} {
+				environment, err := Build(kind, base, Runtime{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := environment.Lookup(name); (got == "host-value") != allowed {
+					t.Fatalf("host allow-list repair failed for %s/%d: %q", name, kind, got)
+				}
+			}
+		}
+	}
+}

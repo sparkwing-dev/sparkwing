@@ -220,3 +220,16 @@ func shellFixtureEnv() []string {
 	}
 	return env
 }
+
+func TestBuildEnvRetainsModuleFailureDuringCancellation(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "go.mod"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := gotoolchain.BuildEnv(ctx, dir, nil, "")
+	if err == nil || errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "go.mod") {
+		t.Fatalf("module failure replaced by cancellation: %v", err)
+	}
+}

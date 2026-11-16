@@ -1,5 +1,3 @@
-//go:build rewrite_integration
-
 package cluster
 
 import (
@@ -46,6 +44,7 @@ import (
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testhome"
 )
 
 const productionHTTPBoundary = "production HTTP boundary"
@@ -77,8 +76,8 @@ func TestProductionRunnerCommandsClaimAndHost(t *testing.T) {
 							t.Error("claim did not use the enrolled credential file")
 						}
 						if claims > 1 {
-							cancel(stop)
-							return nil, stop
+							response = controllerwire.ClaimResponse{}
+							break
 						}
 						var demand controllerwire.ClaimRequest
 						if err := json.NewDecoder(r.Body).Decode(&demand); err != nil {
@@ -109,7 +108,15 @@ func TestProductionRunnerCommandsClaimAndHost(t *testing.T) {
 				if command == "warm" {
 					args = []string{"--controller=" + hosting.ControllerURL, "--repos=github.com/acme/*", "--credentials-dir=" + credentials, "--max-concurrent=1", "--max-claims-before-restart=1"}
 				}
-				err := productionRuntime("dev").Runner.Run(ctx, command, args, "dev")
+				runtime := productionRuntime("dev")
+				factory := runtime.Runner.Factory
+				runtime.Runner.Factory = func(ctx context.Context, options RunnerOptions) (runners.RuntimeConfig, error) {
+					cfg, err := factory(ctx, options)
+					// safety: stop after hosted work reaches its boundary, not after a concurrent empty poll.
+					cfg.OnError = func(error) { cancel(stop) }
+					return cfg, err
+				}
+				err := runtime.Runner.Run(ctx, command, args, "dev")
 				// safety: the award renews with its own bearer before source acquisition; the beat count is the keeper's.
 				if claims == 0 || renewals == 0 || private == 0 {
 					t.Fatalf("command did not claim, renew and bind its award: claims=%d renewals=%d private=%d error=%v", claims, renewals, private, err)
@@ -147,7 +154,6 @@ func TestProductionCloudUnitsRestorePreparedSource(t *testing.T) {
 	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
 		t.Run(string(kind), func(t *testing.T) {
 			native, unit := productionNativeAward(t, kind)
-			t.Setenv("DOCKER_HOST", "unix://"+filepath.Join(t.TempDir(), "docker.sock"))
 			hosting := productionHostingAt(os.Getenv("SPARKWING_HOME"), "v1.2.3", client.EngineOptions{URL: native.ControllerURL, HTTP: native.HTTP}, t.TempDir(), false, procenv.SubmitAccept{}, nil)
 			controller, err := client.NewEngineClient(client.EngineOptions{URL: hosting.ControllerURL, HTTP: hosting.HTTP, Bearer: fixedBearer(unit.Capability)})
 			if err != nil {
@@ -210,6 +216,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("SPARKWING_HOME", filepath.Join(home, "state"))
+	productionDockerFixture(t)
 	raw := productionTestBearer("owner")
 	binding := capability.Binding{Kind: capability.BindingTrigger, RunID: "run", Holder: "runner", Generation: 1}
 	purpose, grants := capability.PurposeTrigger, []capability.Grant{capability.TriggerHost}
@@ -242,7 +249,7 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 	unit := controllerwire.ClaimedUnit{Unit: kind, UnitID: "unit", Purpose: purpose, Delivery: capability.DeliveryDirect, RunID: "run", JobID: binding.NodeID, Binding: binding, Capability: raw, Request: request, LeaseExpiresAt: now.Add(time.Hour), Runner: nodewire.RunnerIdentity{Name: "runner", Type: "runner", Labels: []string{}}}
 	if kind == capability.UnitNode || kind == capability.UnitEval {
 		unit.Engine = &engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}
-		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: *unit.Engine}}, Plan: json.RawMessage(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
+		unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: *unit.Engine, SecretRegistration: runspec.SecretRegistration{Version: 1}}}, Plan: json.RawMessage(`{"jobs":[{"id":"job"}]}`), PlanHash: "plan-hash"}
 		unit.Execution = &runspec.JobExecutionSettings{}
 	}
 	if kind == capability.UnitEval {
@@ -266,6 +273,8 @@ func productionNativeAward(t *testing.T, kind capability.UnitKind) (runners.Host
 				snapshot.Binding.Expansion = &capability.ExpansionState{Lease: *binding.Expansion, ExpiresAt: until}
 			}
 			response = localhostwire.LocalAuthentication{Snapshot: snapshot, Digests: [][32]byte{principal.Capability.Digest}}
+		case "POST /api/v1/runs/run/local-host/may-start":
+			response = runstate.AcquireSlotResponse{Kind: runstate.AcquireGranted, HolderID: "run/job", LeaseExpiresAt: unit.LeaseExpiresAt}
 		case "GET " + prefix + "/data-authority":
 			response = localhostwire.LocalDataAuthority{Authority: blob.Authority{CapabilityRef: "owner", Principal: "runner", Repo: "gh:42"}}
 		case "GET " + prefix + "/snapshot":
@@ -389,6 +398,7 @@ func TestInstalledRunnerRuntimeComposition(t *testing.T) {
 		}
 		os.Exit(2)
 	}
+	productionDockerFixture(t)
 	options, award := bootstrapPlanFile(t)
 	award.Source = source.Spec{RepoKey: "gh:42", RemoteURL: "https://github.com/acme/project", SHA: strings.Repeat("a", 40), PipelineDir: ".sparkwing", DefaultBranch: "main"}
 	metadata, err := json.Marshal(award)
@@ -522,7 +532,7 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 				})
 			}
 			identity := engineid.Identity{Version: "v1.2.3", Pin: engineid.Pin{SDK: engineid.GoSDK, Version: "v1.2.3"}, ManifestDigest: strings.Repeat("b", 64)}
-			unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: identity}}, PlanHash: "plan-hash", Plan: json.RawMessage(`{"jobs":[{"id":"job","concurrency":[{"group":"serial","scope":"run","capacity":1,"cost":1,"on_limit":"queue"}]}]}`)}
+			unit.Accepted = &controllerwire.PlanAccepted{Spec: runspec.Spec{Request: unit.Request, Hash: "spec-hash", PlanHash: "plan-hash", Resolved: runspec.Resolved{Engine: identity, SecretRegistration: runspec.SecretRegistration{Version: 1}}}, PlanHash: "plan-hash", Plan: json.RawMessage(`{"jobs":[{"id":"job","concurrency":[{"group":"serial","scope":"run","capacity":1,"cost":1,"on_limit":"queue"}]}]}`)}
 			group := runspec.Concurrency{Group: "serial", Scope: "run", Capacity: 1, Cost: 1, OnLimit: "queue"}
 			row := runstate.NodeRow{Execution: runspec.JobExecutionSettings{Concurrency: []runspec.Concurrency{group}}, Ref: runspec.NodeRef{RunID: runspec.RunID(unit.RunID), NodeID: "job"}, Status: runstate.StatusPending, SpecHash: "job-hash", Spec: json.RawMessage(`{"id":"job","concurrency":[{"group":"serial","scope":"run","capacity":1,"cost":1,"on_limit":"queue"}]}`)}
 			row.OwnerExecution = &runstate.OwnerExecution{Owner: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "owner"}, Team: "team", Generation: unit.Binding.Generation, Node: row.Ref, NodeGeneration: int64(row.Generation), SpecHash: row.SpecHash, Allowed: true}
@@ -601,7 +611,7 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			services, _, err := hosting.Bind(t.Context(), unit, controller)
+			services, principal, err := hosting.Bind(t.Context(), unit, controller)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -623,9 +633,13 @@ func TestProductionRunnerSchedulesEligibleJobWithOptionalComputeAdmission(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
+			inputs, err := runners.NativeInputs(t.Context(), services.Config.Store, unit, principal, input)
+			if err != nil {
+				t.Fatal(err)
+			}
 			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
-			_, err = owner.Run(ctx, input)
+			_, err = owner.Run(ctx, inputs.Run)
 			select {
 			case <-scheduled:
 			default:
@@ -688,4 +702,35 @@ func TestProductionRunnerSourceResolvesRetainedAcceptedEngine(t *testing.T) {
 	if err != nil || strings.TrimSpace(string(output)) != "v0.72.0" {
 		t.Fatalf("runner source executed replacement: %s %v", output, err)
 	}
+}
+
+func productionDockerFixture(t *testing.T) {
+	t.Helper()
+	socket := filepath.Join(testhome.TempDir(t), "docker.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /_ping":
+			_, _ = io.WriteString(w, "OK")
+		case "GET /containers/json":
+			_, _ = io.WriteString(w, "[]")
+		default:
+			t.Errorf("unexpected fixture Docker request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})}
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		if err := server.Close(); err != nil {
+			t.Error(err)
+		}
+		if err := <-done; !errors.Is(err, http.ErrServerClosed) {
+			t.Error(err)
+		}
+	})
+	t.Setenv("DOCKER_HOST", "unix://"+socket)
 }

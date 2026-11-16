@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
@@ -26,7 +27,15 @@ func Output(ctx context.Context, cmd *exec.Cmd, combined bool) ([]byte, error) {
 	}
 	select {
 	case <-ctx.Done():
-		err = group.Kill()
+		killedLeader, killErr := group.KillForCancellation() //nolint:contextcheck // Cleanup must outlive cancellation and uses the owner's bounded process-table lookup.
+		waitErr := group.Finish(context.WithoutCancel(ctx), 0)
+		// safety: an exit from our cancellation kill is not a separate Git failure.
+		if exit, ok := waitErr.(*exec.ExitError); ok && killedLeader { //nolint:errorlint // Joined failures must retain every error.
+			if status, ok := exit.Sys().(syscall.WaitStatus); ok && status.Signaled() && status.Signal() == syscall.SIGKILL {
+				waitErr = ctx.Err()
+			}
+		}
+		return output.Bytes(), errors.Join(killErr, waitErr)
 	case <-group.LeaderExited():
 	}
 	err = errors.Join(err, group.Finish(context.WithoutCancel(ctx), 0))

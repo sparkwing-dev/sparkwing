@@ -119,10 +119,10 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 		clear = fmt.Sprintf("; clears in ~%s", fmtElapsed(*qs.ExpectedClearMS))
 	}
 	if d := FmtDaemonHeader(qs); d != "" {
-		fmt.Fprintln(out, d)
+		fmt.Fprintln(out, DisplayText(d))
 	}
 	if cc := fmtCapacityChange(qs.CapacityChange); cc != "" {
-		fmt.Fprintln(out, cc)
+		fmt.Fprintln(out, DisplayText(cc))
 	}
 	unmeasured := ""
 	if n := unmeasuredWaiters(qs); n > 0 {
@@ -131,7 +131,7 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	fmt.Fprintf(out, "local admission: %d holding, %d connected, %d queued%s%s\n",
 		len(holders), len(connections), len(qs.Waiters), unmeasured, clear)
 	if line := FmtEventsLine(qs.Events); line != "" {
-		fmt.Fprintln(out, line)
+		fmt.Fprintln(out, DisplayText(line))
 	}
 	fmt.Fprintln(out)
 
@@ -141,39 +141,39 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 		fmt.Fprintln(tw, "(none)\t\t\t\t\t")
 	}
 	for _, r := range qs.Resources {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", DisplayText(r.Key),
 			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
 			fmtHeadroomCell(r.Key, r.Reserved), externalAmount(r),
 			fmtAmount(r.Key, resourceAvailable(r)))
 	}
 	_ = tw.Flush()
 	if line := resourceLegend(qs); line != "" {
-		fmt.Fprintln(out, line)
+		fmt.Fprintln(out, DisplayText(line))
 	}
 	if line := softCoreAllowanceNote(qs, holders); line != "" {
-		fmt.Fprintln(out, line)
+		fmt.Fprintln(out, DisplayText(line))
 	}
 
 	if c := ContainerNote(qs.Container); c != "" {
-		fmt.Fprintf(out, "%s\n", c)
+		fmt.Fprintf(out, "%s\n", DisplayText(c))
 	}
 	if b := BudgetNote(qs.Budget); b != "" {
-		fmt.Fprintf(out, "%s\n", b)
+		fmt.Fprintf(out, "%s\n", DisplayText(b))
 	}
 	if line := externalIgnoredNote(qs); line != "" {
-		fmt.Fprintln(out, line)
+		fmt.Fprintln(out, DisplayText(line))
 	}
 	if note := externalUnmeasuredNote(qs); note != "" {
-		fmt.Fprintln(out, note)
+		fmt.Fprintln(out, DisplayText(note))
 	}
 	if note := externalAgeNote(qs); note != "" {
-		fmt.Fprintln(out, note)
+		fmt.Fprintln(out, DisplayText(note))
 	}
 	if note := externalAttributionNote(qs); note != "" {
-		fmt.Fprintln(out, note)
+		fmt.Fprintln(out, DisplayText(note))
 	}
 	if note := ExternalPressureNote(qs); note != "" {
-		fmt.Fprintf(out, "\n%s\n", note)
+		fmt.Fprintf(out, "\n%s\n", DisplayText(note))
 	}
 
 	fmt.Fprintln(out)
@@ -195,10 +195,10 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 			run += " (contended)"
 		}
 		remaining, word := holderSchedule(h)
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
-			orDash(OriginWord(h.Origin)), fmtElapsed(h.ElapsedMS),
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", DisplayText(run), DisplayText(orDash(h.Pipeline)), DisplayText(orDash(h.Repo)),
+			DisplayText(orDash(OriginWord(h.Origin))), fmtElapsed(h.ElapsedMS),
 			fmtEstimate(remaining, word), fmtFinishClock(now, remaining, word), fmtHolderCost(h),
-			orDash(h.CostSource), orDash(joinKeys(h.Semaphores)))
+			DisplayText(orDash(h.CostSource)), DisplayText(orDash(joinKeys(h.Semaphores))))
 	}
 	_ = tw.Flush()
 	if len(connections) > 0 {
@@ -212,8 +212,8 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 				run = "  " + run + " (attached)"
 			}
 			remaining, word := holderSchedule(h)
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
-				orDash(OriginWord(h.Origin)), fmtElapsed(h.ElapsedMS),
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", DisplayText(run), DisplayText(orDash(h.Pipeline)), DisplayText(orDash(h.Repo)),
+				DisplayText(orDash(OriginWord(h.Origin))), fmtElapsed(h.ElapsedMS),
 				fmtEstimate(remaining, word), fmtFinishClock(now, remaining, word))
 		}
 		_ = tw.Flush()
@@ -229,31 +229,31 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 	for _, wt := range qs.Waiters {
 		run := queueDisplayRunID(wt.RunID, wt.DisplayRunID)
 		finish, word := waiterSchedule(wt)
-		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, orDash(wt.Class), run,
-			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources),
-			orDash(wt.CostSource), fmtWaiterStart(wt),
+		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, DisplayText(orDash(wt.Class)), DisplayText(run),
+			DisplayText(orDash(wt.Pipeline)), DisplayText(orDash(wt.Repo)), DisplayText(orDash(OriginWord(wt.Origin))), fmtCost(wt.Resources),
+			DisplayText(orDash(wt.CostSource)), fmtWaiterStart(wt),
 			fmtFinishClock(now, finish, word),
-			orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
+			DisplayText(orDash(joinKeys(wt.WaitingOn))), fmtElapsed(wt.WaitingMS))
 	}
 	_ = tw.Flush()
 
 	for _, wt := range qs.Waiters {
 		if wt.BlockingReason != "" {
-			fmt.Fprintf(out, "\n%s waiting: %s\n", queueDisplayRunID(wt.RunID, wt.DisplayRunID), wt.BlockingReason)
+			fmt.Fprintf(out, "\n%s waiting: %s\n", DisplayText(queueDisplayRunID(wt.RunID, wt.DisplayRunID)), DisplayText(wt.BlockingReason))
 		}
 	}
 	for _, h := range holders {
 		if h.Stalled && h.Recovery != "" {
-			fmt.Fprintf(out, "\n%s is stalled (idle while runs wait). Recover with:\n  %s\n", h.RunID, h.Recovery)
+			fmt.Fprintf(out, "\n%s is stalled (idle while runs wait). Recover with:\n  %s\n", DisplayText(h.RunID), DisplayText(h.Recovery))
 		}
 	}
 	for _, h := range holders {
 		if h.Contended && h.ContentionReason != "" {
-			fmt.Fprintf(out, "\n%s is contended (%s).\n", h.RunID, h.ContentionReason)
+			fmt.Fprintf(out, "\n%s is contended (%s).\n", DisplayText(h.RunID), DisplayText(h.ContentionReason))
 		}
 	}
 	for _, d := range queueDriftNotes(qs) {
-		fmt.Fprintf(out, "\n%s: %s\n", d.runID, d.warning)
+		fmt.Fprintf(out, "\n%s: %s\n", DisplayText(d.runID), DisplayText(d.warning))
 	}
 	if len(qs.Runners) > 0 {
 		fmt.Fprintln(out)
@@ -264,7 +264,7 @@ func renderQueuePrettyAt(out io.Writer, qs wingwire.QueueState, now time.Time) e
 			if r.MemoryBytes > 0 {
 				mem = HumanBytes(r.MemoryBytes)
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", r.Name, trimFloat(r.Cores), mem, r.QueueDepth)
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%d\n", DisplayText(r.Name), trimFloat(r.Cores), mem, r.QueueDepth)
 		}
 		_ = tw.Flush()
 	}

@@ -46,6 +46,7 @@ func TestRunStartsLocalControllerBeforeSubmitting(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(home, "secrets.key"))
 	offlineStopDaemon(t, home)
 	if status, err := wingdclient.QueryLocalController(t.Context(), home); !errors.Is(err, wingdclient.ErrNoDaemon) {
 		t.Fatalf("expected no controller before run: %+v, %v", status, err)

@@ -39,7 +39,7 @@ func (s *Server) sessionPresentation(r *http.Request) (string, error) {
 		}
 		return "", sessionUnavailable()
 	}
-	raw := sessionCookie(r, s.cookiesSecure())
+	raw := sessionCookie(r)
 	if raw == "" {
 		return "", sessionUnavailable()
 	}
@@ -53,7 +53,7 @@ func (s *Server) verifySessionFlow(r *http.Request) error {
 	}
 	var role store.Role
 	if unsafeMethod(r.Method) {
-		if !validAPIRequestCSRF(r, session.CSRFToken, s.cookiesSecure()) {
+		if !validAPIRequestCSRF(r, session.CSRFToken) {
 			return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 		}
 	} else {
@@ -151,7 +151,7 @@ func (s *Server) endVerifiedSession(w http.ResponseWriter, r *http.Request) erro
 		}})
 		noteSessionRevocation(r.Context(), revoked)
 	}
-	clearSessionCookies(w, s.cookiesSecure())
+	clearSessionCookies(w)
 	return nil
 }
 

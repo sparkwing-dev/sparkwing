@@ -69,7 +69,14 @@ to register a mask. Planning output waits until declarations are known.
 Failed discovery withholds output. A healthy selected pipeline can still plan
 when a sibling fails discovery, with planning output withheld. The withheld
 notice names how many pipelines failed and their error codes, never their names,
-and gives the isolated-home retry when that refusal is the only failure. A
+and gives the isolated-home retry when that refusal is the only failure.
+Otherwise the notice and the withheld error name
+`sparkwing pipeline describe --pipeline <name> --show-withheld`. That command
+describes in the CLI process and writes the withheld output and errors to its
+stderr, never to run logs or the describe cache, masked by the values registered
+so far. A failed pipeline's own secret defaults are unknown, so that command,
+like running the pipeline code yourself, prints them unmasked. Run it only where
+its stderr stays private, never in CI. A
 missing risk allowance is still named with its labels. Private
 declarations drive lookup, flag parsing and routing. Help, display and the
 describe cache use a separate presentation type. Incomplete discovery withholds
@@ -325,6 +332,22 @@ Each OIDC token a run mints is audited as `oidc.minted` in the transaction that
 rechecks the run's authority, naming the run, a digest of its job, the
 audience, and the token's `jti`, subject and expiry, so a leaked token traces to
 its mint. A token whose audit row does not commit is never returned.
+An authenticated request refused because of the run, job, claim, child or team
+it names is audited as `access.refused` in the acting credential's own team. The
+row names the actor, the HTTP method, the registered route template, the refusal
+class (`not_found`, `team` or `binding`), the credential kind (`account`,
+`runner`, `trigger`, `plan`, `node`, `eval`, `service`, `operator` or `local`) and
+how it was presented. It never holds the request path, body, the identifiers the
+request named or another team's identity. Each credential, route and class keeps
+at most one row per hour, and each team at most 300 rows per hour on each
+controller, so a probe loop cannot flood the table. Refusals past a team's cap
+are counted in one `access.refused_suppressed` row for that hour, written by the
+controller's first refusal of the next hour. A credential without a team leaves
+no row. A missing
+resource in the caller's own team is audited by the same rule, and the response
+to a refused request stays byte-identical to the response for a missing
+resource. Only deployment operators read these rows, through the operator team
+view.
 Restricted claims and sealed execution inputs must never be rendered as details.
 Run creation and retry return display inputs, not the execution seal. Schedule
 declarations, overrides, effective arguments and fire history hide every argument
@@ -400,16 +423,41 @@ credential release is audited. See [Git credentials](git-credentials.md).
 ## Secrets at rest
 
 Secrets remain encrypted with authenticated row binding. The kind of row
-(secret, git credential, submitted run environment or controller setting), its
-team, name, pipeline/shared scope and masking policy participate in the binding.
-Moving a ciphertext to a row with different access, or to a row of another kind,
-cannot make it readable there. A value that fails to open is an error, never an
-empty success value.
+(secret, git credential, submitted run environment, run arguments or controller
+setting), its team, name, pipeline/shared scope and masking policy participate
+in the binding. Moving a ciphertext to a row with different access, or to a row
+of another kind, cannot make it readable there. A value that fails to open is an
+error, never an empty success value.
+
+Stored run requests, accepted specs and generator expansion registrations keep
+argument names and secret classifications in plain JSON. Pipeline-level argument
+values, pipeline-level declared defaults and every masking registration value
+move into one `sealed_arguments` envelope in the same document, bound to the
+run's team, run ID and document kind. Job-level `WithArgs` declarations are not
+sealed yet: their defaults, including secret defaults, stay in plaintext in the
+stored plan (`runs.plan_json`), each job's node spec (`nodes.spec_json`) and a
+generator's expansion body (`nodes.expansion_body`). The same values are sealed
+where they also appear in the accepted spec and its masking registration, and
+run output masks them. A listing that meets a run whose envelope cannot be
+opened shows that run's argument values as `(unavailable)` and lists the other
+runs; reading that run's status, or anything that needs its values such as a
+retry, fails for that run alone. A keyed store whose key cannot be used refuses the run
+rather than store the values in plaintext. A PostgreSQL controller started
+without a `secrets-key` credential has no key: it refuses every secret write,
+stores run argument values, including secret defaults, unencrypted, and says so
+in a startup warning. Runs stored before argument sealing keep their plaintext
+values and still read as written. `sparkwing operator secrets rotate` seals them in
+place and reports the count as `plaintext_run_arguments`; `--verify` only
+counts them. Local stores are not rewritten, because the local `secrets.key`
+sits beside `state.db` with the same file permissions. A rewritten row's old
+plaintext can survive in SQLite free pages and WAL frames or PostgreSQL dead
+tuples until the database is vacuumed, and in every backup taken before the
+rewrite. Treat those copies as holding the plaintext arguments.
 
 ### Rotating the secrets key
 
-One key seals every team's secrets, git credentials and submitted run
-environments, and the session signing key. To replace it:
+One key seals every team's secrets, git credentials, run arguments and
+submitted run environments, and the session signing key. To replace it:
 
 1. Generate a new key (`openssl rand -base64 32`).
 2. Put the current key in the `secrets-key.previous` credential and the new key
@@ -420,11 +468,13 @@ environments, and the session signing key. To replace it:
    `operator.tokens`, or `POST /api/v1/operator/secrets/rotate` from a console
    session signed in within the last 10 minutes. It reseals every row under the
    new key, one team at a time, and reports counts, `previous_key_only` (rows
-   that needed the previous key) and any row neither key opens. It is safe to
+   that needed the previous key), `plaintext_run_arguments` (run documents it
+   sealed for the first time) and any row neither key opens. It is safe to
    repeat, including after an interruption.
 4. Run `sparkwing operator secrets rotate --verify` (`?verify=1`). It writes
-   nothing and reports how many rows still open only under the previous key.
-   Run the rotation again until it reports `previous_key_only: 0`.
+   nothing and reports how many rows still open only under the previous key and
+   how many run documents still hold plaintext arguments. Run the rotation again
+   until it reports `previous_key_only: 0` and `plaintext_run_arguments: 0`.
 5. When verification reports zero and nothing unreadable, remove
    `secrets-key.previous` and restart every replica. A row reported unreadable
    was already unreadable under both keys; rewrite or delete it first. Back up

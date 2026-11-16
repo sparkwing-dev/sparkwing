@@ -37,6 +37,7 @@ type goTestTiming struct {
 }
 
 type goTestTimings struct {
+	failed   func(goTestEvent)
 	mu       sync.Mutex
 	packages []goPackageTiming
 	tests    []goTestTiming
@@ -86,6 +87,7 @@ func (t *goTestTimings) run(ctx context.Context, script string) error {
 	}()
 
 	tr := newGoTestTranscript(func(line string) { sparkwing.Info(ctx, "%s", line) })
+	tr.failed = t.failed
 	done := make(chan struct{})
 	followed := make(chan error, 1)
 	go func() { followed <- followLines(path, done, tr.add) }()
@@ -95,6 +97,9 @@ func (t *goTestTimings) run(ctx context.Context, script string) error {
 	t.merge(tr)
 	if followErr != nil {
 		sparkwing.Warn(ctx, "go test timing: read the event file: %v", followErr)
+	}
+	if followErr != nil && t.failed != nil && runErr == nil {
+		return fmt.Errorf("read the go test event file: %w", followErr)
 	}
 	var execErr *sparkwing.ExecError
 	if runErr != nil && errors.As(runErr, &execErr) {
@@ -185,6 +190,7 @@ func seconds(s float64) string {
 // build output, failed tests' output) so the log and failure summaries read
 // as they did before the step switched to -json.
 type goTestTranscript struct {
+	failed   func(goTestEvent)
 	emit     func(string)
 	lines    []string
 	buffered map[string][]string
@@ -217,6 +223,9 @@ func (tr *goTestTranscript) add(raw []byte) {
 	if raw[0] != '{' || json.Unmarshal(raw, &ev) != nil {
 		tr.print(string(raw))
 		return
+	}
+	if tr.failed != nil && (ev.Action == "fail" || ev.Action == "build-fail") {
+		tr.failed(ev)
 	}
 	switch ev.Action {
 	case "build-output":

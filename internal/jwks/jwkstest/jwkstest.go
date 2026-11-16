@@ -1,4 +1,4 @@
-// Package jwkstest signs RS256 tokens with a generated key and serves the key
+// Package jwkstest signs RS256 tokens with a leased key and serves the key
 // set that verifies them, so a suite can stand in for an identity provider.
 package jwkstest
 
@@ -12,6 +12,8 @@ import (
 	"math/big"
 	"net/http"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/rsatest"
 )
 
 // Signer holds a signing key and the key id tokens name.
@@ -20,14 +22,10 @@ type Signer struct {
 	Kid string
 }
 
-// NewSigner generates a 2048-bit key.
+// NewSigner leases a 2048-bit key until t's cleanup.
 func NewSigner(t testing.TB, kid string) *Signer {
 	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &Signer{Key: key, Kid: kid}
+	return &Signer{Key: rsatest.New(t), Kid: kid}
 }
 
 // Sign returns claims as a compact RS256 JWT under s's key id.

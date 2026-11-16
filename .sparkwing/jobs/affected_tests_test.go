@@ -26,8 +26,8 @@ func TestAffectedTestsCoverTheReverseDependencyClosure(t *testing.T) {
 	if len(p.critical) != 2 || !slices.Equal(p.critical["m/billing"], []string{"TestRefund"}) || !slices.Equal(p.critical["m/leaf"], []string{"TestLeaf"}) {
 		t.Fatalf("critical = %v, want every critical test without short mode", p.critical)
 	}
-	commands := p.commands(hostShape{cpus: 8})
-	if len(commands) != 2 || !strings.Contains(commands[0], "-short ") || strings.Contains(commands[1], "-short ") || !strings.Contains(commands[1], "TestRefund") {
+	commands := affectedTestGroups([]affectedTestPlan{p}, 3)
+	if len(commands) != 2 || !strings.Contains(commands[0][0].command, "-short ") || strings.Contains(commands[1][0].command, "-short ") || !strings.Contains(commands[1][0].command, "TestRefund") {
 		t.Fatalf("commands = %q, want affected fast tests and unshortened critical tests", commands)
 	}
 }
@@ -45,7 +45,7 @@ func TestAffectedTestsRunTheWholeModuleWhenTheGraphCannotSeeTheChange(t *testing
 		if !p.whole {
 			t.Errorf("%s: plan = %+v, want every package", file, p)
 		}
-		if commands := p.commands(hostShape{cpus: 8}); len(commands) != 1 || !strings.Contains(commands[0], "m/leaf") || !strings.Contains(commands[0], "m/top") {
+		if commands := affectedTestGroups([]affectedTestPlan{p}, 3); len(commands) != 1 || !strings.Contains(commands[0][0].command, "m/leaf") || !strings.Contains(commands[0][0].command, "m/top") {
 			t.Errorf("%s: commands = %q, want every package in the module", file, commands)
 		}
 	}
@@ -65,8 +65,8 @@ func TestAffectedSchemaRunsStoreAndItsReadersWithoutWideningTheModule(t *testing
 
 func TestAffectedModuleChangesKeepCriticalTestsUnshortened(t *testing.T) {
 	p := planAffectedTests(".", []string{"."}, []string{"go.mod"}, affectedFixturePackages, map[string][]string{"leaf": {"TestGuard"}})
-	commands := p.commands(hostShape{cpus: 2})
-	if len(commands) != 2 || !strings.Contains(commands[0], "-short ") || !strings.Contains(commands[0], "m/top") || strings.Contains(commands[1], "-short ") || !strings.Contains(commands[1], "TestGuard") {
+	commands := affectedTestGroups([]affectedTestPlan{p}, 1)
+	if len(commands) != 2 || !strings.Contains(commands[0][0].command, "-short ") || !strings.Contains(commands[0][0].command, "m/top") || strings.Contains(commands[1][0].command, "-short ") || !strings.Contains(commands[1][0].command, "TestGuard") {
 		t.Fatalf("commands = %q, want the whole fast class and full critical tests", commands)
 	}
 }
@@ -93,8 +93,8 @@ func TestAffectedWireChangesRunTheReleaseWireCutCheck(t *testing.T) {
 	for _, file := range files {
 		t.Run(file, func(t *testing.T) {
 			plan := planAffectedTests(".sparkwing", modules, []string{file}, packages, nil)
-			commands := plan.commands(hostShape{cpus: 2})
-			if len(commands) != 1 || !strings.HasSuffix(commands[0], " 'sparkwing-pipelines/jobs'") || strings.Contains(commands[0], "-run") {
+			commands := affectedTestGroups([]affectedTestPlan{plan}, 1)
+			if len(commands) != 1 || !strings.HasSuffix(commands[0][0].command, " 'sparkwing-pipelines/jobs'") || strings.Contains(commands[0][0].command, "-run") {
 				t.Fatalf("%s selected %q, want the jobs suite including TestRepositoryUnreleasedSectionDeclaresEveryWireCut", file, commands)
 			}
 		})
@@ -135,6 +135,86 @@ func TestAffectedTestStepRunsTheChangeAndTheCriticalSetOnly(t *testing.T) {
 	}
 }
 
+func TestAffectedTestsRejectUnsafeGitInUnrelatedTestPackages(t *testing.T) {
+	guard, err := os.ReadFile(filepath.Join(sourceTreeRoot(), "pkg", "gitenv", "testgit", "guard_test.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{".sparkwing/jobs_test.go", "internal/sound_test.go", "sparkwing/example_test.go", "README.md"} {
+		t.Run(file, func(t *testing.T) {
+			root := gateFixtureRepo(t)
+			writeGoFile(t, filepath.Join(root, "pkg/gitenv/testgit/guard_test.go"), string(guard))
+			writeGoFile(t, filepath.Join(root, "sparkwing/go.mod"), "module fixture-sdk\n\ngo 1.25\n")
+			writeGoFile(t, filepath.Join(root, "sparkwing/example.go"), "package sdk\n")
+			if file == "README.md" {
+				writeGoFile(t, filepath.Join(root, "internal/unsafe_test.go"), "package internal\nimport \"os/exec\"\nfunc unsafeFixture() { exec.Command(\"git\", \"status\") }\n")
+			}
+			gitCommitAll(t, root, "base")
+			runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+			pkg := map[string]string{".sparkwing/jobs_test.go": "pipelines", "internal/sound_test.go": "internal", "sparkwing/example_test.go": "sdk"}[file]
+			body := "# Docs only\n"
+			if pkg != "" {
+				body = "package " + pkg + "\nimport \"os/exec\"\nfunc unsafeFixture() { exec.Command(\"git\", \"status\") }\n"
+			}
+			writeGoFile(t, filepath.Join(root, file), body)
+			gitAddAll(t, root)
+			err := runAffectedTestFiles(newTestContext(t), []string{file}, "fixture", hostShape{cpus: 2}, false)
+			if pkg == "" {
+				if err != nil {
+					t.Fatalf("docs-only change selected the Go guard: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), "TestRepositoryGitFixturesUseTheScrubbedEnvironment") || !strings.Contains(err.Error(), "use testgit.Command") {
+				t.Fatalf("unsafe Git in %s escaped the repository guard: %v", file, err)
+			}
+		})
+	}
+}
+
+func TestAffectedTestsAlwaysSelectRepositoryScanningGuards(t *testing.T) {
+	t.Chdir(sourceTreeRoot())
+	critical, err := criticalTests(newTestContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	guards := map[string]map[string][]string{
+		".": {
+			"pkg/gitenv/testgit": {"TestRepositoryGitFixturesUseTheScrubbedEnvironment"},
+			"pkg/color":          {"TestNoRawANSIOutsideAllowed"},
+			"internal/source":    {"TestGitAcquisitionHasOneOwner"},
+			"internal/sdkchecks": {"TestPrefersDocumentationStatesEligibility", "TestRequiresDocumentationStatesDispatchBehavior"},
+			"internal/doccheck":  {"TestProductionCommentsUseCurrentConfigFilename", "TestRepositorySourceHintsUseCurrentGrammar"},
+			"cmd/sparkwing":      {"TestDocsNameEveryEnvironmentVariableTheCodeReads"},
+			"pkg/docs":           {"TestDocsNameOnlySymbolsThatExist"},
+			"internal/store":     {"TestLifecycleGuard_StatusLiteralsStayCanonical", "TestConcurrencyGuard_TablesTouchedOnlyByStore", "TestDeclaredRepoGuard_OnlyReviewedFilesReadTheField"},
+			"internal/fssecure":  {"TestConfigDirectoryWritersDoNotMkdirGroupReadable"},
+		},
+		"sparkwing": {
+			".":                    {"TestSDKHasNoMaskerOrAutomaticRegistration"},
+			"testsupport/testleak": {"TestEveryTestPackageRunsInsideTheSandbox"},
+		},
+	}
+	for module, dirs := range guards {
+		var packages []modulePackage
+		for dir := range dirs {
+			packages = append(packages, modulePackage{importPath: path.Join("fixture", dir), dir: dir})
+		}
+		p := planAffectedTests(module, []string{".", "sparkwing", ".sparkwing"}, []string{".sparkwing/jobs/unrelated_test.go"}, packages, critical[module])
+		if len(p.packages) != 0 {
+			t.Fatalf("%s: unrelated module change selected short packages %v", module, p.packages)
+		}
+		command := p.criticalCommand(1)
+		for dir, names := range dirs {
+			for _, name := range names {
+				if !slices.Contains(p.critical[path.Join("fixture", dir)], name) || !strings.Contains(command, name) || strings.Contains(command, "-short") {
+					t.Errorf("%s/%s: guard %s missing from unshortened command %s", module, dir, name, command)
+				}
+			}
+		}
+	}
+}
+
 func TestThisRepoTagsASmallCriticalSet(t *testing.T) {
 	root := sourceTreeRoot()
 	if root == "" {
@@ -146,8 +226,10 @@ func TestThisRepoTagsASmallCriticalSet(t *testing.T) {
 		t.Fatal(err)
 	}
 	count := 0
-	for _, tests := range critical["."] {
-		count += len(tests)
+	for _, dirs := range critical {
+		for _, tests := range dirs {
+			count += len(tests)
+		}
 	}
 	for _, dir := range []string{"internal/controller", "internal/capability", "internal/store", "internal/runspec", "internal/secrets"} {
 		if len(critical["."][dir]) == 0 {
@@ -155,8 +237,8 @@ func TestThisRepoTagsASmallCriticalSet(t *testing.T) {
 		}
 	}
 	// perf: the critical set runs on every gate, so it stays a few dozen tests.
-	if count == 0 || count > 40 {
-		t.Errorf("critical set holds %d tests, want between 1 and 40", count)
+	if count == 0 || count > 60 {
+		t.Errorf("critical set holds %d tests, want between 1 and 60", count)
 	}
 }
 
@@ -218,7 +300,7 @@ func TestAffectedTestsRunTheReadersOfFilesOutsideEveryPackage(t *testing.T) {
 	packages := map[string][]modulePackage{}
 	known := map[string]bool{}
 	for _, m := range modules {
-		pkgs, err := listModulePackages(ctx, m)
+		pkgs, err := listModulePackages(ctx, m, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -369,7 +451,7 @@ func TestAffectedClosureCrossesLocalModuleReplacements(t *testing.T) {
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "go.mod"), "module fixture/pipelines\n\ngo 1.25\nrequire fixture v0.0.0\nreplace fixture => ..\n")
 	writeGoFile(t, filepath.Join(root, ".sparkwing", "jobs.go"), "package pipelines\nimport f \"fixture/internal\"\nfunc Jobs() int { return f.Sound() }\n")
 	gitCommitAll(t, root, "modules")
-	plans, _, err := planAffectedModules(newTestContext(t), []string{"internal/sound.go"}, nil)
+	plans, _, err := planAffectedModules(newTestContext(t), []string{"internal/sound.go"}, nil, "")
 	if err != nil {
 		t.Fatal(err)
 	}

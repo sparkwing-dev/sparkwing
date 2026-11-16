@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26.11-alpine@sha256:ae52b5bc6ed045a9ed26ab03dc19327a802a9cc9aa8b27ed57f5c6b60579b0bb AS build
 ARG TARGETOS TARGETARCH SPARKWING_VERSION GO_TAGS
 WORKDIR /src
 COPY . .
@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -o /out/sparkwing-runner \
       ./cmd/sparkwing-runner
 
-FROM golang:1.26.10-bookworm@sha256:632dff7351799a5a9954a48dc06670ade72ee44e8c351cdc0e5a57af2fea21af AS tools
+FROM golang:1.26.11-bookworm@sha256:dc40a13b61304647ed7e5d581d246b86413dfc29d63c6d018310feb93cd98fc0 AS tools
 # perf: Go's regression corpus, API baselines and HTML docs are not pipeline build inputs.
 RUN rm -rf /usr/local/go/test /usr/local/go/api /usr/local/go/doc
 ARG TARGETARCH

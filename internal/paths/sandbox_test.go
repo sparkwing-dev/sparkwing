@@ -38,3 +38,18 @@ func TestDefaultPaths_StillHonorsSparkwingHome(t *testing.T) {
 		t.Errorf("SandboxHome() = %q, %v; want %q, true for a redirected home", root, ok, want)
 	}
 }
+
+func TestIsOperatorHome_OnlyTheHomesOwnSparkwingDirectory(t *testing.T) {
+	home := t.TempDir()
+	testhome.Set(t, home)
+	for root, want := range map[string]bool{
+		filepath.Join(home, ".sparkwing"):              true,
+		filepath.Join(home, ".sparkwing") + "/":        true,
+		filepath.Join(home, "elsewhere", ".sparkwing"): false,
+		filepath.Join(t.TempDir(), ".sparkwing"):       false,
+	} {
+		if got := PathsAt(root).IsOperatorHome(); got != want {
+			t.Errorf("PathsAt(%q).IsOperatorHome() = %v, want %v", root, got, want)
+		}
+	}
+}

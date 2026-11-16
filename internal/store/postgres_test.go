@@ -17,7 +17,7 @@ func openPGTestStore(t *testing.T) *store.Store {
 }
 
 func TestPostgresOpenAndMigrate(t *testing.T) {
-	st := openPGTestStore(t)
+	st := storetest.NewPostgres(t).Open(t)
 	if got, want := st.Dialect(), store.DialectPostgres; got != want {
 		t.Errorf("Dialect = %v, want %v", got, want)
 	}

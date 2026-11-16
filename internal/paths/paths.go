@@ -36,12 +36,14 @@ func StateDirs() []string {
 	return dirs
 }
 
-func isOperatorHome(root string) bool {
+// IsOperatorHome reports whether p is the operator's own ~/.sparkwing rather
+// than a home that SPARKWING_HOME or a caller redirected elsewhere.
+func (p Paths) IsOperatorHome() bool {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return false
 	}
-	return filepath.Clean(root) == filepath.Join(home, ".sparkwing")
+	return filepath.Clean(p.Root) == filepath.Join(home, ".sparkwing")
 }
 
 // SandboxHome reports the sparkwing home in use when it is not the operator's
@@ -50,7 +52,7 @@ func isOperatorHome(root string) bool {
 // the operator keeps.
 func SandboxHome() (string, bool) {
 	p, err := DefaultPaths()
-	if err != nil || p.Root == "" || isOperatorHome(p.Root) {
+	if err != nil || p.Root == "" || p.IsOperatorHome() {
 		return "", false
 	}
 	return p.Root, true

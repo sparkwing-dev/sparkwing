@@ -39,7 +39,7 @@ func TestOperatorTeamViewPagesAuditEvents(t *testing.T) {
 	var cursor string
 	for page, want := range []int{50, 50, 5} {
 		r := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/operator/teams/a?cursor="+url.QueryEscape(cursor), nil)
-		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
+		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: raw})
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		var view operatorTeamJSON
@@ -58,7 +58,7 @@ func TestOperatorTeamViewPagesAuditEvents(t *testing.T) {
 		}
 	}
 	r := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/operator/teams/a?cursor=missing", nil)
-	r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
+	r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: raw})
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusBadRequest {

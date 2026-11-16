@@ -2,19 +2,32 @@ package blob
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // TransferClient sends only the signed headers to the one-object URL. Its
 // transport is injectable for filesystem signing and S3 conformance tests.
 type TransferClient struct{ Transport http.RoundTripper }
 
-func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, body io.Reader) (io.ReadCloser, error) {
+func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, body io.Reader) (_ io.ReadCloser, resultErr error) {
+	status := 0
+	defer func() {
+		if body != nil && resultErr != nil && status != 0 {
+			failure := newTransferFailure(http.MethodPut, transfer.URL, resultErr)
+			failure.class = fmt.Sprintf("HTTP %d", status)
+			failure.retry = status == 502 || status == 503 || status == 504
+			failure.cause = resultErr
+			resultErr = failure
+		}
+	}()
 	if err := transfer.Validate(); err != nil {
 		return nil, err
 	}
@@ -38,11 +51,17 @@ func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, b
 	client := &http.Client{Transport: c.Transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(req)
 	if err != nil {
+		if method == http.MethodPut {
+			return nil, newTransferFailure(method, transfer.URL, err)
+		}
 		return nil, safeTransferError(err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		_, readErr := io.Copy(io.Discard, privateTransferBody{response.Body})
-		if err := errors.Join(readErr, safeTransferError(response.Body.Close())); err != nil {
+		status = response.StatusCode
+		body := privateTransferBody{response.Body}
+		payload, readErr := io.ReadAll(io.LimitReader(body, 4096))
+		_, drainErr := io.Copy(io.Discard, body)
+		if err := errors.Join(readErr, drainErr, body.Close()); err != nil {
 			return nil, err
 		}
 		switch response.StatusCode {
@@ -50,6 +69,16 @@ func (c TransferClient) Transfer(ctx context.Context, transfer SignedTransfer, b
 			return nil, ErrNotFound
 		case http.StatusPreconditionFailed:
 			return nil, ErrPreconditionFailed
+		case http.StatusConflict:
+			failure := &apierr.Error{Code: apierr.Conflict, Message: "signed blob transfer: HTTP 409: object conflict"}
+			var envelope struct {
+				Error *apierr.Error `json:"error"`
+			}
+			// safety: storage responses can contain credentials; retain only this fixed public reason.
+			if json.Unmarshal(payload, &envelope) == nil && envelope.Error != nil && envelope.Error.Code == apierr.Conflict && envelope.Error.Message == "object integrity mismatch" {
+				failure.Message = "object integrity mismatch"
+			}
+			return nil, failure
 		default:
 			if response.StatusCode == http.StatusForbidden && method == http.MethodGet {
 				return nil, errors.New("signed blob transfer: HTTP 403: download links may expire; re-run the command to request a fresh link")

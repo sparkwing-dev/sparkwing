@@ -19,7 +19,7 @@ func TestRunnerServiceW8Components(t *testing.T) {
 		t.Run(goos, func(t *testing.T) {
 			root := t.TempDir()
 			host := service.Host{
-				GOOS: goos, Home: root, ConfigHome: filepath.Join(root, "config"),
+				GOOS: goos, Home: root, StateHome: root, ConfigHome: filepath.Join(root, "config"),
 				Binary:     filepath.Join(root, "bin with spaces", "sparkwing-runner"),
 				ConfigPath: filepath.Join(root, "config", "runner.yaml"), UID: 501,
 				Exec: func(_ context.Context, name string, args ...string) (string, error) {

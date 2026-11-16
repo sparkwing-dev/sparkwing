@@ -58,7 +58,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing daemon status", Flags: []Flag{}},
 		{Path: "sparkwing daemon uninstall", Platforms: []string{"linux", "darwin"}, Rules: []string{"Remove the controller login service; Windows starts the controller on demand."}, Flags: []Flag{}},
-		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller, its dashboard and its local runner. The runner stops claiming work first. If it remains alive at the end of the stop wait, the command exits nonzero and reports incomplete shutdown. Run `sparkwing dashboard open` to let held work finish, then retry `sparkwing daemon stop`. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again."}, Flags: []Flag{}},
+		{Path: "sparkwing daemon stop", Rules: []string{"Stops the local controller, its dashboard and its local runner. The runner stops claiming work first. If it still holds jobs at the end of the stop wait, the command exits nonzero and names the runner. The controller keeps accepting that runner's results and exits on its own once the runner does; `sparkwing daemon status` reports `stopping` until then. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again."}, Flags: []Flag{}},
 		{Path: "sparkwing dashboard", Flags: []Flag{}},
 		{Path: "sparkwing dashboard logs", Flags: []Flag{
 			{Name: "tail", Argument: "N"},
@@ -171,7 +171,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing operator secrets", Authority: deploymentAdmin, Flags: []Flag{}},
-		{Path: "sparkwing operator secrets rotate", Authority: deploymentAdmin, Rules: []string{"Reseal every team's secrets, git credentials and submitted run environments, and the session signing key, under the controller's current key. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.", "Repeats safely. JSON retains the counts, previous_key_only and each unreadable row's purpose, team and name; values never appear.", "--verify writes nothing and counts the rows that still open only under the previous key; retire the previous key when it reports zero and nothing unreadable."}, Flags: []Flag{
+		{Path: "sparkwing operator secrets rotate", Authority: deploymentAdmin, Rules: []string{"Reseal every team's secrets, git credentials, run arguments and submitted run environments, and the session signing key, under the controller's current key. Run arguments stored before argument sealing are sealed for the first time. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.", "Repeats safely. JSON retains the counts, previous_key_only, plaintext_run_arguments and each unreadable row's purpose, team and name; values never appear.", "--verify writes nothing and counts the rows that still open only under the previous key and the run documents still holding plaintext arguments; retire the previous key when previous_key_only is zero and nothing is unreadable."}, Flags: []Flag{
 			{Name: "verify"},
 			{Name: "profile", Argument: "NAME"},
 		}},
@@ -203,6 +203,7 @@ func Registry() []Command {
 		{Path: "sparkwing pipeline describe", Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "secrets"},
+			{Name: "show-withheld"},
 		}},
 		{Path: "sparkwing pipeline hooks", Flags: []Flag{}},
 		{Path: "sparkwing pipeline hooks install", Flags: []Flag{}},
@@ -390,7 +391,7 @@ func Registry() []Command {
 			"Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.",
 			"-o applies to foreground and detached runs, their help and their errors; it beats SPARKWING_LOG_FORMAT, then terminal detection.",
 			"--sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names and ranges selecting no steps in a job fail before work starts. Bounds follow dependency paths, not declaration order; omit both to run parallel steps. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry. Child pipelines resolve their own job and step selections because their jobs and steps have separate names.",
-			"--sw-allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.",
+			"--sw-allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI retires its supervised runner while the controller still answers, then joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.",
 		}, Flags: []Flag{
 			{Name: "publish", Argument: "PROFILE"},
 			{Name: "sw-route", Argument: "ROUTE", Values: []string{"local", "cloud"}, Meaning: "Select local execution or direct Cloud execution for this invocation."},
@@ -563,7 +564,7 @@ func Registry() []Command {
 		{Path: "sparkwing runs logs", Rules: []string{
 			"Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.",
 			"Every read consumes all available pages. Without --follow, a snapshot with pending final log segments reports logs incomplete and exits 3. --follow waits for new records until final log segments are complete. An interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.",
-			"JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
+			"JSON emits tagged log records. Plain emits log lines. Pretty starts each line with its job, leaves out scheduling events, and ends a failed run with each failed job's step and error and the commands to read its log and retry it. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "job", Argument: "JOB"},
@@ -602,6 +603,7 @@ func Registry() []Command {
 			"Reuse requires readable source results in the retry's data scope. Missing, expired or host-confined results can make a successful job run again. Run status lists a job in `retry.reused` only after its source result has been materialized without an execution attempt.",
 			"Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one safe receipt or structured failure per source run. Plain emits new run IDs. Local and remote retries use the same controller API.",
 			"--reason records why the retry should pass on the new run, shown by runs list and runs status. It is required when an agent retries: the CLI detects Claude Code, Codex and Gemini CLI, or reads --agent or SPARKWING_AGENT, and the controller refuses an agent's retry without a reason. --agent none opts out.",
+			"An agent retry without --reason exits 2 with bad_request. The repair hint asks for --reason saying why the retry should pass, such as --reason \"flake: DNS timeout in TestX\" or --reason \"fixed X in commit Y\".",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID", Required: true, Repeatable: true, CommaList: true},
 			{Name: "failed", Conflicts: []string{"all-jobs"}},
@@ -708,7 +710,7 @@ func Registry() []Command {
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets get", Rules: []string{"This explicit authorized read includes the value. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
+		{Path: "sparkwing secrets get", Rules: []string{"Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so get refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "repo", Argument: "REPO", Requires: []string{"pipeline"}},
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
@@ -733,6 +735,31 @@ func Registry() []Command {
 			{Name: "shared", Conflicts: []string{"pipeline", "repo"}},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "only-on", Argument: "POOL"},
+		}},
+		{Path: "sparkwing subscriptions", Flags: []Flag{}},
+		{Path: "sparkwing subscriptions create", Authority: teamCredential, Rules: []string{"Create a team run event subscription through the team-admin route with an idempotency key. Sparkwing posts each matching run.started and run.finished event to --url as CloudEvents 1.0 JSON signed with Standard Webhooks headers.", "A controller accepts only an https URL whose host is a public name or address; the local controller also accepts http and loopback receivers. Omitted --event selects run.finished when --status is given and both events otherwise; --status applies only to run.finished, and every other omitted filter matches all values. A team holds at most 20 subscriptions.", "The signing secret is printed once and never shown again; rotate-secret replaces it. JSON emits the subscription and its secret; plain emits the ID, then the secret."}, Flags: []Flag{
+			{Name: "url", Argument: "URL", Required: true, Meaning: "Receiver URL; it must not carry a username, password or fragment."},
+			{Name: "event", Argument: "EVENT", Repeatable: true, CommaList: true, Values: []string{"run.started", "run.finished"}, Meaning: "Events to receive; omitted, run.finished when --status is given and both otherwise."},
+			{Name: "status", Argument: "STATUS", Repeatable: true, CommaList: true, Values: []string{"success", "failed", "cancelled", "dry_run"}, Meaning: "Receive run.finished only for these final statuses; omitted, every status."},
+			{Name: "pipeline", Argument: "NAME", Repeatable: true, CommaList: true, Meaning: "Receive events only for these exact pipeline names; omitted, every pipeline."},
+			{Name: "repo", Argument: "KEY", Repeatable: true, CommaList: true, Meaning: "Receive events only for these repository keys, as run JSON reports them; omitted, every repository."},
+			{Name: "description", Argument: "TEXT", Meaning: "Note shown with the subscription, at most 200 characters."},
+			{Name: "profile", Argument: "NAME"},
+		}},
+		{Path: "sparkwing subscriptions delete", Authority: teamCredential, Rules: []string{"Delete a subscription and its pending deliveries through the team-admin route. JSON retains whether it was deleted or already absent and exits 0 either way; pretty and plain emit the deleted ID, and report a subscription the team does not hold as not found with a non-zero exit."}, Flags: []Flag{
+			{Name: "subscription", Argument: "ID", Required: true, Meaning: "Subscription ID, as subscriptions list shows it."},
+			{Name: "profile", Argument: "NAME"},
+		}},
+		{Path: "sparkwing subscriptions list", Authority: teamCredential, Rules: []string{"List the team's run event subscriptions without their secrets; only team administrators may read them, because a URL can carry a credential. JSON emits one record per subscription; plain emits IDs."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME"},
+		}},
+		{Path: "sparkwing subscriptions rotate-secret", Authority: teamCredential, Rules: []string{"Replace a subscription's signing secret and print the new one once. Signing switches at once; deliveries the receiver rejects meanwhile are retried for 24 hours. JSON emits the subscription and its secret; plain emits the secret."}, Flags: []Flag{
+			{Name: "subscription", Argument: "ID", Required: true, Meaning: "Subscription ID, as subscriptions list shows it."},
+			{Name: "profile", Argument: "NAME"},
+		}},
+		{Path: "sparkwing subscriptions show", Authority: teamCredential, Rules: []string{"Show one subscription without its secret. JSON emits the subscription; plain emits its URL."}, Flags: []Flag{
+			{Name: "subscription", Argument: "ID", Required: true, Meaning: "Subscription ID, as subscriptions list shows it."},
+			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing tokens", Flags: []Flag{}},
 		{Path: "sparkwing tokens create", Authority: teamCredential, Rules: []string{"Create a member credential through the team token route. Enroll runners with runners add. The controller derives authority and metering. JSON includes the new bearer and metadata; plain emits the bearer once. A token minted with a profile token is delegated from it: it gets at most the minting token's scopes, including team.admin, and never outlives it."}, Flags: []Flag{
@@ -815,7 +842,6 @@ func Registry() []Command {
 			{Name: "heartbeats-per-runner-minute", Argument: "N", Meaning: "Per-runner request budget on the heartbeat routes, per rolling minute, charged whatever the answer."},
 			{Name: "hsts", Meaning: "Assert that browsers reach this controller's dashboard over TLS: send Strict-Transport-Security and require an https origin on cookie-authenticated writes."},
 			{Name: "idle-claim-poll", Argument: "DURATION", Meaning: "Widest poll interval this controller suggests to a claim loop while it has no work to hand out."},
-			{Name: "insecure-cookies", Meaning: "Drop Secure and the __Host- prefix from the dashboard's session cookies so a browser keeps a session over plain HTTP."},
 			{Name: "limits-profile", Argument: "VALUE", Meaning: "Named set of abuse guards this controller runs with: cloud, cloud-free."},
 			{Name: "log-format", Argument: "VALUE", Meaning: "Format of this service's own log: text or json."},
 			{Name: "log-level", Argument: "VALUE", Meaning: "Lowest level this service logs: debug, info, warn or error."},

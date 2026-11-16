@@ -156,8 +156,8 @@ func TestServerPolicySessionsCheckCommittedIdentityAndCSRF(t *testing.T) {
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", origin)
 		r.Header.Set(csrfHeaderName, header)
-		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, server.cookiesSecure()), Value: sessionID})
-		r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, server.cookiesSecure()), Value: cookie})
+		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: sessionID})
+		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: cookie})
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		return w
@@ -254,8 +254,8 @@ func TestServerPolicyConsoleUsesDirectSessionAndConfiguredGate(t *testing.T) {
 		r := httptest.NewRequest(http.MethodPost, "https://controller.test/api/v1/operator/teams/a/grants?actor="+hex.EncodeToString(input), strings.NewReader(`{"amount_cents":10,"reason":"test","key":"once"}`))
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Origin", "https://controller.test")
-		r.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, s.cookiesSecure()), Value: raw})
-		r.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, s.cookiesSecure()), Value: csrf})
+		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: raw})
+		r.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrf})
 		r.Header.Set(csrfHeaderName, csrf)
 		want := 201
 		switch phase % 5 {

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/pipelineentry"
@@ -57,7 +59,7 @@ func runPipelineLint(inv clisurface.Invocation) error {
 				Notice string `json:"notice"`
 			}{Status: "unsupported", Notice: notice})
 		}
-		fmt.Println(notice)
+		fmt.Println(opsview.DisplayText(notice))
 		return nil
 	}
 
@@ -123,9 +125,9 @@ func renderLintFindings(findings []pipelinelint.Finding, format string) error {
 	case "plain":
 		for _, f := range findings {
 			if f.File != "" {
-				fmt.Printf("%s:%d:%d: %s: %s\n", f.File, f.Line, f.Col, f.Rule, f.Message)
+				fmt.Printf("%s:%d:%d: %s: %s\n", opsview.DisplayText(f.File), f.Line, f.Col, opsview.DisplayText(f.Rule), opsview.DisplayText(f.Message))
 			} else {
-				fmt.Printf("%s: [%s] %s\n", f.Pipeline, f.Rule, f.Message)
+				fmt.Printf("%s: [%s] %s\n", opsview.DisplayText(f.Pipeline), opsview.DisplayText(f.Rule), opsview.DisplayText(f.Message))
 			}
 		}
 		return nil
@@ -145,7 +147,7 @@ func printLintTable(findings []pipelinelint.Finding) {
 		if f.File != "" {
 			loc = fmt.Sprintf("%s:%d:%d", filepath.Base(f.File), f.Line, f.Col)
 		}
-		fmt.Printf("  %s  [%s]\n      %s\n", loc, f.Rule, f.Message)
+		fmt.Printf("  %s  [%s]\n      %s\n", opsview.DisplayText(loc), opsview.DisplayText(f.Rule), opsview.DisplayText(f.Message))
 	}
 	fmt.Println()
 	fmt.Printf("%d violation%s\n", len(findings), pluralS(len(findings)))
@@ -186,10 +188,10 @@ func printPlacementPreview(cfg *projectconfig.Config, only string) error {
 			fmt.Println("\nplacement for repository runs (the default branch's copy applies):")
 			header = true
 		}
-		fmt.Printf("  %s\n", p.Name)
-		fmt.Printf("    %-12s %s\n", "other jobs", placementLine(policy.Prefer))
+		fmt.Printf("  %s\n", opsview.DisplayText(p.Name))
+		fmt.Printf("    %-12s %s\n", "other jobs", opsview.DisplayText(placementLine(policy.Prefer)))
 		for _, job := range policy.Jobs {
-			fmt.Printf("    %-12s %s\n", job.Job, placementLine(job.Prefer))
+			fmt.Printf("    %-12s %s\n", opsview.DisplayText(job.Job), opsview.DisplayText(placementLine(job.Prefer)))
 		}
 	}
 	return nil

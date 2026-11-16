@@ -99,7 +99,7 @@ func TestRunnerEnrollmentReachesServiceFailure(t *testing.T) {
 	t.Setenv("SPARKWING_CONFIG", path)
 	called := false
 	service := runnerServicePlan{host: runnerservice.Host{
-		GOOS: "linux", Home: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: path,
+		GOOS: "linux", Home: t.TempDir(), StateHome: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: path,
 		Exec: func(_ context.Context, name string, args ...string) (string, error) {
 			called = true
 			return "fixture service failure", errors.New("service failed")
@@ -178,7 +178,7 @@ func TestRunnerEnrollmentRemovesNewUnitWhenManagerDisappears(t *testing.T) {
 	lost := false
 	failure := errors.New("service manager unavailable")
 	plan := runnerServicePlan{host: runnerservice.Host{
-		GOOS: "linux", Home: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: path,
+		GOOS: "linux", Home: t.TempDir(), StateHome: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: path,
 		Exec: func(_ context.Context, _ string, args ...string) (string, error) {
 			lost = lost || strings.Join(args, " ") == "--user daemon-reload"
 			if lost {
@@ -212,7 +212,7 @@ func TestRunnerEnrollmentFailureKeepsAnExistingService(t *testing.T) {
 	failed := false
 	failure := errors.New("manager unavailable")
 	plan := runnerServicePlan{host: runnerservice.Host{
-		GOOS: "linux", Home: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: path,
+		GOOS: "linux", Home: t.TempDir(), StateHome: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: path,
 		Exec: func(_ context.Context, _ string, args ...string) (string, error) {
 			if failed && strings.Join(args, " ") == "--user daemon-reload" {
 				return "manager unavailable", failure
@@ -246,7 +246,7 @@ func TestRunnerEnrollmentFailureKeepsAnExistingService(t *testing.T) {
 
 func TestFailedEnrollmentCleanupKeepsAReplacedServiceFile(t *testing.T) {
 	host := runnerservice.Host{
-		GOOS: "linux", Home: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: filepath.Join(t.TempDir(), "config.yaml"),
+		GOOS: "linux", Home: t.TempDir(), StateHome: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: filepath.Join(t.TempDir(), "config.yaml"),
 		Exec: func(context.Context, string, ...string) (string, error) { return "", nil },
 	}
 	if _, err := runnerservice.Install(t.Context(), host); err != nil {
@@ -314,7 +314,7 @@ func TestRunnerEnrollmentFailurePreservesPriorSettingsAndCredential(t *testing.T
 	var created string
 	failure, revokeFailure := errors.New("service failed"), errors.New("revoke failed")
 	plan := runnerServicePlan{host: runnerservice.Host{
-		GOOS: "linux", Home: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: path,
+		GOOS: "linux", Home: t.TempDir(), StateHome: t.TempDir(), ConfigHome: t.TempDir(), Binary: "/test/sparkwing-runner", ConfigPath: path,
 		Exec: func(_ context.Context, _ string, args ...string) (string, error) {
 			if strings.Join(args, " ") != "--user daemon-reload" || created != "" {
 				return "", nil

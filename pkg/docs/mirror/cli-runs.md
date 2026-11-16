@@ -291,7 +291,7 @@ Read job-attempt and trigger, plan or eval logs through the controller. --job se
 
 Every read consumes all available pages. Without --follow, a snapshot with pending final log segments reports logs incomplete and exits 3. --follow waits for new records until final log segments are complete. An interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.
 
-JSON emits tagged log records. Plain emits log lines. Use --grep without --run to search across runs with the same filters and pagination as runs grep.
+JSON emits tagged log records. Plain emits log lines. Pretty starts each line with its job, leaves out scheduling events, and ends a failed run with each failed job's step and error and the commands to read its log and retry it. Use --grep without --run to search across runs with the same filters and pagination as runs grep.
 
 ### Flags
 
@@ -356,6 +356,8 @@ Reuse requires readable source results in the retry's data scope. Missing, expir
 Repeat --run or use --run - for newline-separated IDs on stdin. JSON emits one safe receipt or structured failure per source run. Plain emits new run IDs. Local and remote retries use the same controller API.
 
 --reason records why the retry should pass on the new run, shown by runs list and runs status. It is required when an agent retries: the CLI detects Claude Code, Codex and Gemini CLI, or reads --agent or SPARKWING_AGENT, and the controller refuses an agent's retry without a reason. --agent none opts out.
+
+An agent retry without --reason exits 2 with bad_request. The repair hint asks for --reason saying why the retry should pass, such as --reason "flake: DNS timeout in TestX" or --reason "fixed X in commit Y".
 
 ### Flags
 

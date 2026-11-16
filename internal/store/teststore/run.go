@@ -49,6 +49,11 @@ func SeedRun(s *store.Store, ctx context.Context, team store.Team, r store.Run) 
 	if err != nil {
 		return err
 	}
+	// bug: project the persisted JSON, including its UTF-8 repair.
+	var persisted runspec.SealedRequest
+	if err := json.Unmarshal(body, &persisted); err != nil {
+		return err
+	}
 	var started, finished, parent any
 	if !r.StartedAt.IsZero() {
 		started = r.StartedAt.UnixNano()
@@ -65,14 +70,20 @@ func SeedRun(s *store.Store, ctx context.Context, team store.Team, r store.Run) 
 	if err != nil {
 		return err
 	}
-	query := `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,repo_identity,dispatch,intake_mode,created_at,started_at,finished_at,parent_run_id,retry_of,replay_of_run_id,replay_of_node_id,trigger_source,git_branch,git_sha,error,created_principal,log_retention_class,log_retention_days)
-SELECT ?,?,COALESCE(MAX(number),0)+1,?,?,?,?,?,'gh:1',?,?,'host','execute',?,?,?,?,?,?,?,?,?,?,?,'fixture','r30',30 FROM runs WHERE team=?`
+	// perf: typed seeds already know these facts; refreshing every existing
+	// run's projections makes history fixture setup quadratic.
+	query := `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,repo_identity,provenance_sha,provenance_ref,dispatch,intake_mode,created_at,started_at,finished_at,parent_run_id,retry_of,replay_of_run_id,replay_of_node_id,trigger_source,git_branch,git_sha,error,created_principal,log_retention_class,log_retention_days)
+SELECT ?,?,COALESCE(MAX(number),0)+1,?,?,?,?,?,'gh:1',?,?,?,?,'host','execute',?,?,?,?,?,?,?,?,?,?,?,'fixture','r30',30 FROM runs WHERE team=?`
 	if s.Dialect() == store.DialectPostgres {
 		for i := 1; strings.Contains(query, "?"); i++ {
 			query = strings.Replace(query, "?", fmt.Sprintf("$%d", i), 1)
 		}
 	}
-	_, err = Exec(ctx, s, query, team, r.ID, r.Pipeline, r.Status, body, "fixture", created.UnixNano(), repository, identity, created.UnixNano(), started, finished, parent, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, r.TriggerSource, r.GitBranch, r.GitSHA, r.Error, team)
+	db, err := registeredDB(s)
+	if err != nil {
+		return err
+	}
+	_, err = db.ExecContext(ctx, query, team, r.ID, r.Pipeline, r.Status, body, "fixture", created.UnixNano(), repository, identity, persisted.Provenance.SHA(), persisted.Provenance.Ref(), created.UnixNano(), started, finished, parent, r.RetryOf, r.ReplayOfRunID, r.ReplayOfNodeID, r.TriggerSource, r.GitBranch, r.GitSHA, r.Error, team)
 	return err
 }
 

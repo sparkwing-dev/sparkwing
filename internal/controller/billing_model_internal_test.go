@@ -322,7 +322,7 @@ func TestBillingModelControllerReportsStandingAndKeepsCardPrepay(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/team/billing", nil)
-	request.AddCookie(&http.Cookie{Name: cookieName(sessionCookieName, server.cookiesSecure()), Value: raw})
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: raw})
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {

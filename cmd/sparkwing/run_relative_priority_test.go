@@ -44,7 +44,7 @@ func TestRunRelativePrioritySealsControllerQueueRank(t *testing.T) {
 			var out bytes.Buffer
 			err = runLocalCommand(t.Context(), "example", flags, args, &out, localRunDependencies{resolve: func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
 				runtime, err := resolveLocalRunRuntime(ctx, options)
-				runtime.controller, runtime.ensureController = controller, nil
+				runtime.controller, runtime.ensureController, runtime.runner = controller, nil, nil
 				return runtime, err
 			}})
 			if err != nil {

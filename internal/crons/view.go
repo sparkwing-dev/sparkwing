@@ -37,6 +37,8 @@ func newTimerStateView(t crontimer.State) controllerwire.TimerStateView {
 		Path:      t.Path,
 		Binary:    t.Binary,
 		Detail:    t.Detail,
+
+		ActivationUnknown: t.ActivationUnknown,
 	}
 }
 

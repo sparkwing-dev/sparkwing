@@ -312,7 +312,7 @@
     },
     {
       "kind": "unclaimed_work",
-      "reason": "no runner or launcher has claimed the run's trigger yet; check that a matching runner (or the Cloud launcher) is online; if targeting a pool holding reserved secrets, it needs verified default-branch work: push to the repository's default branch through the GitHub App, or select a pool without reserved secrets and start a new run"
+      "reason": "no runner or launcher has claimed the run's trigger yet; check that a matching runner (or the Cloud launcher) is online; repository-scoped runners cannot run working-tree code; commit and push, then rerun through the GitHub App; if targeting a pool holding reserved secrets, it needs verified default-branch work: push to the repository's default branch through the GitHub App, or select a pool without reserved secrets and start a new run"
     }
   ],
   "retry": {

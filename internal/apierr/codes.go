@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/secretname"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
@@ -50,14 +51,17 @@ const (
 	ReasonNoTeam                 apierr.Reason = "no_team"
 	ReasonCancelled              apierr.Reason = "cancel_requested"
 	ReasonSecretUndeclared       apierr.Reason = "secret_undeclared"
+	ReasonSecretMasked           apierr.Reason = "secret_masked"
 	ReasonDigestNotReadable      apierr.Reason = "digest_not_readable"
 	ReasonRepositoryUnauthorized apierr.Reason = "repository_unauthorized"
 	ReasonReadOnly               apierr.Reason = "read_only"
 	ReasonPersonalMachine        apierr.Reason = "personal_machine"
-	ReasonCredentialUnconfirmed  apierr.Reason = "credential_unconfirmed"
-	ReasonReauthRequired         apierr.Reason = "reauth_required"
-	ReasonSecretsKeyRequired     apierr.Reason = "secrets_key_required"
-	ReasonExchangeUsed           apierr.Reason = "exchange_used"
+	// #nosec G101 -- This is a public error reason code, not a credential.
+	ReasonCredentialUnconfirmed apierr.Reason = "credential_unconfirmed"
+	ReasonReauthRequired        apierr.Reason = "reauth_required"
+	// #nosec G101 -- This is a public error reason code, not a secret.
+	ReasonSecretsKeyRequired apierr.Reason = "secrets_key_required"
+	ReasonExchangeUsed       apierr.Reason = "exchange_used"
 )
 
 // Definition drives error reference documentation and HTTP status selection.
@@ -116,6 +120,18 @@ var Codes = []Definition{
 // Authorization constructs a forbidden error with its required reason.
 func Authorization(reason apierr.Reason, message string) *apierr.Error {
 	return &apierr.Error{Code: Forbidden, Message: message, Details: map[string]any{"reason": reason}}
+}
+
+// UndeclaredSecret refuses a read of a secret the run's pipeline does not
+// declare. It names the requested secret and the declaration to add.
+// safety: the refusal depends only on the caller's own declarations, never on
+// whether the secret exists, and a malformed name is not echoed.
+func UndeclaredSecret(name string) *apierr.Error {
+	message := "secret is not declared by this pipeline; add it to the pipeline's Secrets()"
+	if secretname.Validate(name) == nil {
+		message = fmt.Sprintf("secret %q is not declared by this pipeline; add a Secrets() field tagged sw:%q (TypeScript: secrets: [{ name: %q }])", name, name, name)
+	}
+	return Authorization(ReasonSecretUndeclared, message)
 }
 
 // Envelope is the one outer error object. Protocol replies embed its Error beside reply and ok.

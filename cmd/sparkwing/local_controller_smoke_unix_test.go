@@ -23,7 +23,7 @@ import (
 
 // safety: every leaf in these groups is driven below or named in localSmokeSkipped,
 // so a new command cannot ship without meeting a real controller.
-var localSmokeGroups = []string{"secrets", "tokens", "runners", "pools", "queue", "schedules", "runs"}
+var localSmokeGroups = []string{"secrets", "tokens", "runners", "pools", "subscriptions", "queue", "schedules", "runs"}
 
 var localSmokeSkipped = map[string]string{
 	"sparkwing tokens revoke":        "a local controller issues no member tokens",
@@ -63,6 +63,11 @@ var localSmokeSteps = []localSmokeStep{
 	{args: []string{"tokens", "create"}, want: "capability_unsupported"},
 	{args: []string{"runners", "list"}},
 	{args: []string{"pools", "list"}},
+	{args: []string{"subscriptions", "create", "--url", "http://127.0.0.1:9/hook", "--event", "run.finished", "--status", "failed"}},
+	{args: []string{"subscriptions", "list"}},
+	{args: []string{"subscriptions", "show", "--subscription", "sub_000000000000000000000000"}, want: "not_found"},
+	{args: []string{"subscriptions", "rotate-secret", "--subscription", "sub_000000000000000000000000"}, want: "not_found"},
+	{args: []string{"subscriptions", "delete", "--subscription", "sub_000000000000000000000000"}},
 	{args: []string{"queue", "list"}},
 	{args: []string{"schedules", "list"}},
 	{args: []string{"schedules", "show", "--schedule", "missing"}, want: "not_found"},

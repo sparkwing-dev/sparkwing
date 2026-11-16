@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"syscall"
 	"testing"
 	"time"
 
@@ -51,6 +52,13 @@ func TestMissingSocketDoesNotReplayClaim(t *testing.T) {
 	_, err := c.Claim(t.Context(), controllerwire.ClaimRequest{Kinds: []capability.UnitKind{capability.UnitNode}})
 	if !RetryableTransportError(err) || calls != 1 {
 		t.Fatalf("claim calls = %d, error = %v", calls, err)
+	}
+}
+
+func TestClaimConnectionFailuresDoNotBroadenTransportRetries(t *testing.T) {
+	failure := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ENETUNREACH}
+	if !RetryableClaimError(failure) || RetryableTransportError(failure) {
+		t.Fatalf("claim retry=%v transport retry=%v", RetryableClaimError(failure), RetryableTransportError(failure))
 	}
 }
 

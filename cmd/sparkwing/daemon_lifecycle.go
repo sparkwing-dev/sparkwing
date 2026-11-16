@@ -132,7 +132,7 @@ func executeDaemonLifecycle(ctx context.Context, inv clisurface.Invocation, serv
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	if action == "status" || !status.Running || action == "restart" && !inv.Bool("force") && status.Version == services.options.Version {
+	if action == "status" || !status.Running && action != "stop" || action == "restart" && !inv.Bool("force") && status.Version == services.options.Version {
 		return result, nil
 	}
 	if action == "restart" && services.options.Version == "" {
@@ -142,6 +142,9 @@ func executeDaemonLifecycle(ctx context.Context, inv clisurface.Invocation, serv
 		if err := services.retireRunner(ctx); err != nil {
 			return result, err
 		}
+	}
+	if !status.Running {
+		return result, nil
 	}
 	stopped, err := stopLocalController(ctx, services.lifecycle)
 	if err != nil {

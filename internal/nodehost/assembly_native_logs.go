@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -20,15 +21,20 @@ import (
 )
 
 type localLogs struct {
-	mu        sync.Mutex
-	flushes   sync.WaitGroup
-	run       string
-	masker    *secrets.Masker
-	principal capability.Principal
-	nodes     map[string]capability.Principal
-	upload    func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
-	streams   map[string]*localLogStream
-	closed    bool
+	diagnostics      *lease.Diagnostics
+	diagnosticNode   string
+	diagnosticStream *localLogStream
+	diagnosticReady  chan struct{}
+	diagnosticBound  sync.Once
+	mu               sync.Mutex
+	flushes          sync.WaitGroup
+	run              string
+	masker           *secrets.Masker
+	principal        capability.Principal
+	nodes            map[string]capability.Principal
+	upload           func(context.Context, capability.Principal, blob.LogSubject) (logseg.Uploader, error)
+	streams          map[string]*localLogStream
+	closed           bool
 }
 
 type logHostStore struct {
@@ -84,8 +90,20 @@ func (l *localLogs) alert(node string, err error) {
 }
 
 // finish detaches streams before committing lifecycle state. Uploads share no host lock.
+// Keeper diagnostics stop capturing at detachment and seal first, inside the retry-tail wait.
 func (l *localLogs) finish(ctx context.Context, node string) <-chan struct{} {
 	streams := l.take(node)
+	l.mu.Lock()
+	var diagnostic *localLogStream
+	for _, stream := range streams {
+		if stream == l.diagnosticStream {
+			diagnostic = stream
+		}
+	}
+	l.mu.Unlock()
+	if diagnostic != nil {
+		l.diagnostics.Cutoff()
+	}
 	done := make(chan struct{})
 	l.flushes.Add(1)
 	go func() {
@@ -93,6 +111,17 @@ func (l *localLogs) finish(ctx context.Context, node string) <-chan struct{} {
 		defer close(done)
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limits.LogSealGrace)
 		defer cancel()
+		if diagnostic != nil && l.diagnostics != nil {
+			drain, cancelDrain := context.WithTimeout(ctx, limits.KeeperDiagnosticSealWait)
+			l.diagnostics.Seal(drain, func(delivery context.Context, event lease.Event) error {
+				frame, err := keeperDiagnosticFrame(event)
+				if err != nil {
+					return err
+				}
+				return l.writeFrame(delivery, diagnostic, frame)
+			})
+			cancelDrain()
+		}
 		for _, stream := range streams {
 			if err := stream.close(ctx); err != nil {
 				l.alert(node, err)
@@ -127,7 +156,7 @@ type localLogStream struct {
 	closed  bool
 }
 
-func (s *localLogStream) write(ctx context.Context, body []byte) error {
+func (s *localLogStream) write(ctx context.Context, body []byte, diagnostic bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
@@ -143,6 +172,9 @@ func (s *localLogStream) write(ctx context.Context, body []byte) error {
 		if s.failed {
 			s.sink.MarkIncomplete()
 		}
+	}
+	if diagnostic {
+		return s.sink.AppendDiagnostic(body)
 	}
 	return s.sink.Append(body)
 }
@@ -177,8 +209,20 @@ func (l *localLogs) bind(p capability.Principal, attempt int64) {
 		l.nodes[node] = p
 		l.mu.Unlock()
 	}
-	if _, err := l.open(node); err != nil {
+	stream, err := l.open(node, true)
+	if err != nil {
 		l.alert(node, err)
+	} else if node == l.diagnosticNode {
+		l.mu.Lock()
+		previous := l.diagnosticStream
+		l.diagnosticStream = stream
+		l.mu.Unlock()
+		if previous != nil && previous != stream {
+			l.diagnostics.Open()
+		}
+	}
+	if l.diagnosticReady != nil {
+		l.diagnosticBound.Do(func() { close(l.diagnosticReady) })
 	}
 }
 
@@ -242,7 +286,7 @@ func (u *logUpload) PutManifest(ctx context.Context, manifest logseg.Manifest) e
 	return up.PutManifest(ctx, manifest)
 }
 
-func (l *localLogs) open(node string) (*localLogStream, error) {
+func (l *localLogs) open(node string, create bool) (*localLogStream, error) {
 	p, subject, err := l.subject(node)
 	if err != nil {
 		return nil, err
@@ -261,6 +305,9 @@ func (l *localLogs) open(node string) (*localLogStream, error) {
 	}
 	stream := l.streams[string(key)]
 	if stream == nil {
+		if !create {
+			return nil, logseg.ErrClosed
+		}
 		stream = &localLogStream{subject: subject, upload: &logUpload{open: func(ctx context.Context) (logseg.Uploader, error) { return l.upload(ctx, p, subject) }}}
 		l.streams[string(key)] = stream
 	}
@@ -274,20 +321,80 @@ func (l *localLogs) write(ctx context.Context, run, node string, frame nodewire.
 	if run != l.run || l.masker == nil {
 		return errors.New("local logs require the awarded run and shared masker")
 	}
-	stream, err := l.open(node)
+	diagnostic := frame.Event == "lease_keeper" || frame.Event == "request_timing"
+	stream, err := l.open(node, !diagnostic)
 	if errors.Is(err, logseg.ErrClosed) {
+		if diagnostic {
+			return err
+		}
 		l.alert(node, err)
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	body, err := json.Marshal(l.masker.Log(frame))
-	if err != nil {
-		return err
-	}
-	if err := stream.write(ctx, body); err != nil {
+	if err := l.writeFrame(ctx, stream, frame); err != nil {
+		if diagnostic {
+			return err
+		}
 		l.alert(node, err)
 	}
 	return nil
+}
+
+// safety: keeper records go to the stream bound when the sink runs and never open another writer.
+func (l *localLogs) writeKeeper(ctx context.Context, event lease.Event) error {
+	l.mu.Lock()
+	stream := l.diagnosticStream
+	l.mu.Unlock()
+	if stream == nil {
+		return logseg.ErrClosed
+	}
+	frame, err := keeperDiagnosticFrame(event)
+	if err != nil {
+		return err
+	}
+	return l.writeFrame(ctx, stream, frame)
+}
+
+func keeperDiagnosticFrame(event lease.Event) (nodewire.FrameLog, error) {
+	raw, err := json.Marshal(event)
+	return nodewire.FrameLog{TS: event.Wall.Format(time.RFC3339Nano), Level: "debug", Event: "lease_keeper", Attrs: raw}, err
+}
+
+func (l *localLogs) writeFrame(ctx context.Context, stream *localLogStream, frame nodewire.FrameLog) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	body, err := l.marshalLogFrame(frame)
+	if err != nil {
+		return err
+	}
+	return stream.write(ctx, body, frame.Event == "lease_keeper" || frame.Event == "request_timing")
+}
+
+func (l *localLogs) requestTimingWriter(run, node string) func(context.Context, nodewire.FrameLog) error {
+	if run != l.run || l.masker == nil {
+		return nil
+	}
+	stream, err := l.open(node, false)
+	if err != nil {
+		return nil
+	}
+	return func(ctx context.Context, frame nodewire.FrameLog) error {
+		body, err := l.marshalLogFrame(frame)
+		if err != nil {
+			return err
+		}
+		return stream.write(ctx, body, true)
+	}
+}
+
+func (l *localLogs) marshalLogFrame(frame nodewire.FrameLog) ([]byte, error) {
+	// safety: The host stamp survives masking and is never decoded from SDK protocol frames.
+	return json.Marshal(struct {
+		nodewire.FrameLog
+		LeaseKeeper   bool `json:"host_lease_keeper,omitempty"`
+		RequestTiming bool `json:"host_request_timing,omitempty"`
+	}{l.masker.Log(frame), frame.Event == "lease_keeper", frame.Event == "request_timing"})
 }

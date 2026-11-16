@@ -4,9 +4,22 @@ import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const unitOnlyInputs = new Set([
+  "test/consumer.ts", "test/helper-context.ts", "test/helpers.ts", "test/host-command.ts", "test/package-consumer.ts",
+]);
+const unpublishedInputs = new Set(["IMPLEMENTATION.md", ".prettierrc.json"]);
+
 export function sdkDigest(root, tools = root) {
   const paths = execFileSync("git", ["-C", root, "ls-files", "-z", "--", "sdk/typescript"], { encoding: "utf8" })
-    .split("\0").filter(Boolean).filter(path => !/\/(node_modules|dist|win32-x64|win32-arm64)\//.test(path)).sort();
+    .split("\0").filter(Boolean).filter(path => {
+      const input = path.slice("sdk/typescript/".length);
+      // safety: Unknown inputs count, including npm's automatically packed files. Windows publication binds all of nativehost into receipts.
+      return !unitOnlyInputs.has(input) && !unpublishedInputs.has(input) &&
+        !/^test\/[^/]+\.test\.(ts|mjs)$/.test(input) &&
+        !input.startsWith("test/fixtures/") && !input.startsWith("test/testdata/commandhost/") &&
+        !input.startsWith("examples/") && !input.startsWith("dist/") && !input.startsWith("node_modules/") &&
+        !/^native\/win32-(x64|arm64)\//.test(input);
+    }).sort();
   const hash = createHash("sha256");
   for (const path of paths) {
     let bytes = readFileSync(resolve(root, path));

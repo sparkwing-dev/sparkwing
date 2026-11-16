@@ -29,7 +29,7 @@ adds capacity from your own machines to Cloud.
 
 Building Sparkwing requires Go 1.26.0 or later. Pipeline modules that use only
 the Go SDK require Go 1.25.0 or later. Job packages can require a newer version.
-The engine's source module selects Go 1.26.10 for patched builds with automatic
+The engine's source module selects Go 1.26.11 for patched builds with automatic
 toolchain selection. SDK consumers choose their own Go patch release.
 
 ### macOS / Linux
@@ -253,7 +253,11 @@ Use `sparkwing daemon status` to inspect it and `sparkwing daemon stop` to stop
 it. See [Local dashboard](native-mode.md) for service requirements.
 Daemon records include `url` when known. Use `--output plain` for a single
 `running` or `stopped` value, or `--output pretty` for the terminal layout.
-A stopped `daemon status` exits 1; stopping an absent controller exits 0.
+A stopped `daemon status` exits 1. On Linux with systemd, `daemon stop` also
+waits for this home’s supervised runner units to disappear, including runners
+still starting. It exits nonzero with incomplete shutdown if they remain at
+the stop bound or their state cannot be read. Stopping an absent controller
+exits 0 only after this check passes.
 
 If you want a local Kubernetes cluster as a deploy target for user apps
 (not for sparkwing itself), bring your own - any local Kubernetes setup
@@ -261,12 +265,26 @@ works. Local CI uses the controller on your machine.
 
 ### Inspect a failed run
 
-The run's final output includes its ID and commands to inspect it:
+On a terminal, each line of a run's output starts with its job, as in
+`test | running tests`. A failed run ends with a block that names each failed
+job, its step and its error, followed by the commands to read the job's log
+and retry the failed jobs:
+
+```text
+test failed in step unit:
+  command failed (exit 1): go test ./...
+  FAIL: TestWidget expected 3 got 4
+deploy was cancelled because test did not succeed
+
+Show the failed job's log:  sparkwing runs logs --run 2 --job test
+Retry the failed jobs:      sparkwing runs retry --failed --run 2
+```
+
+List runs and read one's jobs with:
 
 ```bash
 sparkwing runs list --profile=
 sparkwing runs status --profile= --run RUN_ID
-sparkwing runs logs --profile= --run RUN_ID
 ```
 
 Fix the failing job and run the pipeline again. If a run stays pending, inspect

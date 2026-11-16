@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
@@ -67,14 +69,14 @@ func runDaemonEventsCommand(inv clisurface.Invocation, out, diagnostics io.Write
 	truncated := len(selected) > limit
 	selected = selected[max(0, len(selected)-limit):]
 	if len(records) == 0 && format != "json" {
-		_, err := fmt.Fprintf(out, "No events are retained in %s.\n", dir)
+		_, err := fmt.Fprintf(out, "No events are retained in %s.\n", opsview.DisplayText(dir))
 		return err
 	}
 	for _, record := range selected {
 		if format == "json" {
 			err = json.NewEncoder(out).Encode(record)
 		} else {
-			_, err = fmt.Fprintf(out, "%s  #%d.%d  %-22s %s %s\n", record.TS.Format(time.RFC3339Nano), record.Incarnation, record.Seq, record.Kind, record.RunID, compactData(record.Data))
+			_, err = fmt.Fprintf(out, "%s  #%d.%d  %-22s %s %s\n", record.TS.Format(time.RFC3339Nano), record.Incarnation, record.Seq, opsview.DisplayText(record.Kind), opsview.DisplayText(record.RunID), opsview.DisplayText(compactData(record.Data)))
 		}
 		if err != nil {
 			return err

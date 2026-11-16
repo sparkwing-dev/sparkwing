@@ -183,6 +183,10 @@ dependents are also reused in the same transaction. If any dependent must run
 again, the retry requests a fresh approval. Unknown generated descendants also
 require a fresh approval. Run-control grants do not grant approval rights.
 
+Fresh retry responses and idempotent replays report the new invocation's
+`inputs.lineage`, including `retry_of`, `retrier` and `retry_reason`, matching a
+fresh run-detail read.
+
 Direct store consumers use `Store.ClaimUnit` for launcher and runner awards.
 `Store.ClaimLaunch`, `LaunchClaim`, `LaunchClaimRequest`, `MinLaunchLifetime`
 and `LaunchDeadlineSlack` are removed. HTTP consumers call `Claim` on the controller returned by

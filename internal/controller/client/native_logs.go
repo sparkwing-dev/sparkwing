@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -86,7 +85,8 @@ func (u *nativeLogUploader) signed(ctx context.Context, index int64, body []byte
 // put uploads one slot's object before the slot's fixed upload deadline (STORE-DATA.md, log slot accounting). A
 // create-only refusal (HTTP 412) follows a PUT whose response was lost; it proves nothing about the bytes, so put
 // reports success and the commit that follows verifies the stored object.
-func (u *nativeLogUploader) put(ctx context.Context, target string, headers map[string]string, expiry time.Time, body []byte) error {
+func (u *nativeLogUploader) put(ctx context.Context, index int64, slot blob.LogUploadURL, body []byte) error {
+	target, headers, expiry := slot.URL, slot.Headers, slot.ExpiresAt
 	if err := validateDataTransfer(controllerwire.DataSignedTransfer{URL: target, Headers: headers, ExpiresAt: expiry}); err != nil {
 		return err
 	}
@@ -95,7 +95,17 @@ func (u *nativeLogUploader) put(ctx context.Context, target string, headers map[
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	response, err := (blob.TransferClient{Transport: u.transport.http.Transport}).Transfer(ctx, blob.SignedTransfer{URL: target, Headers: headers, ExpiresAt: expiry, Size: int64(len(body))}, bytes.NewReader(body))
+	renew := func(ctx context.Context) (blob.SignedTransfer, error) {
+		fresh, err := u.signed(ctx, index, body)
+		if err != nil {
+			return blob.SignedTransfer{}, err
+		}
+		if fresh.Committed {
+			return blob.SignedTransfer{}, blob.ErrPreconditionFailed
+		}
+		return blob.SignedTransfer{URL: fresh.URL, Headers: fresh.Headers, ExpiresAt: fresh.ExpiresAt, Size: int64(len(body))}, nil
+	}
+	response, err := blob.Upload(ctx, blob.TransferClient{Transport: u.transport.http.Transport}, blob.SignedTransfer{URL: target, Headers: headers, ExpiresAt: expiry, Size: int64(len(body))}, bytes.NewReader(body), renew)
 	if errors.Is(err, blob.ErrPreconditionFailed) {
 		return nil
 	}
@@ -114,7 +124,7 @@ func (u *nativeLogUploader) PutSegment(ctx context.Context, segment logseg.Segme
 	// safety: a committed slot means an earlier commit succeeded and only its acknowledgement was lost. Re-signing
 	// keeps the slot's first deadline and is refused after it, so a retry never extends upload authority.
 	if !slot.Committed {
-		if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
+		if err := u.put(ctx, int64(segment.N), slot, body); err != nil {
 			return err
 		}
 	}
@@ -154,7 +164,7 @@ func (u *nativeLogUploader) PutManifest(ctx context.Context, manifest logseg.Man
 	if err != nil || slot.Committed {
 		return err
 	}
-	if err := u.put(ctx, slot.URL, slot.Headers, slot.ExpiresAt, body); err != nil {
+	if err := u.put(ctx, 0, slot, body); err != nil {
 		return err
 	}
 	reason := ""

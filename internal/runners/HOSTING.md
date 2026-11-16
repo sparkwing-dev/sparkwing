@@ -28,12 +28,28 @@ runs execute in-process through the native owner, as a Cloud plan pod does.
 `MaxConcurrent` bounds plan, eval and job awards. Trigger owners have a separate
 bound of the same size, because their hosting waits for jobs to finish. Claims
 offer only kinds with available capacity and stop while job capacity is full.
-Child awaits release their slot. A returning await reacquires it before the SDK
-continues, waiting without consuming the no-progress budget. Cancellation
+Jobs queued for concurrency admission and child awaits release their runner
+slots so waiting siblings cannot starve child planning. A returning wait
+reacquires its slot before source preparation or SDK execution continues.
+Claim selection leaves jobs unclaimed while their queue-policy groups have no
+capacity. It reuses admission's scoped keys, weighted budgets and FIFO checks;
+selection reserves no group and retries against current state on every poll.
+Timed groups persist the first skipped wait under the same claim authorization
+and work fences. A poll or reconciliation settles an expired unclaimed job with
+`queue_timeout`. The deadline continues into `MayStart`; a successful grant ends
+that initial wait.
+At most `MaxConcurrent` admission race waiters suspend inventory per runner.
+Further race losers return their unstarted claims through `RelinquishStart`.
+Plan, eval and runnable child jobs keep their own work inventory. Queued
+admission polls back off from 100 milliseconds to one second. Refused or
+cancelled waiters leave inventory released. Child awaits do not consume the
+no-progress budget. Cancellation
 unblocks slot acquisition. `TestLoopAwaitResumeWaitsForRunnerSlot` covers
 resumption behind unrelated work and cancellation at concurrency one.
 `TestLoopOwnerDoesNotOccupyItsJobsOnlySlot` covers a waiting owner and its job
-at concurrency one. Claims report the configured limit in the optional
+at concurrency one. `TestQueuedAdmissionLeavesRunnerSlotForAwaitedChild` covers
+child planning while a sibling waits for its parent's concurrency group.
+Claims report the configured limit in the optional
 `X-Sparkwing-Max-Concurrent` header, independently of `free_slots`. Older
 controllers ignore this header and continue awarding work. Renewals retain
 that observation. Personal-runner `active_jobs` lists job awards and excludes
@@ -72,18 +88,41 @@ Both the CLI and standalone runner use the same retained executable owner.
 `TestReplacementResolutionSurvivesInstalledEngineSwap` guards byte retention
 and rejects substituting the new installation under the accepted identity.
 
-Controller transport failures, including a missing local socket, allow fresh
-claim polls for up to five seconds of consecutive failures. A successful response
-resets that window. Each poll is a new request because a lost claim reply may
-already contain an award. Authentication, permission and protocol refusals
-remain fatal. Signed version policy keeps its existing denial behavior.
+Controller connection failures, timeouts, explicit 5xx unavailability and
+5xx responses without a JSON error envelope allow fresh claim polls until the
+caller stops intake. Automatic exponential jitter is capped at 30 seconds;
+Retry-After seconds, HTTP dates and structured advice can extend that wait up
+to five minutes per claim response. The shared client ceiling is unchanged. A ten-minute consecutive
+claim outage triggers WARN, repeated at most every five minutes. `Loop.HealthError`
+reports that sustained outage, and the optional runner `/healthz` returns 503
+with its start timestamp until a claim succeeds. This is claim readiness, not
+process liveness; restart automation must not consume it. Heartbeats do not clear it.
+Each poll is a new request because a lost reply may already contain an award.
+Transport outages never enter drain: held hosts may depend on children this
+runner must claim after recovery. Authentication, permission and protocol
+refusals remain fatal. Signed version policy retains its denial behavior.
 `Loop.Drain` stops new claims and returns immediately. `Run` joins held hosts,
 including uploads and terminal acknowledgements, before it returns.
 `TestLoopPollsThroughControllerRestarts`,
 `TestLoopControllerRestartKeepsHeldHostAliveThroughDrain`,
-`TestLoopBoundsControllerTransportRecovery`,
-`TestLoopTransportRecoveryKeepsRefusalsFatal` and
-`TestMissingSocketDoesNotReplayClaim` guard recovery and request replay.
+`TestLoopControllerTransportRecoveryHonorsCallerCancellation`,
+`TestLoopTransportRecoveryKeepsRefusalsFatal`,
+`TestLoopClaimsAfterGatewayOutage`, `TestLoopGatewayRetryTiming`,
+`TestLoopSurvivesDeployLengthGatewayOutage`,
+`TestLoopClaimsAfterProlongedOutageWithHeldWork`, `TestLoopClaimSuccessResetsDegradation`,
+`TestLoopDeferredClaimSuccessClearsDegradation`, `TestLoopCapsClaimRetryAdviceAtFiveMinutes`,
+`TestLoopSlowGatewayRecoveryHonorsCallerCancellation`,
+`TestLoopGatewayOutageKeepsHeldHost`, `TestLoopGatewayProtocolFailuresStayFatal`
+and `TestMissingSocketDoesNotReplayClaim` guard recovery and request replay.
+The shared controller decoder preserves gateway status and retry advice.
+RetryableClaimError gives the runner its fresh-claim recovery classification;
+RetryableTransportError retains its transport-only meaning. One-shot operations
+return unavailable replies without extra retries unless the server advises a
+retry or the operation already owns intake recovery. Launcher gateway failures
+remain visible at WARN, including when shutdown interrupts an advised retry.
+Held reads retain their award-bound recovery. The client never replays a claim.
+A non-JSON success, an invalid error envelope in a JSON object or a protocol,
+authentication or permission refusal remains fatal. Lease keepers retain their expiry and renewal policy.
 
 Job reports and application retries carry optional `X-Sparkwing-Exited-At`,
 captured after the execution process tree joins and before final log
@@ -224,6 +263,10 @@ an integration obligation. A committed-source test does not close that obligatio
 
 `Loop.OnClaimsStopped` notifies the host owner before pending awards and held
 hosts join. The local runner uses it to persist draining independently of host
-cleanup, including when a controller outage exhausts claim recovery. Cancellation
+cleanup, after an explicit drain or terminal refusal. Cancellation
 of that persistence worker follows host joining, so a permanently absent API
 does not hold an idle runner open.
+
+Terminal run acknowledgements retry temporary controller failures until their
+caller context ends, retaining their completion fence and Retry-After advice.
+A successful heartbeat does not clear claim degradation.

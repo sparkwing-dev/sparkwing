@@ -433,7 +433,7 @@ func runGitEnv(ctx context.Context, repoDir string, env []string, args ...string
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := runGitCommand(cmd); err != nil {
+	if err := runGitCommand(ctx, cmd); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)

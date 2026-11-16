@@ -1,7 +1,9 @@
 package capability
 
 import (
+	"encoding/base64"
 	"slices"
+	"strings"
 	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -103,6 +105,15 @@ type AwardPolicy struct {
 // bootstrapGrants replaces the purpose's grants until Exchange consumes the bootstrap.
 var bootstrapGrants = []Grant{SourceRead, ClaimExchange}
 
+// ExecutionGrants returns the permissions needed by an award on its persisted host.
+func (p AwardPolicy) ExecutionGrants(host *HostFacts) []Grant {
+	grants := slices.Clone(p.Grants)
+	if p.Unit == UnitEval && host != nil && host.Kind == HostSelfHosted {
+		grants = append(grants, SourceRead)
+	}
+	return grants
+}
+
 // bootstrapUnits confines pod delivery to units accepted by the launcher.
 var bootstrapUnits = []UnitKind{UnitPlan, UnitEval, UnitNode}
 
@@ -116,7 +127,7 @@ const (
 	parentRequester    ParentRule = "requester"
 )
 
-// awardPolicies is exhaustive for execution grants, including the here trigger-Award case.
+// safety: Cloud evaluators restore prepared executables, so source access stays host-specific.
 // Eval reads are restricted to its source or the approval predicate declarations.
 var awardPolicies = []AwardPolicy{
 	{PurposeTrigger, UnitTrigger, []Grant{TriggersClaim, TriggerHost}, []Grant{
@@ -361,6 +372,13 @@ func ValidateProvisionSeed(spec ProvisionSpec) error {
 	lookup, err := credentialLookup(Presentation{Class: CredentialBearer, Raw: spec.Seed})
 	if err != nil || lookup.Audience != Controller || spec.Kind != ProvisionBootstrap {
 		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid bootstrap credential"}
+	}
+	payload, err := base64.RawURLEncoding.Strict().DecodeString(strings.TrimPrefix(spec.Seed, ControllerPrefix))
+	if err != nil || len(payload) != 32 {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "invalid bootstrap credential"}
+	}
+	if !slices.ContainsFunc(payload[1:], func(value byte) bool { return value != payload[0] }) {
+		return &apierr.Error{Code: apierr.BadRequest, Message: "bootstrap seed must be random; constant bytes refused", Hint: "Fresh store only: (umask 077 && printf 'swk_%s' \"$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\\n')\" > bootstrap-admin-token). Mount that file."}
 	}
 	return nil
 }

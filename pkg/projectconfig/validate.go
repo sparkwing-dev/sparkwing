@@ -151,7 +151,7 @@ func validateSchedules(key string, entries []Schedule) error {
 		}
 		seen[name] = true
 		if _, err := cronspec.Parse(s.Cron); err != nil {
-			return userconfig.Invalid(base+".cron", "expected a five-field cron expression")
+			return userconfig.Invalid(base+".cron", strings.TrimPrefix(err.Error(), "cronspec: ")+`; example: "0 * * * *" (hourly)`)
 		}
 		if s.Where != "local" && s.Where != "controller" {
 			return userconfig.Invalid(base+".where", "must be local or controller")
@@ -161,7 +161,7 @@ func validateSchedules(key string, entries []Schedule) error {
 				return userconfig.Invalid(base+".tz", "timezone must not be empty")
 			}
 			if _, err := time.LoadLocation(*s.TZ); err != nil {
-				return userconfig.Invalid(base+".tz", "unknown timezone")
+				return userconfig.Invalid(base+".tz", fmt.Sprintf("unknown time zone %q; use an IANA name such as America/Denver, or local", *s.TZ))
 			}
 		}
 		if s.Overlap != nil && *s.Overlap != "skip" && *s.Overlap != "queue" {

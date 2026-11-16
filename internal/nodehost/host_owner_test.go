@@ -116,10 +116,10 @@ func TestOwnerSeals(t *testing.T) {
 					t.Fatalf("error = %v", err)
 				}
 			case "cancelled_owner":
-				want = nil
+				want = []string{"finish"}
 				var cancelled *lease.CancelError
-				if !errors.As(err, &cancelled) || cancelled.Reason != "operator requested stop" {
-					t.Fatalf("owner cancellation lost its reason: %v", err)
+				if !errors.As(err, &cancelled) || cancelled.Reason != "operator requested stop" || s.finished.Transition.Reason != string(hosterr.ReasonCancelled) || s.finished.Unit != owner {
+					t.Fatalf("owner cancellation lost its reason or finish: %+v error=%v", s.finished, err)
 				}
 			case "lost_acquire_success":
 				want = []string{"acquire"}

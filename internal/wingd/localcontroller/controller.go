@@ -36,10 +36,14 @@ type Services struct {
 	Policies store.Policies
 	State    State
 	HTTP     localhostwire.LocalHTTP
-	Runner   func(context.Context) error
+	// Runner supervises the local runner and reports each check to its callback.
+	Runner   func(context.Context, func(error)) error
 	Close    func() error
 	Maintain func(context.Context)
 	Complete func(context.Context) error
+	// Deliver sends run event deliveries until its context ends. It runs in
+	// its own worker so a slow receiver never stalls maintenance.
+	Deliver func(context.Context) error
 }
 
 // Config supplies shared service constructors without opening another store.
@@ -151,11 +155,11 @@ func (c *localController) ownRuns(ctx context.Context) error {
 	}
 }
 
-func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivity) error) error {
+func (c *localController) Run(ctx context.Context, reports wingd.LocalReports) error {
 	c.mu.Lock()
-	if c.closed || c.running || !c.reconciled || report == nil {
+	if c.closed || c.running || !c.reconciled || reports.Activity == nil || reports.Runner == nil {
 		c.mu.Unlock()
-		return errors.New("wingd: local workers require reconciled state and an activity reporter")
+		return errors.New("wingd: local workers require reconciled state and activity and runner reporters")
 	}
 	c.running = true
 	c.mu.Unlock()
@@ -166,7 +170,11 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 	}()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	results := make(chan error, 3)
+	workers := 3
+	if c.services.Deliver != nil {
+		workers++
+	}
+	results := make(chan error, workers)
 	start := func(name string, run func(context.Context) error) {
 		go func() {
 			err := run(ctx)
@@ -179,11 +187,14 @@ func (c *localController) Run(ctx context.Context, report func(wingd.LocalActivi
 			results <- err
 		}()
 	}
-	start("queue", c.services.Runner)
-	start("activity", func(ctx context.Context) error { return c.State.Watch(ctx, report) })
+	start("queue", func(ctx context.Context) error { return c.services.Runner(ctx, reports.Runner) })
+	start("activity", func(ctx context.Context) error { return c.State.Watch(ctx, reports.Activity) })
 	start("maintenance", func(ctx context.Context) error { return c.maintain(ctx) })
+	if c.services.Deliver != nil {
+		start("run event delivery", c.services.Deliver)
+	}
 	var result error
-	for range 3 {
+	for range workers {
 		result = errors.Join(result, <-results)
 		cancel()
 	}

@@ -391,3 +391,43 @@ func TestSecretSetWarnsOnlyAfterSavingAShortSecret(t *testing.T) {
 		})
 	}
 }
+
+func TestSecretSetReportsActualMaskEligibility(t *testing.T) {
+	for _, tc := range []struct {
+		name, value      string
+		variable, masked bool
+	}{
+		{"short", "abc", false, false},
+		{"minimum", "abcd", false, true},
+		{"unicode-short", "é日a", false, false},
+		{"unicode-minimum", "é日ab", false, true},
+		{"variable", "abcd", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manager := secretManagerFake{write: func(input controllerwire.SecretWrite) (controllerwire.SecretWritten, error) {
+				if input.Masked == tc.variable {
+					t.Fatal("receipt changed the stored secret policy")
+				}
+				return controllerwire.SecretWritten{Secret: controllerwire.SecretMetadata{Name: input.Name, Masked: input.Masked}}, nil
+			}}
+			args := []string{"set", "--secret", "TOKEN", "--value", tc.value, "-o", "json"}
+			if tc.variable {
+				args = append(args, "--variable")
+			}
+			var out, diagnostics bytes.Buffer
+			if err := manageSecrets(t.Context(), secretInvocation(t, args...), manager, nil, &out, &diagnostics, false); err != nil {
+				t.Fatal(err)
+			}
+			var receipt controllerwire.SecretWritten
+			if err := json.Unmarshal(out.Bytes(), &receipt); err != nil {
+				t.Fatal(err)
+			}
+			if receipt.Secret.Masked != tc.masked {
+				t.Fatalf("mask eligibility = %t, want %t", receipt.Secret.Masked, tc.masked)
+			}
+			if strings.Contains(out.String(), tc.value) {
+				t.Fatal("receipt exposed the saved value")
+			}
+		})
+	}
+}

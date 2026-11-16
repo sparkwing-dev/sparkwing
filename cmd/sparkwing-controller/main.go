@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -43,6 +44,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func main() {
@@ -269,10 +271,6 @@ func run(args []string) error {
 		"assert that browsers reach this controller's dashboard over TLS: send "+
 			"Strict-Transport-Security and require an https origin on cookie-authenticated "+
 			"writes. Unneeded when a proxy reaching --trusted-proxy-addr forwards X-Forwarded-Proto")
-	insecureCookies := fs.Bool("insecure-cookies", false,
-		"drop Secure and the __Host- prefix from the dashboard's session cookies so a browser "+
-			"keeps a session over plain HTTP. Only for a single-team, self-hosted dashboard published without TLS: the "+
-			"cookies then travel readable to every hop on the path")
 	requireAuth := fs.Bool("require-auth", false,
 		"refuse to start until a live deployment administrator capability exists; private routes always require credentials")
 	allowDevelopmentBuild := fs.Bool("allow-development-build", false,
@@ -372,9 +370,6 @@ func run(args []string) error {
 	egressCfg.MaxDownloadsPerPrincipal = guards.MaxDownloadsPerPrincipal
 	egressCfg.GlobalDailyAlarmBytes = guards.EgressDailyAlarmBytes
 
-	if err := checkInsecureCookies(cfg, *insecureCookies); err != nil {
-		return err
-	}
 	if *teamDownloadFree < 0 || *teamDownloadFunded < 0 {
 		return fmt.Errorf("a team daily download cap must not be negative; pass 0 to turn it off")
 	}
@@ -595,7 +590,7 @@ func run(args []string) error {
 			closeObjects = objects.Close
 			srv = srv.WithDataObjects(objects)
 		}
-		srv.WithDashboard(dashboard(p, *hsts, *insecureCookies, *supportContact))
+		srv.WithDashboard(dashboard(p, *hsts, *supportContact))
 
 		return srv.StorePolicies(), nil
 	}))
@@ -663,10 +658,6 @@ func (b boundListeners) close() {
 	}
 }
 
-// safety: a mounted seed that already bootstrapped this store has done its
-// job, and failing on it would leave the operator a choice between a crash
-// loop and dropping --require-auth, so it only warns. A different seed is
-// still refused.
 func ensureBootstrapAdmin(ctx context.Context, st *store.Store, seed string, logger *slog.Logger) error {
 	if seed == "" {
 		return nil
@@ -676,6 +667,21 @@ func ensureBootstrapAdmin(ctx context.Context, st *store.Store, seed string, log
 	case errors.Is(err, store.ErrBootstrapSeedConsumed):
 		logger.Warn("the " + credBootstrapAdminToken + " credential already bootstrapped this store; remove it from the credentials directory")
 	case err != nil:
+		var refusal *apierr.Error
+		if errors.As(err, &refusal) && refusal.Hint != "" {
+			repair := *refusal
+			principal, lookupErr := st.AsOperator().LookupCapability(ctx, sha256.Sum256([]byte(seed)))
+			if lookupErr == nil && principal.Capability.Subject == (capability.Subject{Kind: capability.SubjectOperator, ID: controller.BootstrapAdminPrincipal}) {
+				repair.Message = "weak credential is live and guessable"
+				repair.Hint = "Remove bootstrap-admin-token; restart on loopback; sparkwing operator tokens rotate --profile deployment --token PREFIX --grace 0. Save replacement."
+			} else if ready, readyErr := st.AsOperator().HasDeploymentAdministrator(ctx); readyErr != nil {
+				return fmt.Errorf("check bootstrap repair: %w", readyErr)
+			} else if ready {
+				repair.Hint = "Existing store: secure its administrator and remove bootstrap-admin-token; see the random-bootstrap-seed migration guide. A new seed cannot reopen its gate."
+			}
+			err = &repair
+			return fmt.Errorf("bootstrap admin token: %w. %s", err, repair.Hint)
+		}
 		return fmt.Errorf("bootstrap admin token: %w", err)
 	case created:
 		logger.Info("bootstrap admin token created", "principal", controller.BootstrapAdminPrincipal)
@@ -827,14 +833,6 @@ func checkMultiTeamObjectStore(cfg deployment.Config, bucketStoreURL, cacheBlobS
 		"--cache-blob-store keeps its objects in, so the ceiling measures every object rather than only this process's writes")
 }
 
-func checkInsecureCookies(cfg deployment.Config, insecure bool) error {
-	if !insecure || !cfg.MultiTeam() {
-		return nil
-	}
-	return errors.New("--insecure-cookies is refused on a multi-team or hosted controller, whose sessions belong to other people; " +
-		"publish the dashboard over TLS and drop the flag")
-}
-
 // safety: a multi-team controller must refuse missing encryption before creating persistent state.
 func parseSecretsCipher(cfg deployment.Config) (*secrets.Cipher, error) {
 	cipher, err := secretsCipher(cfg.SecretsKey())
@@ -852,24 +850,37 @@ func parseSecretsCipher(cfg deployment.Config) (*secrets.Cipher, error) {
 func configureSecrets(ctx context.Context, srv *controller.Server, st *store.Store,
 	cipher *secrets.Cipher, keyPath string,
 ) error {
+	selected, err := deploymentCipher(ctx, st, cipher, keyPath)
+	if err != nil {
+		return err
+	}
+	if _, keyless := selected.(keylessCipher); keyless {
+		slog.Warn("no " + credSecretsKey + " credential: this PostgreSQL controller refuses every secret write and stores " +
+			"run argument values, including secret defaults, unencrypted; put a base64-encoded 32-byte key in the " +
+			credSecretsKey + " file of its --credentials-dir and restart it to encrypt them")
+	}
+	srv.WithSecretsCipher(selected)
+	return nil
+}
+
+// safety: serving and offline maintenance select the same key, or one cannot open the other's run arguments.
+func deploymentCipher(ctx context.Context, st *store.Store, cipher *secrets.Cipher, keyPath string) (controller.BoundCipher, error) {
 	switch {
 	case cipher != nil:
 		// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
-		srv.WithSecretsCipher(cipher)
+		return cipher, nil
 	case st.Dialect() == store.DialectSQLite:
 		ring, err := localsecrets.NewStoreKeyring(keyPath, nil,
 			"Restore that key to "+keyPath+", or put it in the "+credSecretsKey+" credential, and start again.")
 		if err != nil {
-			return fmt.Errorf("secrets key %s: %w", keyPath, err)
+			return nil, fmt.Errorf("secrets key %s: %w", keyPath, err)
 		}
 		if err := ring.MissingKey(ctx, st.AsOperator()); err != nil {
-			return err
+			return nil, err
 		}
-		srv.WithSecretsCipher(ring.For(st.AsOperator()))
-	default:
-		srv.WithSecretsCipher(keylessCipher{})
+		return ring.For(st.AsOperator()), nil
 	}
-	return nil
+	return keylessCipher{}, nil
 }
 
 // safety: the generated key sits beside the database on its volume, so a
@@ -934,13 +945,12 @@ func validateBucketCeiling(cfg objectguard.CeilingConfig) error {
 
 // safety: a source build carries no dashboard bundle, so the controller still starts and serves its API and
 // sign-in pages; its dashboard pages name the build step instead.
-func dashboard(p paths.Paths, hsts, insecureCookies bool, supportContact string) controller.Dashboard {
+func dashboard(p paths.Paths, hsts bool, supportContact string) controller.Dashboard {
 	d := controller.Dashboard{
-		Version:         Version,
-		HSTS:            hsts,
-		InsecureCookies: insecureCookies,
-		SupportContact:  supportContact,
-		Paths:           p,
+		Version:        Version,
+		HSTS:           hsts,
+		SupportContact: supportContact,
+		Paths:          p,
 		Capabilities: backend.Capabilities{
 			Mode:     "cluster",
 			Storage:  backend.CapabilitiesStorage{Artifacts: "custom", Logs: "segments", Runs: "controller"},

@@ -168,6 +168,7 @@ func defaultProber(args EscapeProbeArgs) prober {
 var credentialNames = []string{"TOKEN", "SECRET", "PASSWORD", "AWS_", "GITHUB_", "NETRC", "KEY"}
 
 const (
+	// #nosec G101 -- This is the Kubernetes credential mount path, not token contents.
 	saTokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 	kubeletPort = "10250"
 	apiVIP      = "kubernetes.default.svc:443"

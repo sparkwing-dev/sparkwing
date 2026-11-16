@@ -222,6 +222,7 @@ CREATE TABLE nodes (
     expansion_registration BLOB,
     expansion_failure BLOB,
     trusted_host BIGINT NOT NULL DEFAULT 0 CHECK(trusted_host IN (0,1)),
+    group_wait_started_at BIGINT CHECK(group_wait_started_at IS NULL OR group_wait_started_at>0),
     PRIMARY KEY (team, run_id, node_id),
     CHECK((claimed_by IS NULL AND capability_prefix = '' AND lease_expires_at IS NULL) OR (claimed_by IS NOT NULL AND claimed_by <> '' AND capability_prefix <> '' AND lease_expires_at IS NOT NULL AND generation > 0)),
     CHECK(status <> 'running' OR (claimed_by IS NOT NULL AND started_at IS NOT NULL AND attempt > 0)),
@@ -1969,3 +1970,44 @@ CREATE TABLE github_actions_dispatches (
 CREATE INDEX idx_actions_dispatch_sender ON github_actions_dispatches(state,send_until) WHERE state IN ('requested','sending');
 CREATE INDEX idx_actions_dispatch_live ON github_actions_dispatches(state) WHERE state<>'cancelled';
 CREATE INDEX idx_actions_dispatch_cancellation ON github_actions_dispatches(state,cancel_sent) WHERE provider_run_id<>'';
+
+-- safety: a subscription secret is sealed to its team and ID, so a copied row does not open; every delivery row keeps
+-- the exact body it sends, so a retry or redelivery repeats the same event.
+CREATE TABLE run_event_subscriptions (
+    team TEXT NOT NULL REFERENCES teams(name),
+    id TEXT NOT NULL CHECK(id <> ''),
+    url TEXT NOT NULL CHECK(url <> ''),
+    event_types TEXT NOT NULL,
+    statuses TEXT NOT NULL DEFAULT '[]',
+    pipelines TEXT NOT NULL DEFAULT '[]',
+    repositories TEXT NOT NULL DEFAULT '[]',
+    secret TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    created_principal TEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    PRIMARY KEY(team,id)
+);
+CREATE TABLE run_event_deliveries (
+    team TEXT NOT NULL REFERENCES teams(name),
+    subscription_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    body BLOB NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('pending','sending','succeeded','failed')),
+    attempts BIGINT NOT NULL DEFAULT 0 CHECK(attempts >= 0),
+    next_at BIGINT NOT NULL,
+    send_until BIGINT,
+    deadline_at BIGINT NOT NULL,
+    last_status BIGINT,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at BIGINT NOT NULL,
+    finished_at BIGINT,
+    PRIMARY KEY(team,subscription_id,event_id),
+    FOREIGN KEY(team,subscription_id) REFERENCES run_event_subscriptions(team,id) ON DELETE CASCADE,
+    FOREIGN KEY(team,run_id) REFERENCES runs(team,id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_run_event_deliveries_due ON run_event_deliveries(next_at) WHERE state IN ('pending','sending');
+CREATE INDEX idx_run_event_deliveries_run ON run_event_deliveries(team,run_id);

@@ -103,7 +103,7 @@ func (c *NativeProcessClient) Output(ctx context.Context, run, job string) (json
 // ChildOutput reads a committed result through its creating job's child relation.
 func (c *NativeProcessClient) ChildOutput(ctx context.Context, run, job string) (json.RawMessage, error) {
 	var result controllerwire.JobOutput
-	err := retryHeldRead(ctx, func() error {
+	err := retryHeldRequest(ctx, func() error {
 		return c.transport.request(ctx, "GET", "/api/v1/runs/{run}/children/{child}/jobs/{job}/output", "/api/v1/runs/"+url.PathEscape(c.run)+"/children/"+url.PathEscape(run)+"/jobs/"+url.PathEscape(job)+"/output", "", nil, &result)
 	})
 	return result.Output, err
@@ -180,7 +180,7 @@ func (c *NativeProcessClient) Child(ctx context.Context, run string, wait time.D
 	until := time.Now().Add(wait)
 	delay := 500 * time.Millisecond
 	for {
-		err := retryHeldRead(ctx, func() error {
+		err := retryHeldRequest(ctx, func() error {
 			return c.transport.request(ctx, "GET", "/api/v1/runs/{run}/children/{child}", "/api/v1/runs/"+url.PathEscape(c.run)+"/children/"+url.PathEscape(run)+"?"+query.Encode(), "", nil, &result)
 		})
 		if err != nil {
@@ -196,6 +196,7 @@ func (c *NativeProcessClient) Child(ctx context.Context, run string, wait time.D
 			return result, nil
 		}
 		// perf: keep one host await authorized while polling immediate controller snapshots.
+		// #nosec G404 -- Retry jitter needs dispersion, not cryptographic unpredictability.
 		pause := delay/2 + mathrand.N(delay/2)
 		if err := waitFor(ctx, min(pause, remaining)); err != nil {
 			return result, err

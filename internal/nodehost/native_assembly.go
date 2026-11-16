@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/nodeproto"
+	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -170,19 +171,37 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 		return NativeServices{}, err
 	}
 	serve, closeHTTP := localProcessHTTP(ctx, listener, router, authorities.Close)
-	logs := &localLogs{principal: cfg.Principal, upload: cfg.Logs, masker: masker, run: run.Run.ID}
+	logs := &localLogs{diagnosticReady: make(chan struct{}), principal: cfg.Principal, upload: cfg.Logs, masker: masker, run: run.Run.ID}
+	if cfg.Principal.Capability.Unit == capability.UnitNode {
+		logs.diagnosticNode = cfg.Principal.Capability.Binding.NodeID
+	}
 	if cfg.Principal.Capability.Unit != capability.UnitNode {
 		logs.bind(cfg.Principal, 0)
 	}
+	diagnostics := lease.NewDiagnostics(ctx, func(delivery context.Context, event lease.Event) error {
+		select {
+		case <-delivery.Done():
+			return delivery.Err()
+		case <-logs.diagnosticReady:
+		}
+		return logs.writeKeeper(delivery, event)
+	})
+	logs.diagnostics = diagnostics
+	requestTimings := newRequestDiagnostics(ctx)
 	closeResources = func() error {
+		requestTimings.close()
 		logs.finish(ctx, "")
 		// State transitions already committed. Keep bearer transports alive for the bounded tail.
 		logs.flushes.Wait()
+		diagnostics.Close()
 		return closeHTTP()
 	}
 	processes := &NativeProcesses{Authorities: authorities, Masks: masks, URL: "http://" + listener.Addr().String()}
 	claims.processes = processes
 	processes.Log = logs.write
+	processes.Timing = func(run, node string) func(otelutil.OperationTiming) {
+		return requestTimings.observer(logs.requestTimingWriter(run, node))
+	}
 	delegate := func(ctx context.Context, node string, generation, attempt int64) (ProcessGrant, error) {
 		grant, err := claims.delegate(ctx, node, generation, attempt)
 		if err == nil {
@@ -222,7 +241,7 @@ func nativeServices(ctx context.Context, cfg NativeConfig, listen func(string, s
 	follower := stateFollower{Store: cfg.Store, Subscribe: localStateSubscription}
 	debug := storeDebugBoundary{store: cfg.Store, follower: follower}
 	config := NativeHostConfig{
-		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs, unit: cfg.Principal.Capability.Unit}, Lease: lease.Keeper{Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
+		Store: logHostStore{NativeHostStore: cfg.Store, logs: logs, unit: cfg.Principal.Capability.Unit}, Lease: lease.Keeper{Diagnostics: diagnostics, Lease: limits.DefaultLease, Interval: limits.Renew(limits.DefaultLease)},
 		Source: sourceOptions, Snapshots: snapshots, Masks: masks, Processes: processes, Router: router,
 		Validation: nodeproto.ValidationContext{Placement: store.RequestPlacement(run.Run.Request.Request)},
 		Admission:  cfg.Admission,
@@ -270,7 +289,7 @@ func localProcessHTTP(ctx context.Context, listener net.Listener, handler http.H
 	var closeErr error
 	start := func() {
 		startOnce.Do(func() {
-			go func() { done <- wingd.ServeLocalHTTP(ctx, listener, handler, nil, nil) }()
+			go func() { done <- wingd.ServeLocalHTTP(ctx, listener, observeProcessRequests(handler), nil, nil) }()
 		})
 	}
 	return start, func() error {

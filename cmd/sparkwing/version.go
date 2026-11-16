@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 
@@ -247,13 +249,13 @@ func printVersionTable(r VersionReport) {
 	fmt.Println()
 	switch {
 	case r.LatestFetchErr != "":
-		fmt.Printf("  latest:   %s %s\n", color.Dim("unknown"), color.Dim("("+r.LatestFetchErr+")"))
+		fmt.Printf("  latest:   %s %s\n", color.Dim("unknown"), color.Dim("("+opsview.DisplayText(r.LatestFetchErr)+")"))
 	case r.LatestRelease == "":
 		fmt.Printf("  latest:   %s\n", color.Dim("not checked (--offline)"))
 	case r.CLIStatus == "unknown" || r.CLIStatus == "diverged":
 		fmt.Printf("  latest:   %s %s\n", r.LatestRelease, color.Yellow("comparison unknown"))
 		if r.CLIReason != "" {
-			fmt.Printf("  compare:  %s\n", r.CLIReason)
+			fmt.Printf("  compare:  %s\n", opsview.DisplayText(r.CLIReason))
 		}
 	case r.CLIStatus == "ahead":
 		fmt.Printf("  latest:   %s %s\n", r.LatestRelease, color.Dim("installed release is ahead"))
@@ -272,7 +274,7 @@ func printVersionTable(r VersionReport) {
 		fmt.Printf("  upgrade:  %s\n", color.Dim("sparkwing update"))
 	}
 	if r.Hold != nil && r.Hold.Error != "" {
-		fmt.Printf("  hold:     %s\n", color.Yellow(r.Hold.Error))
+		fmt.Printf("  hold:     %s\n", color.Yellow(opsview.DisplayText(r.Hold.Error)))
 	} else if r.Hold != nil {
 		fmt.Printf("  hold:     %s %s\n",
 			color.Yellow("held at "+r.Hold.Value+" by operator"),
@@ -289,14 +291,14 @@ func printVersionTable(r VersionReport) {
 
 	p := r.Project
 	if p.SDKPin == "" && p.SDKReplace == "" && len(p.Sparks) == 0 {
-		fmt.Printf("Project at %s\n", p.SparkwingDir)
+		fmt.Printf("Project at %s\n", opsview.DisplayText(p.SparkwingDir))
 		fmt.Println(color.Dim("  (no go.mod pins resolved)"))
 		return
 	}
-	fmt.Printf("Project at %s\n", p.SparkwingDir)
+	fmt.Printf("Project at %s\n", opsview.DisplayText(p.SparkwingDir))
 	switch {
 	case p.SDKReplace != "":
-		fmt.Printf("  sdk:      %s\n", color.Dim("(replaced with "+p.SDKReplace+")"))
+		fmt.Printf("  sdk:      %s\n", color.Dim("(replaced with "+opsview.DisplayText(p.SDKReplace)+")"))
 	case p.SDKPin != "":
 		label := color.Green("up to date")
 		switch {
@@ -319,7 +321,7 @@ func printVersionTable(r VersionReport) {
 			}
 		}
 		for _, s := range p.Sparks {
-			fmt.Printf("    %-*s  %s\n", w, s.Module, s.Version)
+			fmt.Printf("    %-*s  %s\n", w, opsview.DisplayText(s.Module), s.Version)
 		}
 	}
 }

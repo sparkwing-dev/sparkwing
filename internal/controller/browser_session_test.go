@@ -276,23 +276,12 @@ func clearsCookie(rec *httptest.ResponseRecorder, name string) bool {
 	return false
 }
 
-func TestBrowserInsecureCookiesDropThePrefix(t *testing.T) {
-	f := newBrowserFixture(t, &controller.Dashboard{InsecureCookies: true})
-	prefixed := f.cookieRequest(http.MethodGet, "/api/v1/auth/whoami", "")
-	if rec := f.serve(prefixed); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("a __Host- cookie on an insecure-cookie dashboard = %d, want 401", rec.Code)
-	}
-	plain := httptest.NewRequest(http.MethodGet, "http://dash.example/api/v1/auth/whoami", nil)
+func TestBrowserRejectsUnprefixedSessionCookie(t *testing.T) {
+	f := newBrowserFixture(t, &controller.Dashboard{})
+	plain := httptest.NewRequest(http.MethodGet, dashOrigin+"/api/v1/auth/whoami", nil)
 	plain.AddCookie(&http.Cookie{Name: "sw_session", Value: f.sessID})
-	if rec := f.serve(plain); rec.Code != http.StatusOK {
-		t.Fatalf("an unprefixed cookie on an insecure-cookie dashboard = %d %s, want 200", rec.Code, rec.Body)
-	}
-
-	secure := newBrowserFixture(t, &controller.Dashboard{})
-	plain = httptest.NewRequest(http.MethodGet, dashOrigin+"/api/v1/auth/whoami", nil)
-	plain.AddCookie(&http.Cookie{Name: "sw_session", Value: secure.sessID})
-	if rec := secure.serve(plain); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("an unprefixed cookie on a secure dashboard = %d, want 401", rec.Code)
+	if rec := f.serve(plain); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("an unprefixed session cookie = %d, want 401", rec.Code)
 	}
 }
 

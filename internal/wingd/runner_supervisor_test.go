@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crontimer"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service/unitfile"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func runnerSupervisorHost(t *testing.T) crontimer.Host {
@@ -56,8 +57,16 @@ func TestLocalRunnerSystemdManagerFailureNeverDetaches(t *testing.T) {
 				return "", nil
 			}
 			err := startLocalRunnerLinux(t.Context(), host, "instance", t.TempDir())
-			if err == nil || !strings.Contains(err.Error(), "failed manager") {
-				t.Fatalf("startup = %v; want manager failure", err)
+			message := "failed manager"
+			if failing == "systemctl" {
+				message = "the local runner cannot start: the systemd user manager is unreachable (manager unavailable)"
+				var failure *apierr.Error
+				if !errors.As(err, &failure) || !strings.Contains(failure.Hint, "systemctl --user status") || !strings.Contains(failure.Hint, "loginctl enable-linger") || !strings.Contains(failure.Hint, "run `sparkwing daemon stop` from that session") {
+					t.Fatalf("unreachable manager gave no fix: %#v", err)
+				}
+			}
+			if err == nil || !strings.Contains(err.Error(), message) {
+				t.Fatalf("startup = %v; want %q", err, message)
 			}
 			want := []string{"systemctl"}
 			if failing == "systemd-run" {
@@ -86,7 +95,7 @@ func TestLocalRunnerSystemdKeepsLiteralArgvAndIndependentLifetime(t *testing.T) 
 	if err := startLocalRunnerLinux(t.Context(), host, "instance", t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	for _, arg := range []string{"--user", "--service-type=exec", "--property=Restart=no", "--property=TimeoutStopSec=infinity", "--property=KillMode=mixed"} {
+	for _, arg := range []string{"--working-directory=" + host.SparkwingHome, "--user", "--service-type=exec", "--property=Restart=no", "--property=TimeoutStopSec=infinity", "--property=KillMode=mixed"} {
 		if !slices.Contains(launch, arg) {
 			t.Fatalf("missing %q in %q", arg, launch)
 		}
@@ -242,5 +251,17 @@ func TestLocalRunnerLaunchdFallsBackToUserDomainWithoutGUILogin(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(host.SparkwingHome, "runners", LocalRunnerServiceName(host.SparkwingHome, "instance"), "runner.plist")); err != nil {
 		t.Fatalf("user-domain agent lost its plist: %v", err)
+	}
+}
+
+func TestLocalRunnerAgentWorkingDirectoryUsesStateHome(t *testing.T) {
+	host := runnerSupervisorHost(t)
+	body, err := localRunnerAgent(host, "instance", filepath.Join(host.SparkwingHome, "runner.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("rendered local runner agent:\n%s", body)
+	if want := "<key>WorkingDirectory</key><string>" + unitfile.XMLText(host.SparkwingHome) + "</string>"; !strings.Contains(body, want) {
+		t.Fatalf("missing state working directory %q:\n%s", want, body)
 	}
 }

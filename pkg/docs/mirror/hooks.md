@@ -265,6 +265,20 @@ index quietly reads an empty one. sparkwing's own comment gate does this: it
 reads `GIT_INDEX_FILE` when a caller set one deliberately, the gate index when
 a hook started the run, and the repository's index otherwise.
 
+### Reading what is being pushed
+
+The managed `pre-push` hook captures Git's stdin once into
+`SPARKWING_GATE_PUSH_REFS`. Every pipeline declared for that hook receives the
+same value through the local run's captured environment. Each line contains
+`<local-ref> <local-object-id> <remote-ref> <remote-object-id>`, as Git supplies
+it. Shell capture removes trailing newlines. Use the remote ref to distinguish
+a push to `refs/heads/main` from a branch push, including a refspec that maps
+a differently named local branch to main.
+
+Other hooks do not capture their stdin. Pipeline stdin belongs to the job
+protocol, so a pipeline reads this variable rather than stdin. This value is
+hook context, not a setting to put in an environment file.
+
 ## Running checks locally without a hook
 
 If you don't want hooks managing your git lifecycle, just run the

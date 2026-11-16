@@ -8,11 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/testsupport/testleak"
@@ -26,13 +29,15 @@ var (
 )
 
 func TestMain(m *testing.M) {
-	code := m.Run()
-	os.RemoveAll(fixtureDir)
-	if err := testleak.Check(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		code = 1
-	}
-	os.Exit(code)
+	os.Exit(testmanager.Run(func() int {
+		code := m.Run()
+		os.RemoveAll(fixtureDir)
+		if err := testleak.Check(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			code = 1
+		}
+		return code
+	}))
 }
 
 func buildFixture(t *testing.T) string {
@@ -254,6 +259,10 @@ func TestProcess_CancelOthersEvictsHolderAcrossProcesses(t *testing.T) {
 func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("process test skipped in -short")
+	}
+	if runtime.GOOS == "linux" {
+		testmanager.Scope(t)
+		t.Setenv("INVOCATION_ID", "fixture-service")
 	}
 	home := shortHome(t)
 	stopProcessDaemonOnCleanup(t, home)

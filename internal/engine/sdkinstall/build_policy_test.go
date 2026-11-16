@@ -16,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func TestSDKInstallUncachedUsesRealCompilerWithoutPublishingCacheEntry(t *testing.T) {
@@ -66,6 +67,7 @@ func TestSDKInstallHashAllFilesIncludesIgnoredEmbeddedInputs(t *testing.T) {
 
 func realBuildPolicyFixture(t *testing.T) string {
 	t.Helper()
+	testshell.UsePath(t, "go", "git")
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(home, "missing.yaml"))

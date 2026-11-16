@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 )
 
 func emitLocalRunEvent(out io.Writer, format, event, run, pipeline, status string) error {
@@ -22,9 +24,9 @@ func emitLocalRunEvent(out io.Writer, format, event, run, pipeline, status strin
 		}{time.Now().UTC(), event, attrs})
 	}
 	if status == "" {
-		_, err := fmt.Fprintf(out, "run %s: %s started\n", run, pipeline)
+		_, err := fmt.Fprintf(out, "run %s: %s started\n", opsview.DisplayText(run), opsview.DisplayText(pipeline))
 		return err
 	}
-	_, err := fmt.Fprintf(out, "run %s: %s %s\n", run, pipeline, status)
+	_, err := fmt.Fprintf(out, "run %s: %s %s\n", opsview.DisplayText(run), opsview.DisplayText(pipeline), opsview.DisplayText(status))
 	return err
 }

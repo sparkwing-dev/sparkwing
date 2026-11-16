@@ -26,6 +26,7 @@ type jobDocument struct {
 	Needs           []string `json:"deps"`
 	Steps           []stepDocument
 	TimeoutMS       int64   `json:"timeout_ms"`
+	NoProgressMS    int64   `json:"no_progress_timeout_ms"`
 	Cores           float64 `json:"cores"`
 	Requires        []string
 	Inline          bool
@@ -55,6 +56,9 @@ type stepDocument struct {
 	Finally           bool
 	ContinueOnError   bool `json:"continue_on_error"`
 	SafeWithoutDryRun bool `json:"safe_without_dry_run"`
+	Closures          struct {
+		SkipIf []string `json:"skip_if"`
+	}
 }
 
 type testPipeline struct {
@@ -111,6 +115,10 @@ func inspectPipeline(t *testing.T, name string, args map[string]string) pipeline
 }
 
 func preparePlan(t *testing.T, build func(context.Context, *sparkwing.Plan) error) (sparkwingtest.Host, *sparkwing.Plan, pipelineDocument) {
+	return preparePlanWithOptions(t, build, sparkwingtest.Options{})
+}
+
+func preparePlanWithOptions(t *testing.T, build func(context.Context, *sparkwing.Plan) error, options sparkwingtest.Options) (sparkwingtest.Host, *sparkwing.Plan, pipelineDocument) {
 	t.Helper()
 	name := fmt.Sprintf("test-plan-%d", testPipelineNumber.Add(1))
 	var captured *sparkwing.Plan
@@ -120,7 +128,7 @@ func preparePlan(t *testing.T, build func(context.Context, *sparkwing.Plan) erro
 			return build(ctx, plan)
 		}}
 	})
-	host := newTestHost(t, sparkwingtest.Options{})
+	host := newTestHost(t, options)
 	doc, err := host.Plan(t.Context(), name, nil)
 	if err != nil {
 		t.Fatal(err)

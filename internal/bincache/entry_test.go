@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const seededRecordBytes = 64
@@ -543,8 +546,10 @@ func TestLeaseRefusesAnExecutableChangedAfterPublication(t *testing.T) {
 		t.Fatalf("rewriting the cache changed the verified copy: %q, %v", body, err)
 	}
 	tampered := filepath.Join(out, "tampered")
-	if _, err := lease.Install(tampered); err == nil {
-		t.Fatal("a cached executable rewritten after publication was handed out")
+	_, err = lease.Install(tampered)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != hosterr.IntegrityFailure || !strings.Contains(refusal.Message, "33333333-33333333") || !strings.Contains(refusal.Message, lease.CachedPath()) || !strings.Contains(refusal.Hint, "sparkwing cache prune --all-entries") {
+		t.Fatalf("cache integrity refusal lost its entry or repair: %v", err)
 	}
 	if _, err := os.Stat(tampered); !os.IsNotExist(err) {
 		t.Fatalf("a refused copy was left behind: %v", err)

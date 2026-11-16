@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestConcurrencyGuard_TablesTouchedOnlyByStore(t *testing.T) {
 	root := moduleRoot(t)
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {

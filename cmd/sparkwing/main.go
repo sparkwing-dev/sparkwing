@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -160,6 +162,7 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	if helpRequested {
 		return runSelectedHelp(dir, pipelineName, flags)
 	}
+	defer func() { resultErr = explainOutsideGit(context.Background(), filepath.Dir(dir), resultErr) }()
 	home, err := wingd.HomeDir("")
 	if err != nil {
 		return err
@@ -230,7 +233,7 @@ func pinnedProfileHere(pipelineName string) (string, error) {
 
 func printPin(pipelineName string) {
 	if pin, err := pinnedProfileHere(pipelineName); err == nil && pin != "" {
-		fmt.Printf("Pinned: profile %s; run it with `sparkwing pipeline trigger %s --profile %s`\n", pin, pipelineName, pin)
+		fmt.Printf("Pinned: profile %s; run it with `sparkwing pipeline trigger %s --profile %s`\n", opsview.DisplayText(pin), opsview.DisplayText(pipelineName), opsview.DisplayText(pin))
 	}
 }
 
@@ -296,6 +299,8 @@ func runSparkwing(args []string) (result error) {
 		return runSchedules(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing pools "):
 		return runPools(context.Background(), inv)
+	case strings.HasPrefix(inv.Command.Path, "sparkwing subscriptions "):
+		return runSubscriptions(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing overflow "):
 		return runOverflow(context.Background(), inv)
 	case strings.HasPrefix(inv.Command.Path, "sparkwing billing "):

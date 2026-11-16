@@ -14,24 +14,32 @@ import (
 )
 
 const (
-	epochDirectoryFlag         = "credential-epoch-dir"
-	epochDirectoryHelp         = "writable persistent directory for credential-epoch; defaults to --credentials-dir, or the local state directory when unset"
-	credPGURL                  = "pg-url"
-	credSecretsKey             = "secrets-key"
-	credSecretsPreviousKey     = "secrets-key.previous"
-	credOIDCKey                = "oidc-key"
-	credOIDCPublishedKey       = "oidc-key.published"
-	credBootstrapAdminToken    = "bootstrap-admin-token"
-	credLicense                = "license"
-	credGitHubClientSecret     = "github-client-secret"
-	credGoogleClientSecret     = "google-client-secret"
-	credGitHubAppKey           = "github-app-key"
+	epochDirectoryFlag = "credential-epoch-dir"
+	epochDirectoryHelp = "writable persistent directory for credential-epoch; defaults to --credentials-dir, or the local state directory when unset"
+	credPGURL          = "pg-url"
+	credSecretsKey     = "secrets-key"
+	// #nosec G101 -- This is a credential file name, not its secret contents.
+	credSecretsPreviousKey = "secrets-key.previous"
+	credOIDCKey            = "oidc-key"
+	// #nosec G101 -- This is a credential file name, not its secret contents.
+	credOIDCPublishedKey    = "oidc-key.published"
+	credBootstrapAdminToken = "bootstrap-admin-token"
+	credLicense             = "license"
+	// #nosec G101 -- This is a credential file name, not its secret contents.
+	credGitHubClientSecret = "github-client-secret"
+	credGoogleClientSecret = "google-client-secret"
+	// #nosec G101 -- This is a credential file name, not its secret contents.
+	credGitHubAppKey = "github-app-key"
+	// #nosec G101 -- This is a credential file name, not its secret contents.
 	credGitHubAppWebhookSecret = "github-app-webhook-secret"
-	credGitHubAppPreviousHook  = "github-app-webhook-secret.previous"
-	credCloudFrontKey          = "cloudfront-key"
-	credBillingToken           = "billing-token"
-	credStripeAPIKey           = "stripe-api-key"
-	credStripeWebhookSecret    = "stripe-webhook-secret"
+	// #nosec G101 -- This is a credential file name, not its secret contents.
+	credGitHubAppPreviousHook = "github-app-webhook-secret.previous"
+	credCloudFrontKey         = "cloudfront-key"
+	credBillingToken          = "billing-token"
+	// #nosec G101 -- This is a credential file name, not its secret contents.
+	credStripeAPIKey = "stripe-api-key"
+	// #nosec G101 -- This is a credential file name, not its secret contents.
+	credStripeWebhookSecret = "stripe-webhook-secret"
 )
 
 func epochMismatch(err error, dir string) error {

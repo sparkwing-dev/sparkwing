@@ -1,6 +1,7 @@
 package controller_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/quicktest"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -169,5 +171,50 @@ func TestSecretArgsPublicReadsProperty(t *testing.T) {
 	}
 	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 24})); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSecretArgs_CorruptEnvelopeFailsOnlyItsOwnRun(t *testing.T) {
+	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{7}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newBrowserFixture(t, nil, fixtureStorePolicies(store.Policies{Intake: receiptPolicy{}, RunEnvironment: cipher}))
+	healthy := secretArgRun(t, f, ctlSecretValue, true)
+	damaged := secretArgRun(t, f, ctlSecretValue, true)
+	var raw []byte
+	if err := teststore.SQL(t, f.st).QueryRow(`SELECT request_json FROM runs WHERE id=$1`, damaged.RunID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	envelope, _ := doc["sealed_arguments"].(string)
+	if len(envelope) < 20 {
+		t.Fatalf("damaged run carries no argument envelope: %s", raw)
+	}
+	flipped := []byte(envelope)
+	flipped[len(flipped)/2] ^= 1
+	doc["sealed_arguments"] = string(flipped)
+	if raw, err = json.Marshal(doc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := teststore.SQL(t, f.st).Exec(`UPDATE runs SET request_json=$1 WHERE id=$2`, raw, damaged.RunID); err != nil {
+		t.Fatal(err)
+	}
+
+	list := secretArgBody(t, f, "/api/v1/runs")
+	if !strings.Contains(list, healthy.RunID) || !strings.Contains(list, damaged.RunID) || strings.Contains(list, ctlSecretValue) || !strings.Contains(list, `"`+ctlVisibleValue+`"`) || !strings.Contains(list, `"(unavailable)"`) {
+		t.Fatalf("one damaged envelope broke or leaked the run list: %s", list)
+	}
+	if body := secretArgBody(t, f, "/api/v1/runs/"+healthy.RunID); strings.Contains(body, ctlSecretValue) {
+		t.Fatalf("healthy run detail leaked its secret: %s", body)
+	}
+	r := f.cookieRequest(http.MethodGet, "/api/v1/runs/"+damaged.RunID, "")
+	r.Header.Set("Accept", "application/json")
+	w := f.serve(r)
+	if w.Code == http.StatusOK || strings.Contains(w.Body.String(), ctlSecretValue) {
+		t.Fatalf("damaged run detail: HTTP %d %s", w.Code, w.Body)
 	}
 }

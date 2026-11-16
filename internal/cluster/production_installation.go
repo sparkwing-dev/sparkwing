@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/runners"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/service"
 )
@@ -43,7 +44,11 @@ func productionInstallation(config string, hosting *productionHost) (runners.Run
 			if err != nil {
 				return err
 			}
-			return service.RefreshRegistration(ctx, service.Host{GOOS: runtime.GOOS, Home: home, ConfigHome: configHome, Binary: executable, ConfigPath: config, UID: os.Getuid(), Exec: service.DefaultExec})
+			state, err := paths.DefaultPaths()
+			if err != nil {
+				return err
+			}
+			return service.RefreshRegistration(ctx, service.Host{GOOS: runtime.GOOS, Home: home, StateHome: state.Root, ConfigHome: configHome, Binary: executable, ConfigPath: config, UID: os.Getuid(), Exec: service.DefaultExec})
 		},
 		Restart: func(ctx context.Context) error {
 			if err := context.Cause(ctx); err != nil {

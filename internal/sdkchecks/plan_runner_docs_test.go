@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+//sparkwing:critical
 func TestPrefersDocumentationStatesEligibility(t *testing.T) {
 	tests := []struct {
 		file     string
@@ -115,6 +116,21 @@ func assertPreferenceContract(t *testing.T, doc string) {
 	} {
 		if strings.Contains(doc, falseClaim) {
 			t.Errorf("preference documentation contains false claim %q", falseClaim)
+		}
+	}
+}
+
+func TestUnclaimedNoticeDocumentationStatesRunnerTrust(t *testing.T) {
+	for _, path := range []string{"../../docs/scheduling.md", "../../pkg/docs/mirror/scheduling.md"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := strings.Join(strings.Fields(string(data)), " ")
+		for _, want := range []string{"--personal --label gpu --session-stdin", "Omit `--repos`", "Repository-scoped runners require repository-proven code", "enrollment suggestion keeps `--repos REPOSITORY`"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s omits %q", path, want)
+			}
 		}
 	}
 }

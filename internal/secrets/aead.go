@@ -22,11 +22,16 @@ const (
 // safety: the label separates bound envelopes from other uses of the cipher.
 const boundAADLabel = "sparkwing/secret/v3\x00"
 
-// ErrKeyRefused marks a seal that failed because the key's owner refused to
+// ErrKeyRefused marks an operation that failed because the key's owner refused to
 // load or create the key for a reason the caller can act on, such as a key
 // file outside the sparkwing home. The controller returns its message to the
 // client instead of masking it as an internal error.
 var ErrKeyRefused = errors.New("secrets key refused")
+
+// ErrKeyMismatch marks an envelope that no configured key authenticates: it
+// was sealed under another key, or altered. Malformed envelopes and unknown
+// purposes fail without it, since a different key would not open them either.
+var ErrKeyMismatch = errors.New("no configured key opens the value")
 
 const KeySize = chacha20poly1305.KeySize
 
@@ -35,15 +40,19 @@ type Purpose string
 
 // Bound envelope purposes.
 const (
-	PurposeSecret         Purpose = "secret"
+	PurposeSecret Purpose = "secret"
+	// #nosec G101 -- This is an AEAD purpose label, not key material.
 	PurposeGitCredential  Purpose = "git-credential"
 	PurposeRunEnvironment Purpose = "run-environment"
+	PurposeRunArguments   Purpose = "run-arguments"
 	PurposeSetting        Purpose = "setting"
+	// #nosec G101 -- This is an AEAD purpose label, not key material.
+	PurposeEventSigning Purpose = "event-signing"
 )
 
 func (p Purpose) valid() bool {
 	switch p {
-	case PurposeSecret, PurposeGitCredential, PurposeRunEnvironment, PurposeSetting:
+	case PurposeSecret, PurposeGitCredential, PurposeRunEnvironment, PurposeRunArguments, PurposeSetting, PurposeEventSigning:
 		return true
 	}
 	return false
@@ -199,7 +208,7 @@ func (c *Cipher) open(envelope, prefix string, aad []byte) (string, error) {
 			return string(plain), nil
 		}
 	}
-	return "", fmt.Errorf("secrets cipher: open: %w", err)
+	return "", fmt.Errorf("secrets cipher: open: %w%.0w", err, ErrKeyMismatch)
 }
 
 func IsEncrypted(v string) bool {

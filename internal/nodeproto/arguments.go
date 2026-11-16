@@ -39,6 +39,13 @@ func ValidateArgument(arg nodewire.ArgumentDescription, value string) (string, e
 		err = fmt.Errorf("unknown type")
 	}
 	if err != nil {
+		if arg.Type == "int" || arg.Type == "int64" {
+			flag := "--" + arg.Name
+			if arg.Short != "" {
+				flag = "-" + arg.Short
+			}
+			return "", &apierr.Error{Code: apierr.InvalidArgs, Message: fmt.Sprintf("argument --%s must be %s", arg.Name, arg.Type), Hint: fmt.Sprintf("Pass a base-10 whole number (for example %s=42), then retry", flag)}
+		}
 		return "", fmt.Errorf("argument --%s must be %s", arg.Name, arg.Type)
 	}
 	values := []string{value}

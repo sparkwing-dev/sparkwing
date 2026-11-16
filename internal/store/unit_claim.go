@@ -20,6 +20,7 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 	var out UnitClaim
 	candidate := claimHead{}
 	var err error
+	var capacityMiss error
 	if demand.Target != nil {
 		candidate.Unit = *demand.Target
 	} else {
@@ -28,8 +29,9 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 			return UnitClaim{}, err
 		}
 	}
-	err = o.s.inTx(ctx, func(tx *storeTx) error {
+	err = o.s.inBlobTx(ctx, func(tx *storeTx) error {
 		out = UnitClaim{}
+		capacityMiss = nil
 		if err := lockClaimQueueTx(ctx, tx); err != nil {
 			return err
 		}
@@ -41,8 +43,15 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 			return notFound("eligible work", "")
 		}
 		out, err = tx.operator.claimUnitTx(ctx, tx, demand, candidate)
+		if errors.Is(err, errClaimCapacityUnavailable) {
+			capacityMiss = err
+			return nil
+		}
 		return err
 	})
+	if err == nil {
+		err = capacityMiss
+	}
 	if err == errRankingHold && demand.Target == nil {
 		err = notFound("eligible work", "")
 	}
@@ -64,7 +73,7 @@ func (o *Operator) claimUnit(ctx context.Context, demand UnitDemand) (UnitClaim,
 	return out, nil
 }
 
-// Search holds a read snapshot only; award rechecks one candidate after arbitration.
+// safety: close the search snapshot before rechecking timed waits under writer fences.
 func (o *Operator) searchClaimUnit(ctx context.Context, demand UnitDemand) (claimHead, error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
@@ -86,7 +95,19 @@ func (o *Operator) searchClaimUnit(ctx context.Context, demand UnitDemand) (clai
 	if err := claimInputsTx(ctx, tx, demand, kinds, &q); err != nil {
 		return claimHead{}, err
 	}
-	return searchClaimTx(ctx, tx, demand, &q)
+	tx.groupWaits = make(map[UnitRef]groupWaitObservation)
+	tx.claimCapacity = &claimCapacitySearch{accounting: make(map[claimCapacityKey]concurrencyAccounting)}
+	q.capacity = tx.claimCapacity
+	head, searchErr := searchClaimTx(ctx, tx, demand, &q)
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		return claimHead{}, err
+	}
+	for unit, observed := range tx.groupWaits {
+		if err := o.recordObservedGroupWait(ctx, demand, unit, observed); err != nil {
+			return claimHead{}, err
+		}
+	}
+	return head, searchErr
 }
 
 var errRankingHold = authorityError(hosterr.LockHeld, "work is waiting for a preferred runner")
@@ -141,74 +162,17 @@ func (op *Operator) claimUnitTx(ctx context.Context, tx *storeTx, demand UnitDem
 		}
 	}()
 
-	if err := validateClaimUnit(unit); err != nil {
-		return UnitClaim{}, err
-	}
-	if err := lockClaimQueueTx(ctx, tx); err != nil {
-		return UnitClaim{}, err
-	}
-	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+	prepared, err := op.prepareUnitClaimTx(ctx, tx, demand, candidate)
 	if err != nil {
 		return UnitClaim{}, err
 	}
-	if p.Capability.Subject.Kind == capability.SubjectLocal {
-		if err := activeLocalRunnerTx(ctx, tx, demand.CapabilityPrefix); err != nil {
+	if !prepared.ready {
+		if err := recordGroupWaitTx(ctx, tx, prepared.team, unit, groupWaitObservation{}); err != nil {
 			return UnitClaim{}, err
 		}
+		return UnitClaim{}, errClaimCapacityUnavailable
 	}
-	team, err := tx.operator.claimTargetTeamTx(ctx, tx, p.Capability, unit)
-	if err != nil {
-		return UnitClaim{}, err
-	}
-	validation := demand
-	validation.Target = &unit
-	if _, err = claimKinds(p.Capability, validation); err != nil {
-		return UnitClaim{}, err
-	}
-	named := demand
-	named.Kinds = nil
-	named.Target = &unit
-	q := claimSQL{}
-	err = claimInputsTx(ctx, tx, named, []capability.UnitKind{unit.Kind}, &q)
-	if err != nil {
-		return UnitClaim{}, err
-	}
-	// Another award can move this team behind work seen during search.
-	if candidate.Team != "" {
-		q.ordinal = &candidate.Ordinal
-	}
-	q.facts[0].Named = boolInt(demand.Target != nil)
-	query, err := q.query(q.facts, q.teams, q.rates, q.kinds, named, q.now)
-	if err != nil {
-		return UnitClaim{}, err
-	}
-	if _, err := queryClaimTx(ctx, tx, &q, query); err != nil {
-		if errors.Is(err, ErrNotFound) && demand.Target != nil {
-			err = op.claimRefusalTx(ctx, tx, demand, unit)
-		}
-		return UnitClaim{}, err
-	}
-	profile, requirements, err := readMatchingInputsTx(ctx, tx, named, unit, true)
-	if err != nil {
-		return UnitClaim{}, err
-	}
-	if err = checkClaimantBindingTx(ctx, tx, p.Capability, unit); err != nil {
-		return UnitClaim{}, err
-	}
-	if err = lockOwnerUnitTx(ctx, tx, team, unit); err != nil {
-		return UnitClaim{}, err
-	}
-	if unit.Kind == capability.UnitNode {
-		if err := lockControllerCapacityTx(ctx, tx, team, string(unit.RunID)); err != nil {
-			return UnitClaim{}, err
-		}
-	}
-	if err = lockStateRunTx(ctx, tx, team, string(unit.RunID)); err != nil {
-		return UnitClaim{}, err
-	}
-	if err = checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
-		return UnitClaim{}, err
-	}
+	p, team, profile, requirements := prepared.principal, prepared.team, prepared.profile, prepared.requirements
 	policy, _ := claimPlacementFromContext(ctx)
 	placement := placementNone
 	if unit.Kind == capability.UnitNode {
@@ -399,4 +363,97 @@ func (o *Operator) claimTargetTeamTx(ctx context.Context, tx *storeTx, claimant 
 		return "", notFound("run", string(unit.RunID))
 	}
 	return team, err
+}
+
+func lockClaimableUnitTx(ctx context.Context, tx *storeTx, team Team, claimant capability.Capability, unit UnitRef) error {
+	if err := checkClaimantBindingTx(ctx, tx, claimant, unit); err != nil {
+		return err
+	}
+	if err := lockOwnerUnitTx(ctx, tx, team, unit); err != nil {
+		return err
+	}
+	if unit.Kind == capability.UnitNode {
+		if err := lockControllerCapacityTx(ctx, tx, team, string(unit.RunID)); err != nil {
+			return err
+		}
+	}
+	if err := lockStateRunTx(ctx, tx, team, string(unit.RunID)); err != nil {
+		return err
+	}
+	if err := checkClaimableUnitTx(ctx, tx, team, unit); err != nil {
+		return err
+	}
+	return nil
+}
+
+type preparedUnitClaim struct {
+	principal    capability.Principal
+	team         Team
+	profile      match.Profile
+	requirements match.Demand
+	ready        bool
+}
+
+func (op *Operator) prepareUnitClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, candidate claimHead) (preparedUnitClaim, error) {
+	unit := candidate.Unit
+	if err := validateClaimUnit(unit); err != nil {
+		return preparedUnitClaim{}, err
+	}
+	if err := lockClaimQueueTx(ctx, tx); err != nil {
+		return preparedUnitClaim{}, err
+	}
+	p, err := tx.ResolveAuthority(ctx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: demand.CapabilityPrefix})
+	if err != nil {
+		return preparedUnitClaim{}, err
+	}
+	if p.Capability.Subject.Kind == capability.SubjectLocal {
+		if err := activeLocalRunnerTx(ctx, tx, demand.CapabilityPrefix); err != nil {
+			return preparedUnitClaim{}, err
+		}
+	}
+	team, err := op.claimTargetTeamTx(ctx, tx, p.Capability, unit)
+	if err != nil {
+		return preparedUnitClaim{}, err
+	}
+	validation := demand
+	validation.Target = &unit
+	if _, err = claimKinds(p.Capability, validation); err != nil {
+		return preparedUnitClaim{}, err
+	}
+	named := demand
+	named.Kinds = nil
+	named.Target = &unit
+	q := claimSQL{}
+	err = claimInputsTx(ctx, tx, named, []capability.UnitKind{unit.Kind}, &q)
+	if err != nil {
+		return preparedUnitClaim{}, err
+	}
+	// safety: another award can move this team behind work seen during search.
+	if candidate.Team != "" {
+		q.ordinal = &candidate.Ordinal
+	}
+	q.facts[0].Named = boolInt(demand.Target != nil)
+	query, err := q.query(q.facts, q.teams, q.rates, q.kinds, named, q.now)
+	if err != nil {
+		return preparedUnitClaim{}, err
+	}
+	ready := true
+	if _, err := queryClaimTx(ctx, tx, &q, query); err != nil {
+		if errors.Is(err, errClaimCapacityUnavailable) {
+			ready = false
+		} else {
+			if errors.Is(err, ErrNotFound) && demand.Target != nil {
+				err = tx.operator.claimRefusalTx(ctx, tx, demand, unit)
+			}
+			return preparedUnitClaim{}, err
+		}
+	}
+	profile, requirements, err := readMatchingInputsTx(ctx, tx, named, unit, true)
+	if err != nil {
+		return preparedUnitClaim{}, err
+	}
+	if err := lockClaimableUnitTx(ctx, tx, team, p.Capability, unit); err != nil {
+		return preparedUnitClaim{}, err
+	}
+	return preparedUnitClaim{principal: p, team: team, profile: profile, requirements: requirements, ready: ready}, nil
 }

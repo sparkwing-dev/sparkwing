@@ -44,6 +44,7 @@ func retryConflict(ctx context.Context, attempt func() error, sleep func(context
 		if err = attempt(); err == nil || isRunCancellationNotificationError(err) || (!isPGConflict(err) && !errors.Is(err, errAuthorityChanged)) || i == attempts-1 {
 			return err
 		}
+		// #nosec G404 -- Retry jitter needs dispersion, not cryptographic unpredictability.
 		if sleep(ctx, rand.N(min(base<<i, ceiling))) != nil {
 			return err
 		}

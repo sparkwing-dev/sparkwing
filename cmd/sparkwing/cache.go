@@ -93,7 +93,7 @@ func runCacheInfo(inv clisurface.Invocation) error {
 
 	return writeCacheOutput(output, report, func() {
 		fmt.Println(color.Bold("PIPELINE BINARY CACHE"))
-		fmt.Printf("  dir:      %s\n", color.Cyan(report.Dir))
+		fmt.Printf("  dir:      %s\n", color.Cyan(opsview.DisplayText(report.Dir)))
 		if report.Entries == 0 {
 			fmt.Printf("  status:   %s\n", color.Dim("(empty -- no pipeline has been compiled yet)"))
 			return
@@ -251,7 +251,7 @@ func runCacheExplain(inv clisurface.Invocation) error {
 		report := cacheExplainReport{Dir: dir, Reason: "a TypeScript pipeline runs from source with node, so nothing is compiled or cached"}
 		return writeCacheOutput(output, report, func() {
 			fmt.Println(color.Bold("CACHE KEY"))
-			fmt.Printf("  pipeline: %s\n", color.Cyan(dir))
+			fmt.Printf("  pipeline: %s\n", color.Cyan(opsview.DisplayText(dir)))
 			fmt.Printf("  status:   %s\n", color.Dim("not cached -- "+report.Reason))
 		})
 	}
@@ -290,7 +290,7 @@ func runCacheExplain(inv clisurface.Invocation) error {
 
 	return writeCacheOutput(output, report, func() {
 		fmt.Println(color.Bold("CACHE KEY"))
-		fmt.Printf("  pipeline: %s\n", color.Cyan(dir))
+		fmt.Printf("  pipeline: %s\n", color.Cyan(opsview.DisplayText(dir)))
 		fmt.Printf("  key:      %s\n", color.Cyan(report.Key))
 		if report.Cached {
 			fmt.Printf("  status:   %s\n", color.Green("cached -- the next run reuses this binary"))
@@ -300,7 +300,7 @@ func runCacheExplain(inv clisurface.Invocation) error {
 		fmt.Println()
 		fmt.Println(color.Bold("INPUTS"))
 		for _, p := range report.Parts {
-			fmt.Printf("  %-28s %s  %s\n", p.Label, color.Dim(p.Digest), color.Dim(p.Detail))
+			fmt.Printf("  %-28s %s  %s\n", opsview.DisplayText(p.Label), color.Dim(p.Digest), color.Dim(opsview.DisplayText(p.Detail)))
 		}
 	})
 }

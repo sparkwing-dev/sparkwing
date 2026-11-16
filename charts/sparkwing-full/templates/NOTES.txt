@@ -24,23 +24,16 @@ Reach the dashboard:
 
 {{- if .Values.ingress.enabled }}
 {{- range .Values.ingress.hosts }}
-  {{ if $.Values.ingress.tls }}https{{ else }}http{{ end }}://{{ .host }}
-{{- end }}
-{{- if not .Values.ingress.tls }}
-
-  WARNING: ingress.tls is empty, so the controller runs with --insecure-cookies
-  and session cookies and tokens cross every hop in plain text.
+  https://{{ .host }}
 {{- end }}
 {{- else }}
   # Port-forward (no ingress configured):
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "sparkwing-full.controller.fullname" . }} 8080:80
   # then open http://localhost:8080
 
-  Session cookies are Secure. A browser that does not treat http://localhost
-  as a secure origin drops them, so sign-in over the port-forward fails there;
-  configure an HTTPS ingress for regular use.
-
-  # Or expose via your own ingress / Service of type LoadBalancer.
+  Browsers accept the Secure __Host- session cookies on localhost and 127.0.0.1.
+  For remote browser access, configure ingress.tls (for example, cert-manager
+  with Let's Encrypt), or tunnel to loopback with kubectl port-forward or ssh -L.
 {{- end }}
 
 Controller in-cluster URL (for runners / external clients in the same cluster):

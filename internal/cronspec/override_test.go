@@ -38,3 +38,12 @@ func TestOverrideCronErrorNamesFieldAndExample(t *testing.T) {
 		t.Fatalf("suggested example refused: %v", err)
 	}
 }
+
+func TestOverrideTimeZoneErrorNamesTheValue(t *testing.T) {
+	t.Parallel()
+	tz := "America/Denvr"
+	err := (cronspec.Override{TZ: &tz}).Validate()
+	if want := `invalid schedule time zone "America/Denvr"; use an IANA name such as America/Denver, or local`; err == nil || err.Error() != want {
+		t.Fatalf("error = %v, want %q", err, want)
+	}
+}

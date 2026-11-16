@@ -161,7 +161,8 @@ the removed `crons` command with `sparkwing schedules install`.
 
 Linux installations link their private unit files into the user manager before enabling them,
 so a caller’s `XDG_CONFIG_HOME` can differ from the manager’s config directory.
-Uninstall removes both the registration links and the private files. macOS login
+Uninstall stops the timer before removing the registration links and the private
+files, then clears any failed state systemd kept for those two units. macOS login
 agents live under the account’s `~/Library/LaunchAgents`, even when `HOME` is overridden.
 
 On Linux, a controller started from a systemd service runs in a separate transient
@@ -170,8 +171,14 @@ updater restarts. If the scope cannot start, startup fails rather than leaving
 the controller in a cgroup that its caller can terminate.
 
 Local schedule health reads the native timer registration and its activation
-state from systemd or launchd. `--no-timer` leaves automatic firing disabled
-unless a native timer was already installed and enabled. The local controller
+state from systemd or launchd. It judges the timer by the home it ticks and
+whether the service manager fires it, not by which executable the controller
+runs. A timer written in the last three minutes counts as healthy until its first
+tick. Installation puts the timer in place before arming anything, so a timer
+that fails to install arms no schedule. Reinstalling enables a timer whose
+files are present but not enabled. `--no-timer` leaves automatic firing disabled
+unless a native timer was already installed and enabled, and `schedules list`
+then warns that armed schedules will not fire automatically. The local controller
 evaluates schedules when `__tick` invokes it. Remote controller health reports
 its evaluator loop as enabled only while that loop is running. Both views
 report the last tick separately, including a tick older than three minutes.

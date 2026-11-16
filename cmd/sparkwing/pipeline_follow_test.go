@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestTriggeredOutcomeUsesOnePublicRunDetail(t *testing.T) {
@@ -105,5 +106,19 @@ func TestTriggeredOutcomeUsesSharedReadRetryPolicy(t *testing.T) {
 		} else if err == nil || calls != 1 || out.Len() != 0 {
 			t.Fatalf("refusal retried: calls=%d output=%q err=%v", calls, &out, err)
 		}
+	}
+}
+
+func TestTriggeredOutcomePrintsSecretRefusalOnce(t *testing.T) {
+	const repair = "unique-secret-repair: sparkwing secrets set --secret MISSING --file <path>"
+	reader := &statusReader{details: []controllerwire.RunDetail{{ID: "run-outcome", Status: "failed", Notices: []engineid.Notice{{Kind: engineid.NoticeSecretPreflightRefused, Reason: repair}}}}}
+	var out bytes.Buffer
+	status, err := triggeredRunOutcome(t.Context(), reader, "run-outcome", &out)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.BadRequest || status != "failed" {
+		t.Fatalf("status=%q error=%v", status, err)
+	}
+	if strings.Count(out.String(), repair) != 1 {
+		t.Fatalf("secret repair must appear once: %s", &out)
 	}
 }

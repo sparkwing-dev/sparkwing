@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func materializeFixture(t *testing.T, dir string) (string, bool) {
 	t.Helper()
+	testshell.UsePath(t, "go", "git")
 	lease, built, err := MaterializePipeline(t.Context(), dir, CompileOptions{Environment: os.Environ(), Diagnostics: io.Discard})
 	if err != nil {
 		t.Fatal(err)

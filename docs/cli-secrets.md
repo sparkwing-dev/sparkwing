@@ -48,7 +48,7 @@ Delete the exact pipeline or unscoped row. A pipeline row is named by --repo and
 
 Read a secret's value
 
-This explicit authorized read includes the value. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline.
+Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so get refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline.
 
 ### Flags
 

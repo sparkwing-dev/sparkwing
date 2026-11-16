@@ -34,7 +34,7 @@ type Host struct {
 	ConfigPath string
 	LogPath    string
 	// StateHome is the resolved Sparkwing home; the service runs with it as
-	// SPARKWING_HOME so it uses the state the installer chose.
+	// SPARKWING_HOME and working directory so it uses the state the installer chose.
 	StateHome string
 	Path      string
 	UID       int
@@ -189,6 +189,9 @@ func (h Host) registration(ctx context.Context, path string) (bool, error) {
 }
 
 func (h Host) writeRegistration(path string) error {
+	if err := unitfile.PrepareWorkingDirectory(h.StateHome); err != nil {
+		return err
+	}
 	body := serviceUnit(h)
 	if h.GOOS == "darwin" {
 		if err := ensureLogDir(h.LogPath); err != nil {
@@ -214,6 +217,9 @@ func (h Host) run(ctx context.Context, name string, args ...string) (string, err
 }
 
 func requireHost(h Host) error {
+	if !filepath.IsAbs(h.StateHome) {
+		return errors.New("runner service: StateHome must be an absolute path")
+	}
 	if h.Binary == "" || !filepath.IsAbs(h.Binary) {
 		return fmt.Errorf("runner service: Host.Binary must be an absolute path, got %q", h.Binary)
 	}
@@ -289,6 +295,7 @@ func serviceUnit(h Host) string {
 	b.WriteString("After=network-online.target\n")
 	b.WriteString("Wants=network-online.target\n\n")
 	b.WriteString("[Service]\nType=simple\n")
+	fmt.Fprintf(&b, "WorkingDirectory=%s\n", unitfile.SystemdWord(h.StateHome))
 	fmt.Fprintf(&b, "ExecStart=%s\n", unitfile.Command([]string{h.Binary, "start", "--config", h.ConfigPath}))
 	// safety: a runner the operator stopped must stay stopped.
 	if h.StateHome != "" {
@@ -337,7 +344,7 @@ func agentPlist(h Host) string {
 		fmt.Fprintf(&b, "  <key>StandardOutPath</key>\n  <string>%s</string>\n", unitfile.XMLText(h.LogPath))
 		fmt.Fprintf(&b, "  <key>StandardErrorPath</key>\n  <string>%s</string>\n", unitfile.XMLText(h.LogPath))
 	}
-	fmt.Fprintf(&b, "  <key>WorkingDirectory</key>\n  <string>%s</string>\n", unitfile.XMLText(h.Home))
+	fmt.Fprintf(&b, "  <key>WorkingDirectory</key>\n  <string>%s</string>\n", unitfile.XMLText(h.StateHome))
 	b.WriteString("</dict>\n</plist>\n")
 	return b.String()
 }

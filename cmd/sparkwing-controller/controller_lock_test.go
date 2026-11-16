@@ -62,6 +62,7 @@ func TestControllerPostgresFailStopAndStandby(t *testing.T) {
 		home string
 		log  *bytes.Buffer
 	}
+	epochDir := t.TempDir()
 	start := func(name string) *process {
 		t.Helper()
 		home, creds := t.TempDir(), t.TempDir()
@@ -77,7 +78,8 @@ func TestControllerPostgresFailStopAndStandby(t *testing.T) {
 			t.Fatal(err)
 		}
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestControllerPostgresFailStopAndStandby$", "--", helper,
-			"--store=postgres", "--addr=127.0.0.1:0", "--credentials-dir="+creds)
+			"--store=postgres", "--addr=127.0.0.1:0", "--credentials-dir="+creds,
+			"--credential-epoch-dir="+epochDir)
 		cmd.Env = append(os.Environ(), "SPARKWING_HOME="+home)
 		log := new(bytes.Buffer)
 		cmd.Stdout, cmd.Stderr = log, log

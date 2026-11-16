@@ -8,8 +8,11 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -100,42 +103,96 @@ type affectedTestPlan struct {
 	critical      map[string][]string
 }
 
+const affectedTestGoFlags = "-mod=readonly"
+
 func runAffectedTest(ctx context.Context) error {
 	files, scope, err := affectedChangeScope(ctx)
 	if err != nil {
 		return err
 	}
-	return runAffectedTestFiles(ctx, files, scope)
+	return runAffectedTestFiles(ctx, files, scope, currentHost(), false)
 }
 
 // perf: land passes the files a merge of origin/main changed, so a clean merge
 // re-runs only the packages main touched instead of the whole gate.
-func runAffectedTestFiles(ctx context.Context, files []string, scope string) error {
+func runAffectedTestFiles(ctx context.Context, files []string, scope string, host hostShape, queued bool) error {
 	critical, err := criticalTests(ctx)
 	if err != nil {
 		return err
 	}
-	plans, byDir, err := planAffectedModules(ctx, files, critical)
+	plans, byDir, err := planAffectedModules(ctx, files, critical, affectedTestGoFlags)
 	if err != nil {
 		return err
 	}
 
 	sparkwing.Info(ctx, "affected tests: %s", scope)
 	if goChange(files, byDir) == "" {
-		sparkwing.Info(ctx, "affected tests: no Go source changed, so the critical set stays for hosted CI")
+		sparkwing.Info(ctx, "affected tests: no Go inputs changed; no critical tests selected")
 		for i := range plans {
 			plans[i].critical = nil
 		}
 	}
+	// safety: acceptance uses dashboard Node packages even in short mode.
+	acceptance := byDir["tests/acceptance"]
+	nativehost := byDir["sdk/typescript/test/nativehost"]
+	var frontendDeps, sdkDeps bool
+	for _, p := range plans {
+		if slices.Contains(p.packages, acceptance) || len(p.critical[acceptance]) > 0 {
+			frontendDeps, sdkDeps = true, true
+		}
+		if slices.Contains(p.packages, nativehost) || len(p.critical[nativehost]) > 0 {
+			sdkDeps = true
+		}
+	}
+	if frontendDeps {
+		if err := ensureFrontendDeps(ctx); err != nil {
+			return err
+		}
+	}
+	if sdkDeps {
+		compiler := filepath.Join(sparkwing.WorkDir(), "sdk", "typescript", "node_modules", "typescript", "bin", "tsc")
+		if _, err := os.Stat(compiler); err != nil {
+			if _, err := sparkwing.Bash(ctx, "npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund").Run(); err != nil {
+				return fmt.Errorf("TypeScript SDK dependencies: %w", err)
+			}
+		}
+	}
+	// safety: a nonempty owned flag overrides saved GOFLAGS too, while keeping
+	// the Go configuration that supplies private module and proxy settings.
+	var timings goTestTimings
+	var cutoff string
+	start := time.Now()
+	defer func() {
+		// safety: a step summary replaces its previous value in the store.
+		summary := strings.TrimSpace(cutoff + "\n\n" + timings.summary(time.Since(start)))
+		if summary != "" {
+			sparkwing.Summary(ctx, summary)
+		}
+	}()
 	return withStableProductTestHome("gate-test", func(home string) error {
+		if queued {
+			var err error
+			cutoff, err = runQueuedTestPackages(ctx, plans, host, home, &timings)
+			return err
+		}
 		var failures []string
-		for _, p := range plans {
-			for _, command := range p.commands(currentHost()) {
-				script := productTestScript(fmt.Sprintf("cd %q && %s", p.module, command), home)
-				if _, err := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Run(); err != nil {
-					failures = append(failures, describeModuleFailure(p.module, err))
+		for _, group := range affectedTestGroups(plans, goStepParallelism(host)) {
+			errs := make([]error, len(group))
+			var running sync.WaitGroup
+			for i, command := range group {
+				running.Go(func() {
+					script := productTestScript(fmt.Sprintf("cd %q && GOFLAGS=%s %s", command.module, shellQuote(affectedTestGoFlags), command.command), home)
+					errs[i] = timings.run(ctx, script)
+				})
+			}
+			running.Wait()
+			for i, err := range errs {
+				if err != nil {
+					failures = append(failures, describeModuleFailure(group[i].module, err))
 				}
 			}
+		}
+		for _, p := range plans {
 			sparkwing.Info(ctx, "affected tests: %s", p.describe())
 		}
 		if len(failures) == 0 {
@@ -145,7 +202,7 @@ func runAffectedTestFiles(ctx context.Context, files []string, scope string) err
 	})
 }
 
-func planAffectedModules(ctx context.Context, files []string, critical map[string]map[string][]string) ([]affectedTestPlan, map[string]string, error) {
+func planAffectedModules(ctx context.Context, files []string, critical map[string]map[string][]string, goFlags string) ([]affectedTestPlan, map[string]string, error) {
 	modules, err := committedModuleDirs(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -154,7 +211,7 @@ func planAffectedModules(ctx context.Context, files []string, critical map[strin
 	var plans []affectedTestPlan
 	modulePackages := make(map[string][]modulePackage)
 	for _, module := range modules {
-		packages, err := listModulePackages(ctx, module)
+		packages, err := listModulePackages(ctx, module, goFlags)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", module, err)
 		}
@@ -208,7 +265,7 @@ func runAffectedCompileCheck(ctx context.Context, verb string) error {
 }
 
 func runAffectedCompileFiles(ctx context.Context, verb string, files []string) error {
-	plans, _, err := planAffectedModules(ctx, files, nil)
+	plans, _, err := planAffectedModules(ctx, files, nil, os.Getenv("GOFLAGS"))
 	if err != nil {
 		return err
 	}
@@ -241,25 +298,133 @@ func runAffectedCompileFiles(ctx context.Context, verb string, files []string) e
 	return nil
 }
 
-func (p affectedTestPlan) commands(h hostShape) []string {
-	var out []string
-	timeout := "-timeout " + productGoTestTimeout + " "
-	short := "-short " + timeout
-	if len(p.packages) > 0 {
-		out = append(out, boundedGoCommand(h, "test", short+quoteAll(p.packages)))
-	}
-	if len(p.critical) > 0 {
-		pkgs := mapKeys(p.critical)
-		var names []string
-		for _, pkg := range pkgs {
-			names = append(names, p.critical[pkg]...)
+type affectedTestCommand struct {
+	module  string
+	command string
+}
+
+type affectedShortModule struct {
+	plan      affectedTestPlan
+	allowance int
+}
+
+func affectedShortModules(plans []affectedTestPlan, allowance int) [][]affectedShortModule {
+	active, preferred := 0, -1
+	for i, p := range plans {
+		if len(p.packages) == 0 {
+			continue
 		}
-		sort.Strings(names)
-		names = dedupe(names)
-		run := shellQuote("^(" + strings.Join(names, "|") + ")$")
-		out = append(out, boundedGoCommand(h, "test", timeout+"-run "+run+" "+quoteAll(pkgs)))
+		active++
+		if preferred < 0 || p.module == "." {
+			preferred = i
+		}
+	}
+	var groups [][]affectedShortModule
+	var together []affectedShortModule
+	concurrent := allowance >= active
+	for i, p := range plans {
+		if len(p.packages) == 0 {
+			continue
+		}
+		width := allowance
+		if concurrent {
+			width = 1
+			if i == preferred {
+				width += allowance - active
+			}
+		}
+		module := affectedShortModule{plan: p, allowance: width}
+		if concurrent {
+			together = append(together, module)
+		} else {
+			groups = append(groups, []affectedShortModule{module})
+		}
+	}
+	if len(together) > 0 {
+		groups = append(groups, together)
+	}
+	return groups
+}
+
+func affectedTestGroups(plans []affectedTestPlan, allowance int) [][]affectedTestCommand {
+	var groups [][]affectedTestCommand
+	for _, modules := range affectedShortModules(plans, allowance) {
+		var group []affectedTestCommand
+		for _, module := range modules {
+			for _, command := range module.plan.shortCommands(module.allowance) {
+				group = append(group, affectedTestCommand{module: module.plan.module, command: command})
+			}
+		}
+		groups = append(groups, group)
+	}
+	// safety: a failure in one short module cannot narrow another module's
+	// coverage or let a full critical command cross the global short join.
+	for _, p := range plans {
+		if command := p.criticalCommand(allowance); command != "" {
+			groups = append(groups, []affectedTestCommand{{module: p.module, command: command}})
+		}
+	}
+	return groups
+}
+
+const storeTestPackage = "github.com/sparkwing-dev/sparkwing/internal/store"
+
+func (p affectedTestPlan) shortAllocation(parallelism int) ([]string, int, []string) {
+	patterns := storeShortTestPatterns()
+	if p.module == "." && slices.Contains(p.packages, storeTestPackage) && parallelism >= len(patterns) && (len(p.packages) == 1 || parallelism > len(patterns)) {
+		others := slices.DeleteFunc(slices.Clone(p.packages), func(pkg string) bool { return pkg == storeTestPackage })
+		return others, parallelism - len(patterns), patterns[:]
+	}
+	return p.packages, parallelism, nil
+}
+
+func shortTestCommand(runtimeWidth, compileWidth int, packages []string, pattern string) string {
+	args := "-short -timeout " + productGoTestTimeout + " "
+	if pattern != "" {
+		args += "-run " + shellQuote(pattern) + " "
+	}
+	return goCommandWithLimits(runtimeWidth, compileWidth, "test", args+quoteAll(packages))
+}
+
+func (p affectedTestPlan) shortCommands(parallelism int) []string {
+	var out []string
+	packages, width, patterns := p.shortAllocation(parallelism)
+	if len(packages) > 0 {
+		out = append(out, shortTestCommand(width, width, packages, ""))
+	}
+	for _, pattern := range patterns {
+		out = append(out, shortTestCommand(1, 1, []string{storeTestPackage}, pattern))
 	}
 	return out
+}
+
+func (p affectedTestPlan) criticalCommand(parallelism int) string {
+	if len(p.critical) == 0 {
+		return ""
+	}
+	return goCommandAt(parallelism, "test", criticalTestArgs(p.critical, mapKeys(p.critical)))
+}
+
+// perf: measured store costs balance these initials; the complement also covers
+// future nonASCII names without maintaining a list of test functions.
+func storeShortTestPatterns() [3]string {
+	return [3]string{
+		`^(Test|Fuzz|Example)([BCGHJKQTZ].*)?$`,
+		`^(Test|Fuzz|Example)[LMNOSUVW].*$`,
+		`^(Test|Fuzz|Example)[^BCGHJKQTZLMNOSUVW].*$`,
+	}
+}
+
+func criticalTestArgs(critical map[string][]string, packages []string) string {
+	pkgs := mapKeys(critical)
+	var names []string
+	for _, pkg := range pkgs {
+		names = append(names, critical[pkg]...)
+	}
+	sort.Strings(names)
+	names = dedupe(names)
+	run := shellQuote("^(" + strings.Join(names, "|") + ")$")
+	return "-timeout " + productGoTestTimeout + " -run " + run + " " + quoteAll(packages)
 }
 
 func (p affectedTestPlan) describe() string {
@@ -384,9 +549,9 @@ func owningPackage(rel string, byDir map[string]string) string {
 	}
 }
 
-func listModulePackages(ctx context.Context, module string) ([]modulePackage, error) {
+func listModulePackages(ctx context.Context, module, goFlags string) ([]modulePackage, error) {
 	format := `{{.ImportPath}}{{"\t"}}{{.Dir}}{{"\t"}}{{join .Imports " "}} {{join .TestImports " "}} {{join .XTestImports " "}}{{"\t"}}{{if or .GoFiles .CgoFiles}}1{{else}}0{{end}}`
-	out, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %s ./...", module, shellQuote(format))).Env("GOWORK", "auto").String()
+	out, err := sparkwing.Bash(ctx, fmt.Sprintf("cd %q && go list -e -f %s ./...", module, shellQuote(format))).Env("GOWORK", "auto").Env("GOFLAGS", goFlags).String()
 	if err != nil {
 		return nil, fmt.Errorf("list module packages: %w", err)
 	}
@@ -420,7 +585,7 @@ func affectedChangeScope(ctx context.Context) ([]string, string, error) {
 		return nil, "", fmt.Errorf("list the staged change: %w", err)
 	}
 	if len(staged) > 0 {
-		files, err := listNames(ctx, "diff --cached -z --name-only --no-renames --diff-filter=ACMRD")
+		files, err := listNames(ctx, "diff --cached -z --name-only --no-renames")
 		if err != nil {
 			return nil, "", err
 		}
@@ -430,7 +595,7 @@ func affectedChangeScope(ctx context.Context) ([]string, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	changed, err := listNames(ctx, "diff -z --name-only --no-renames --diff-filter=ACMRD "+base)
+	changed, err := listNames(ctx, "diff -z --name-only --no-renames "+base)
 	if err != nil {
 		return nil, "", fmt.Errorf("list the change since %s: %w", base, err)
 	}
@@ -566,7 +731,7 @@ func frontendChange(ctx context.Context, browser bool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	packages, err := listModulePackages(ctx, ".")
+	packages, err := listModulePackages(ctx, ".", os.Getenv("GOFLAGS"))
 	if err != nil {
 		return "", err
 	}
@@ -640,19 +805,31 @@ func repoGoChange(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	modules, err := committedModuleDirs(ctx)
+	return repoGoFilesChange(ctx, files, os.Getenv("GOFLAGS"))
+}
+
+func repoGoFilesChange(ctx context.Context, files []string, goFlags string) (string, error) {
+	byDir, err := repoPackageDirs(ctx, goFlags)
 	if err != nil {
 		return "", err
 	}
+	return goChange(files, byDir), nil
+}
+
+func repoPackageDirs(ctx context.Context, goFlags string) (map[string]string, error) {
+	modules, err := committedModuleDirs(ctx)
+	if err != nil {
+		return nil, err
+	}
 	byDir := map[string]string{}
 	for _, module := range modules {
-		packages, err := listModulePackages(ctx, module)
+		packages, err := listModulePackages(ctx, module, goFlags)
 		if err != nil {
-			return "", fmt.Errorf("%s: %w", module, err)
+			return nil, fmt.Errorf("%s: %w", module, err)
 		}
 		addRepoPackages(byDir, module, packages)
 	}
-	return goChange(files, byDir), nil
+	return byDir, nil
 }
 
 // safety: an unjudgeable change runs the step, so a broken scope can only widen it.

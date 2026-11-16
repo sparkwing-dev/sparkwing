@@ -439,6 +439,13 @@ func TestProtocolSessionChild(t *testing.T) {
 		switch mode {
 		case "partial_output":
 			fmt.Fprint(os.Stdout, "starting")
+		case "keeper_spoof", "timing_spoof":
+			event := "lease_keeper"
+			if mode == "timing_spoof" {
+				event = "request_timing"
+			}
+			send(map[string]any{"level": "info", "event": event, "msg": "application event", "host_" + event: true})
+			reply(request, map[string]bool{})
 		case "log_policy":
 			send(nodewire.FrameLog{Level: "debug", Message: "debug detail"})
 			send(nodewire.FrameLog{Level: "info", Message: "normal detail"})
@@ -932,5 +939,31 @@ func TestProtocolSessionObservesExitBeforeOutputAcknowledgement(t *testing.T) {
 	}
 	if observed.IsZero() || observed.After(blockedAt) || !exited.Equal(observed) {
 		t.Fatalf("exit observation = %v, after acknowledgement = %v, output blocked at %v", observed, exited, blockedAt)
+	}
+}
+
+func TestSDKCannotImpersonateKeeperDiagnosticKind(t *testing.T) {
+	for mode, event := range map[string]string{"keeper_spoof": "lease_keeper", "timing_spoof": "request_timing"} {
+		t.Run(mode, func(t *testing.T) {
+			records := make(chan nodewire.FrameLog, 1)
+			session := protocolTestSession(t, mode, func(cfg *ProtocolSessionConfig) {
+				cfg.Log = func(_ context.Context, record nodewire.FrameLog) error { records <- record; return nil }
+			})
+			protocolTestHello(t, session)
+			if _, err := session.Request(t.Context(), nodewire.Request{ID: "log", Op: nodewire.OpPlan}); err != nil {
+				t.Fatal(err)
+			}
+			record := <-records
+			encoded, err := json.Marshal(record)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), "host_"+event) {
+				t.Fatalf("SDK stamp survived protocol decoding: %s", encoded)
+			}
+			if record.Event != "sdk_"+event || record.Message != "application event" {
+				t.Fatalf("SDK retained host diagnostic identity: %+v", record)
+			}
+		})
 	}
 }

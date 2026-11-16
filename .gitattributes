@@ -19,3 +19,6 @@ AGENTS.md text eol=lf
 CLAUDE.md text eol=lf
 sdk/typescript/** text eol=lf
 sdk/typescript/native/**/*.node binary
+
+# Detached signatures are raw bytes; text diffs would corrupt review input.
+*.sig binary

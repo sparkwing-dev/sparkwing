@@ -31,6 +31,7 @@ var defaultCreditRates = []CreditRate{
 	{Cores: 8, MicroPerSecond: 33_000},
 }
 
+// #nosec G101 -- This is a metadata key for the credit rate table, not a credential.
 const metaKeyCreditRateTable = "credit_rate_table"
 
 // CreditRate prices one cloud runner second for one cpu class.

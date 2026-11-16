@@ -164,16 +164,16 @@ func renderQueueGroup(out io.Writer, group controllerwire.QueueGroup, format str
 		tw = tabwriter.NewWriter(&buffer, 0, 0, 2, ' ', 0)
 		rows = tw
 	}
-	fmt.Fprintf(rows, "group\t%s\tcapacity\t%d\teffective\t%d\tused\t%d\n", group.Group, group.Capacity, group.EffectiveCapacity, group.UsedCost)
+	fmt.Fprintf(rows, "group\t%s\tcapacity\t%d\teffective\t%d\tused\t%d\n", opsview.DisplayText(group.Group), group.Capacity, group.EffectiveCapacity, group.UsedCost)
 	if format == "pretty" {
-		fmt.Fprintf(rows, "scope\t%s\n", nodehost.ScopeLabelFromKey(group.Group))
+		fmt.Fprintf(rows, "scope\t%s\n", opsview.DisplayText(nodehost.ScopeLabelFromKey(group.Group)))
 		fmt.Fprintln(rows, "STATE\tRUN\tJOB\tPOSITION\tCOST\tSUPERSEDED\tHOLDER / POLICY\tCLAIMED / ARRIVED\tLEASE EXPIRES")
 	}
 	for _, h := range group.Holders {
-		fmt.Fprintf(rows, "holder\t%s\t%s\t-\t%d\t%t\t%s\t%s\t%s\n", h.RunID, h.JobID, h.Cost, h.Superseded, h.HolderID, fmtQueueTime(h.ClaimedAt), fmtQueueTime(h.LeaseExpiresAt))
+		fmt.Fprintf(rows, "holder\t%s\t%s\t-\t%d\t%t\t%s\t%s\t%s\n", opsview.DisplayText(h.RunID), opsview.DisplayText(h.JobID), h.Cost, h.Superseded, opsview.DisplayText(h.HolderID), fmtQueueTime(h.ClaimedAt), fmtQueueTime(h.LeaseExpiresAt))
 	}
 	for _, w := range group.Waiters {
-		fmt.Fprintf(rows, "waiter\t%s\t%s\t%d\t%d\t-\t%s\t%s\t-\n", w.RunID, w.JobID, w.Position, w.Cost, w.Policy, fmtQueueTime(w.ArrivedAt))
+		fmt.Fprintf(rows, "waiter\t%s\t%s\t%d\t%d\t-\t%s\t%s\t-\n", opsview.DisplayText(w.RunID), opsview.DisplayText(w.JobID), w.Position, w.Cost, opsview.DisplayText(w.Policy), fmtQueueTime(w.ArrivedAt))
 	}
 	if tw != nil {
 		if err := tw.Flush(); err != nil {

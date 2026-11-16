@@ -173,6 +173,7 @@ func (l *Ledger) List() ([]Record, error) {
 		if d.IsDir() || !strings.HasSuffix(d.Name(), ".json") {
 			return nil
 		}
+		// #nosec G122 -- The process-cleanup ledger lives in the local operator's private state directory.
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil

@@ -97,10 +97,13 @@ var livenessPolicies = []livenessPolicy{
 type CredentialRule string
 
 const (
-	CredentialBootstrap    CredentialRule = "pod_bootstrap"
-	CredentialAny          CredentialRule = "any_live"
-	CredentialMember       CredentialRule = "unbound_member_or_local"
-	CredentialAccount      CredentialRule = "account_session"
+	// #nosec G101 -- This is a credential policy enum value, not a credential.
+	CredentialBootstrap CredentialRule = "pod_bootstrap"
+	CredentialAny       CredentialRule = "any_live"
+	// #nosec G101 -- This is a credential policy enum value, not a credential.
+	CredentialMember  CredentialRule = "unbound_member_or_local"
+	CredentialAccount CredentialRule = "account_session"
+	// #nosec G101 -- This is a credential policy enum value, not a credential.
 	CredentialClaim        CredentialRule = "awarded_or_delegated_claim"
 	credentialEval         CredentialRule = "eval_unit"
 	credentialHere         CredentialRule = "here_award"
@@ -109,10 +112,12 @@ const (
 	CredentialOperator     CredentialRule = "operator_console_session"
 	credentialNodeProcess  CredentialRule = "nodehost_process"
 	credentialOwnerProcess CredentialRule = "owner_process"
-	CredentialPublisher    CredentialRule = "local_run_publisher"
-	CredentialRepoReader   CredentialRule = "repo_cache_reader"
-	credentialDiscovery    CredentialRule = "discovery"
-	CredentialLocalPeer    CredentialRule = "verified_local_peer"
+	// #nosec G101 -- This is a credential policy enum value, not a credential.
+	CredentialPublisher CredentialRule = "local_run_publisher"
+	// #nosec G101 -- This is a credential policy enum value, not a credential.
+	CredentialRepoReader CredentialRule = "repo_cache_reader"
+	credentialDiscovery  CredentialRule = "discovery"
+	CredentialLocalPeer  CredentialRule = "verified_local_peer"
 )
 
 // AccessRule is one complete alternative. Every grant in it is required.

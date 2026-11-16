@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 
 	goruntime "runtime"
@@ -102,6 +104,11 @@ func handoffHereRun(ctx context.Context, options client.EngineOptions, response 
 	completion, err := resumeAttachedHereRun(ctx, options, response.RunID, deps)
 	if err != nil {
 		return err
+	}
+	if completion.Outcome == "failed" {
+		if reader, err := client.NewRunReader(options); err == nil {
+			return runCompletionError(ctx, reader, response.RunID, completion.Outcome)
+		}
 	}
 	return statusExitCode(completion.Outcome)
 }
@@ -243,9 +250,9 @@ func runHereResumeCommand(ctx context.Context, flags triggerFlags, out io.Writer
 	if flags.output == "json" {
 		err = json.NewEncoder(out).Encode(result)
 	} else if flags.output == "plain" {
-		_, err = fmt.Fprintln(out, result.RunID)
+		_, err = fmt.Fprintln(out, opsview.DisplayText(result.RunID))
 	} else {
-		_, err = fmt.Fprintf(out, "run %s: %s\n", result.RunID, result.Outcome)
+		_, err = fmt.Fprintf(out, "run %s: %s\n", opsview.DisplayText(result.RunID), opsview.DisplayText(result.Outcome))
 	}
-	return errors.Join(statusExitCode(completion.Outcome), err)
+	return errors.Join(runCompletionError(ctx, controller, detail.ID, completion.Outcome), err)
 }

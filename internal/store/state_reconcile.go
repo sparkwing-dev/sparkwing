@@ -48,6 +48,15 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (r
 			return err
 		}
 		now := tx.now(ctx)
+		if result.Node.Status == runstate.StatusPending && result.Node.ClaimedBy == "" && groupWaitExpired(result.Node, now) {
+			unit := UnitRef{Kind: capability.UnitNode, RunID: request.Ref.RunID, NodeID: request.Ref.NodeID}
+			if err := recordGroupWaitTx(ctx, tx, t.team, unit, groupWaitObservation{}); err != nil {
+				return err
+			}
+			result.Node, err = readNodeTx(ctx, tx, t.team, request.Ref)
+			result.Kind = runstate.KeepTerminal
+			return err
+		}
 		switch {
 		case result.Node.Status == runstate.StatusDone:
 			result.Kind = runstate.KeepTerminal
@@ -111,6 +120,14 @@ func (t *Tenant) reconcileNode(ctx context.Context, request ReconcileRequest) (r
 				return err
 			}
 			claim, err := selfClaimNodeTx(ctx, tx, t.team, request.Actor, request.Ref)
+			if errors.Is(err, errClaimCapacityUnavailable) {
+				result.Kind = runstate.Dispatch
+				result.Node, err = readNodeTx(ctx, tx, t.team, request.Ref)
+				if err == nil && result.Node.Status == runstate.StatusDone {
+					result.Kind = runstate.KeepTerminal
+				}
+				return err
+			}
 			if err != nil {
 				return err
 			}

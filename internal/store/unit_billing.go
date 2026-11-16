@@ -112,8 +112,10 @@ func unitBillingAwardTx(ctx context.Context, tx *storeTx, team Team, unit UnitRe
 	if err != nil {
 		return nil, err
 	}
-	if _, err := lockLedgerTx(ctx, tx, team); err != nil {
-		return nil, err
+	if !tx.snapshotRead {
+		if _, err := lockLedgerTx(ctx, tx, team); err != nil {
+			return nil, err
+		}
 	}
 	award, err := readBillingAwardTx(ctx, tx, team, reservation)
 	return &award, err

@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -40,7 +42,7 @@ func attachHereRun(ctx context.Context, options client.EngineOptions, run, outpu
 			return followControllerRunLogs(ctx, options, run, format, out, waitStatusPoll)
 		},
 		cancel: func(ctx context.Context) error {
-			_, writeErr := fmt.Fprintf(os.Stderr, "cancelling %s; interrupt again to stop hosting without waiting\n", run)
+			_, writeErr := fmt.Fprintf(os.Stderr, "cancelling %s; interrupt again to stop hosting without waiting\n", opsview.DisplayText(run))
 			_, err := controller.Cancel(ctx, run, controllerwire.CancelRequest{Reason: "interrupted by here host"})
 			return errors.Join(writeErr, err)
 		},
@@ -127,7 +129,7 @@ func observeHereRun(ctx context.Context, run string, observe hereObservation, si
 		return result.completion, incompleteHereHandoff(run, err)
 	}
 	if logFailure != nil {
-		if _, err := fmt.Fprintf(os.Stderr, "warning: run %s finished %s, but log observation was incomplete; read retained logs with sparkwing runs logs --run %s\n", run, result.completion.Outcome, run); err != nil {
+		if _, err := fmt.Fprintf(os.Stderr, "warning: run %s finished %s, but log observation was incomplete; read retained logs with sparkwing runs logs --run %s\n", opsview.DisplayText(run), result.completion.Outcome, opsview.DisplayText(run)); err != nil {
 			return result.completion, incompleteHereHandoff(run, errors.Join(logFailure, err))
 		}
 	}

@@ -225,3 +225,18 @@ func TestTeamAndRunOwnersRefuseATeamlessLauncherRule(t *testing.T) {
 		}
 	}
 }
+
+func TestEvalSourceAccessFollowsExecutorHost(t *testing.T) {
+	for _, policy := range AwardPolicies() {
+		if policy.Purpose != PurposeEval {
+			continue
+		}
+		for _, host := range []*HostFacts{nil, {Kind: HostCloud}, {Kind: HostSelfHosted}, {Kind: HostPersonal}, {Kind: HostHere}} {
+			got := policy.ExecutionGrants(host)
+			want := host != nil && host.Kind == HostSelfHosted
+			if slices.Contains(got, SourceRead) != want {
+				t.Fatalf("eval source access does not match its executor: host=%+v grants=%v", host, got)
+			}
+		}
+	}
+}

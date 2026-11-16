@@ -57,7 +57,7 @@ func TestEngineRetiredExecutionRoutesProperty(t *testing.T) {
 	for _, browser := range []bool{false, true} {
 		s := controller.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 		if browser {
-			s.WithDashboard(controller.Dashboard{InsecureCookies: true})
+			s.WithDashboard(controller.Dashboard{})
 		}
 		h := s.Handler()
 		property := func(run, job, child []byte, presentation uint8) bool {
@@ -72,7 +72,7 @@ func TestEngineRetiredExecutionRoutesProperty(t *testing.T) {
 				case 2:
 					r.Header.Set("Authorization", "Session private-session")
 				case 3:
-					r.AddCookie(&http.Cookie{Name: "sw_session", Value: "private-cookie"})
+					r.AddCookie(&http.Cookie{Name: "__Host-sw_session", Value: "private-cookie"})
 				}
 				r.Header.Set("X-Sparkwing-Claim-Generation", "1")
 				w := httptest.NewRecorder()

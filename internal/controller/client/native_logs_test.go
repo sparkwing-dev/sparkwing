@@ -290,7 +290,7 @@ func TestNativeLogPutDiscardsCredentialURLsFromFailures(t *testing.T) {
 				body := &logFailingBody{Reader: strings.NewReader(""), failure: failure, stage: stage}
 				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: body}, nil
 			})}
-			err := uploader.put(t.Context(), target, nil, time.Now().Add(time.Minute), []byte("hello"))
+			err := uploader.put(t.Context(), 1, blob.LogUploadURL{URL: target, ExpiresAt: time.Now().Add(time.Minute)}, []byte("hello"))
 			if err == nil || strings.Contains(err.Error(), "private-token") || errors.Is(err, failure) {
 				t.Fatalf("upload retained credential error: %v", err)
 			}
@@ -328,8 +328,33 @@ func TestNativeLogPutKeepsTheConfiguredHTTPDeadline(t *testing.T) {
 			return engineResponse(http.StatusCreated, ""), nil
 		})}
 		uploader.transport.http.Timeout = time.Minute
-		if err := uploader.put(context.Background(), "https://storage.example/object", nil, time.Now().Add(time.Minute), []byte("hello")); err != nil {
+		if err := uploader.put(context.Background(), 1, blob.LogUploadURL{URL: "https://storage.example/object", ExpiresAt: time.Now().Add(time.Minute)}, []byte("hello")); err != nil {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestNativeLogUploaderRecoversLostPutResponseBeforeCommit(t *testing.T) {
+	subject := blob.LogSubject{Kind: blob.LogOwnerUnit, Team: "team", RunID: "run", Unit: &blob.LogUnit{Kind: "plan", Generation: 1}}
+	storage := &fakeLogStore{t: t, subject: subject, objects: map[string][]byte{}, committed: map[int64]bool{}}
+	lost := false
+	transport := testEngine(t, func(request *http.Request) (*http.Response, error) {
+		response, err := storage.handle(request)
+		if request.Method == http.MethodPut && !lost {
+			lost = true
+			if response != nil {
+				_ = response.Body.Close()
+			}
+			return nil, io.EOF
+		}
+		return response, err
+	})
+	uploader := &nativeLogUploader{transport: transport, subject: subject, pattern: "/api/v1/claims/{claim}", path: "/api/v1/claims/plan"}
+	body := []byte("hello")
+	if err := uploader.PutSegment(t.Context(), logSegment(1, body), body); err != nil {
+		t.Fatal(err)
+	}
+	if !lost || storage.puts != 1 || storage.refused != 1 || storage.commits != 1 || len(uploader.segments) != 1 {
+		t.Fatalf("lost=%v puts=%d replays=%d commits=%d", lost, storage.puts, storage.refused, storage.commits)
+	}
 }

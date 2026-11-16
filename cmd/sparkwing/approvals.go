@@ -9,6 +9,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -68,7 +70,7 @@ func writeApprovals(ctx context.Context, review controllerwire.RunReview, inv cl
 	}
 	if format == "plain" {
 		for _, approval := range result.Approvals {
-			if _, err := fmt.Fprintf(out, "%s/%s\n", approval.RunID, approval.JobID); err != nil {
+			if _, err := fmt.Fprintf(out, "%s/%s\n", opsview.DisplayText(approval.RunID), opsview.DisplayText(approval.JobID)); err != nil {
 				return err
 			}
 		}
@@ -77,7 +79,7 @@ func writeApprovals(ctx context.Context, review controllerwire.RunReview, inv cl
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "RUN\tJOB\tSTATUS\tREQUESTED\tPOLICY\tAPPROVER\tCOMMENT\tMESSAGE")
 	for _, approval := range result.Approvals {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", approval.RunID, approval.JobID, approvalStatus(approval), approval.RequestedAt.Format(time.RFC3339), orDashApproval(approval.OnTimeout), orDashApproval(approval.Approver), orDashApproval(truncateOneLine(approval.Comment, 40)), truncateOneLine(approval.Message, 60))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", opsview.DisplayText(approval.RunID), opsview.DisplayText(approval.JobID), opsview.DisplayText(approvalStatus(approval)), approval.RequestedAt.Format(time.RFC3339), opsview.DisplayText(orDashApproval(approval.OnTimeout)), opsview.DisplayText(orDashApproval(approval.Approver)), orDashApproval(opsview.DisplayText(approval.Comment, 40)), opsview.DisplayText(approval.Message, 60))
 	}
 	return tw.Flush()
 }
@@ -95,10 +97,10 @@ func writeApprovalDecision(ctx context.Context, review controllerwire.RunReview,
 		return json.NewEncoder(out).Encode(result)
 	}
 	if format == "plain" {
-		_, err = fmt.Fprintf(out, "%s/%s\n", result.Approval.RunID, result.Approval.JobID)
+		_, err = fmt.Fprintf(out, "%s/%s\n", opsview.DisplayText(result.Approval.RunID), opsview.DisplayText(result.Approval.JobID))
 		return err
 	}
-	_, err = fmt.Fprintf(out, "%s %s/%s by %s\n", result.Approval.Resolution, result.Approval.RunID, result.Approval.JobID, result.Approval.Approver)
+	_, err = fmt.Fprintf(out, "%s %s/%s by %s\n", opsview.DisplayText(result.Approval.Resolution), opsview.DisplayText(result.Approval.RunID), opsview.DisplayText(result.Approval.JobID), opsview.DisplayText(result.Approval.Approver))
 	return err
 }
 

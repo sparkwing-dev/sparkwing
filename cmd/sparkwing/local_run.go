@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -26,6 +28,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/toolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
@@ -95,6 +98,11 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 				return resolveLocalServicesAt(ctx, home)
 			})
 			return err
+		},
+		runner: func(ctx context.Context) (*apierr.Error, error) {
+			return localRunnerUnavailable(ctx, func(ctx context.Context) (wingd.LocalStatus, error) {
+				return wingdclient.QueryLocalController(ctx, home)
+			})
 		},
 		close: func() error {
 			// bug: unused client dials must close before the standalone API drains.
@@ -266,12 +274,12 @@ func prepareNativeLocalRun(ctx context.Context, home, directory, pipeline string
 			if err := context.Cause(ctx); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintln(os.Stderr, frame.Message)
+			_, err := fmt.Fprintln(os.Stderr, opsview.DisplayText(frame.Message))
 			return err
 		},
 	}
 	prepared, err := planner.Inspect(ctx, nodehost.PlanningProcessInput{
-		Entry: entry, Entrypoint: identity.Entrypoint,
+		Entry: entry, Entrypoint: identity.Entrypoint, Listed: listedPipelines(selection.project),
 		Environment: seal, Args: map[string]string{}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 		Run: nodewire.RunContext{RunID: rand.Text(), Pipeline: pipeline},
 	})

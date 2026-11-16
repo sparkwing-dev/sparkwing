@@ -143,6 +143,24 @@ func TestLandMergesMainThatMovedCleanlyAndRechecksOnlyTheMergeDelta(t *testing.T
 	}
 }
 
+func TestLandRecheckedMergeDoesNotRepeatThePushHook(t *testing.T) {
+	r := newLandRemote(t)
+	head := r.head()
+	r.moveMain(map[string]string{"b/b.txt": "b1\nb2\n"})
+	hook := filepath.Join(r.dev, ".git", "hooks", "pre-push")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho 'duplicate push tests' >&2\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var recheck recordingRecheck
+	landed, err := landOnto(newTestContext(t), r.dev, head, recheck.run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if landed.Merges != 1 || len(recheck.calls) != 1 || r.remoteMain() != landed.Commit {
+		t.Fatalf("landed %+v with rechecks %v; want the checked merge pushed once", landed, recheck.calls)
+	}
+}
+
 func TestLandMergeConflictFailsWithTheMergeToRunByHand(t *testing.T) {
 	r := newLandRemote(t)
 	head := r.head()

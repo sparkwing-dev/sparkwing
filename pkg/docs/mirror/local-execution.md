@@ -176,7 +176,11 @@ sparkwing doctor -o json
 ```
 
 Daemon status, stop and restart use the shared local lifecycle. JSON reports
-`state`, `version`, `pid`, `installed` and the four activity counts.
+`state`, `version`, `pid`, `installed` and the four activity counts. `state` is
+`running`, `stopping` while a stop waits for its runner, or `stopped`. A running
+controller also reports `runner`: `starting` until its first runner check, then
+`running` or `unavailable`. An unavailable runner adds `runner_error` and
+`runner_hint`, and pretty output prints them on its `runner:` line.
 They report the dashboard apart from the controller: `dashboard` is `serving`
 or `not_serving`, and while it serves, `url` is its address. Pretty output
 prints a `dashboard:` line either way. Every shared controller serves the
@@ -187,10 +191,18 @@ sign-in link. When the address is taken, the controller keeps admitting runs
 without a dashboard, and status reports the bind error as `dashboard_error`; it
 never moves to another port. `sparkwing daemon stop` stops the controller and
 its dashboard together and retires the local runner: the runner stops claiming
-work. If the runner remains alive when the stop wait ends, the command exits
-nonzero and reports incomplete shutdown. Run `sparkwing dashboard open` to let
-held work finish, then retry `sparkwing daemon stop`. `sparkwing daemon restart`
-leaves the runner and its jobs running.
+work. If the runner still holds jobs when the stop wait ends, the command exits
+nonzero and names the runner. The controller keeps accepting that runner's
+results and exits on its own once the runner does. Until then, commands that
+need the controller, `sparkwing runs cancel` included, wait briefly and fail
+with "the local controller is still stopping". To abandon the held work, kill
+the runner by the command the stop prints: on a systemd host,
+`systemctl --user kill --signal=SIGKILL` on its exact unit, because
+`systemctl --user stop` waits for the work. `sparkwing daemon restart`
+leaves the runner and its jobs running. A runner stop ignores only its own
+watch or drain cancellation; lifecycle failures remain errors, including when
+they occur alongside cancellation. Other cancellations remain errors, even if
+they are returned after the owner stops.
 Stop and restart also report `stopped`, `restarted` and `previous_version`.
 Plain output is the resulting state. Store and API diagnostics come from doctor.
 Doctor also sweeps stray step sessions through the controller. A successful
@@ -224,9 +236,22 @@ separate `SPARKWING_HOME`.
 The controller remains running while idle. `sparkwing daemon stop` stops it.
 Linux and macOS support an installed login service through `daemon install`.
 The service retains the installing caller's home, config and secrets-key file
-paths. Use `SPARKWING_SECRETS_KEY_FILE` for a service. Installation refuses
+paths. Every generated systemd or launchd definition pins
+`SPARKWING_SECRETS_KEY_FILE`, including definitions upgraded by a machine
+update. Installation refuses
 `SPARKWING_SECRETS_KEY` and `SPARKWING_SECRETS_PREVIOUS_KEY` values because native
 service definitions are not secret stores. Reinstall after changing those paths.
+A new home creates `$SPARKWING_HOME/secrets.key` on its first seal, including
+controller startup, with mode `0600`. Separate homes create separate keys.
+An explicit `SPARKWING_SECRETS_KEY_FILE` still selects that file. An existing
+`~/.sparkwing` home's existing config-directory key wins over a home-local
+key when no selector is set. A redirected home never falls back to that config key. If an older
+redirected home used it, set `SPARKWING_SECRETS_KEY_FILE` to its existing file
+before restarting. A wrong or missing key names the selected file and this
+override. A malformed sealed value fails without a key repair.
+Preserve the key with the home's backups. A home holding sealed data without
+its key refuses to replace it.
+
 Windows supports the foreground controller. Machine updates refresh managed
 controller and schedule units together. See [local dashboard](native-mode.md).
 
@@ -236,7 +261,9 @@ build. A runner roll starts a successor and stops new claims on the old instance
 The old runner keeps its held jobs, uploads and terminal acknowledgements until
 they finish. A healthy drain has no kill deadline. Controller replacement does
 not cancel these runner processes. Existing execution leases still apply during
-an outage.
+an outage. The local runner polls its controller for work every 500 ms, idle or
+not, so a new run starts within half a second of intake. Unlike shared
+controllers, the local controller never advises an idle runner to poll less often.
 
 A systemd-booted Linux host requires a working user manager. Each runner has its
 own systemd user service and cgroup, separate from the controller. A Linux host
@@ -246,8 +273,21 @@ SSH-only account with no GUI login, the user domain. Windows uses an embedded
 runner loop and does not have this process separation.
 
 A runner that cannot start does not stop the controller. Runs the CLI hosts,
-including `--sw-allow-unadmitted`, keep working. Queued jobs wait, and the
-controller log reports the cause while it retries with backoff of up to a minute.
+including `--sw-allow-unadmitted`, keep working. The controller retries with
+backoff of up to a minute and logs each attempt. While no runner can start,
+`sparkwing run` refuses new runs with the cause and a fix instead of queueing
+them, `sparkwing daemon status` prints the cause on its `runner:` line, and
+`sparkwing doctor` reports a `local_runner_unavailable` finding. Jobs already
+queued wait for a runner.
+
+On a systemd host the runner and, when sparkwing itself runs inside a systemd
+service (`INVOCATION_ID` is set), the controller's own scope need a reachable
+user manager. Without one, commands say so and name the fix: check
+`systemctl --user status` from a login session, or run
+`loginctl enable-linger $USER` once for SSH and service sessions. A controller
+keeps the environment it started with, so after the fix run
+`sparkwing daemon stop` from the repaired session; the next command starts a
+controller that can reach the manager.
 
 Installation drains and joins the existing owner before activating the managed
 service, then waits for the successor to acquire the same home and become ready.

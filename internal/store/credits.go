@@ -85,6 +85,7 @@ func (e *InsufficientCreditsError) Unwrap() error { return ErrInsufficientCredit
 
 // safety: the rate is one price the operator sets for the whole controller, so it stays in the deployment's
 // bag; a per-team rate is a discount the product does not sell.
+// #nosec G101 -- This is a metadata key for a credit rate, not a credential.
 const metaKeyCreditRateMicro = "credit_rate_micro_per_second"
 
 // CreditHistoryMaxLimit is the most rows of each kind one history read returns.

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -65,7 +67,7 @@ func manageBilling(ctx context.Context, inv clisurface.Invocation, manager contr
 			_, err = fmt.Fprintln(out, made.ID)
 			return err
 		}
-		_, err = fmt.Fprintf(out, "Sent your request for %s standing, higher limits or larger payments (%s). An operator will review your message; check with sparkwing billing standing.\n", made.Tier, made.ID)
+		_, err = fmt.Fprintf(out, "Sent your request for %s standing, higher limits or larger payments (%s). An operator will review your message; check with sparkwing billing standing.\n", opsview.DisplayText(made.Tier), opsview.DisplayText(made.ID))
 		return err
 	case "sparkwing billing refill":
 		return manageRefill(ctx, inv, manager, out, format)
@@ -81,13 +83,13 @@ func writeStanding(out io.Writer, format string, s controllerwire.TeamStanding) 
 		_, err := fmt.Fprintln(out, s.Tier)
 		return err
 	}
-	if _, err := fmt.Fprintf(out, "Standing: %s\nHistory tier: %s\nPrepaid funds can reach: %s\n", s.Tier, s.History.Tier, s.PrepayCeiling); err != nil {
+	if _, err := fmt.Fprintf(out, "Standing: %s\nHistory tier: %s\nPrepaid funds can reach: %s\n", opsview.DisplayText(s.Tier), opsview.DisplayText(s.History.Tier), opsview.DisplayText(s.PrepayCeiling)); err != nil {
 		return err
 	}
 	if r := s.Request; r != nil {
-		line := fmt.Sprintf("Request: %s %s, sent %s", r.Tier, r.State, time.Unix(r.RequestedAt, 0).UTC().Format(time.RFC3339))
+		line := fmt.Sprintf("Request: %s %s, sent %s", opsview.DisplayText(r.Tier), opsview.DisplayText(r.State), time.Unix(r.RequestedAt, 0).UTC().Format(time.RFC3339))
 		if r.DecisionReason != "" {
-			line += " (" + r.DecisionReason + ")"
+			line += " (" + opsview.DisplayText(r.DecisionReason) + ")"
 		}
 		if _, err := fmt.Fprintln(out, line); err != nil {
 			return err
@@ -202,14 +204,14 @@ func writeRefill(out io.Writer, format string, r controllerwire.TeamRefill) erro
 	if r.FailedAt > 0 {
 		fmt.Fprintf(&b, "The last refill failed at %s", time.Unix(r.FailedAt, 0).UTC().Format(time.RFC3339))
 		if r.Failure != "" {
-			fmt.Fprintf(&b, " (%s)", r.Failure)
+			fmt.Fprintf(&b, " (%s)", opsview.DisplayText(r.Failure))
 		}
 		b.WriteString(". Update your card on the billing page, then add funds to start refills again.\n")
 	}
 	if r.Enabled && r.Limit != "" {
 		name := refillLimitNames[r.Limit]
 		if name == "" {
-			name = r.Limit
+			name = opsview.DisplayText(r.Limit)
 		}
 		fmt.Fprintf(&b, "The next refill is stopped by %s; Cloud work stops when the credits run out.\n", name)
 	}

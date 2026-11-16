@@ -116,7 +116,7 @@ func (c *LocalHostClient) live() error {
 }
 
 func (c *LocalHostClient) readState(ctx context.Context, suffix, node string, result any) error {
-	return retryHeldRead(ctx, func() error { return c.request(ctx, "GET", suffix, node, nil, result) })
+	return retryHeldRequest(ctx, func() error { return c.request(ctx, "GET", suffix, node, nil, result) })
 }
 
 // ReadSnapshot reads the private execution snapshot under the current owner fence.
@@ -198,7 +198,9 @@ func (c *LocalHostClient) FinishRunAndUnit(ctx context.Context, finish runstate.
 		return result, localHostClientRefusal()
 	}
 	body := localhostwire.LocalRunCompletion{Cause: change.Cause, Reason: change.Reason, MaskedError: change.MaskedError}
-	err := c.request(ctx, "POST", "/finish", "", body, &result)
+	err := retryHeldRequest(ctx, func() error {
+		return c.request(ctx, "POST", "/finish", "", body, &result)
+	})
 	return result, err
 }
 
@@ -226,7 +228,7 @@ func (c *LocalHostClient) TransitionNode(ctx context.Context, ref runspec.NodeRe
 // ReadAuthentication refreshes only authority within the host's awarded run.
 func (c *LocalHostClient) ReadAuthentication(ctx context.Context, lookup capability.CredentialLookup, evidence capability.RequestEvidence) (capability.AuthenticationSnapshot, error) {
 	var response localhostwire.LocalAuthentication
-	err := retryHeldRead(ctx, func() error {
+	err := retryHeldRequest(ctx, func() error {
 		return c.request(ctx, "POST", "/authentication", "", localhostwire.LocalAuthenticationRequest{Lookup: lookup, Evidence: evidence}, &response)
 	})
 	if err != nil {
@@ -244,7 +246,7 @@ func (c *LocalHostClient) ReadAuthentication(ctx context.Context, lookup capabil
 // CheckBinding asks the controller to resolve authority before checking persisted relations.
 func (c *LocalHostClient) CheckBinding(ctx context.Context, principal capability.Principal, rule capability.BindingRule, target capability.Target) error {
 	var result localhostwire.LocalBindingChecked
-	err := retryHeldRead(ctx, func() error {
+	err := retryHeldRequest(ctx, func() error {
 		return c.request(ctx, "POST", "/binding", "", localhostwire.LocalBindingRequest{Authority: principal.Authority, Rule: rule, Target: target}, &result)
 	})
 	if err != nil {

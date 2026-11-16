@@ -581,13 +581,13 @@ func TestLoopPollsThroughControllerRestarts(t *testing.T) {
 			}),
 			Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { hosted++; return nil }),
 		}
-		if err := loop.Run(t.Context()); err != nil || calls != 8 || hosted != 1 || time.Since(start) != 7*time.Second {
+		if err := loop.Run(t.Context()); err != nil || calls != 8 || hosted != 1 || (time.Since(start) < 7700*time.Millisecond || time.Since(start) > 8400*time.Millisecond) {
 			t.Fatalf("claims = %d, hosted = %d, elapsed = %s, error = %v", calls, hosted, time.Since(start), err)
 		}
 	})
 }
 
-func TestLoopBoundsControllerTransportRecovery(t *testing.T) {
+func TestLoopControllerTransportRecoveryHonorsCallerCancellation(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := 0
 		start := time.Now()
@@ -600,7 +600,9 @@ func TestLoopBoundsControllerTransportRecovery(t *testing.T) {
 			}),
 			Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { t.Error("unexpected work"); return nil }),
 		}
-		if err := loop.Run(t.Context()); !errors.Is(err, io.ErrUnexpectedEOF) || calls != 6 || time.Since(start) != 5*time.Second {
+		ctx, cancel := context.WithTimeout(t.Context(), 12*time.Minute)
+		defer cancel()
+		if err := loop.Run(ctx); !errors.Is(err, context.DeadlineExceeded) || (calls < 100 || calls > 400) || time.Since(start) != 12*time.Minute {
 			t.Fatalf("claims = %d, elapsed = %s, error = %v", calls, time.Since(start), err)
 		}
 	})
@@ -643,7 +645,7 @@ func TestLoopControllerRestartKeepsHeldHostAliveThroughDrain(t *testing.T) {
 		default:
 		}
 		close(release)
-		if err := <-joined; err != nil || calls != 5 || time.Since(start) != 3*time.Second {
+		if err := <-joined; err != nil || calls != 5 || (time.Since(start) < 3350*time.Millisecond || time.Since(start) > 3700*time.Millisecond) {
 			t.Fatalf("claims = %d, elapsed = %s, error = %v", calls, time.Since(start), err)
 		}
 	})
@@ -1285,6 +1287,7 @@ func TestLoopReportsStoppedClaimsBeforeHeldHostJoins(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		started, stopped, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
 		calls := 0
+		failure := errors.New("non-retryable claim refusal")
 		loop := &Loop{
 			Config:          LoopConfig{Version: "v1.0.0", MaxConcurrent: 2, PollInterval: time.Second},
 			CheckVersion:    func(context.Context, string) error { return nil },
@@ -1294,13 +1297,13 @@ func TestLoopReportsStoppedClaimsBeforeHeldHostJoins(t *testing.T) {
 				if calls == 1 {
 					return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "secret"}}, nil
 				}
-				return controllerwire.ClaimResponse{}, io.ErrUnexpectedEOF
+				return controllerwire.ClaimResponse{}, failure
 			}),
 			Host: hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error {
 				close(started)
 				<-release
 				if ctx.Err() != nil {
-					t.Errorf("claim transport exit cancelled held work: %v", ctx.Err())
+					t.Errorf("claim refusal cancelled held work: %v", ctx.Err())
 				}
 				return nil
 			}),
@@ -1315,8 +1318,8 @@ func TestLoopReportsStoppedClaimsBeforeHeldHostJoins(t *testing.T) {
 		default:
 		}
 		close(release)
-		if err := <-joined; !errors.Is(err, io.ErrUnexpectedEOF) {
-			t.Fatalf("claim transport outcome: %v", err)
+		if err := <-joined; !errors.Is(err, failure) {
+			t.Fatalf("claim refusal outcome: %v", err)
 		}
 	})
 }
@@ -1400,4 +1403,118 @@ func TestLoopAwaitResumeWaitsForRunnerSlot(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestLoopBoundsQueuedFanoutAndKeepsChildPlanningLive(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const capacity, fanout = 2, 20
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		claimed := 0
+		planned := false
+		childAwarded := false
+		var suspended, returned atomic.Int64
+		maximum := 0
+		group := make(chan struct{}, 1)
+		group <- struct{}{}
+		loop := &Loop{
+			Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: capacity, MaxClaims: fanout + 1, Kinds: []capability.UnitKind{capability.UnitNode, capability.UnitPlan}},
+			CheckVersion: func(context.Context, string) error { return nil },
+			Controller: claimFunc(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				kind, id := capability.UnitPlan, "awaited-child"
+				if slices.Contains(request.Kinds, capability.UnitNode) && claimed < fanout {
+					claimed++
+					kind, id = capability.UnitNode, fmt.Sprintf("queued-%d", claimed)
+				} else if childAwarded {
+					return controllerwire.ClaimResponse{}, nil
+				} else {
+					childAwarded = true
+				}
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: kind, UnitID: id, RunID: id, JobID: "capacity-one-group", Capability: "private"}}, nil
+			}),
+			Host: hostFunc(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+				if unit.Unit == capability.UnitPlan {
+					planned = true
+					maximum = int(suspended.Load())
+					cancel()
+					return nil
+				}
+				resume, stop := nodehost.AdmissionWait(ctx)
+				if resume == nil {
+					returned.Add(1)
+					return nil
+				}
+				suspended.Add(1)
+				defer func() { suspended.Add(-1); stop() }()
+				select {
+				case group <- struct{}{}:
+					resume(ctx)
+					<-group
+				case <-ctx.Done():
+				}
+				return nil
+			}),
+		}
+		if err := loop.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		if maximum > capacity || returned.Load() == 0 || !planned {
+			t.Fatalf("admission races escaped the waiter bound: maximum=%d cap=%d returned=%d child planned=%t", maximum, capacity, returned.Load(), planned)
+		}
+	})
+}
+
+func TestLoopQueuedCapStillRunsAnAwaitedChildJob(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+		defer cancel()
+		var planned atomic.Bool
+		var childRan bool
+		queued := 0
+		planAwarded, childAwarded := false, false
+		loop := &Loop{
+			Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 2, Kinds: []capability.UnitKind{capability.UnitNode, capability.UnitPlan}},
+			CheckVersion: func(context.Context, string) error { return nil },
+			Controller: claimFunc(func(_ context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				kind, id := capability.UnitPlan, "child-plan"
+				if planned.Load() {
+					if childAwarded || !slices.Contains(request.Kinds, capability.UnitNode) {
+						return controllerwire.ClaimResponse{}, nil
+					}
+					childAwarded = true
+					kind, id = capability.UnitNode, "child-stamp"
+				} else if slices.Contains(request.Kinds, capability.UnitNode) && queued < 2 {
+					queued++
+					kind, id = capability.UnitNode, fmt.Sprintf("queued-%d", queued)
+				} else if planAwarded {
+					return controllerwire.ClaimResponse{}, nil
+				} else {
+					planAwarded = true
+				}
+				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: kind, UnitID: id, RunID: id, JobID: "job", Capability: "private"}}, nil
+			}),
+			Host: hostFunc(func(ctx context.Context, unit controllerwire.ClaimedUnit) error {
+				switch unit.UnitID {
+				case "child-plan":
+					planned.Store(true)
+					return nil
+				case "child-stamp":
+					childRan = true
+					cancel()
+					return nil
+				default:
+					_, stop := nodehost.AdmissionWait(ctx)
+					defer stop()
+					<-ctx.Done()
+					return nil
+				}
+			}),
+		}
+		if err := loop.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+		if !planned.Load() || !childRan {
+			t.Fatalf("admission cap starved awaited child execution: planned=%t child ran=%t queued=%d", planned.Load(), childRan, queued)
+		}
+	})
 }

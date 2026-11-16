@@ -20,6 +20,496 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.72.8] - 2026-11-13
+
+### Added
+
+- **orchestrator:** Record lease keeper timing in structured run logs
+  OWNER and NODE traces expose renewal timing, effective expiry and watcher resets
+  through existing run-log permissions. Human log views hide these best-effort
+  diagnostics; JSON retains them and identifies dropped records. Diagnostic bytes
+  share real-output cuts or the final seal instead of starting upload timers.
+
+### Fixed
+
+- **runner:** Prevent intermittent pipeline failures when a job finishes during a state refresh
+
+
+- **runner + test harness:** Fail attempts when command-session cleanup fails
+  The host retains session-capture and cancellation cleanup failures through
+  Close, even if an SDK step returns success. Command results keep the observed
+  exit code, signal and output using the existing published SDK fields.
+  Test hosts also preserve completed command results when their adapter fails.
+  `start_error` stays reserved for commands that never started. Already-gone
+  sessions remain successful. The queued-land cancellation fixture accepts Linux
+  terminal states Z, X and x, retains its live-process assertion and reports
+  process birth, group, session and step-error diagnostics on failure.
+
+
+- **cli:** Completion hints and documentation listings keep complete UTF-8 characters
+  Long pipeline hints, documentation titles and documentation or migration summaries
+  use the shared terminal-safe display limits. JSON retains the full source fields.
+
+
+- **Example pipeline:** Allow two minutes for the simulated deploy job and its controller reporting acknowledgements
+  The previous 30-second job deadline could expire while an annotation was awaiting acknowledgement on a loaded host. Apply and rollout still wait for their reports to finish, and a stalled job remains bounded.
+
+
+- **runner:** Report stopped claim intake while held work drains
+  Fatal claim failures immediately degrade runner readiness and log an error,
+  with periodic warnings and the remaining held-unit count. Valid held work
+  keeps running and the runner exits after it finishes.
+
+
+- **delivery:** Check root release builds against the published Go SDK before landing
+  Full and affected gates, pre-push and merge rechecks compile the CLI, controller
+  and runner against the published pin without the workspace or an SDK replacement.
+  Per-land checks cover the host plus linux/arm64, sharing their compiler allowance.
+  Full Gate and nightly checks cover all six release OS/architecture targets. Package-owned Markdown inputs also select this check,
+  including deletions. Local SDK APIs can no
+  longer hide an unpublished dependency. Publish the standalone SDK change and
+  bump the root pin before using its new API.
+
+
+- **release:** Reuse the shared per-package deadline for broad short tests
+  Local release cuts use the same bounded 25-minute package policy as the land
+  gate, rather than Go's ten-minute default. Existing concurrency and the
+  release job deadline remain unchanged.
+
+
+- **land:** Keep reviewer prompts valid UTF-8 without hiding text changes
+  Text-like patches escape invalid bytes and literal backslashes with a decoding
+  rule. Binary summaries identify unreviewed content, exact blobs, modes, sizes
+  and SHA-256 hashes, with safe inspection commands and an inspection requirement
+  before approval. Binary summaries block independently of model output and
+  cached verdicts. Only non-strict, non-executable files without a shebang and
+  with a known asset extension remain summary-only: png, jpg, jpeg, gif, webp,
+  ico, svgz, woff, woff2, ttf, otf, pdf, zip, gz and tgz. There is no override for
+  that block; `--skip` refuses it. Raw Git filenames, including colons, match
+  strict routes literally. Finding locations bind to the longest changed filename
+  before numeric line/column parsing, preserving filenames with numeric colons.
+  Open findings with unmatched or malformed locations block and cannot be skipped,
+  including cached verdicts. Strict review includes both endpoints of renames and copies from a NUL-delimited name-status inventory,
+  preserving raw filenames. Strict profile selection happens in Go from one
+  complete patch: raw filename bytes never cross JSON command arguments. A
+  changed file with no rendered patch blocks independently of model output or
+  cached verdicts, including ordinary assets; `--skip` cannot clear that block.
+  Restored coverage must reach the reviewers before an earlier pass can be reused.
+  Repository diff attributes cannot suppress readable text changes. Ordinary UTF-8
+  text hunks keep their bytes, and truncation respects character boundaries.
+
+
+- **CLI:** Preserve UTF-8 rune boundaries in Spark resolver-error summaries
+  Pretty output applies the shared display limit before a multibyte character can be split. JSON keeps the full original error.
+
+
+- **runner:** Retire the standalone local runner before closing its controller
+  Standalone runs no longer leave a supervised runner waiting on a controller that has already exited.
+  Stop retries against the same controller keep waiting for the retiring process after it enters draining.
+
+
+- **tests:** Ordinary test runs keep native user service managers untouched
+  Workflow fixtures use a test-only unmanaged runner backend. Managed-service
+  qualification requires an explicit opt-in in a quiet window.
+
+
+- **sdk:** Republish the TypeScript SDK as 0.72.4 after the release input set changed
+  Existing signed entries keep their recorded digests. New TypeScript pipelines
+  pin 0.72.4.
+
+
+- **release:** Keep unit-only TypeScript SDK edits out of release decisions
+  Hosted and pre-tag checks include tracked SDK inputs by default, including new
+  paths and automatically packed files such as LICENSE. Known unit tests,
+  examples and unpublished notes
+  no longer force SDK version bumps. The entire nativehost fixture tree remains
+  included because Windows publication runs it and records it in receipts.
+  Adopting the narrower input set changes existing digests and needs a new SDK
+  version once. Recoveries of pre-change entries also refuse the new hash;
+  published policy entries are unchanged.
+
+### Security
+
+- **delivery:** Bind queued landing checks to the merged owner tree
+  Policy, fast checks, review and affected tests run on the merged owner
+  checkout and record their checked tree. Verification and push refuse missing,
+  failed or mismatched check receipts, so a passing pre-merge snapshot cannot
+  authorize a different tree. Queued review uses its pinned main SHA and owner
+  checkout instead of relying on a worker clone's remote-tracking refs.
+  Standalone review also requires a matching base before reusing a cached verdict.
+
+## [v0.72.7] - 2026-11-12
+
+### Changed
+
+- **tests:** Reuse initialized PostgreSQL templates for ready-store fixtures
+  Each fixture keeps its own database and teardown. Empty targets still exercise
+  fresh schema creation and migrations, and restricted roles retain the existing
+  schema path. Test selection, iterations and seeds stay unchanged.
+
+
+- **tests:** Identity fixtures reuse released RSA keys from a process-local pool
+  Keys are generated at runtime only when none are free. Live fixtures keep
+  distinct keys, and cleanup closes each issuer before releasing its key.
+
+
+- **sdk:** Republish the TypeScript SDK as 0.72.3 because its native verification inputs changed. New TypeScript pipelines pin 0.72.3.
+
+
+- **ci:** Compile the TypeScript native test SDK once per test process
+
+### Fixed
+
+- **runner:** Keep claim recovery live through controller rollouts and longer outages
+  Fresh claims retain capped backoff and cap Retry-After advice at five minutes
+  per response while held work
+  keeps its execution context and existing lease limits. Sustained ten-minute
+  outages warn and make the optional readiness endpoint report degraded until
+  recovery, including a successful claim accepted during shutdown.
+  Terminal run acknowledgements also wait through temporary outages within
+  their existing award context, including preparation-failure acknowledgements.
+
+### Docs
+
+- **migration:** Fix the authentication and HTTPS links in the v0.72.3 migration guide.
+
+## [v0.72.6] - 2026-11-12
+
+### Changed
+
+- **ci:** Use the store's NORMAL SQLite synchronization policy for fixture SQL connections
+
+
+- **store (Breaking):** The schema baseline advances to version 38 to persist initial group waits. Schema 37 stores upgrade automatically. Older binaries refuse the upgraded store. See the [migration guide](docs/migrations/v0.72.6.md#upgrade-the-store-in-place-to-schema-baseline-38)
+
+
+- **ci:** Keep Go SDK installation fixtures independent of unrelated host tool directories
+
+
+- **tests:** Reuse the current SQLite schema for new storage acceptance fixtures
+  Depcache cases keep their independent databases, generated inputs and close/reopen persistence checks.
+
+
+- **ci:** Reuse build objects across uploaded fixture checkouts
+  The offline Kubernetes fixture guard trims source paths and executes its proof tests on every invocation.
+
+### Fixed
+
+- **local runtime:** Keep lifecycle failures during runner shutdown
+  Local runner watch and drain cleanup preserve genuine failures alongside
+  cancellation. Only cancellation caused by the cleanup owner's stop
+  is clean; other cancellations remain errors when returned after shutdown.
+
+
+- **services:** Run generated runner, controller and schedule units from their state home
+  Existing managed definitions gain the working directory during refresh while
+  retaining captured configuration and schedule cadence. Running processes keep
+  their current directory; loaded launchd registrations also need a reload.
+
+
+- **release:** Release previews now verify the published SDK policy and reject changed TypeScript SDK source under an existing version before creating a tag. Cuts that reuse exact-source CI run the same check.
+
+
+- **runner:** Jobs in full concurrency groups stay unclaimed so awaited child pipelines can run; admission races use bounded waits and backed-off polling
+- **runner:** Self-hosted evaluators can acquire the sealed pipeline source after a generator's source job finishes
+- **controller:** Group queue timeouts include unclaimed waiting and survive controller restarts without changing queue arrival order
+- **controller:** Claim searches skip full groups together so large fan-outs do not delay runnable child jobs
+
+
+- **runner:** Report a clean operator stop as a successful exit
+  After SIGTERM or interrupt, `start` and `warm` exit 0 when only cancellation
+  errors remain, including during DNS, credentials, bundle transfers and SDK
+  setup. Cancellation without a shutdown signal, and genuine runtime or cleanup
+  failures, including a child killed externally before cancellation, still exit 1.
+  Hosted failures are reported as they occur; shutdown keeps a bounded summary
+  with the first genuine failure and its count. Pending claim and acquisition
+  failures remain visible. Windows SDK and Git owners distinguish their own
+  termination from a prior external death or ordinary exit 1. Service drain deadlines are unchanged.
+
+
+- **runner:** Retry transient signed object uploads before failing jobs
+  Seekable blob, source snapshot and log uploads make at most three attempts,
+  reuse valid signing tickets and renew expired ones. Streaming readers get
+  one attempt, and a refused rewind never blocks the first upload. Errors retain the operation, host, failure class and attempt
+  count while redacting signed URLs.
+
+
+- **toolchain:** Preserve failures that precede shutdown
+  Compiler cancellation suppresses only a termination sent by its process owner.
+  External signals and nonzero exits keep their wait status, including through
+  the pipeline compiler. A supplied pipe-drain bound does not start a second
+  cancellation killer. Grace periods and drain deadlines are unchanged.
+
+
+- **cache:** Avoid repeated ancestor scans for missing compiler tools on PATH
+  Pipeline cache identity checks stat missing candidates once before resolving symlinks. Present tools keep the same resolved path, size and modification-time identity, including symlink chains beyond the native stat traversal limit.
+
+
+- **sdk:** Windows TypeScript SDK verification now compares protocol pipe objects, so reused handle numbers do not cause false leak failures. The SDK and new TypeScript scaffolds move to 0.72.2 because the verification inputs changed.
+
+### Docs
+
+- **delivery:** Include native runner composition tests in ordinary cluster gates
+
+## [v0.72.4] - 2026-11-12
+
+### Fixed
+
+- **sdk:** Republish the TypeScript SDK as `0.72.1` because its native bridges now build with Go 1.26.11
+  New TypeScript pipelines pin that SDK release.
+
+## [v0.72.3] - 2026-11-12
+
+### Changed
+
+- **Landing:** Run affected short modules together within one command allowance
+  Root receives the allowance left after one worker per other selected module.
+  Small allowances retain sequential modules. All short commands finish before
+  full critical tests, including after a short failure.
+
+
+- **ci:** Affected Go checks split selected root store short tests into concurrent shards
+  The three shards share the existing Go command allowance with other selected
+  root packages. Smaller allowances keep the unsplit command. Full critical tests
+  still run after the short commands finish, including when a shard fails.
+
+
+- **ci:** Run affected short and critical Go tests before local main pushes and queued landings
+  Local and hosted checks share the same dependency and file-reader selection.
+  The fast checks keep their one-minute warning budget, and affected tests have
+  a separate 45-minute execution deadline with package and test timings.
+
+
+- **ci:** Queued Land stops admitting packages after an affected-test failure
+  Packages already running finish and report their failures. The failed job
+  lists skipped short and critical packages and exact commands to rerun the
+  selected work. Module allocations are shared with collect-all execution,
+  and the three store shards are admitted together as one package. Pre-push
+  and Gate keep collecting all results.
+
+
+- **ci:** Queued Land starts known long affected-test packages earlier within each short-test lane
+  Other packages keep their order. Selection, lane widths, store-shard admission,
+  critical barriers and package-level fail-fast behavior remain unchanged.
+
+
+- **ci:** Reporting run fixtures insert routing and provenance facts without
+  rewriting earlier runs. History-search regression tests keep their full
+  datasets and paging assertions with less setup work.
+
+### Fixed
+
+- **cli:** Keep configuration and integrity refusals actionable in final errors
+  Missing-secret and local-key refusals retain their configuration class and
+  repair. Corrupt artifacts and compiled pipeline cache entries name the
+  affected item and recovery action. Unreadable inputs, a missing TypeScript
+  `main` field and invalid integers give a usable correction without exposing
+  secret argument values or signed URLs.
+
+
+- **cli:** Treat an occupied artifact download destination as invalid usage
+  The command exits 2 instead of the incomplete-observation exit 3, names the
+  occupied path and asks for a distinct `--dest`. Retrying the same destination
+  keeps refusing it.
+
+
+- **Cancellation:** Finish controller-owned runs as soon as cancellation leaves every job terminal, including jobs waiting for an unavailable runner label or run-group capacity.
+
+
+- **runtime:** Awaited child failures name the pipeline and source with repair advice instead of reporting a missing output blob
+
+
+- **secrets:** Let concurrent local key creators agree on the published key
+  A key appearing during a credential lookup no longer turns a missing-file observation into a fatal resolution error. Dangling credential links still fail closed.
+
+
+- **cli:** `daemon stop` waits for supervised Linux runners still starting after a controller reopen, and reports incomplete shutdown if their units remain at the stop bound
+
+
+- **engine:** Avoid a second executable-sized allocation when verifying cached releases
+  Verification hashes into an owned snapshot, preserving both release signatures and immutable installation bytes.
+
+
+- **cli:** Start local admission before submitting a remote `--runner here` trigger
+  A fresh home can host its first job without starting a daemon by hand. Startup
+  failures explain the repair before allocating a run, and resumed here runs
+  restore local admission before claiming work.
+
+
+- **runtime:** Initial secret-identifier plan refusals finish failed runs with the safe field diagnostic instead of waiting for an owner lease to expire
+
+
+- **launcher:** Wait from claim response completion and honor controller poll advice to prevent idle-poll rate-limit warnings under variable request latency
+  Retain advice across failed responses. Treat a wrapped first-claim rate limit as an INFO deferral while joined faults remain warnings.
+  Stop quietly on parent cancellation, including Job teardown, while preserving warnings for independent faults and gateway failures.
+
+
+- **Landing:** affected Go tests ignore submitting shell limits
+  The job reserves the shared host's command allowance and overrides process and saved Go build flags while preserving other saved Go configuration.
+
+
+- **cli + controller:** Explain recovery from a mismatched log cursor
+  The refusal now tells readers to remove the cursor to restart, or reuse a
+  returned cursor with the same run, job and filters.
+
+
+- **runtime:** Missing-secret refusals show the optional-secret declaration syntax for the pipeline's Go or TypeScript SDK
+
+
+- **CLI:** Run status shows missing-secret scopes and repair commands to team members, including shared-secret repairs for uploaded pipelines
+
+
+- **Pipeline plan:** Apply effective checkout requirements and reject unsupported Cloud sizes before previewing jobs
+
+
+- **runner:** Cancelling a run stops any claimed job, including an awaited child, without waiting for the work lease renewal
+  New run-cancel requests wake the controller reaper after commit; each cancelled child wakes another pass for deeper descendants. Claimed jobs observe cancellation by reading only their own claim row every 3 s. The three-minute lease and cleanup authority remain unchanged.
+
+
+- **delivery:** Refuse main pushes whose source commit differs from checked-out HEAD
+  Merge rechecks retain fast push contracts, qatrust vet and lint before running affected tests once.
+- **delivery:** Select main tests against Git's advertised remote commit
+  Main updates must fast-forward. Creating main runs every committed Go module's short tests and full critical set.
+- **delivery:** Include file type changes in affected-test selection
+  Main pushes, manual checks and merge rechecks retain every status Git reports.
+
+
+- **runner:** Cancelling a run during planning finishes it without waiting for its owner lease to expire
+  Cancellation before plan acceptance creates no jobs or concurrency waiter and leaves other runs' capacity intact.
+
+
+- **controller:** Report the retry source and retrier in retry responses
+  Fresh responses and idempotent replays now report the new run's invocation
+  lineage, matching run detail.
+
+
+- **cli + controller:** Include repair examples in run-list input refusals
+  Invalid or negative `--since` durations show `--since 1h`, and invalid
+  HTTP page limits show `limit=1`. Validation rules are unchanged.
+
+
+- **runner:** Keep fresh claims alive through temporary non-JSON gateway failures
+  during controller replacement, with bounded backoff, jitter and Retry-After
+  advice. Held work keeps running while claims recover. Authentication and
+  protocol failures still stop claims.
+
+
+- **cli:** Secret-save receipts report actual log-mask eligibility for short values
+
+
+- **cli + runner:** Name refused submitted-environment variables and explain the repair
+  Explicit reserved names in the submit allow-list now produce a CLI warning.
+  Controller and runner refusals retain the variable name and usable guidance
+  without exposing its value or widening environment permissions.
+
+
+- **controller:** Unclaimed-work notices suggest personal runner enrollment for unproven code and repository-scoped enrollment for repository-proven code
+  Status names the provenance refusal when a matching repository-scoped runner cannot claim unproven work.
+
+
+- **cli:** Unknown template names are refused before creating a `.sparkwing` tree
+
+
+- **runner:** Keep the Windows profile directory available while installing pipeline SDKs
+  Windows personal runners can plan uploaded pipelines without failing with `USERPROFILE` missing. The executing runner supplies the directory; pipeline requests cannot override it.
+
+### Removed
+
+- **controller (Breaking):** Remove `--insecure-cookies` and Helm `ingress.allowInsecure`
+  All dashboard cookies keep Secure and the `__Host-` prefix. The web client
+  reads only `__Host-sw_csrf`, matching session CLI enrollment. Secure prevents
+  session cookies crossing remote HTTP connections in clear text. Cookies still
+  have no port scope: another loopback service can receive `__Host-sw_session`
+  and read or plant `__Host-sw_csrf`. The Origin check and the CSRF token tied to
+  the session protect writes there. Do not run untrusted loopback services
+  alongside the dashboard. Browser login requires HTTPS or loopback.
+  Ingress rendering requires `ingress.tls`.
+  See [migration guide](docs/migrations/v0.72.3.md#secure-dashboard-cookies).
+
+### Security
+
+- **toolchain:** Build with Go 1.26.11 to fix GO-2026-6859
+  Source builds, hosted jobs and container builds select the patched compiler.
+  The module graph stays at Go 1.26.0 and the standalone SDK keeps its Go 1.25 floor.
+
+
+- **runtime:** Keep submitted environments from changing host profile and PowerShell module selectors
+
+
+- **controller:** Require the local API socket for publication exports containing private arguments
+  Dashboard sessions cannot read the export. Run owners keep their fenced execution snapshots.
+
+
+- **logs:** Mask individual lines of multi-line secrets and CR, LF and CRLF variants
+  Raw and trimmed lines of at least four Unicode code points receive the same encoded masks as full secrets. Whitespace-only lines are skipped.
+  Each eligible line from a run secret is masked anywhere in that run's logs. Common lines such as PEM BEGIN/END or `apiVersion: v1` show as `***` when they belong to a secret.
+
+- **host:** Explain when an identifier conflicts with a line of a multi-line secret
+  The error names the field without displaying the secret line or identifier.
+
+
+- **Pipeline plan:** Refuse effective runner labels containing registered secrets before preview output
+- **Runner labels:** Refuse registered secrets in checkout requirements, preferences and profiles, including overridden declarations, before accepting run or generated-job settings or copying a retry
+- **Profile routing:** Show a configuration placeholder instead of echoing an unchecked profile value in pre-intake pin refusals
+
+
+- **delivery:** Queue Land with main's pipeline definition against the candidate checkout
+  The trusted submission script pins fetched main and refuses changed registries
+  or a target that moves before execution. Pipeline edits still run their own
+  affected tests before landing. Queued pushes require an atomic lease on the
+  planned main SHA, prove fast-forward ancestry, and refuse no-op results.
+
+
+- **controller (Breaking):** Reject constant-byte bootstrap administrator seeds
+  Startup refuses the mounted weak file even on an initialized store, including
+  after its credential was revoked. Generating a random replacement only repairs
+  a fresh store. Existing installations must revoke or rotate any live weak
+  bootstrap credential and remove the mounted file before restarting.
+  See the [migration guide](docs/migrations/v0.72.3.md#random-bootstrap-administrator-seeds).
+
+
+- **cli:** Escape terminal controls and bidirectional formatting in displayed run, approval, annotation, log and pipeline text
+  Human-readable summaries truncate UTF-8 text at rune boundaries. JSON records
+  preserve their original values. Plain log streams keep their original text.
+
+
+- **cache + runner:** Bound gzip trailer verification after tar EOF
+  Dependency-cache and prepared-source restores reject more than 1 MiB of trailing
+  data while still verifying gzip checksums before publishing restored files.
+
+- **deployment:** Keep temporary-directory cleanup inside its opened root
+  Symlink swaps during stale-directory cleanup cannot change permissions outside
+  the directory being removed.
+
+
+- **auth:** Keep credential history out of public authentication refusals
+  Unknown and ended credentials return the same 401 envelope and refusal
+  headers. Detailed reasons stay in private server audit logs; CLI profile
+  replacement guidance remains available. Response timing is not guaranteed
+  uniform because ended credentials require additional lookups.
+
+### Docs
+
+- **artifacts:** Clarify byte-exact Unicode names and filesystem collisions
+  NFC and NFD spellings are distinct artifacts. Downloads refuse a destination found
+  to exist before publication; choose distinct `--dest` names when a filesystem treats the
+  spellings as one path. Pipeline staging replaces colliding destination paths.
+
+
+- **secrets:** Clarify the v0.68.0 stream-masking description
+  The v0.68.0 statement that "stdout and stderr are masked as one stream"
+  should read "stdout and stderr are masked independently". Masking matches
+  whole registered values and encoded spellings within each stream. Registered
+  values or encoded spellings split across consecutive writes to the same stream
+  are masked. Fragments split across streams, or separated by other text within
+  one stream, are not masked.
+
+- **secrets:** Document credential-owned team scope for secret API routes
+
+
+- **runs retry:** Document the missing agent reason refusal
+  The retry reference names exit 2, `bad_request` and the `--reason` repair hint.
+
 ## [v0.72.2] - 2026-11-10
 
 ### Fixed

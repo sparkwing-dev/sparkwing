@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -140,17 +142,17 @@ func renderDebugObservation(out io.Writer, value debugObservation, format string
 	if format == "json" {
 		return json.NewEncoder(out).Encode(value)
 	}
-	_, err := fmt.Fprintf(out, "run: %s\njob: %s\nstatus: %s\nattempt: %d\n", value.RunID, value.Job.ID, value.Job.Status, value.Job.Attempt)
+	_, err := fmt.Fprintf(out, "run: %s\njob: %s\nstatus: %s\nattempt: %d\n", opsview.DisplayText(value.RunID), opsview.DisplayText(value.Job.ID), opsview.DisplayText(value.Job.Status), value.Job.Attempt)
 	if err != nil {
 		return err
 	}
 	if value.Execution != nil {
-		if _, err := fmt.Fprintf(out, "runner: %s (%s)\n", value.Execution.Runner, value.Execution.Kind); err != nil {
+		if _, err := fmt.Fprintf(out, "runner: %s (%s)\n", opsview.DisplayText(value.Execution.Runner), opsview.DisplayText(value.Execution.Kind)); err != nil {
 			return err
 		}
 	}
 	if value.Job.StatusDetail != "" {
-		if _, err := fmt.Fprintf(out, "detail: %s\n", value.Job.StatusDetail); err != nil {
+		if _, err := fmt.Fprintf(out, "detail: %s\n", opsview.DisplayText(value.Job.StatusDetail)); err != nil {
 			return err
 		}
 	}
@@ -162,6 +164,6 @@ func renderDebugObservation(out io.Writer, value debugObservation, format string
 	if value.Pause.ExpiresAt != nil {
 		expires = value.Pause.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")
 	}
-	_, err = fmt.Fprintf(out, "paused: %s (reason=%s, expires=%s)\n", value.Pause.PausedAt.Format("2006-01-02T15:04:05Z07:00"), value.Pause.Reason, expires)
+	_, err = fmt.Fprintf(out, "paused: %s (reason=%s, expires=%s)\n", value.Pause.PausedAt.Format("2006-01-02T15:04:05Z07:00"), opsview.DisplayText(value.Pause.Reason), expires)
 	return err
 }

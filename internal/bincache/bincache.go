@@ -15,9 +15,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gotoolchain"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -69,6 +71,16 @@ type compileError struct {
 
 func (e *compileError) Error() string { return fmt.Sprintf("compile .sparkwing/: %v", e.Err) }
 func (e *compileError) Unwrap() error { return e.Err }
+
+// CompileOutput returns the compiler's output when err is a failed build of the
+// pipeline's own code, as opposed to a cache, toolchain or filesystem failure.
+func CompileOutput(err error) ([]byte, bool) {
+	var failure *compileError
+	if !errors.As(err, &failure) {
+		return nil, false
+	}
+	return failure.Output, true
+}
 
 type lockedBuffer struct {
 	mu  sync.Mutex
@@ -190,7 +202,7 @@ func compilePipeline(ctx context.Context, sparkwingDir, dest string, flags []str
 
 	if err := gotoolchain.Run(ctx, cmd); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return ctxErr
+			return err
 		}
 		if strings.Contains(captured.String(), "missing go.sum entry") {
 			return errMissingGoSum
@@ -600,6 +612,10 @@ func hashFilesInto(h io.Writer, dir string, files []string) (hashStats, error) {
 	wg.Wait()
 	for i, path := range files {
 		if errs[i] != nil {
+			if errors.Is(errs[i], fs.ErrPermission) {
+				refusal := &apierr.Error{Code: apierr.BadRequest, Message: fmt.Sprintf("cannot read pipeline cache input %q", path), Hint: "Restore read access for the current user, then repeat the command"}
+				return stats, fmt.Errorf("%w: %w", refusal, errs[i])
+			}
 			return stats, errs[i]
 		}
 		rel, _ := filepath.Rel(dir, path)
@@ -864,6 +880,10 @@ func buildEnvironmentKey(env []string) []byte {
 }
 
 func toolIdentity(env []string, tool string) string {
+	return toolIdentityWithFS(env, tool, os.Stat, filepath.EvalSymlinks)
+}
+
+func toolIdentityWithFS(env []string, tool string, stat func(string) (os.FileInfo, error), evalSymlinks func(string) (string, error)) string {
 	candidates := []string{tool}
 	if !filepath.IsAbs(tool) {
 		candidates = nil
@@ -880,11 +900,15 @@ func toolIdentity(env []string, tool string) string {
 		}
 	}
 	for _, candidate := range candidates {
-		resolved, err := filepath.EvalSymlinks(candidate)
+		// perf: resolving missing tools walks every ancestor, including slow mounted PATH entries.
+		if _, err := stat(candidate); errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			continue
+		}
+		resolved, err := evalSymlinks(candidate)
 		if err != nil {
 			continue
 		}
-		info, err := os.Stat(resolved)
+		info, err := stat(resolved)
 		if err != nil || info.IsDir() || runtime.GOOS != "windows" && info.Mode()&0o111 == 0 {
 			continue
 		}

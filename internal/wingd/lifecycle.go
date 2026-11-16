@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // LocalActivity counts live state, not historical runs or configured schedules.
@@ -69,6 +70,28 @@ type LocalStatus struct {
 	DashboardURL string
 	// DashboardError says why a running controller serves no dashboard.
 	DashboardError string
+	// Stopping marks a live controller that is draining toward exit.
+	Stopping bool
+	// Runner is LocalRunnerStarting until the controller's first runner check, then LocalRunnerRunning or
+	// LocalRunnerUnavailable.
+	Runner string
+	// RunnerError says why no local runner can take jobs while Runner is LocalRunnerUnavailable.
+	RunnerError *apierr.Error
+}
+
+// Local runner states reported in LocalStatus.Runner.
+const (
+	LocalRunnerStarting    = "starting"
+	LocalRunnerRunning     = "running"
+	LocalRunnerUnavailable = "unavailable"
+)
+
+// LocalReports receives what controller workers publish into the controller's status.
+type LocalReports struct {
+	// Activity replaces the live activity counts.
+	Activity func(LocalActivity) error
+	// Runner records each local runner check: nil while a runner can take jobs, otherwise why none can.
+	Runner func(error)
 }
 
 // ManagedUnitKind gives schedules and the controller one upgrade path.

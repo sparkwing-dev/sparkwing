@@ -22,6 +22,7 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).FinishActionsDispatch":          "the deployment sender records one outcome by the globally unique receipt it took from the cross-team queue",
 	"(*Operator).FinishActionsCancellation":      "the deployment sender acknowledges one provider cancellation by its globally unique receipt",
 	"(*Operator).FinishSkippedActionsDispatch":   "the deployment sender cancels its own unsent receipt by the globally unique queue identity",
+	"(*Operator).ClaimRunEventDeliveries":        "the delivery sender fails expired rows and leases due deliveries across teams; each subscription joins on its delivery's team and each lease update binds that team",
 	"(*Operator).unawaitedChildrenQuery":         "the maintenance sweep finds abandoned children across all teams; parent and node joins equate their teams to the child team",
 	"(*Operator).DeleteExpiredLogObjects":        "maintenance deletes every team's log objects past their retention class, matching each slot to its own stream and retiring it by its own team key",
 	"(*Operator).ClaimFailedRefundNotices":       "the billing pass finds every team's failed queued refunds once and marks each announced by its own team key",

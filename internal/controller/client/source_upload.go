@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
 
@@ -33,23 +34,31 @@ func UploadSourceSnapshot(ctx context.Context, options EngineOptions, publicatio
 	}
 	digest := blob.Digest(hex.EncodeToString(hash.Sum(nil)))
 	var ticket controllerwire.DataUploadTicket
-	err = c.request(ctx, "POST", "/api/v1/data/source", "/api/v1/data/source", "", controllerwire.SourceUploadRequest{Git: publication.Git, Source: publication.Source, Digest: digest, Size: size}, &ticket)
+	renew := func(ctx context.Context) (blob.SignedTransfer, error) {
+		ticket = controllerwire.DataUploadTicket{}
+		err := c.request(ctx, "POST", "/api/v1/data/source", "/api/v1/data/source", "", controllerwire.SourceUploadRequest{Git: publication.Git, Source: publication.Source, Digest: digest, Size: size}, &ticket)
+		if err != nil {
+			return blob.SignedTransfer{}, err
+		}
+		if !validSelector(ticket.UploadID) || ticket.SHA256 != digest || ticket.Size != size {
+			return blob.SignedTransfer{}, dataProtocolError("source upload ticket differs from snapshot")
+		}
+		transfer := blob.SignedTransfer{URL: ticket.URL, Headers: ticket.Headers, ExpiresAt: ticket.ExpiresAt, Digest: ticket.SHA256, Size: ticket.Size}
+		if err := validateDataTransfer(controllerwire.DataSignedTransfer(transfer)); err != nil {
+			return blob.SignedTransfer{}, err
+		}
+		return transfer, nil
+	}
+	transfer, err := renew(ctx)
 	if err != nil {
-		return "", err
-	}
-	if !validSelector(ticket.UploadID) || ticket.SHA256 != digest || ticket.Size != size {
-		return "", dataProtocolError("source upload ticket differs from snapshot")
-	}
-	transfer := blob.SignedTransfer{URL: ticket.URL, Headers: ticket.Headers, ExpiresAt: ticket.ExpiresAt, Digest: ticket.SHA256, Size: ticket.Size}
-	if err := validateDataTransfer(controllerwire.DataSignedTransfer(transfer)); err != nil {
 		return "", err
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return "", err
 	}
-	body, err := (blob.TransferClient{Transport: c.http.Transport}).Transfer(ctx, transfer, f)
+	body, err := blob.Upload(ctx, blob.TransferClient{Transport: c.http.Transport}, transfer, f, renew)
 	if err != nil {
-		return "", &apierr.Error{Code: hosterr.Unavailable, Message: "source snapshot transfer failed"}
+		return "", &apierr.Error{Code: hosterr.Unavailable, Message: fmt.Sprintf("source snapshot transfer failed: %v", err)}
 	}
 	_, copyErr := io.Copy(io.Discard, body)
 	if err := errors.Join(copyErr, body.Close()); err != nil {

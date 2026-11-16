@@ -5,7 +5,7 @@ import (
 	"testing/quick"
 )
 
-var allPurposes = []Purpose{PurposeSecret, PurposeGitCredential, PurposeRunEnvironment, PurposeSetting}
+var allPurposes = []Purpose{PurposeSecret, PurposeGitCredential, PurposeRunEnvironment, PurposeRunArguments, PurposeSetting}
 
 func TestBoundEnvelopeOpensOnlyForItsPurposeProperty(t *testing.T) {
 	c, err := NewCipher(make([]byte, KeySize))

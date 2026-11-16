@@ -12,12 +12,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 func TestManagedControllerPreservesKeyAcrossRestart(t *testing.T) {
+	testmanager.Require(t)
 	if testing.Short() {
 		t.Skip("starts a real controller")
 	}

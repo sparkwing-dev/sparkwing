@@ -11,6 +11,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -176,7 +178,7 @@ func writeRunStatistics(out io.Writer, stats []pipelineStats, format string) err
 	}
 	if format == "plain" {
 		for _, stat := range stats {
-			if _, err := fmt.Fprintln(out, stat.Pipeline); err != nil {
+			if _, err := fmt.Fprintln(out, opsview.DisplayText(stat.Pipeline)); err != nil {
 				return err
 			}
 		}
@@ -189,7 +191,7 @@ func writeRunStatistics(out io.Writer, stats []pipelineStats, format string) err
 		if s.Passed+s.Failed+s.Cancelled > 0 {
 			success = fmt.Sprintf("%.0f%%", s.SuccessPct)
 		}
-		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n", s.Pipeline, s.Runs, s.Passed, s.DryRun, s.Failed, s.Cancelled, s.Running, success, fmtDur(s.AvgDur), fmtDur(s.P50Dur), fmtDur(s.P95Dur))
+		fmt.Fprintf(tw, "%s\t%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s\n", opsview.DisplayText(s.Pipeline), s.Runs, s.Passed, s.DryRun, s.Failed, s.Cancelled, s.Running, success, fmtDur(s.AvgDur), fmtDur(s.P50Dur), fmtDur(s.P95Dur))
 	}
 	return tw.Flush()
 }

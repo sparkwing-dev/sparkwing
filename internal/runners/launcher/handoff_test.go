@@ -256,11 +256,11 @@ func (c *leasedControl) Prepare(ctx context.Context, fences []capability.LeaseRe
 	return now.Add(time.Minute), context.Cause(ctx)
 }
 
-func (c *leasedControl) Claim(context.Context, string, []string) (*CloudJobAward, error) {
+func (c *leasedControl) Claim(context.Context, string, []string) (*CloudJobAward, time.Duration, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.claimed++
-	return nil, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(10 * time.Minute / time.Millisecond)}}
+	return nil, 0, &apierr.Error{Code: hosterr.RateLimited, Message: "poll later", Details: map[string]any{"retry_after_ms": float64(10 * time.Minute / time.Millisecond)}}
 }
 
 func TestTeardownWaitRenewsThroughClaimBackoff(t *testing.T) {

@@ -657,9 +657,10 @@ cannot select its owner or encryption result. `SecretWritten` returns the
 encrypted/bound metadata and replay marker. The client refuses an unconfirmed
 restriction, visibility change or unbound result. W1/W2 must persist `only_on`
 and enforce it at plan acceptance and release, including here refusal.
-Masked values shorter than four characters are refused
-with HTTP 400 and guidance to use a plain config variable. Explicit plain
-configuration writes permit those values.
+Masked secret values shorter than four Unicode code points are accepted with
+HTTP 200 and a warning. They remain encrypted and access-controlled but are not
+registered for log masking. Explicit plain configuration writes also accept
+those values.
 
 `DeleteSecret` uses `DELETE /api/v1/secrets/{name}?pipeline=` and returns
 `SecretDeletion` with the exact row selector and a deleted/absent bit. Deletion

@@ -157,6 +157,7 @@ linters:
             - github.com/sparkwing-dev/sparkwing/internal/sourceurl
             - github.com/sparkwing-dev/sparkwing/internal/secrets
             - github.com/sparkwing-dev/sparkwing/internal/procenv
+            - github.com/sparkwing-dev/sparkwing/internal/runevents
 
         wire-is-leaf:
           list-mode: lax
@@ -167,6 +168,7 @@ linters:
             - "**/internal/runspec/**"
             - "**/internal/runstate/**"
             - "**/internal/engineid/**"
+            - "**/internal/runevents/**"
             - "!$test"
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/store
@@ -234,6 +236,7 @@ linters:
             - "!**/*test/**"
             - "!**/sparkwing/testsupport/**"
             - "!**/internal/testshell/**"
+            - "!**/internal/testmanager/**"
             - "!**/internal/chaos/**"
           deny:
             - pkg: testing

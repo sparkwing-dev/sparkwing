@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -36,23 +38,36 @@ type dashboardResult struct {
 	Dashboard      string            `json:"dashboard"`
 	URL            string            `json:"url,omitempty"`
 	DashboardError string            `json:"dashboard_error,omitempty"`
+	Runner         string            `json:"runner,omitempty"`
+	RunnerError    string            `json:"runner_error,omitempty"`
+	RunnerHint     string            `json:"runner_hint,omitempty"`
 	Activity       dashboardActivity `json:"activity"`
 	Warning        string            `json:"warning,omitempty"`
 }
 
 func localStatusResult(service, action string, status wingd.LocalStatus) dashboardResult {
 	state, dashboard := "stopped", "not_serving"
-	if status.Running {
+	switch {
+	case status.Running:
 		state = "running"
+	case status.Stopping && status.PID > 0:
+		state = "stopping"
 	}
 	if status.Running && status.DashboardURL != "" {
 		dashboard = "serving"
 	}
-	return dashboardResult{
+	result := dashboardResult{
 		Kind: "service", Tool: "sparkwing", Service: service, Action: action, State: state, Dashboard: dashboard,
 		PID: status.PID, Version: status.Version, Installed: status.Installed, URL: status.DashboardURL, DashboardError: status.DashboardError,
 		Activity: dashboardActivity{Runs: status.Activity.Runs, QueuedTriggers: status.Activity.QueuedTriggers, HeldLeases: status.Activity.HeldLeases, DashboardConnections: status.Activity.DashboardConnections},
 	}
+	if status.Running {
+		result.Runner = status.Runner
+		if status.RunnerError != nil {
+			result.RunnerError, result.RunnerHint = status.RunnerError.Message, status.RunnerError.Hint
+		}
+	}
+	return result
 }
 
 // safety: v0.67 and earlier ran the dashboard as its own process recorded in this file, which v0.68 never writes.
@@ -106,27 +121,37 @@ func renderDashboard(out io.Writer, result dashboardResult, mode string) error {
 		return json.NewEncoder(out).Encode(result)
 	case "plain":
 		if result.Warning != "" {
-			fmt.Fprintln(os.Stderr, "warning: "+result.Warning)
+			fmt.Fprintln(os.Stderr, "warning: "+opsview.DisplayText(result.Warning))
 		}
 		_, err := fmt.Fprintln(out, result.State)
 		return err
 	default:
-		_, err := fmt.Fprintf(out, "Local controller: %s\npid: %d\nversion: %s\ninstalled: %t\n", result.State, result.PID, result.Version, result.Installed)
+		_, err := fmt.Fprintf(out, "Local controller: %s\npid: %d\nversion: %s\ninstalled: %t\n", result.State, result.PID, opsview.DisplayText(result.Version), result.Installed)
 		if err == nil {
 			switch {
 			case result.Dashboard == "serving":
-				_, err = fmt.Fprintf(out, "dashboard: serving at %s (sign in with sparkwing dashboard open)\n", result.URL)
+				_, err = fmt.Fprintf(out, "dashboard: serving at %s (sign in with sparkwing dashboard open)\n", opsview.DisplayText(result.URL))
 			case result.DashboardError != "":
-				_, err = fmt.Fprintf(out, "dashboard: not serving: %s\n", result.DashboardError)
+				_, err = fmt.Fprintf(out, "dashboard: not serving: %s\n", opsview.DisplayText(result.DashboardError))
 			default:
 				_, err = fmt.Fprintln(out, "dashboard: not serving (sparkwing dashboard open starts the controller and prints a sign-in link)")
+			}
+		}
+		if err == nil && result.Runner != "" {
+			if result.RunnerError != "" {
+				_, err = fmt.Fprintf(out, "runner: %s: %s\n", result.Runner, opsview.DisplayText(result.RunnerError))
+			} else {
+				_, err = fmt.Fprintf(out, "runner: %s\n", result.Runner)
+			}
+			if err == nil && result.RunnerHint != "" {
+				_, err = fmt.Fprintf(out, "  hint: %s\n", opsview.DisplayText(result.RunnerHint))
 			}
 		}
 		if err == nil {
 			_, err = fmt.Fprintf(out, "activity: %d runs, %d queued triggers, %d held leases, %d dashboard connections\n", result.Activity.Runs, result.Activity.QueuedTriggers, result.Activity.HeldLeases, result.Activity.DashboardConnections)
 		}
 		if err == nil && result.Warning != "" {
-			_, err = fmt.Fprintf(out, "warning: %s\n", result.Warning)
+			_, err = fmt.Fprintf(out, "warning: %s\n", opsview.DisplayText(result.Warning))
 		}
 		return err
 	}
@@ -166,10 +191,10 @@ func openDashboard(ctx context.Context, services dashboardServices, host string,
 	case "json":
 		return json.NewEncoder(out).Encode(dashboardLoginResult{Kind: "service", Tool: "sparkwing", Service: "dashboard", Action: "open", URL: login.URL, ExpiresAt: login.ExpiresAt})
 	case "plain":
-		_, err := fmt.Fprintln(out, login.URL)
+		_, err := fmt.Fprintln(out, opsview.DisplayText(login.URL))
 		return err
 	default:
-		_, err := fmt.Fprintf(out, "Open this link to sign in to the local dashboard. It works once and expires at %s.\n%s\n", login.ExpiresAt.Local().Format(time.TimeOnly), login.URL)
+		_, err := fmt.Fprintf(out, "Open this link to sign in to the local dashboard. It works once and expires at %s.\n%s\n", login.ExpiresAt.Local().Format(time.TimeOnly), opsview.DisplayText(login.URL))
 		return err
 	}
 }

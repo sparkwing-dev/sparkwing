@@ -271,7 +271,7 @@ func TestLocalOwnerDelegatesEvaluationBeforeAnyNodeAward(t *testing.T) {
 	owner.Capability.Unit, owner.Capability.UnitID = capability.UnitTrigger, "owner-unit"
 	owner.Capability.Purpose, owner.Capability.Issuance = capability.PurposeTrigger, capability.Award
 	owner.Capability.Digest = sha256.Sum256([]byte("owner-token"))
-	owner.Capability.Grants = []capability.Grant{capability.DataRead, capability.NodeReport}
+	owner.Capability.Grants = []capability.Grant{capability.DataRead, capability.NodeReport, capability.SourceRead}
 	owner.Capability.Binding.Attempt = 0
 	state.snapshot.Authorities[0].Principal = owner
 	state.snapshot.Binding.Current = owner.Capability.Binding
@@ -306,6 +306,11 @@ func TestLocalOwnerDelegatesEvaluationBeforeAnyNodeAward(t *testing.T) {
 	snapshot, err := registry.ReadAuthentication(t.Context(), capability.CredentialLookup{Class: capability.CredentialBearer, Audience: capability.NodeHost, Digest: sha256.Sum256([]byte(grant.Binding.Routes.Bearer))}, capability.RequestEvidence{})
 	if err != nil || len(snapshot.Authorities) != 2 || snapshot.Authorities[0].Principal.Capability.Parent.ID != "owner" || snapshot.Authorities[0].Principal.Capability.Binding.Kind != capability.BindingTrigger {
 		t.Fatalf("owner ancestry: %+v %v", snapshot, err)
+	}
+	for _, grant := range snapshot.Authorities[0].Principal.Capability.Grants {
+		if grant == capability.SourceRead {
+			t.Fatal("SDK evaluation process retained host source access")
+		}
 	}
 	if err := grant.Revoke(); err != nil {
 		t.Fatal(err)

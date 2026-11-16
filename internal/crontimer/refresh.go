@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -52,8 +53,11 @@ func commandState(h Host, path, body string) State {
 	if len(args) > 0 {
 		state.Arguments = slices.Clone(args[1:])
 	}
-	state.Stale = staleAgainst(h, state.Binary) || state.Home != h.SparkwingHome
+	state.Stale = state.Home != h.SparkwingHome
 	state.Version = unitfile.Version(body)
+	if info, err := os.Stat(path); err == nil {
+		state.WrittenAt = info.ModTime()
+	}
 	return state
 }
 
@@ -118,6 +122,16 @@ func Refresh(ctx context.Context, h Host) (State, error) {
 		return state, err
 	}
 	body, err := unitfile.RewriteCommand(h.GOOS, driver.body, timerCommand(h), h.Version)
+	if err == nil {
+		body, err = unitfile.RewriteWorkingDirectory(h.GOOS, body, h.SparkwingHome)
+	}
+	if err == nil {
+		key := h.Env["SPARKWING_SECRETS_KEY_FILE"]
+		if key == "" {
+			key = filepath.Join(h.SparkwingHome, "secrets.key")
+		}
+		body, err = unitfile.PinEnvironment(h.GOOS, body, "SPARKWING_SECRETS_KEY_FILE", key)
+	}
 	if err != nil {
 		return state, err
 	}
@@ -126,6 +140,9 @@ func Refresh(ctx context.Context, h Host) (State, error) {
 		return state, err
 	}
 	if err := ctx.Err(); err != nil {
+		return state, err
+	}
+	if err := unitfile.PrepareWorkingDirectory(h.SparkwingHome); err != nil {
 		return state, err
 	}
 	if err := writeManaged(driver.path, body); err != nil {

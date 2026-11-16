@@ -50,6 +50,56 @@ Retention checks use the PVC mounted as the controller's `data` volume. The
 controller component label also matches the separate credential-epoch PVC.
 Image tags stay strings in the harness values, including numeric tags.
 
+### Serving the dashboard over HTTPS
+
+Browser login uses Secure `__Host-` cookies. On `http://localhost` or
+`http://127.0.0.1`, browsers accept these cookies without certificate setup.
+For remote access, use HTTPS or bring the connection to loopback:
+
+- **Port-forward or SSH tunnel.** Keep the chart's ingress disabled and use
+  the `kubectl port-forward` command printed in the Helm notes. For a release
+  named `sparkwing` in namespace `sparkwing`, run
+  `kubectl -n sparkwing port-forward svc/sparkwing-sparkwing-full-controller 8080:80`.
+  For a remote controller listening on port 8080, run
+  `ssh -L 8080:127.0.0.1:8080 user@controller-host`. Open `http://localhost:8080`.
+- **Kubernetes ingress.** Set `ingress.enabled=true` and configure `ingress.tls`.
+  For example, with cert-manager installed and a Let's Encrypt ClusterIssuer
+  named `letsencrypt-prod`, use the values below. Configure that issuer's ACME
+  challenge solver for your ingress controller or DNS provider first.
+  See [cert-manager ingress certificates](https://cert-manager.io/docs/usage/ingress/).
+
+```yaml
+ingress:
+  enabled: true
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: sparkwing.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - hosts: [sparkwing.example.com]
+      secretName: sparkwing-tls
+```
+
+For a native controller, [Caddy](https://caddyserver.com/docs/command-line#caddy-reverse-proxy)
+can terminate HTTPS. Run the controller and proxy in separate terminals, adding
+your normal controller credential flags to the first command:
+
+```bash
+sparkwing-controller --addr=127.0.0.1:8080 --trusted-proxy-addr=127.0.0.1:8081
+caddy reverse-proxy --from https://sparkwing.example.com --to 127.0.0.1:8081 --header-up 'X-Real-IP: {http.request.remote.host}'
+```
+
+Point the hostname at the proxy and allow Caddy's certificate validation traffic.
+The trusted listener serves the same API and trusts `X-Real-IP` for client
+addresses. Only a proxy that overwrites that header may reach it. It also accepts
+`X-Forwarded-Proto: https` as TLS evidence, which enables HSTS and requires HTTPS
+Origins for cookie-authenticated writes. The ordinary `--addr` listener ignores
+those forwarded headers. Restrict the trusted listener to the proxy. See
+[Client addresses behind proxies](#client-addresses-behind-proxies).
+
 ### First shared deployment
 
 This is Cloud operator setup. Controller bootstrap credentials grant deployment
@@ -195,7 +245,7 @@ these file names, mounted whole.
 | File | Holds | Without it |
 |---|---|---|
 | `pg-url` | PostgreSQL connection string for the state store | `--store=postgres` refuses to start |
-| `secrets-key` | Key stored secrets are sealed under, 32 raw bytes or their base64 | see [Security](security.md#secrets-at-rest) |
+| `secrets-key` | Key stored secrets and run argument values are sealed under, 32 raw bytes or their base64 | SQLite generates `secrets.key` beside the store; PostgreSQL refuses every secret write and stores run argument values, including secret defaults, unencrypted. See [Security](security.md#secrets-at-rest) |
 | `credential-epoch` | Live bearer and session epoch, when kept beside `secrets-key` | created on startup; preserve the latest value through a restore |
 | `secrets-key.previous` | Key values were sealed under before `secrets-key`, during a rotation | one key |
 | `bootstrap-admin-token` | First admin token, stored before the listener binds | no token is provisioned |
@@ -495,6 +545,10 @@ or service manager you used to install it.
 
 Runner service definitions run `sparkwing-runner start --config PATH` in the
 foreground. Linux uses a systemd user service. macOS uses a launchd agent.
+A clean SIGTERM or interrupt of `start` or `warm` exits 0 after shutdown. This
+includes cancellation during source acquisition and SDK setup, even when a
+dependency reports a cancellation or deadline error. Compiler shutdown keeps external termination and real process failures visible; only an owner-attributed termination counts as cancellation. Cancellation without a
+shutdown signal, or a separate runtime or cleanup failure, still exits 1.
 The service file names an existing machine configuration and contains no
 credential. The duplicate shell enrollment installer has been removed.
 
@@ -701,3 +755,37 @@ Quota and allowance writes preserve each other's fields. Creating an allowance
 for a team without a quota preserves its effective default-tier limits.
 [Retained storage billing](auth.md#retained-storage) describes the rate, free
 allowance and billing interval.
+
+## Runner recovery during controller rollout
+
+Runners keep retrying claim transport failures and temporary gateway 5xx
+responses until their caller stops them. Fresh requests use exponential jitter,
+with automatic backoff capped at 30 seconds. Claim polls honor longer
+`Retry-After` advice up to five minutes per response.
+Uncertain claims are never replayed. After ten minutes without a successful claim
+response, the runner logs a warning, repeated at most once every five minutes.
+When runner metrics are enabled, `/healthz` is a readiness or monitoring endpoint
+for claim availability. It returns HTTP 503 with
+`degraded: controller unreachable since T` during that sustained outage, then
+returns HTTP 200 after a successful claim response. A fatal claim refusal or
+invalid claim response returns HTTP 503 immediately with
+`claiming stopped: <error>; draining N held units`. The count decreases as held
+units finish. Heartbeat success alone does not clear claim degradation, and a
+fatal claim failure does not resume claims. Do not wire this endpoint to process
+liveness or restart automation: neither a controller outage nor a claim failure
+should kill valid held work.
+
+Held work keeps its execution context and existing lease and authority limits.
+A transport outage does not stop claims or start a drain: recovery can claim
+children needed by held work. A non-retryable refusal stops new claims, logs one
+ERROR promptly, then logs a WARN at most once every five minutes while joining
+held work. It returns the original error after that work finishes. There is no
+forced drain deadline: valid local work can be unbounded, and a claim-protocol
+error must not cancel it. Repair the reported controller or credential problem;
+use the degraded state to monitor the stopped claim capacity while work drains.
+Explicit stop, idle-exit and claim-lifetime policies retain their existing behavior.
+
+Terminal run acknowledgements retry temporary controller or connection failures
+with backoff and `Retry-After` until the caller's award context ends. They keep
+the same fenced completion request. Authority loss and other permanent refusals
+return immediately. Heartbeat success does not clear claim degradation.

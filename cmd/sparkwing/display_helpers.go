@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -12,16 +11,6 @@ func shortSHAOrDash(s string) string {
 	}
 	if len(s) > 10 {
 		return s[:10]
-	}
-	return s
-}
-
-func truncateOneLine(s string, max int) string {
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\t", " ")
-	s = strings.TrimSpace(s)
-	if len(s) > max {
-		return s[:max-3] + "..."
 	}
 	return s
 }

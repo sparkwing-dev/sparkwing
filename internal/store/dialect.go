@@ -133,18 +133,23 @@ type storeTx struct {
 	scheduleAdmission    *scheduleAdmission
 	unpricedDemand       *UnitDemand
 	expiredClaimant      string
-	clock                func(context.Context) (time.Time, error)
-	err                  error
-	cancelingTeam        Team
-	tx                   *sql.Tx
-	dialect              Dialect
-	store                *Store
-	snapshotRead         bool
-	rowsOpen             bool
-	rotatingRoot         *capability.Capability
-	createdTeam          *TeamInfo
-	blobIO               *blobIO
-	matchingRuns         map[matchingRunKey]*matchingRun
+	// safety: only read-only multi-run reads set listing; there a run whose sealed arguments
+	// cannot be opened shows unavailable values instead of failing every other run.
+	listing       bool
+	clock         func(context.Context) (time.Time, error)
+	err           error
+	cancelingTeam Team
+	tx            *sql.Tx
+	dialect       Dialect
+	store         *Store
+	groupWaits    map[UnitRef]groupWaitObservation
+	claimCapacity *claimCapacitySearch
+	snapshotRead  bool
+	rowsOpen      bool
+	rotatingRoot  *capability.Capability
+	createdTeam   *TeamInfo
+	blobIO        *blobIO
+	matchingRuns  map[matchingRunKey]*matchingRun
 }
 
 func (s *Store) now() time.Time {

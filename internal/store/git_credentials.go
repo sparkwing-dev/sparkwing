@@ -51,6 +51,7 @@ type GitCredential struct {
 	UpdatedAt   time.Time
 }
 
+// #nosec G101 -- This string lists SQL columns and contains no credential values.
 const gitCredentialCols = `id, team, host, repository_key, host_wide, kind, username, secret, known_hosts, fingerprint,
 	confirmed_at, created_by, created_at, updated_at`
 

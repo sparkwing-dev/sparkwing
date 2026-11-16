@@ -17,7 +17,7 @@ func TestOpenPrivateConfigRejectsGroupReadableFile(t *testing.T) {
 	if err := os.Chmod(path, 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := OpenPrivateConfig(path); err == nil || !strings.Contains(err.Error(), "0600") {
+	if _, err := OpenPrivateConfig(path); err == nil || !strings.Contains(err.Error(), "0600") || !strings.Contains(err.Error(), "run chmod 600 "+path) {
 		t.Fatalf("broad-mode error = %v", err)
 	}
 }

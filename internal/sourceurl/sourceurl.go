@@ -89,23 +89,46 @@ func validateHost(host string) error {
 	if strings.HasPrefix(host, "-") {
 		return fmt.Errorf("repo URL host must not begin with '-'")
 	}
-	host = strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]")
-	// safety: a trailing dot is an equally resolvable spelling of the same name.
-	host = strings.TrimRight(host, ".")
+	host = canonicalHost(host)
 	if host == "" {
 		return fmt.Errorf("repo URL host required")
 	}
-	if isInternalName(host) {
-		return fmt.Errorf("repo URL host %q is not allowed", host)
-	}
-	// safety: 127.1, 0x7f000001, and 017700000001 all resolve to loopback, so canonicalize first.
-	if ip := parseHostIP(host); ip != nil && !routableIP(ip) {
+	if !publicHost(host) {
 		return fmt.Errorf("repo URL host %q is not allowed", host)
 	}
 	if pol := hostPolicy.Load(); pol != nil {
 		return (*pol)(host)
 	}
 	return nil
+}
+
+// CheckPublicHost refuses a host that names the local network or the instance
+// itself: internal names and literal addresses that are not publicly routable.
+// It does not resolve DNS and does not apply the deployment's clone host policy,
+// so a caller that dials the host must still check each resolved address.
+func CheckPublicHost(host string) error {
+	host = canonicalHost(host)
+	if host == "" {
+		return errors.New("host required")
+	}
+	if !publicHost(host) {
+		return fmt.Errorf("host %q is not a public address", host)
+	}
+	return nil
+}
+
+// safety: a trailing dot is an equally resolvable spelling of the same name.
+func canonicalHost(host string) string {
+	return strings.TrimRight(strings.Trim(strings.ToLower(strings.TrimSpace(host)), "[]"), ".")
+}
+
+func publicHost(host string) bool {
+	if isInternalName(host) {
+		return false
+	}
+	// safety: 127.1, 0x7f000001, and 017700000001 all resolve to loopback, so canonicalize first.
+	ip := parseHostIP(host)
+	return ip == nil || routableIP(ip)
 }
 
 // cloneHostPolicy is a deployment's own answer to whether a clone may go to host. It

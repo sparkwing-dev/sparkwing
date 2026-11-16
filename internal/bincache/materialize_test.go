@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func TestMaterializePipelineReusesBinaryWithoutGo(t *testing.T) {
@@ -71,6 +73,7 @@ func TestMaterializePipelineReusesBinaryWithoutGo(t *testing.T) {
 }
 
 func TestMaterializePipelineUsesTheCompilationWorkspace(t *testing.T) {
+	testshell.UsePath(t, "go", "git")
 	for _, covering := range []bool{true, false} {
 		t.Run(map[bool]string{true: "covering", false: "unrelated"}[covering], func(t *testing.T) {
 			root := t.TempDir()

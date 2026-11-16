@@ -12,6 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, error) {
@@ -28,20 +29,39 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	if err != nil {
 		return v, err
 	}
+	if len(request) > 0 {
+		if err := decodeRunRequest(tx.store, team, id, request, &v.Request); err != nil {
+			if !tx.listing || !runArgumentsUnreadable(err) {
+				return v, persistedRunError(err)
+			}
+			v.argumentsUnavailable = true
+		}
+	}
+	if len(spec) > 0 && string(spec) != "null" {
+		v.Spec = new(runspec.Spec)
+		if err := decodeRunSpec(tx.store, team, id, spec, v.Spec); err != nil {
+			if !tx.listing || !runArgumentsUnreadable(err) {
+				return v, persistedRunError(err)
+			}
+			v.argumentsUnavailable = true
+		}
+	}
 	for _, item := range []struct {
 		raw []byte
 		dst any
-	}{{request, &v.Request}, {spec, &v.Spec}, {lineage, &execution}, {actor, &v.StateActor}} {
+	}{{lineage, &execution}, {actor, &v.StateActor}} {
 		if len(item.raw) > 0 {
 			if err := json.Unmarshal(item.raw, item.dst); err != nil {
-				return v, authorityError(hosterr.IntegrityFailure, "invalid persisted run: "+err.Error())
+				return v, persistedRunError(err)
 			}
 		}
 	}
-	v.expansions, err = readAcceptedExpansionsTx(ctx, tx, team, id)
+	var unavailable bool
+	v.expansions, unavailable, err = readAcceptedExpansionsTx(ctx, tx, team, id)
 	if err != nil {
 		return v, err
 	}
+	v.argumentsUnavailable = v.argumentsUnavailable || unavailable
 	v.Lineage, v.Retry = execution.Lineage, execution.Retry
 	v.admission = execution.admissionIdentity
 	v.Plan = plan
@@ -73,7 +93,7 @@ func runClaimWait(run RunRow) runspec.Setting[time.Duration] {
 }
 
 // safety: one attempt per generation is not an application retry; the rest are.
-const nodeReadColumns = `node_id,status,outcome,status_detail,failure_reason,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash,output_record,manifest_record,
+const nodeReadColumns = `node_id,status,outcome,status_detail,failure_reason,COALESCE(claimed_by,''),capability_prefix,owner_capability_prefix,generation,attempt,disruptions,ready_at,queue_started_at,group_wait_started_at,lease_expires_at,started_at,finished_at,cancel_requested_at,cancel_reason,state_seq,state_digest,state_actor,expansion,expansion_digest,execution_json,spec_json,spec_hash,output_record,manifest_record,
  (SELECT COUNT(*)-COUNT(DISTINCT generation) FROM node_attempts a
  WHERE a.team=nodes.team AND a.run_id=nodes.run_id AND a.node_id=nodes.node_id)`
 
@@ -87,9 +107,9 @@ func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef
 
 func scanNode(row rowScanner, runID runspec.RunID) (runstate.NodeRow, error) {
 	v := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runID}}
-	var ready, queued, lease, start, finish, cancel sql.NullInt64
+	var ready, queued, groupWait, lease, start, finish, cancel sql.NullInt64
 	var actor, execution, output, manifest []byte
-	err := row.Scan(&v.Ref.NodeID, &v.Status, &v.Outcome, &v.StatusDetail, &v.FailureReason, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &output, &manifest, &v.ApplicationRetries)
+	err := row.Scan(&v.Ref.NodeID, &v.Status, &v.Outcome, &v.StatusDetail, &v.FailureReason, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &groupWait, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &output, &manifest, &v.ApplicationRetries)
 	if err != nil {
 		return v, err
 	}
@@ -111,11 +131,21 @@ func scanNode(row rowScanner, runID runspec.RunID) (runstate.NodeRow, error) {
 	if err = json.Unmarshal(execution, &v.Execution); err != nil {
 		return v, authorityError(hosterr.IntegrityFailure, "invalid persisted execution: "+err.Error())
 	}
+	v.GroupWaitStartedAt = stateTime(groupWait)
 	v.ReadyAt, v.QueueStartedAt, v.LeaseExpiresAt, v.StartedAt, v.FinishedAt, v.CancelRequestedAt = stateTime(ready), stateTime(queued), stateTime(lease), stateTime(start), stateTime(finish), stateTime(cancel)
 	if _, err = nodeState(v); err != nil {
 		return v, err
 	}
 	return v, nil
+}
+
+// safety: typed refusals keep their code; anything else reports an undecodable row.
+func persistedRunError(err error) error {
+	var typed *apierr.Error
+	if errors.As(err, &typed) {
+		return err
+	}
+	return authorityError(hosterr.IntegrityFailure, "invalid persisted run: "+err.Error())
 }
 
 func stateTime(v sql.NullInt64) *time.Time {
@@ -126,10 +156,10 @@ func stateTime(v sql.NullInt64) *time.Time {
 	return &t
 }
 
-func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id string) ([]runstate.AcceptedExpansionRow, error) {
+func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id string) (_ []runstate.AcceptedExpansionRow, unavailable bool, _ error) {
 	rows, err := tx.queryContext(ctx, `SELECT node_id,generation,expansion_body,expansion_digest,expansion_registration FROM nodes WHERE team=? AND run_id=? AND expansion_body IS NOT NULL ORDER BY seq,node_id`, team, id)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var out []runstate.AcceptedExpansionRow
 	for rows.Next() {
@@ -140,32 +170,36 @@ func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id st
 		var registrationRaw []byte
 		if err = rows.Scan(&node, &generation, &body, &digest, &registrationRaw); err != nil {
 			_ = rows.Close()
-			return out, err
+			return out, false, err
 		}
 		ref := runspec.NodeRef{RunID: runspec.RunID(id), NodeID: runspec.NodeID(node)}
 		if len(body) > 0 {
 			if len(registrationRaw) == 0 {
 				_ = rows.Close()
-				return out, errors.New("accepted expansion is missing host masking registrations; start a new run instead of resuming")
+				return out, false, errors.New("accepted expansion is missing host masking registrations; start a new run instead of resuming")
 			}
 			bodyHash, err := runspec.CanonicalHash(json.RawMessage(body))
 			if err != nil {
 				_ = rows.Close()
-				return out, err
+				return out, false, err
 			}
 			var registration runspec.SecretRegistration
-			if err := json.Unmarshal(registrationRaw, &registration); err != nil {
-				_ = rows.Close()
-				return out, err
+			if err := decodeRunDocument(tx.store, team, id, expansionArgumentsScope(node), registrationRaw, &registration, registrationArgumentSlots); err != nil {
+				if !tx.listing || !runArgumentsUnreadable(err) {
+					return out, false, errors.Join(err, rows.Close())
+				}
+				unavailable = true
+				out = append(out, runstate.AcceptedExpansionRow{Source: ref, SourceGeneration: generation, Body: body, BodyHash: string(bodyHash)})
+				continue
 			}
 			if registration.Version != 1 {
 				_ = rows.Close()
-				return out, errors.New("accepted expansion was sealed without host masking registrations; start a new run instead of resuming")
+				return out, false, errors.New("accepted expansion was sealed without host masking registrations; start a new run instead of resuming")
 			}
 			projected, err := runspec.BuildSecretRegistration(runspec.Request{}, runspec.Resolved{SecretRegistration: registration})
 			if err != nil || !reflect.DeepEqual(projected, registration) {
 				_ = rows.Close()
-				return out, errors.New("persisted expansion registration differs from its projection")
+				return out, false, errors.New("persisted expansion registration differs from its projection")
 			}
 			committed, err := runspec.CanonicalHash(struct {
 				Body         json.RawMessage
@@ -173,15 +207,15 @@ func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id st
 			}{body, registration})
 			if err != nil || string(committed) != digest {
 				_ = rows.Close()
-				return out, errors.New("persisted expansion registration differs from its accepted digest")
+				return out, false, errors.New("persisted expansion registration differs from its accepted digest")
 			}
 			out = append(out, runstate.AcceptedExpansionRow{Source: ref, SourceGeneration: generation, Body: body, BodyHash: string(bodyHash), Registration: registration})
 		}
 	}
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
-		return out, err
+		return out, false, err
 	}
-	return out, nil
+	return out, unavailable, nil
 }
 
 func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (RunSnapshot, error) {

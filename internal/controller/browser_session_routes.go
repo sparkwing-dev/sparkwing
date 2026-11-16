@@ -24,7 +24,7 @@ func (s *Server) verifyBrowserLogout(r *http.Request) error {
 	if err := r.ParseForm(); err != nil {
 		return invalidEngineBody("invalid sign-out form")
 	}
-	if !validFormCSRF(r, s.cookiesSecure()) || !constantTimeEqual(r.PostForm.Get("csrf_token"), session.CSRFToken) {
+	if !validFormCSRF(r) || !constantTimeEqual(r.PostForm.Get("csrf_token"), session.CSRFToken) {
 		return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	notePolicyPrincipal(r.Context(), capability.Principal{Class: capability.CredentialSession, Capability: capability.Capability{

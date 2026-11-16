@@ -213,6 +213,12 @@ surfaces ship with matching entries.
 - `github.com/fsnotify/fsnotify` lets registry tests observe staging-file creation because filesystem events avoid timing-based polling.
 - `k8s.io/utils` supplies fake clocks for chaos tests because advancing time makes settling and process-guard assertions deterministic.
 - `golang.org/x/sync` joins concurrent controller and runner image publication and cancels sibling registry work on failure (build tooling).
+- `github.com/go-logr/logr` supplies the discard logger that silences OpenTelemetry's internal logging, because its default writes unfiltered output to stderr.
+
+Managed pre-push hooks provide `SPARKWING_GATE_PUSH_REFS` to their local
+pipelines. It contains Git's ref updates, so checks can distinguish a branch
+push from a push to main. See [hook context](docs/hooks.md#reading-what-is-being-pushed)
+and the [environment reference](docs/environment-variables.md).
 
 ## Development candidates
 

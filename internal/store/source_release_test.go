@@ -75,6 +75,61 @@ func sourceReleaseUnitFixture(t *testing.T, kind capability.UnitKind) (*Tenant, 
 	return tenant, capability.Authorized{Principal: p, Binding: p.Capability.Binding, Target: capability.Target{Team: "a", RunID: "run"}, Access: capability.AccessRule{Liveness: capability.LiveSensitive}}
 }
 
+func TestSourceReleaseEvalUsesItsLiveExpansionLease(t *testing.T) {
+	for _, change := range []string{"", "expired", "source generation", "eval generation", "cancelled", "eval finished"} {
+		t.Run(change, func(t *testing.T) {
+			s, claim := releaseFixture(t, capability.UnitEval)
+			tenant := &Tenant{s: s, team: "a"}
+			run, err := tenant.ReadRun(t.Context(), "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			run.Request.Request.Source.Location.RemoteURL = "https://github.com/acme/repo"
+			run.Request.Provenance, err = run.Request.Provenance.FetchedFrom(1, "acme/repo", "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			run.Request.Provenance, err = run.Request.Provenance.WithSourceCredentialVerified()
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(run.Request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rewriteSchemaExec(t, s.db, `UPDATE runs SET request_json=? WHERE id='run'`, raw)
+			rewriteSchemaExec(t, s.db, `UPDATE nodes SET status='done',outcome='success',generation=2,attempt=0,finished_at=1 WHERE run_id='run'`)
+			rewriteSchemaExec(t, s.db, `INSERT INTO git_credentials(host_wide,id,team,host,kind,secret,confirmed_at,created_at,updated_at) VALUES (1,'credential','a','github.com','https','encrypted-secret',1,1,1)`)
+			principal, err := s.AsOperator().ResolveAuthority(t.Context(), capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix})
+			if err != nil {
+				t.Fatal(err)
+			}
+			auth := capability.Authorized{Principal: principal, Target: capability.Target{Team: "a", RunID: "run", NodeID: "job"}}
+			setSourceHost(t, tenant, auth, &capability.HostFacts{Kind: capability.HostSelfHosted, MachineID: "runner", OwnerAccountID: "owner"})
+			switch change {
+			case "expired":
+				rewriteSchemaExec(t, s.db, `UPDATE eval_units SET lease_expires_at=1`)
+			case "eval finished":
+				rewriteSchemaExec(t, s.db, `UPDATE eval_units SET status='done',claimed_by=NULL,capability_prefix='',claimed_at=NULL,finished_at=1,lease_expires_at=NULL`)
+			case "source generation":
+				rewriteSchemaExec(t, s.db, `UPDATE nodes SET generation=3`)
+			case "eval generation":
+				rewriteSchemaExec(t, s.db, `UPDATE eval_units SET generation=generation+1`)
+			case "cancelled":
+				rewriteSchemaExec(t, s.db, `UPDATE runs SET cancel_requested_at=1`)
+			}
+			credential, audit, err := tenant.ReleaseSourceCredential(t.Context(), auth)
+			if change == "" {
+				if err != nil || credential.ID != "credential" || audit.RunID != "run" || audit.NodeID != "job" || audit.Generation != 2 {
+					t.Fatalf("terminal source could not be acquired by its live eval: credential=%s audit=%+v err=%v", credential.ID, audit, err)
+				}
+			} else if err == nil || credential.Secret != "" || audit.ID != "" {
+				t.Fatalf("changed %s released source: credential=%s audit=%+v err=%v", change, credential.ID, audit, err)
+			}
+		})
+	}
+}
+
 func setMachineOrigin(t *testing.T, s *Store, prefix string, origin *CapabilityOrigin) {
 	t.Helper()
 	if origin != nil && origin.Personal {

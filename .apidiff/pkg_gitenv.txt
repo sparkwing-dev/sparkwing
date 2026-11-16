@@ -2,5 +2,6 @@
 
 func GateIndex() string
 const GateIndexVar = "SPARKWING_GATE_INDEX"
+const PushRefsVar = "SPARKWING_GATE_PUSH_REFS"
 func ShellUnbind() string
 func Unbind()

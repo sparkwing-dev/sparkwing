@@ -29,8 +29,8 @@ type oauthFlow struct {
 
 func (s *Server) readOAuthFlow(r *http.Request) (oauthFlow, bool) {
 	var flow oauthFlow
-	if len(r.CookiesNamed(cookieName(oauthFlowCookieName, s.cookiesSecure()))) != 1 ||
-		!readFlowCookie(r, oauthFlowCookieName, s.cookiesSecure(), &flow) ||
+	if len(r.CookiesNamed(oauthFlowCookieName)) != 1 ||
+		!readFlowCookie(r, oauthFlowCookieName, &flow) ||
 		flow.Provider == "" || flow.State == "" || flow.Verifier == "" ||
 		flow.Mode != "" && flow.Mode != oauthFlowLink {
 		return oauthFlow{}, false
@@ -47,7 +47,7 @@ func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request, _ capa
 	if !ok || proof.grant.AuthorizeURL == "" {
 		return routepolicy.MissingEndpointPolicy()
 	}
-	if !setFlowCookie(w, oauthFlowCookieName, proof.flow, s.cookiesSecure()) {
+	if !setFlowCookie(w, oauthFlowCookieName, proof.flow) {
 		return &apierr.Error{Code: hosterr.Internal, Message: "could not start sign-in"}
 	}
 	http.Redirect(w, r, proof.grant.AuthorizeURL, http.StatusSeeOther)
@@ -65,10 +65,10 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request, _ c
 	if proof.session == nil || proof.raw == "" {
 		return routepolicy.MissingEndpointPolicy()
 	}
-	clearFlowCookie(w, oauthFlowCookieName, s.cookiesSecure())
+	clearFlowCookie(w, oauthFlowCookieName)
 	noteAuditWrite(r.Context())
 	s.endPriorSession(r, proof.raw)
-	setSessionCookies(w, proof.raw, proof.session.CSRFToken, s.cookiesSecure())
+	setSessionCookies(w, proof.raw, proof.session.CSRFToken)
 	renderPage(w, http.StatusOK, signedInTmpl, safeNext(proof.flow.Next))
 	return nil
 }
@@ -88,7 +88,7 @@ var signedInTmpl = template.Must(template.New("signed-in").Parse(`<!doctype html
 `))
 
 func (s *Server) continueIdentityLink(w http.ResponseWriter, r *http.Request, flow oauthFlow) error {
-	if !setFlowCookie(w, oauthFlowCookieName, flow, s.cookiesSecure()) {
+	if !setFlowCookie(w, oauthFlowCookieName, flow) {
 		return &apierr.Error{Code: hosterr.Internal, Message: "could not continue linking"}
 	}
 	next := "/auth/" + flow.Provider + "/link/complete"

@@ -49,7 +49,8 @@ func TestConcurrentCoOwnerDeletionsLeaveTheTeamAnOwner(t *testing.T) {
 	for _, withEditor := range []bool{true, false} {
 		t.Run(fmt.Sprintf("editor=%v", withEditor), func(t *testing.T) {
 			for i := range 20 {
-				st := storetest.Open(t)
+				// perf: these fixtures stay live until the child ends; shared-database schemas avoid a checkpoint per drop.
+				st := storetest.New(t).Open(t)
 				ctx := context.Background()
 				now := time.Now()
 				a := signIn(t, st, fmt.Sprintf("a%d", i), "a@example.com")

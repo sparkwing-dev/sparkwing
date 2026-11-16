@@ -373,9 +373,7 @@ func main() {
 				UserURL: provider.URL + "/user", EmailsURL: provider.URL + "/user/emails",
 			}), []string{origin + "/github/app/callback", origin + "/auth/github/callback"})
 		}
-		// safety: the fixture serves plain HTTP on loopback, so its cookies drop Secure, which the controller
-		// command refuses for a multi-team deployment.
-		srv.WithDashboard(controller.Dashboard{Bundle: os.DirFS(config.webOut), Version: "auth-browser-fixture", Paths: home, InsecureCookies: true})
+		srv.WithDashboard(controller.Dashboard{Bundle: os.DirFS(config.webOut), Version: "auth-browser-fixture", Paths: home})
 		return srv.StorePolicies(), nil
 	}))
 	if err != nil {

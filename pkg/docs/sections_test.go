@@ -87,27 +87,65 @@ func TestSectionsDoNotSplitInsideAFence(t *testing.T) {
 	}
 }
 
+func nonCurrentSlug(slug string) bool {
+	return slug == docs.ChangelogSlug || strings.HasPrefix(slug, "migrations/")
+}
+
 func TestNonCurrentDocsNeverOutrankReference(t *testing.T) {
-	for _, q := range []string{"trigger", "admission", "cache", "pipeline"} {
+	for _, q := range []string{"trigger", "admission", "cache", "pipeline", "how do I add a secret", "secret"} {
 		hits := docs.SearchSections(q)
 		if len(hits) == 0 {
 			t.Errorf("SearchSections(%q) found nothing", q)
 			continue
 		}
-		var current bool
+		history := ""
 		for _, h := range hits {
-			if !strings.HasPrefix(h.Slug, "migrations/") {
-				current = true
-				break
+			switch {
+			case nonCurrentSlug(h.Slug):
+				history = h.Slug
+			case history != "":
+				t.Errorf("SearchSections(%q) ranked %s above the current section %s/%q", q, history, h.Slug, h.Heading)
 			}
 		}
-		if !current {
-			continue
+	}
+}
+
+func TestHowToQueriesReachTheGuide(t *testing.T) {
+	cases := []struct {
+		query string
+		top   int
+		want  func(docs.Section) bool
+	}{
+		{"how do I add a secret", 5, func(s docs.Section) bool { return s.Slug == "secrets" || s.Heading == "Secrets" }},
+		{"how do I schedule a pipeline", 10, func(s docs.Section) bool {
+			return s.Slug == "schedules" || s.Heading == "Schedule local work"
+		}},
+	}
+	for _, tc := range cases {
+		hits := docs.SearchSections(tc.query)
+		found := false
+		for i, h := range hits {
+			if i < 20 && nonCurrentSlug(h.Slug) {
+				t.Errorf("SearchSections(%q) ranked %s/%q at %d", tc.query, h.Slug, h.Heading, i+1)
+			}
+			if i < tc.top && tc.want(h) {
+				found = true
+			}
 		}
-		if strings.HasPrefix(hits[0].Slug, "migrations/") {
-			t.Errorf("SearchSections(%q) ranked %q first while a reference section also matched",
-				q, hits[0].Slug)
+		if !found {
+			t.Errorf("SearchSections(%q) has no guide answer in its top %d", tc.query, tc.top)
 		}
+	}
+}
+
+func TestQuestionWordsAloneStillSearch(t *testing.T) {
+	if len(docs.SearchSections("how")) == 0 {
+		t.Error("a query of only question words should search for them")
+	}
+	with := docs.SearchSections("how do I retry a failed run")
+	without := docs.SearchSections("retry failed run")
+	if len(with) == 0 || with[0] != without[0] {
+		t.Errorf("question words changed the top hit for a retry question")
 	}
 }
 
@@ -250,5 +288,30 @@ func TestBreadcrumbMatchesRankBelowHeadingMatches(t *testing.T) {
 	if !strings.Contains(strings.ToLower(hits[0].Heading), "trigger") {
 		t.Errorf("top hit %q/%q matched on its breadcrumb, not its heading",
 			hits[0].Slug, hits[0].Heading)
+	}
+}
+
+func TestVersionAndBreakingQueriesReachTheChangelog(t *testing.T) {
+	for _, q := range []string{"v0.70.0", "breaking", "breaking changes v0.70.0"} {
+		hits := docs.SearchSections(q)
+		if len(hits) == 0 || hits[0].Slug != docs.ChangelogSlug {
+			top := "nothing"
+			if len(hits) > 0 {
+				top = hits[0].Slug + "/" + hits[0].Heading
+			}
+			t.Errorf("SearchSections(%q) ranked %s first; want the changelog", q, top)
+		}
+	}
+}
+
+func TestWhenIsASearchableGuardKeyword(t *testing.T) {
+	hits := docs.SearchSections("when unless guard")
+	if len(hits) == 0 {
+		t.Fatal("no hits for a guard query")
+	}
+	for _, h := range hits {
+		if !strings.Contains(strings.ToLower(h.Body), "when") {
+			t.Errorf("SearchSections(%q) returned %s/%q, which never says when", "when unless guard", h.Slug, h.Heading)
+		}
 	}
 }

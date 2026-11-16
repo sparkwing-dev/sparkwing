@@ -185,6 +185,7 @@ type protocolSession struct {
 	execSeq                   uint64
 	commands                  sync.WaitGroup
 	measureCommand            func(context.Context, int, string) error
+	startCommand              func(*exec.Cmd, []string) (*commandSession, error)
 }
 
 var errProtocolSessionClosed = errors.New("SDK protocol session closed")
@@ -508,6 +509,9 @@ func (s *protocolSession) deliverProtocolReply(reply nodewire.Reply) error {
 }
 
 func (s *protocolSession) attributeProtocolLog(log nodewire.FrameLog) nodewire.FrameLog {
+	if log.Event == "lease_keeper" || log.Event == "request_timing" {
+		log.Event = "sdk_" + log.Event
+	}
 	if log.Step == "" {
 		return log
 	}

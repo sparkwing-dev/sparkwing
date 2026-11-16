@@ -82,12 +82,14 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		}
 		return runstate.AcquireSlotResponse{}, err
 	}
+	var jobRow runstate.NodeRow
 	// An approval has no execution award and never participates in job groups.
 	if binding.NodeID != "" {
 		row, err := readNodeTx(ctx, tx, t.team, runspec.NodeRef{RunID: runspec.RunID(binding.RunID), NodeID: runspec.NodeID(binding.NodeID)})
 		if err != nil {
 			return runstate.AcquireSlotResponse{}, err
 		}
+		jobRow = row
 		var job nodewire.JobSpec
 		if err := json.Unmarshal(row.Spec, &job); err != nil {
 			return runstate.AcquireSlotResponse{}, err
@@ -162,18 +164,22 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		return runstate.AcquireSlotResponse{}, err
 	}
 	result := runstate.AcquireSlotResponse{Kind: runstate.AcquireGranted, HolderID: id, LeaseExpiresAt: time.Unix(0, expires)}
-	for _, key := range keys {
-		group := declarations[key]
-		if !retainedGrant && group.QueueTimeoutMS != nil && *group.QueueTimeoutMS > 0 && !time.Unix(0, arrival).Add(time.Duration(*group.QueueTimeoutMS)*time.Millisecond).After(tx.now(ctx)) {
-			result = runstate.AcquireSlotResponse{Kind: runstate.AcquireFailed, FailureReason: FailureQueueTimeout}
-			break
-		}
-		result, err = t.acquireConcurrencySlotTx(ctx, tx, acquireSlotRequest{Key: key, HolderID: id, RunID: binding.RunID, NodeID: binding.NodeID}, &fence, time.Time{})
-		if err != nil {
-			return runstate.AcquireSlotResponse{}, err
-		}
-		if result.Kind != runstate.AcquireGranted && result.Kind != runstate.AcquireCancellingOthers {
-			break
+	if !retainedGrant && groupWaitExpired(jobRow, tx.now(ctx)) {
+		result = runstate.AcquireSlotResponse{Kind: runstate.AcquireFailed, FailureReason: FailureQueueTimeout}
+	} else {
+		for _, key := range keys {
+			group := declarations[key]
+			if !retainedGrant && group.QueueTimeoutMS != nil && *group.QueueTimeoutMS > 0 && !time.Unix(0, arrival).Add(time.Duration(*group.QueueTimeoutMS)*time.Millisecond).After(tx.now(ctx)) {
+				result = runstate.AcquireSlotResponse{Kind: runstate.AcquireFailed, FailureReason: FailureQueueTimeout}
+				break
+			}
+			result, err = t.acquireConcurrencySlotTx(ctx, tx, acquireSlotRequest{Key: key, HolderID: id, RunID: binding.RunID, NodeID: binding.NodeID}, &fence, time.Time{})
+			if err != nil {
+				return runstate.AcquireSlotResponse{}, err
+			}
+			if result.Kind != runstate.AcquireGranted && result.Kind != runstate.AcquireCancellingOthers {
+				break
+			}
 		}
 	}
 	if result.Kind != runstate.AcquireGranted && result.Kind != runstate.AcquireCancellingOthers {
@@ -185,6 +191,16 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 		return runstate.AcquireSlotResponse{}, err
 	}
 	if result.Kind == runstate.AcquireQueued {
+		if binding.NodeID != "" {
+			for _, group := range declarations {
+				if group.QueueTimeoutMS != nil && *group.QueueTimeoutMS > 0 {
+					if _, err := tx.execContext(ctx, `UPDATE nodes SET group_wait_started_at=COALESCE(group_wait_started_at,?) WHERE team=? AND run_id=? AND node_id=?`, now.UnixNano(), t.team, binding.RunID, binding.NodeID); err != nil {
+						return result, err
+					}
+					break
+				}
+			}
+		}
 		if err := clearAdmissionLevelTx(ctx, tx, t.team, binding.RunID, binding.NodeID); err != nil {
 			return result, err
 		}
@@ -198,6 +214,11 @@ func (t *Tenant) admitWorkTx(ctx context.Context, tx *storeTx, binding runstate.
 			}
 		}
 	} else if result.Kind == runstate.AcquireGranted || result.Kind == runstate.AcquireCancellingOthers {
+		if binding.NodeID != "" {
+			if _, err := tx.execContext(ctx, `UPDATE nodes SET group_wait_started_at=NULL WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID); err != nil {
+				return result, err
+			}
+		}
 		if _, err := tx.execContext(ctx, `UPDATE admission_work SET granted=1 WHERE team=? AND run_id=? AND node_id=?`, t.team, binding.RunID, binding.NodeID); err != nil {
 			return result, err
 		}
@@ -285,7 +306,7 @@ func checkStartPermitTx(ctx context.Context, tx *storeTx, team Team, row runstat
 	return err
 }
 
-// RelinquishStart returns a provisional burst award when compute cannot start it.
+// RelinquishStart returns an unstarted award when the host cannot start or queue it.
 // Readiness keeps its original timestamp so placement ranking does not restart.
 func (t *Tenant) RelinquishStart(ctx context.Context, b runstate.CapacityBinding, actor runstate.Actor) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
@@ -310,7 +331,7 @@ func (t *Tenant) RelinquishStart(ctx context.Context, b runstate.CapacityBinding
 	})
 }
 
-func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.AuthorityRef, runID, nodeID, scope, group string) (string, error) {
+func capacityScopeKey(runID, nodeID, scope, group, host string) (string, error) {
 	level := "job"
 	if nodeID == "" {
 		level = "plan"
@@ -324,19 +345,30 @@ func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.Author
 	case "run":
 		return runspec.ConcurrencyKey(level, scope, runID, group), nil
 	case "box":
-		chain, err := authorityChainTx(ctx, tx, authority, false)
-		if err != nil {
-			return "", err
+		if host != "" {
+			return runspec.ConcurrencyKey(level, scope, host, group), nil
 		}
-		c := chain[0].principal.Capability
-		if c.Unit != "" && c.ExecutionHost != "" {
-			return runspec.ConcurrencyKey(level, scope, c.ExecutionHost, group), nil
-		}
-		if c.Unit != "" {
-			for _, node := range chain {
-				if capability.Launcher(node.principal.Capability) {
-					return "", errLauncherHostPending
-				}
+		return "", errLauncherHostPending
+	}
+	return "", bindingRefusal()
+}
+
+func capacityKeyTx(ctx context.Context, tx *storeTx, authority capability.AuthorityRef, runID, nodeID, scope, group string) (string, error) {
+	if scope != "box" || nodeID == "" {
+		return capacityScopeKey(runID, nodeID, scope, group, "")
+	}
+	chain, err := authorityChainTx(ctx, tx, authority, false)
+	if err != nil {
+		return "", err
+	}
+	c := chain[0].principal.Capability
+	if c.Unit != "" && c.ExecutionHost != "" {
+		return capacityScopeKey(runID, nodeID, scope, group, c.ExecutionHost)
+	}
+	if c.Unit != "" {
+		for _, node := range chain {
+			if capability.Launcher(node.principal.Capability) {
+				return "", errLauncherHostPending
 			}
 		}
 	}

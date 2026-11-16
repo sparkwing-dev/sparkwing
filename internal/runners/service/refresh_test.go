@@ -249,3 +249,66 @@ func TestRefreshRegistrationPreservesRunningProcess(t *testing.T) {
 		t.Fatalf("running process lifecycle changed: %s", joined)
 	}
 }
+
+func TestRefreshRegistrationUpgradesWorkingDirectoryWithoutChangingConfig(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			executor := &fakeExec{}
+			h := linuxHost(t, executor)
+			h.GOOS = goos
+			h.StateHome = filepath.Join(h.Home, "private state % & quotes\"")
+			if err := os.MkdirAll(filepath.Dir(h.ConfigPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			config := []byte("runner:\n  controller: https://captured.example\n")
+			if err := os.WriteFile(h.ConfigPath, config, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			body := serviceUnit(h)
+			path := UnitPath(h)
+			var want string
+			if goos == "linux" {
+				var lines []string
+				for _, line := range strings.Split(body, "\n") {
+					if !strings.HasPrefix(line, "WorkingDirectory=") {
+						lines = append(lines, line)
+					}
+				}
+				body = strings.Join(lines, "\n")
+				want = strings.Replace(body, "[Service]\n", "[Service]\nWorkingDirectory="+unitfile.SystemdWord(h.StateHome)+"\n", 1)
+			} else {
+				executor.home = h.Home
+				body = agentPlist(h)
+				stateField := "<key>WorkingDirectory</key>\n  <string>" + unitfile.XMLText(h.StateHome) + "</string>"
+				homeField := "<key>WorkingDirectory</key>\n  <string>" + unitfile.XMLText(h.Home) + "</string>"
+				body = strings.Replace(body, stateField, homeField, 1)
+				want = strings.Replace(body, homeField, stateField, 1)
+				path = plistPath(h)
+			}
+			if err := unitfile.Write(path, body); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if err := RefreshRegistration(t.Context(), h); err != nil {
+					t.Fatal(err)
+				}
+				if info, err := os.Stat(h.StateHome); err != nil || !info.IsDir() {
+					t.Fatalf("refresh did not prepare working directory: %v", err)
+				}
+				got, err := os.ReadFile(path)
+				if err != nil || string(got) != want {
+					t.Fatalf("upgrade changed more than working directory: %v\n%s", err, got)
+				}
+			}
+			got, err := os.ReadFile(h.ConfigPath)
+			if err != nil || !slices.Equal(got, config) {
+				t.Fatalf("runner config changed: %s %v", got, err)
+			}
+			for _, call := range executor.calls {
+				if strings.Contains(call, "restart") || strings.Contains(call, "bootout") || strings.Contains(call, "bootstrap") {
+					t.Fatalf("upgrade changed live process: %s", call)
+				}
+			}
+		})
+	}
+}

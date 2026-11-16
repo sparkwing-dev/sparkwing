@@ -14,8 +14,10 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/journal"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 const maxCancelledRunTombstones = 4096
@@ -67,6 +69,10 @@ type Daemon struct {
 	draining           bool
 	runnerWake         runnerWake
 	runnerChanges      runnerGate
+	retiringRunner     *localhostwire.LocalRunnerInstance
+	finishingDrain     bool
+	runnerState        string
+	runnerErr          *apierr.Error
 	shuttingDown       bool
 	localActivity      LocalActivity
 	dashboardConns     int
@@ -188,6 +194,7 @@ func (d *Daemon) runElected(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// #nosec G404 -- The daemon incarnation labels journal records and is not an authentication secret.
 	incarnation := uint64(rand.Int64())
 	d.incarnation = incarnation
 	d.journal = journal.NewWriter(d.layout.dir, incarnation, d.cfg.Logf)

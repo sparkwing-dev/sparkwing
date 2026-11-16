@@ -15,9 +15,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
+	"github.com/sparkwing-dev/sparkwing/internal/testshell"
 )
 
 func TestRunGoSDKNeedsOnlyThePipelineDependencyArchives(t *testing.T) {
+	testshell.UsePath(t, "go", "git")
 	root := t.TempDir()
 	t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))
 	t.Setenv("GOMODCACHE", filepath.Join(root, "modules"))
@@ -59,6 +61,7 @@ func TestRunGoSDKNeedsOnlyThePipelineDependencyArchives(t *testing.T) {
 }
 
 func TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable(t *testing.T) {
+	testshell.UsePath(t, "go", "git")
 	root := t.TempDir()
 	t.Cleanup(func() {
 		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
@@ -167,6 +170,7 @@ func TestRunGoSDKPreparesEffectiveInputsAndOwnsExecutable(t *testing.T) {
 }
 
 func TestRunGoSDKUpgradeWithStaleSparksOverlay(t *testing.T) {
+	testshell.UsePath(t, "go", "git")
 	root := t.TempDir()
 	t.Cleanup(func() {
 		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {

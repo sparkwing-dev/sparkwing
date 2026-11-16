@@ -286,15 +286,11 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 
 	policy := req.Policy
 
-	queueBlocked := false
-	if policy == onLimitQueue {
-		blocked, err := txEarlierRunnableQueueWaiter(ctx, tx, t.team, req.Key, req.RunID, req.NodeID, nowNS, acct)
-		if err != nil {
-			return runstate.AcquireSlotResponse{}, err
-		}
-		queueBlocked = blocked
+	available, err := concurrencyFitsTx(ctx, tx, t.team, req, nowNS, acct, true)
+	if err != nil {
+		return runstate.AcquireSlotResponse{}, err
 	}
-	if !queueBlocked && fitsBudget(activeCost, req.Cost, effCap) {
+	if available {
 		expiresNS := now.Add(req.Lease).UnixNano()
 		if err := txInsertHolder(ctx, tx, holderRow{
 			team: t.team, key: req.Key, holderID: req.HolderID, runID: req.RunID, nodeID: req.NodeID,
@@ -398,6 +394,21 @@ func (t *Tenant) acquireConcurrencySlotTx(ctx context.Context, tx *storeTx, req 
 	}
 }
 
+func concurrencyFitsTx(ctx context.Context, tx *storeTx, team Team, req acquireSlotRequest, nowNS int64, acct concurrencyAccounting, cleanup bool) (bool, error) {
+	for _, holder := range acct.holders {
+		if holder.HolderID == req.HolderID {
+			return true, nil
+		}
+	}
+	if req.Policy == onLimitQueue {
+		blocked, err := txEarlierRunnableQueueWaiter(ctx, tx, team, req.Key, req.RunID, req.NodeID, nowNS, acct, cleanup)
+		if err != nil || blocked {
+			return false, err
+		}
+	}
+	return fitsBudget(acct.used, req.Cost, acct.effectiveCapacity(req.Capacity)), nil
+}
+
 func txActiveHolders(ctx context.Context, tx *storeTx, team Team, key string, nowNS int64) ([]ConcurrencyHolder, error) {
 	rows, err := tx.queryContext(
 		ctx,
@@ -452,8 +463,16 @@ func txConcurrencyAccounting(ctx context.Context, tx *storeTx, team Team, key st
 	if err != nil {
 		return concurrencyAccounting{}, err
 	}
-	a := concurrencyAccounting{entryCap: entryCap, holders: holders}
+	a := concurrencyAccounting{entryCap: entryCap}
 	for _, h := range holders {
+		live, err := capacityWorkLiveTx(ctx, tx, team, runstate.CapacityBinding{RunID: h.RunID, NodeID: h.NodeID}, h.LeaseExpiresAt.UnixNano())
+		if err != nil {
+			return concurrencyAccounting{}, err
+		}
+		if !live {
+			continue
+		}
+		a.holders = append(a.holders, h)
 		a.used += max(h.Cost, 1)
 		if t := declaredCapacityFloorTerm(h.DeclaredCapacity); a.floor == 0 || t < a.floor {
 			a.floor = t
@@ -462,7 +481,7 @@ func txConcurrencyAccounting(ctx context.Context, tx *storeTx, team Team, key st
 	return a, nil
 }
 
-func txEarlierRunnableQueueWaiter(ctx context.Context, tx *storeTx, team Team, key, runID, nodeID string, nowNS int64, acct concurrencyAccounting) (bool, error) {
+func txEarlierRunnableQueueWaiter(ctx context.Context, tx *storeTx, team Team, key, runID, nodeID string, nowNS int64, acct concurrencyAccounting, cleanup bool) (bool, error) {
 	currentArrivedNS, currentQueued, err := txQueueWaiterArrivedAt(ctx, tx, team, key, runID, nodeID)
 	if err != nil {
 		return false, err
@@ -495,8 +514,12 @@ func txEarlierRunnableQueueWaiter(ctx context.Context, tx *storeTx, team Team, k
 
 	used := acct.used
 	holderMin := acct.floor
+	currentWaiter := capacityWaiterLiveTx
+	if cleanup {
+		currentWaiter = capacityWaiterCurrentTx
+	}
 	for _, w := range waiters {
-		current, err := capacityWaiterCurrentTx(ctx, tx, team, w)
+		current, err := currentWaiter(ctx, tx, team, w)
 		if err != nil {
 			return false, err
 		}

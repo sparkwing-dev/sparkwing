@@ -95,6 +95,10 @@ type deployEnv struct {
 }
 
 func defaultDeployConfig() deployConfig {
+	// #nosec G101 -- This is a parameter-store path, not its secret value.
+	const smokeSubmitTokenParameter = "/kikd-prod/sparkwing/deploy/scan-submit-token"
+	// #nosec G101 -- This is a parameter-store path, not its secret value.
+	const stagingGateTokenParameter = "/kikd-prod/sparkwing/deploy/staging-gate-token"
 	const ecr = "633280902600.dkr.ecr.us-west-2.amazonaws.com"
 	return deployConfig{
 		Region:   "us-west-2",
@@ -114,8 +118,8 @@ func defaultDeployConfig() deployConfig {
 		Params: deployParams{
 			GitopsKey:    "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key",
 			ReferenceKey: "/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key",
-			StagingToken: "/kikd-prod/sparkwing/deploy/staging-gate-token",
-			SmokeToken:   "/kikd-prod/sparkwing/deploy/scan-submit-token",
+			StagingToken: stagingGateTokenParameter,
+			SmokeToken:   smokeSubmitTokenParameter,
 		},
 		Staging: deployEnv{
 			Name:                 "staging",
@@ -227,10 +231,32 @@ func sweepStaleDeployDirs(root string, now time.Time, maxAge time.Duration) erro
 	return errors.Join(errs...)
 }
 
-// bug: Go module cache directories are read-only. Unlinking their files needs
-// writable parent directories; WalkDir leaves symlink targets untouched.
-func removeDeployDir(root string) error {
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+// safety: Go module cache directories need writable parents before removal. Root-scoped
+// chmod keeps concurrent symlink swaps from changing permissions outside the tree.
+func removeDeployDir(root string) (err error) {
+	info, err := os.Lstat(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return os.RemoveAll(root)
+	}
+	dir, err := os.OpenRoot(root)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, dir.Close()) }()
+	opened, err := dir.Stat(".")
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, opened) {
+		return fmt.Errorf("deployment cleanup root changed: %s", root)
+	}
+	err = fs.WalkDir(dir.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -244,7 +270,7 @@ func removeDeployDir(root string) error {
 		if err != nil {
 			return err
 		}
-		return os.Chmod(path, info.Mode()|0o200)
+		return dir.Chmod(path, info.Mode()|0o200)
 	})
 	if err != nil {
 		return err

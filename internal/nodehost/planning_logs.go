@@ -29,6 +29,7 @@ type planningLogs struct {
 	sink           func(context.Context, nodewire.FrameLog) error
 	fail           func(error)
 	known, debug   bool
+	show           bool
 	buffer         []planningOutput
 	presenter      *secrets.LogStreams
 	bytes, dropped int
@@ -91,6 +92,10 @@ func (l *planningLogs) explain(reason string) {
 func (l *planningLogs) release(ctx context.Context) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	return l.releaseLocked(ctx)
+}
+
+func (l *planningLogs) releaseLocked(ctx context.Context) error {
 	l.known = true
 	for _, output := range l.buffer {
 		if err := l.emit(ctx, output); err != nil {
@@ -127,6 +132,9 @@ func (l *planningLogs) finishOutput(ctx context.Context) error {
 	}
 	if l.err == nil {
 		l.err = context.Cause(ctx)
+	}
+	if l.err == nil && !l.known && l.show {
+		l.err = l.releaseLocked(ctx)
 	}
 	if l.err == nil && !l.known && len(l.buffer)+l.dropped > 0 {
 		message := fmt.Sprintf("sparkwing: output withheld because secret declarations were unavailable (%d records)", len(l.buffer)+l.dropped)

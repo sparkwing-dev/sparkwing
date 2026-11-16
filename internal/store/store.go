@@ -517,7 +517,7 @@ func (s *Store) listRuns(ctx context.Context, query string, args []any, f RunFil
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
-	if err := s.refreshRunPresentations(ctx, out); err != nil {
+	if err := s.refreshRunPresentations(ctx, out, true); err != nil {
 		return nil, err
 	}
 	if f.hasBeforeCursor() {
@@ -1296,7 +1296,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: fresh stores get this baseline whole; an older store upgrades only through schemaUpgrades.
-const expectedSchemaVersion = 37
+const expectedSchemaVersion = 39
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

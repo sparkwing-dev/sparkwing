@@ -637,7 +637,7 @@ func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row runstate.N
 				return err
 			}
 			wait := runClaimWait(run)
-			if !wait.Set || wait.Value <= 0 || row.QueueStartedAt == nil || row.QueueStartedAt.Add(wait.Value).After(now) {
+			if !groupWaitExpired(row, now) && (!wait.Set || wait.Value <= 0 || row.QueueStartedAt == nil || row.QueueStartedAt.Add(wait.Value).After(now)) {
 				return errors.New("queue deadline not reached")
 			}
 		case guardApproval, guardApprovalTimeout:
@@ -748,6 +748,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 		}
 		row.Status = runstate.StatusRunning
 		row.QueueStartedAt = nil
+		row.GroupWaitStartedAt = nil
 		row.Attempt++
 		row.StartedAt = &now
 		if a := change.Extra.Attempt; a != nil {
@@ -803,6 +804,7 @@ func applyNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row *runstate.
 		row.Outcome = change.To
 		row.FinishedAt = &finished
 		row.QueueStartedAt = nil
+		row.GroupWaitStartedAt = nil
 		clearNodeClaim(row)
 		if row.Expansion == runstate.ExpansionExpected && change.To != runstate.NodeSuccess && change.To != runstate.NodeMemoized {
 			row.Expansion = runstate.ExpansionNone
@@ -837,6 +839,8 @@ func clearNodeClaim(row *runstate.NodeRow) {
 	row.ReadyAt = nil
 }
 
+// safety: run locks serialize this full-row write with private queue-clock updates, leaving state_seq for edges.
+// Generation and queue fences reject stale observations; a retained earlier start only shortens a pending wait.
 func writeNodeStateTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow) error {
 	actor, err := json.Marshal(row.StateActor)
 	if err != nil {
@@ -846,7 +850,7 @@ func writeNodeStateTx(ctx context.Context, tx *storeTx, team Team, row runstate.
 	if row.ClaimedBy != "" {
 		holder = row.ClaimedBy
 	}
-	result, err := tx.execContext(ctx, `UPDATE nodes SET status=?,outcome=?,claimed_by=?,capability_prefix=?,owner_capability_prefix=?,generation=?,attempt=?,disruptions=?,ready_at=?,queue_started_at=?,lease_expires_at=?,started_at=?,finished_at=?,cancel_requested_at=?,cancel_reason=?,state_seq=?,state_digest=?,state_actor=?,expansion=? WHERE team=? AND run_id=? AND node_id=? AND state_seq=?`, row.Status, row.Outcome, holder, row.CapabilityPrefix, row.OwnerCapabilityPrefix, row.Generation, row.Attempt, row.Disruptions, timeNS(row.ReadyAt), timeNS(row.QueueStartedAt), timeNS(row.LeaseExpiresAt), timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.CancelReason, row.StateSeq, row.StateDigest, actor, row.Expansion, team, row.Ref.RunID, row.Ref.NodeID, row.StateSeq-1)
+	result, err := tx.execContext(ctx, `UPDATE nodes SET status=?,outcome=?,claimed_by=?,capability_prefix=?,owner_capability_prefix=?,generation=?,attempt=?,disruptions=?,ready_at=?,queue_started_at=?,group_wait_started_at=?,lease_expires_at=?,started_at=?,finished_at=?,cancel_requested_at=?,cancel_reason=?,state_seq=?,state_digest=?,state_actor=?,expansion=? WHERE team=? AND run_id=? AND node_id=? AND state_seq=?`, row.Status, row.Outcome, holder, row.CapabilityPrefix, row.OwnerCapabilityPrefix, row.Generation, row.Attempt, row.Disruptions, timeNS(row.ReadyAt), timeNS(row.QueueStartedAt), timeNS(row.GroupWaitStartedAt), timeNS(row.LeaseExpiresAt), timeNS(row.StartedAt), timeNS(row.FinishedAt), timeNS(row.CancelRequestedAt), row.CancelReason, row.StateSeq, row.StateDigest, actor, row.Expansion, team, row.Ref.RunID, row.Ref.NodeID, row.StateSeq-1)
 	if err != nil {
 		return err
 	}

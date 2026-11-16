@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 )
 
 func streamDashboardLogs(ctx context.Context, inv clisurface.Invocation, openLog func(context.Context) (*os.File, error), out io.Writer, mode string) error {
@@ -46,6 +47,9 @@ func streamDashboardLogs(ctx context.Context, inv clisurface.Invocation, openLog
 				Line      string `json:"line"`
 				Truncated bool   `json:"truncated,omitempty"`
 			}{"log", "sparkwing", "dashboard", line.Text, line.Truncated})
+		}
+		if mode == "pretty" {
+			line.Text = opsview.DisplayText(line.Text)
 		}
 		if line.Truncated {
 			line.Text += " … [line truncated]"

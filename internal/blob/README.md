@@ -4,6 +4,19 @@
 downloads and presence queries. The caller supplies authority in memory.
 `TransferClient` sends only the signed headers to the object URL and refuses
 redirects. It supports S3 and filesystem signing through the same HTTP path.
+`Upload` owns the shared PUT retry policy used by blob, source-snapshot and log
+uploads. The first attempt reads from the current position without rewinding.
+Seekable bodies rewind to that position only between attempts, for at most
+three attempts with 100 ms and 200 ms backoff, on connection failures before a
+response or HTTP 502, 503 and 504. Non-seekable readers get one attempt. If a
+rewind fails, no further PUT is sent and the original safe transfer details
+include an explicit not-retried reason. No payload is buffered or spooled. Valid
+signing tickets are reused, and expired tickets are renewed through the
+caller's signer. Log signing still keeps its original slot deadline. Other
+HTTP refusals and errors after a successful response are not retried. Failure
+diagnostics name PUT, the object host, a fixed error class and the attempt
+count, without retaining the signed URL or arbitrary transport error text.
+
 
 All physical keys are relative to the configured storage root. For
 `--cache-blob-store=s3://bucket/controller`, CAS blobs, artifact members and
@@ -404,3 +417,41 @@ that same run can read. Bootstrap, delegated and remote-cache readers are refuse
 The prepared edge grants no access across runs, including retries in a new run.
 The record follows run retention. Bytes use the ordinary authenticated, verified
 upload/download path; a consumer must consume verified EOF before extraction.
+
+## R2 log signing acceptance
+
+`TestR2LogSigningRejectsChangedBytes` exercises the production signer against
+Cloudflare R2. It skips before loading credentials when both
+`SPARKWING_R2_TEST_ENDPOINT` and `SPARKWING_R2_TEST_BUCKET` are absent. Partial
+configuration fails. Explicit `AWS_PROFILE` is required. Bucket and profile
+names must each include a whole `test` or `scratch` token between `-` or `_`
+separators, so `sparkwing-test` and `r2_test` pass while `prod-latest` and
+`contest` fail. The endpoint must be an HTTPS R2 account endpoint. These test-only inputs add no product configuration.
+
+Use only an already-existing, confirmed test/scratch bucket and its existing
+credential profile. Do not create resources or point the proof at a production
+bucket. With an isolated HOME, point `AWS_CONFIG_FILE` and
+`AWS_SHARED_CREDENTIALS_FILE` at those existing read-only files. Run through the
+repository's normal Xwing scratch and CPU admission wrapper:
+
+```sh
+SPARKWING_R2_TEST_ENDPOINT=https://ACCOUNT.r2.cloudflarestorage.com \
+SPARKWING_R2_TEST_BUCKET=existing-test-bucket AWS_PROFILE=r2-test \
+go test ./internal/blob -run '^TestR2LogSigningRejectsChangedBytes$' -count=1 -v
+```
+
+The test uses a fresh random prefix and both segment and manifest slots. It
+checks valid uploads and larger/smaller bodies with correct HTTP framing. The
+larger/smaller cases use a URL signed for the sent bytes' own SHA-256 but the
+original length, so only the signed Content-Length can refuse them, and R2's
+checksum error fails them. It also checks corrupted same-length bytes under the
+original checksum, changed/missing checksum
+headers, a missing create-only header and overwrite refusal. Each refused PUT
+must leave no object, and a valid retry using the original URL must succeed.
+A corrupted body must produce R2's checksum error, not a local Go transport
+length error. Successful writes are read back byte-for-byte.
+
+Cleanup deletes only that invocation's exact keys, requires HEAD absence for
+each, and requires an empty prefix listing. Cleanup errors fail the test.
+Logs retain statuses, error codes and request IDs, never signed query strings
+or credential values. An unconfigured skip leaves live provider proof pending.

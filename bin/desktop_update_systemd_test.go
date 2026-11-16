@@ -14,11 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 func TestDesktopUpdaterSystemdLifetimeAndControllerKeys(t *testing.T) {
+	testmanager.Require(t)
 	cli := os.Getenv("SPARKWING_LOCAL_E2E_BINARY")
 	if cli == "" {
 		t.Skip("set SPARKWING_LOCAL_E2E_BINARY to a worktree candidate")

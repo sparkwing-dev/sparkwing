@@ -29,6 +29,80 @@ An interrupted or incomplete observation exits 3, and polling again may
 complete it. A run that does not exist, or that the credential cannot read,
 exits 4: stop polling.
 
+Native hosts also record structured `lease_keeper` diagnostics. Default CLI plain
+and pretty output and the dashboard's human log rendering hide these records.
+Use `sparkwing runs logs --run RUN --grep host_lease_keeper -o json` to read them
+through the run's existing log permissions. No additional credential is granted.
+The persisted host-owned `host_lease_keeper: true` stamp identifies these records
+even when secret masking redacts the event name. The SDK protocol does not accept
+this stamp; SDK messages cannot assign it.
+Pretty prefixes keep physical log line numbers, so hidden diagnostic records can
+leave gaps in those numbers. SDK protocol records using this reserved event kind
+are renamed `sdk_lease_keeper` and stay visible as application records.
+Diagnostic-only bytes do not start an upload timer. They ride the next real-output
+cut or the final seal; the existing segment-size and total-byte bounds still apply.
+Diagnostics only append to an already-bound stream, and no diagnostic opens a
+writer. Each bound stream holds one observation window, which closes when the
+stream detaches. The first window opens when diagnostics start, so records
+captured before the first bind land in the first stream. Records already queued
+for a stream drain into it before it seals. A retried job attempt binds a new
+stream and opens the next window once the previous one has sealed. Keeper events
+between two windows are not recorded. A stream that detaches before its window
+opens gets no summary.
+
+Each keeper instance records its OWNER or NODE role, unit generation, renewal
+sequence, selected expiry and watcher reset, renewal-in-flight state and inherited
+deadlines. A reset retains the originating renewal number even when a newer
+renewal is in flight. All recorders in one process share the same monotonic origin.
+Clock samples pair process-relative monotonic durations with wall time;
+process birth and boot identity indicate whether process identity is complete.
+On Linux, `origin_mono_before_ns` and `origin_mono_after_ns` bracket that shared
+origin on `CLOCK_MONOTONIC`, the clock behind every `mono_*_ns` duration. A
+sample's position on that clock is the bracket plus its duration.
+`expires_mono_ns`, `deadline_mono_ns` and `execution_deadline_mono_ns` restate
+the expiry and the inherited deadlines as offsets from the same origin. Each is
+absent when its target has only a wall time, as an inherited deadline decoded
+from a Cloud award does. The keeper holds a server-supplied expiry on the
+monotonic clock and still enforces the server's wall expiry, stopping at
+whichever comes first. It therefore stops no later than `expires_mono_ns`.
+`expires_wall_bound: true` marks an expiry that came from the server, which a
+forward wall-clock step, such as one after a host suspend, can end earlier. An
+unmarked expiry is purely monotonic.
+A failed renewal's `renewal_finish` carries `error_code`: the wire error code,
+or `unclassified` when the error has none. It never carries the message. A
+`cancel_requested` record, with `cancel_source` set to `renewal` or `wait`, is
+captured before the keeper acts on a cancellation request. A complete window
+without one saw no request.
+The records contain no lease bearer or renewal payload.
+
+Delivery is best effort and cannot delay renewal, expiry or stop. Capture never
+waits for another capture: lock contention drops the record and increments loss.
+At sealing, the host spends at most 100 ms of the existing retry-tail wait
+draining the stream's queued diagnostics. It then writes one `kind: summary`
+record per keeper instance. `summary.as_of_seal` marks a record that covers only
+its window. `open_mono_before_ns`, `open_wall` and `open_mono_after_ns` record the
+window's start, and `seal_mono_before_ns`, `seal_wall` and `seal_mono_after_ns`
+record its cutoff. `last_delivered_sequence` is the last data sequence appended to
+this stream. `captured` is the instance's last data sequence. `lost` totals the
+instance's contention drops, queue overflows and delivery failures. A snapshot
+that was captured and then lost counts in both. `drain_complete` is true only when
+the window lost nothing. The summary repeats the last captured sequence and does
+not consume one of its own.
+
+A window's trace is complete when its stream has a host-stamped summary with
+`drain_complete: true` and complete identity, and data sequences run without gaps
+up to `captured`. The claim ends at the cutoff. The keeper keeps renewing through
+the finish write, and later events fall outside the claim. `execution_end` does
+not mark the final sequence and may fall after the cutoff. A missing summary
+means incomplete diagnostics. That happens when the drain budget expires or the
+summary write fails. Neither condition changes the run outcome or the log
+lifecycle.
+
+A zero inherited deadline does not imply that a lease watcher has no expiry. Log
+closure or lost writer authority can discard a tail; diagnostics do not extend log
+authority or execution lifetime. These records share the run's existing log
+storage limits, retention and upload policy.
+
 Search several runs with `sparkwing runs grep --grep PATTERN --pipeline check`.
 Search output retains its continuation even when a page has no matching lines.
 Each log read or search request scans at most 256 MiB of log bytes for at most
@@ -269,6 +343,10 @@ Each read rechecks the authenticated actor and its holder/generation before
 fetching committed bytes. Log streams return `Cache-Control: no-store`.
 
 ## Log completeness
+
+A log cursor belongs to one run, job and filter selection. If a read refuses
+it as a mismatch, remove `--cursor` (the HTTP `cursor` parameter) to restart
+the selection, or reuse a returned cursor with the same run, job and filters.
 
 A log page contains `records`, `next_cursor`, `truncated` and `complete`.
 An incomplete page retains a cursor even when it has no records. A truncated
@@ -846,3 +924,67 @@ backend composition require separate acceptance evidence.
 
 If `runs status` cannot find the selected run, run `sparkwing runs list` in the
 same profile and team, then retry with an ID from that list.
+
+## Annotation request timing
+
+Native hosts trace annotation dispatch, its fresh parent-authentication checks,
+binding check and persistence RPC. Controller-client spans use method and route
+templates, and propagate trace identity to controller server spans. They record
+bearer-provider timing and HTTP connection, DNS, dial, TLS, request-write,
+first-response-byte and response-body/decode phases when those phases occur.
+A reused connection has no DNS, dial or TLS phase.
+
+Native SDK service RPCs share the host timing observer, including services other
+than annotations.
+
+Runner `start`, `warm` and `run-node` export these traces when the existing
+`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set.
+They use `OTEL_TRACES_SAMPLER_ARG` and flush for at most five seconds on exit.
+`run-node` puts its requests under one `runner run-node` root span, because it
+runs one bounded unit. `start` and `warm` can run for days, so each request or
+annotation starts its own trace and gets its own sampling decision; they record
+only a short `runner start` or `runner warm` startup span. `--help` starts no
+exporter and does not wait for a flush.
+Exporter failures report a fixed warning without endpoint values or response
+bodies, and OTel's internal logger is silenced, so a malformed endpoint is not
+echoed either. Flush cannot change the command's already-decided exit outcome.
+With neither trace endpoint configured, they start no exporter. This does not
+configure a CLI or wingd exporter or enable runner log export.
+
+On any host, one of these operations taking at least one second also produces
+a best-effort `request_timing` diagnostic in the job's existing run log:
+
+| Operation | Covers |
+| --- | --- |
+| `nodehost.annotation` | the whole SDK annotation request, through its acknowledgement |
+| `nodehost.parent_auth` | one fresh parent-authentication check |
+| `nodehost.binding` | the binding check |
+| `nodehost.annotation_write` | annotation persistence, after authorization |
+| `controller <METHOD> <route>` | one controller RPC, with its HTTP phases |
+| `controller.bearer` | fetching the controller credential for one RPC |
+
+No collector is required. Read it with `sparkwing runs logs --run RUN --job JOB -o json`.
+The host adds `host_request_timing: true` after secret masking; SDK protocol
+records cannot set that stamp, and SDK events using the reserved kind are
+renamed `sdk_request_timing`. CLI plain/pretty output and the dashboard hide
+host-stamped request timings even if masking changed their event name.
+
+Timing attributes contain a host-generated request correlation ID, the SDK
+route template such as `POST /node/v1/summary` (never the request path), the
+operation, UTC start, elapsed milliseconds, success and phase offsets in
+milliseconds from operation start. Nested durations overlap and must not be
+added. Repeated phases identify retries; at most 128 phase entries are retained, with
+`dropped_phases` reporting overflow. Trace/span IDs are included when available.
+Names come from host constants or route templates, never URLs, credentials,
+annotation text, request bodies or error messages.
+
+A bounded, nonblocking host queue isolates diagnostic capture from request
+acknowledgement. Later records report queue/delivery loss as `dropped`.
+Queued records retain the log stream captured at SDK delegation. Closing that
+stream discards a late record; it cannot enter a successor attempt.
+Diagnostics append only to an already-bound log stream, share its byte and
+retention limits, and ride the next ordinary log cut or final seal. Host
+shutdown stops intake and delivers records already queued, waiting at most two
+seconds. A closed stream, a record arriving after shutdown starts, a delivery
+still running at that bound or queue overflow can discard a diagnostic.
+Missing records therefore do not prove that a request was fast.

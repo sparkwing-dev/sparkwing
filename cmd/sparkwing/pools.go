@@ -9,6 +9,8 @@ import (
 	"os"
 	"text/tabwriter"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -50,7 +52,7 @@ func managePools(ctx context.Context, inv clisurface.Invocation, manager control
 		}
 		if format == "plain" {
 			for _, pool := range pools.Pools {
-				if _, err := fmt.Fprintln(out, pool.Name); err != nil {
+				if _, err := fmt.Fprintln(out, opsview.DisplayText(pool.Name)); err != nil {
 					return err
 				}
 			}
@@ -60,11 +62,11 @@ func managePools(ctx context.Context, inv clisurface.Invocation, manager control
 		fmt.Fprintln(tw, "POOL\tRUNNERS\tRULE\tREPOSITORIES\tBRANCHES\tSOURCE\tROUTE")
 		for _, pool := range pools.Pools {
 			if len(pool.Rules) == 0 {
-				fmt.Fprintf(tw, "%s\t%s\t-\t-\t-\t-\t-\n", pool.Name, joinOrDash(pool.Runners))
+				fmt.Fprintf(tw, "%s\t%s\t-\t-\t-\t-\t-\n", opsview.DisplayText(pool.Name), opsview.DisplayText(joinOrDash(pool.Runners)))
 				continue
 			}
 			for _, rule := range pool.Rules {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%t\n", pool.Name, joinOrDash(pool.Runners), rule.ID, joinOrDash(rule.Repos), joinOrDash(rule.Branches), dashIfEmpty(rule.Source), rule.Route)
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%t\n", opsview.DisplayText(pool.Name), opsview.DisplayText(joinOrDash(pool.Runners)), opsview.DisplayText(rule.ID), opsview.DisplayText(joinOrDash(rule.Repos)), opsview.DisplayText(joinOrDash(rule.Branches)), opsview.DisplayText(dashIfEmpty(rule.Source)), rule.Route)
 			}
 		}
 		return tw.Flush()
@@ -76,7 +78,7 @@ func managePools(ctx context.Context, inv clisurface.Invocation, manager control
 		if format == "json" {
 			return json.NewEncoder(out).Encode(result)
 		}
-		_, err = fmt.Fprintln(out, result.Rule.ID)
+		_, err = fmt.Fprintln(out, opsview.DisplayText(result.Rule.ID))
 		return err
 	case "sparkwing pools disallow":
 		result, err := manager.DisallowPool(ctx, inv.Value("pool"), inv.Value("rule"))
@@ -86,7 +88,7 @@ func managePools(ctx context.Context, inv clisurface.Invocation, manager control
 		if format == "json" {
 			return json.NewEncoder(out).Encode(result)
 		}
-		_, err = fmt.Fprintln(out, result.RuleID)
+		_, err = fmt.Fprintln(out, opsview.DisplayText(result.RuleID))
 		return err
 	}
 	return &clisurface.UsageError{Path: inv.Command.Path, Message: "unknown pool command"}

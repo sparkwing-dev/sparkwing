@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"golang.org/x/term"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -31,7 +33,7 @@ func terminalConsole() deviceConsole {
 
 // safety: the approver's session picks the team, so the CLI names it before anything is saved or started.
 func checkApprovedTeam(token controllerwire.CreatedToken, want string) error {
-	fmt.Fprintf(os.Stderr, "Approved for team %s as %s with %s.\n", token.Team, token.Principal, strings.Join(token.Grants, ", "))
+	fmt.Fprintf(os.Stderr, "Approved for team %s as %s with %s.\n", opsview.DisplayText(token.Team), opsview.DisplayText(token.Principal), opsview.DisplayText(strings.Join(token.Grants, ", ")))
 	if want != "" && token.Team != want {
 		return fmt.Errorf("the approval is for team %s, not --team %s; nothing was saved", token.Team, want)
 	}
@@ -121,7 +123,7 @@ func login(inv clisurface.Invocation, console deviceConsole) error {
 		err := revokeProfileToken(replaced)
 		var failure *apierr.Error
 		if err != nil && !(errors.As(err, &failure) && (failure.Code == hosterr.Unauthenticated || failure.Code == apierr.NotFound)) {
-			fmt.Fprintf(os.Stderr, "warning: the profile's previous token was not revoked; revoke it from the console's Machines page or with sparkwing tokens revoke --profile %s\n", name)
+			fmt.Fprintf(os.Stderr, "warning: the profile's previous token was not revoked; revoke it from the console's Machines page or with sparkwing tokens revoke --profile %s\n", opsview.DisplayText(name))
 		}
 	}
 	return writeProfile(p, format)
@@ -152,7 +154,7 @@ func deviceSignIn(parent context.Context, console deviceConsole, base string, re
 	if len(code) == 8 {
 		code = code[:4] + "-" + code[4:]
 	}
-	fmt.Fprintf(os.Stderr, "To approve this sign-in, open %s%s in a browser where you are signed in, and enter the code:\n\n    %s\n\nWaiting for approval; the code expires in %d minutes. Press Ctrl-C to cancel.\n", base, started.VerificationPath, code, max(started.ExpiresIn/60, 1))
+	fmt.Fprintf(os.Stderr, "To approve this sign-in, open %s%s in a browser where you are signed in, and enter the code:\n\n    %s\n\nWaiting for approval; the code expires in %d minutes. Press Ctrl-C to cancel.\n", opsview.DisplayText(base), opsview.DisplayText(started.VerificationPath), code, max(started.ExpiresIn/60, 1))
 	token, err := login.Wait(ctx, started, console.sleep)
 	if err != nil && ctx.Err() != nil {
 		cancelCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)

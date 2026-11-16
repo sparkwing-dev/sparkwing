@@ -14,10 +14,27 @@ import (
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/settings"
 	"github.com/sparkwing-dev/sparkwing/internal/userconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
+
+func TestSurfaceSecretsKeyRefusalIsBadRequest(t *testing.T) {
+	inv, err := clisurface.Parse("sparkwing", []string{"dashboard", "open", "-o", "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := fmt.Errorf("restore the existing key or set SPARKWING_SECRETS_KEY_FILE to a private key file inside SPARKWING_HOME: %w", secrets.ErrKeyRefused)
+	var out bytes.Buffer
+	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, hosterr.WriteJSON); err != nil {
+		t.Fatal(err)
+	}
+	var envelope hosterr.Envelope
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil || envelope.Error.Code != apierr.BadRequest || !strings.Contains(envelope.Error.Message, "restore the existing key") {
+		t.Fatalf("key refusal was not a configuration error: %s, %v", &out, err)
+	}
+}
 
 func TestSurfaceErrorsUseSharedEnvelope(t *testing.T) {
 	inv, parseErr := clisurface.Parse("sparkwing", []string{"runs", "status", "--run=r1", "--output=json", "--unknown=private-value"})
@@ -190,5 +207,24 @@ func TestRunErrorsRenderInTheRunsResolvedOutput(t *testing.T) {
 	}
 	if got := invocationOutput(inv); got != "plain" {
 		t.Fatalf("explicit -o plain resolved to %q, want plain over the environment", got)
+	}
+}
+
+func TestSurfaceMultiLineErrorPrintsRealIndentedLines(t *testing.T) {
+	inv, err := clisurface.Parse("sparkwing", []string{"runs", "list", "-o", "pretty"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := &apierr.Error{Code: apierr.BadRequest, Message: "pipeline \"build\" did not start:\n- DEPLOY_KEY is unavailable\n  Fix: sparkwing secrets set --secret DEPLOY_KEY\x1b[2J", Hint: "set it\nthen retry"}
+	var out bytes.Buffer
+	if err := writeInvocationError(&out, &invocationError{inv: inv, cause: failure}, hosterr.WriteJSON); err != nil {
+		t.Fatal(err)
+	}
+	want := "sparkwing: runs list: pipeline \"build\" did not start:\n" +
+		"  - DEPLOY_KEY is unavailable\n" +
+		`  "  Fix: sparkwing secrets set --secret DEPLOY_KEY\x1b[2J"` + "\n" +
+		"hint: set it\n  then retry\n"
+	if out.String() != want {
+		t.Fatalf("pretty error:\n%s\nwant:\n%s", &out, want)
 	}
 }

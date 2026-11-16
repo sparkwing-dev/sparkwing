@@ -118,8 +118,11 @@ produce the same graph. Read clocks, random values and mutable environment
 inside callbacks. A reconstruction mismatch fails with `plan_drift` before the
 body starts.
 
-`RunContext` contains `RunID`, `Pipeline`, `Git`, `Trigger`, `StartedAt`, `DryRun`
-and `NoMemo`. These are the host's run snapshot. `sw.Inputs[T](ctx)` reads typed
+`RunContext` contains `RunID`, `Pipeline`, `Git`, `Trigger`, `StartedAt`, `DryRun`,
+`NoMemo`, `StartAt` and `StopAt`. These are the host's run snapshot. `StartAt`
+and `StopAt` hold the `--sw-start-at` and `--sw-stop-at` step bounds when the host
+forwards them, so a `Plan` can refuse a selection it cannot honor. A host that does
+not forward them leaves both empty. `sw.Inputs[T](ctx)` reads typed
 pipeline inputs from an execution callback. `sw.Runner(ctx)` returns the granted
 runner identity, including its name, type and labels.
 
@@ -455,8 +458,13 @@ Reused group definitions at the same level must agree on scope, capacity and
 policy. Plan and job groups have separate namespaces. The same name at both
 levels identifies two budgets. The store derives keys from accepted declarations
 and the actual execution award. Each complete group set grants atomically. A
-queued job holds none of its groups. `QueueTimeout` bounds initial waiting.
-Replaying an already granted admission after that timeout retains its groups.
+queued job holds none of its groups. `QueueTimeout` bounds the initial wait from
+when an eligible ready job first encounters a full group, even before a runner
+claims it. That start survives an unstarted return or controller restart.
+An expired unclaimed wait fails with `queue_timeout` on the next claim poll or
+reconciliation, without consuming an execution attempt. Awarded admission uses
+the same start; replaying an already granted admission after that timeout retains
+its groups.
 
 After released work loses plan capacity, it keeps running. New releases queue
 without a timeout until the plan reacquires capacity. `CancelOthers` replaces
@@ -482,7 +490,10 @@ Secrets containing `***` are accepted.
 Defaults from unselected pipelines register when long enough.
 Stdout and stderr are masked before line splitting. Describe and generator output
 waits for declarations. Failed discovery withholds that output, including CLI
-help diagnostics and test-host planning output. Generator failures persist a
+help diagnostics and test-host planning output.
+`sparkwing pipeline describe --pipeline <name> --show-withheld` writes it to the
+CLI's stderr, masked only by registered values, so the failed pipeline's own
+secret defaults print unmasked. Generator failures persist a
 fixed error with details withheld. Controller comments and run displays include
 accepted generator classifications. CLI lookup, flag parsing and routing use
 private declarations. Help and the describe cache use a separate presentation

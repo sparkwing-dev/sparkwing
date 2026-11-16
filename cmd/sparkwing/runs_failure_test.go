@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -67,9 +68,11 @@ func TestRunStatusShowsAnUnstartedJobsError(t *testing.T) {
 		if err := observeRunStatus(t.Context(), statusInvocation(t, args...), reader, &out, nil); exitCodeFor(err) != 1 {
 			t.Fatalf("%v status exit: %v", args, err)
 		}
-		want := compiler
+		want := "build error:\n  install source entry: # pipeline\n  ./pipeline.go:91:26: cannot use *** as int value\n"
 		if args[1] == "json" {
 			want = "cannot use *** as int value"
+		} else if args[0] == "--view" {
+			want = strconv.Quote(compiler)
 		}
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("%v: missing the job's error in:\n%s", args, &out)
@@ -87,7 +90,10 @@ func TestRunStatusShowsTheErrorOfARunThatFailedToPlan(t *testing.T) {
 		if err := observeRunStatus(t.Context(), statusInvocation(t, args...), reader, &out, nil); exitCodeFor(err) != 1 {
 			t.Fatalf("%v status exit: %v", args, err)
 		}
-		want := []string{compiler}
+		want := []string{"run error:\n  install source entry: # pipeline\n  jobs/broken.go:6:9: undefined: qaDeliberateUndefined\n"}
+		if args[0] == "--view" {
+			want = []string{strconv.Quote(compiler)}
+		}
 		if args[len(args)-1] == "json" {
 			want = []string{"undefined: qaDeliberateUndefined", `"hint":"the pipeline failed to plan`, "sparkwing pipeline plan --pipeline hello"}
 		} else if args[0] != "--view" {

@@ -24,13 +24,19 @@ type Beat struct {
 
 // Keeper renews every unit and its bound concurrency under the shared cadence.
 type Keeper struct {
-	Renew    func(context.Context) (Beat, error)
-	Interval time.Duration
-	Lease    time.Duration
+	Diagnostics *Diagnostics
+	Identity    Identity
+	Renew       func(context.Context) (Beat, error)
+	Interval    time.Duration
+	Lease       time.Duration
 	// Observe receives successful watch updates without changing renewal cadence.
 	Observe func(Beat)
+	// WaitCancellation observes requested cancellation without renewing authority.
+	// It blocks until cancellation or context completion and returns nil for the latter.
+	WaitCancellation func(context.Context) *CancelError
 	// ExecutionEnded stops execution surfaces outside the SDK tree. It runs once and must return promptly.
 	ExecutionEnded func()
+	wall           func() time.Time
 }
 
 // CancelError distinguishes a requested cancellation from lost authority.
@@ -57,49 +63,88 @@ var ErrSilent = errors.New("lease renewal silent")
 
 // Run returns the unit context and a stop function that cancels and joins renewal.
 func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
+	trace := k.Diagnostics.start(ctx, k.Identity)
 	hard, hardCancel := context.WithCancelCause(ExecutionContext(ctx))
 	unit, cancel := context.WithCancelCause(context.WithValue(ctx, executionKey{}, hard))
 	executionDone := make(chan struct{})
 	context.AfterFunc(hard, func() {
 		defer close(executionDone)
+		trace.emit("execution_end", time.Time{}, time.Time{}, "ended", 0)
 		if k.ExecutionEnded != nil {
 			k.ExecutionEnded()
 		}
 	})
 	done := make(chan struct{})
+	cancelDone := make(chan struct{})
+	go func() {
+		defer close(cancelDone)
+		if k.WaitCancellation != nil {
+			if requested := k.WaitCancellation(unit); requested != nil {
+				trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, captureNote{cancelSource: "wait"})
+				cancel(requested)
+			}
+		}
+	}()
 	watchDone := make(chan struct{})
-	renewed := make(chan time.Time)
+	renewed := make(chan leaseUpdate)
 	expires := time.Now().Add(k.Lease)
 	go func(expires time.Time) {
 		defer close(watchDone)
-		watch(hard, func(err error) { hardCancel(err); cancel(err) }, renewed, expires)
+		watch(hard, func(err error) { hardCancel(err); cancel(err) }, renewed, expires, trace)
 	}(expires)
+	wall := k.wall
+	if wall == nil {
+		wall = time.Now
+	}
 	go func() {
 		defer close(done)
 		defer cancel(context.Canceled)
 		every := k.Interval
+		var serverWall time.Time
+		expired := func() bool {
+			// safety: the server's decoded wall expiry still binds, because after a host suspend the
+			// wall clock passes it while the monotonic expiry has not advanced.
+			return !time.Now().Before(expires) || !serverWall.IsZero() && !wall().Before(serverWall)
+		}
 		for unit.Err() == nil {
-			if !time.Now().Before(expires) {
+			if expired() {
 				hardCancel(ErrSilent)
 				cancel(ErrSilent)
 				return
 			}
 			sent := time.Now()
+			renewal := trace.emit("renewal_start", sent, time.Time{}, "", 0)
 			beat, err := k.Renew(unit)
+			outcome, code := "success", ""
+			if err != nil {
+				outcome, code = "error", renewalErrorCode(err)
+			}
+			trace.capture("renewal_finish", time.Time{}, time.Time{}, outcome, 0, captureNote{errorCode: code})
 			if unit.Err() != nil {
 				return
 			}
-			if !time.Now().Before(expires) {
+			if expired() {
 				hardCancel(ErrSilent)
 				cancel(ErrSilent)
 				return
 			}
 			if err == nil {
-				expires = sent.Add(k.Lease)
-				if !beat.ExpiresAt.IsZero() && beat.ExpiresAt.Before(expires) {
-					expires = beat.ExpiresAt
+				expires, serverWall = sent.Add(k.Lease), time.Time{}
+				if !beat.ExpiresAt.IsZero() {
+					// safety: the watcher and diagnostics hold the server expiry on the monotonic clock,
+					// and serverWall keeps its wall bound, so the loop stops at whichever comes first.
+					now := time.Now()
+					if server := now.Add(beat.ExpiresAt.Sub(now)); server.Before(expires) {
+						expires, serverWall = server, beat.ExpiresAt.Round(0)
+					}
 				}
-				if !expires.After(time.Now()) {
+				trace.capture("expiry_selected", time.Time{}, expires, "", 0, captureNote{wallBound: !serverWall.IsZero()})
+				if beat.CancelRequested {
+					// safety: recording before the watcher handoff keeps its reset from contending
+					// with this record, and the record still precedes the cancellation it reports.
+					trace.capture("cancel_requested", time.Time{}, time.Time{}, "", 0, captureNote{cancelSource: "renewal"})
+				}
+				if expired() {
 					hardCancel(ErrSilent)
 					cancel(ErrSilent)
 					return
@@ -109,7 +154,7 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 			next := time.Now().Add(max(every, retryAfter(err)))
 			if err == nil {
 				select {
-				case renewed <- expires:
+				case renewed <- leaseUpdate{expires: expires, renewal: renewal}:
 				case <-hard.Done():
 					return
 				}
@@ -147,8 +192,18 @@ func (k Keeper) Run(ctx context.Context) (unit context.Context, stop func()) {
 		hardCancel(context.Canceled)
 		<-done
 		<-watchDone
+		<-cancelDone
 		<-executionDone
 	}
+}
+
+func renewalErrorCode(err error) string {
+	// safety: only the wire code is recorded, because an error message can carry run or user text.
+	var failure *apierr.Error
+	if errors.As(err, &failure) && failure != nil && failure.Code != "" {
+		return string(failure.Code)
+	}
+	return "unclassified"
 }
 
 func retryAfter(err error) time.Duration {
@@ -183,8 +238,14 @@ func retryAfter(err error) time.Duration {
 	return time.Duration(milliseconds * float64(time.Millisecond))
 }
 
-func watch(ctx context.Context, cancel context.CancelCauseFunc, renewed <-chan time.Time, expires time.Time) {
+type leaseUpdate struct {
+	expires time.Time
+	renewal uint64
+}
+
+func watch(ctx context.Context, cancel context.CancelCauseFunc, renewed <-chan leaseUpdate, expires time.Time, trace *keeperTrace) {
 	timer := time.NewTimer(time.Until(expires))
+	trace.emit("watch_arm", time.Time{}, expires, "", 0)
 	defer timer.Stop()
 	for {
 		select {
@@ -193,8 +254,10 @@ func watch(ctx context.Context, cancel context.CancelCauseFunc, renewed <-chan t
 		case <-timer.C:
 			cancel(ErrSilent)
 			return
-		case expires = <-renewed:
+		case update := <-renewed:
+			expires = update.expires
 			timer.Reset(time.Until(expires))
+			trace.emit("watch_reset", time.Time{}, expires, "", update.renewal)
 		}
 	}
 }

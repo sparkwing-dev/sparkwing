@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -106,11 +108,11 @@ func renderQueuePriorityMissing(out io.Writer, format string, res queuePriorityR
 			return err
 		}
 	case "plain":
-		if _, err := fmt.Fprintf(out, "priority\t%s\tnot_found\t%s\n", runID, reason); err != nil {
+		if _, err := fmt.Fprintf(out, "priority\t%s\tnot_found\t%s\n", opsview.DisplayText(runID), opsview.DisplayText(reason)); err != nil {
 			return err
 		}
 	default:
-		if _, err := fmt.Fprintf(out, "run %s: %s\n", runID, reason); err != nil {
+		if _, err := fmt.Fprintf(out, "run %s: %s\n", opsview.DisplayText(runID), opsview.DisplayText(reason)); err != nil {
 			return err
 		}
 	}
@@ -123,7 +125,7 @@ func renderQueuePriority(out io.Writer, res queuePriorityResult, format string) 
 		return queuePriorityJSON(out, res)
 	case "plain":
 		_, err := fmt.Fprintf(out, "priority\t%s\t%d\t%d\t%d\t%d\t%d\t%t\n",
-			res.RunID, res.Previous, res.Priority, res.PreviousPosition, res.Position, res.Participants, res.Holding)
+			opsview.DisplayText(res.RunID), res.Previous, res.Priority, res.PreviousPosition, res.Position, res.Participants, res.Holding)
 		return err
 	default:
 		line := fmt.Sprintf("run %s: priority %d -> %d", res.RunID, res.Previous, res.Priority)
@@ -131,11 +133,11 @@ func renderQueuePriority(out io.Writer, res queuePriorityResult, format string) 
 			line += fmt.Sprintf(", position %s -> %s",
 				queuePositionWord(res.PreviousPosition), queuePositionWord(res.Position))
 		}
-		if _, err := fmt.Fprintln(out, line); err != nil {
+		if _, err := fmt.Fprintln(out, opsview.DisplayText(line)); err != nil {
 			return err
 		}
 		if res.Holding {
-			_, err := fmt.Fprintf(out, "run %s already holds a lease, which keeps its place; its waiting participants moved, and the job admissions it has yet to make land at %d\n", res.RunID, res.Priority)
+			_, err := fmt.Fprintf(out, "run %s already holds a lease, which keeps its place; its waiting participants moved, and the job admissions it has yet to make land at %d\n", opsview.DisplayText(res.RunID), res.Priority)
 			return err
 		}
 		return nil

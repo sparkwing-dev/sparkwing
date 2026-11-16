@@ -50,11 +50,6 @@ type Dashboard struct {
 	// SupportContact is the email address or URL the console's Help panel and
 	// limit messages name. Empty sends people to their Sparkwing administrator.
 	SupportContact string
-
-	// InsecureCookies drops Secure, and with it the __Host- prefix, from the
-	// session cookies so a browser keeps a session over plain HTTP. Only a
-	// dashboard published without TLS needs it.
-	InsecureCookies bool
 }
 
 // WithDashboard attaches the browser surface d describes to the handler
@@ -147,9 +142,8 @@ func (s *Server) pageGate(pages http.Handler) http.Handler {
 			routepolicy.WritePolicyError(w, &apierr.Error{Code: hosterr.MethodNotAllowed, Message: "page method is not registered"})
 			return
 		}
-		secure := s.cookiesSecure()
 		var session *store.Session
-		if raw := sessionCookie(r, secure); raw != "" {
+		if raw := sessionCookie(r); raw != "" {
 			sess, err := s.readSessionFlow(r)
 			switch {
 			case err == nil:
@@ -158,7 +152,7 @@ func (s *Server) pageGate(pages http.Handler) http.Handler {
 				routepolicy.WritePolicyError(w, err)
 				return
 			default:
-				clearSessionCookies(w, secure)
+				clearSessionCookies(w)
 			}
 		}
 		if session == nil {

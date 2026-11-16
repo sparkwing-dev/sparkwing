@@ -1,9 +1,18 @@
 # Local controller feature scenarios
 
-These Linux scenarios drive an independently built CLI, its controller and runner,
+These opt-in Linux scenarios drive an independently built CLI, its controller and runner,
 the embedded dashboard, and real shell descendants. They never use the caller's
 Sparkwing state. Each scenario creates a private HOME, config, key file, repository,
 state store and random dashboard port. The Go build and package limits are two.
+
+These scenarios use native user-manager services. Set
+`SPARKWING_TEST_USER_MANAGER=1` only in a quiet service-qualification window,
+with no lands, deploys or other unit-creating tests. Ordinary tests skip them
+visibly. Private homes isolate state, but do not isolate the user manager.
+See the native user-manager qualification tier in `DELIVERY.md`.
+
+The explicitly invoked `local-controller-e2e` pipeline sets the gate in its job
+environment; selecting that pipeline opts into native service qualification.
 
 Build the revision to verify with its dashboard assets, then pass the absolute
 executable path. For an Xwing candidate, retain `xwing tool list --session <n>`
@@ -32,7 +41,7 @@ builds it through the repository's normal installer.
 For a grid cell or a focused rerun, use the same executable and this command:
 
 ```sh
-env GOWORK=off GOMAXPROCS=2 SPARKWING_LOCAL_E2E_BINARY=/absolute/built/sparkwing \
+env GOWORK=off GOMAXPROCS=2 SPARKWING_TEST_USER_MANAGER=1 SPARKWING_LOCAL_E2E_BINARY=/absolute/built/sparkwing \
   go -C /absolute/checkout test -p 2 -count=1 -timeout=20m -v \
   -run '^TestLocalControllerFeatureE2E$' ./tests/acceptance
 ```

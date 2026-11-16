@@ -27,6 +27,7 @@ func NewDeployment(st *store.Store, cfg deployment.Config, logger *slog.Logger) 
 	}
 	srv := &Server{
 		deployment:         cfg,
+		reapWake:           make(chan struct{}, 1),
 		engineController:   NewEngineController(st, EngineController{}),
 		logger:             slog.New(CredentialSafeLogHandler(logger.Handler())),
 		loginLimit:         newLoginLimiter(),
@@ -57,6 +58,7 @@ func NewDeployment(st *store.Store, cfg deployment.Config, logger *slog.Logger) 
 		srv.resolveTenant = storeTenantResolver(st)
 		srv.credentialIssuer = srv.operator
 	}
+	srv.engineController.cancelCommitted = srv.nudgeReaper
 	srv.authorization = srv.storeRouteAuthorization()
 	srv.recordQueueActivity(time.Now())
 	return srv
@@ -82,7 +84,7 @@ func NewEngineController(st *store.Store, cfg EngineController) *EngineControlle
 	if cfg.Launcher == nil {
 		cfg.Launcher = storeLauncherSync{op}
 	}
-	cfg.authorization = routepolicy.Authorization{Authenticator: capability.NewAuthenticator(op), Bindings: op}
+	cfg.authorization = routepolicy.Authorization{Authenticator: capability.NewAuthenticator(op), Bindings: op, NoteRefusal: newRefusalAudit(op, slog.Default()).note}
 	if cfg.ResolveTenant == nil {
 		cfg.ResolveTenant = storeTenantResolver(st)
 	}

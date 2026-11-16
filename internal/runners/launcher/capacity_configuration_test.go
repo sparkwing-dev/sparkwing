@@ -135,7 +135,7 @@ func TestUnconfiguredTeamDeletesDemandAndReportsOnce(t *testing.T) {
 	if err != nil || len(jobs.Items) != 0 || len(capacityPods(t, kube)) != 0 || len(l.waitingAwards()) != 0 || failures != 1 {
 		t.Fatalf("terminal capacity cleanup: failures=%d jobs=%d err=%v", failures, len(jobs.Items), err)
 	}
-	if strings.Count(logs.String(), "requested_class=") != 1 || !strings.Contains(logs.String(), "namespace=cloud") {
+	if strings.Count(logs.String(), "requested_class=") != 1 || !strings.Contains(logs.String(), "namespace=cloud") || !strings.Contains(logs.String(), "level=ERROR") {
 		t.Fatalf("operator guidance: %s", logs.String())
 	}
 }

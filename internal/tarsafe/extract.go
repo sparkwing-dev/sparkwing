@@ -4,6 +4,7 @@ package tarsafe
 
 import (
 	"archive/tar"
+	"compress/gzip"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -18,6 +19,20 @@ import (
 
 // safety: bounds one extraction, so a gzip bomb cannot fill the disk.
 var maxExtractBytes = int64(20 << 30)
+
+// VerifyGzipTrailer checks the checksum after tar EOF, allowing at most 1 MiB
+// of trailing padding so bytes outside tar entries cannot bypass extraction limits.
+func VerifyGzipTrailer(gz *gzip.Reader) error {
+	const maxPadding = 1 << 20
+	n, err := io.CopyN(io.Discard, gz, maxPadding+1)
+	if n > maxPadding {
+		return errors.New("archive padding exceeds 1 MiB")
+	}
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
+}
 
 // Policy tunes one extraction.
 type Policy struct {

@@ -10,6 +10,6 @@ import (
 )
 
 // Output runs and joins a Git process and its descendants.
-func Output(_ context.Context, cmd *exec.Cmd, combined bool) ([]byte, error) {
-	return procgroup.CommandOutput(cmd, combined)
+func Output(ctx context.Context, cmd *exec.Cmd, combined bool) ([]byte, error) {
+	return procgroup.CommandOutput(ctx, cmd, combined)
 }

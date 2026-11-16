@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestAssertedPoolWaitingNoticeExplainsVerifiedDefaultRemedy(t *testing.T) {
@@ -49,6 +51,94 @@ func TestWaitingJobNoticeNamesRequiredLabelAndEnrollmentCommand(t *testing.T) {
 			if !strings.Contains(notice.Reason, want) {
 				t.Errorf("notice = %q; missing %q", notice.Reason, want)
 			}
+		}
+	}
+}
+
+func TestWaitingNoticeEnrollmentFollowsRepositoryProof(t *testing.T) {
+	now := time.Now()
+	asserted, err := runspec.AssertedProvenance("account/owner", "refs/heads/main", "0123456789abcdef0123456789abcdef01234567", "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetched, err := asserted.FetchedFrom(1, "acme/repo", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proven, err := runspec.AppProvenance(runspec.AppFacts{Repository: "acme/repo", Event: "push", RepositoryID: 1, DeliveryKey: "delivery", VerifiedAt: now, Ref: "refs/heads/main", SHA: "0123456789abcdef0123456789abcdef01234567"}, runspec.Optional[runspec.PullRequest]{}, "ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provenance := range []runspec.Provenance{asserted, fetched, proven} {
+		for _, cause := range []string{"", "no runner of the allowed tiers is online"} {
+			view := store.RunView{Snapshot: store.RunSnapshot{StoreNow: now}, Waiting: &store.UnclaimedUnit{Kind: capability.UnitPlan, Since: now.Add(-time.Minute), NoEligible: cause}}
+			view.Snapshot.Run.Request = runspec.SealedRequest{Provenance: provenance, Request: runspec.Request{Dispatch: runspec.DispatchController}}
+			view.Snapshot.Run.Request.Request.Options.Requires.Value = []string{"gpu-x"}
+			notice := unclaimedNotice(view)
+			if notice == nil {
+				t.Fatal("missing notice")
+			}
+			scoped := provenance.ProvenRepository() != ""
+			if strings.Contains(notice.Reason, "--repos REPOSITORY") != scoped || strings.Contains(notice.Reason, "--personal") == scoped {
+				t.Errorf("repository proof %q: %s", provenance.ProvenRepository(), notice.Reason)
+			}
+			if !scoped {
+				for _, want := range []string{"own manual", "repository-scoped runners cannot run working-tree", "commit and push"} {
+					if !strings.Contains(notice.Reason, want) {
+						t.Errorf("notice missing %q: %s", want, notice.Reason)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestRunStatusNamesRepositoryScopedProvenanceRefusal(t *testing.T) {
+	e, tenant := engineRuntimeStore(t)
+	run, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run.Request.Request.Dispatch = runspec.DispatchController
+	run.Request.Request.Source.WorkingTree = true
+	run.Request.Request.Git.Repository.Display = "https://github.com/acme/repo"
+	run.Request.Request.Options.Requires.Value = []string{"gpu-x"}
+	body, err := json.Marshal(run.Request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `UPDATE runs SET request_json=?,dispatch='controller' WHERE id='run'`, body)
+	engineSQL(t, e.Store, `UPDATE triggers SET unit_kind='plan',needs_labels=? WHERE id='run'`, []byte(`["gpu-x"]`))
+	_, runner, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMachine, RegistrationID: "runner:a:gpu", Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "gpu"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.TriggersClaim}, AllowedLabels: []string{"gpu-x"}, Repositories: []string{"github.com/acme/*"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	demand := store.UnitDemand{CapabilityPrefix: runner.Prefix, Target: &store.UnitRef{Kind: capability.UnitPlan, RunID: "run"}, Labels: []string{"gpu-x"}}
+	if err := e.Store.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Store.AsOperator().ClaimUnit(t.Context(), demand); err == nil || err.Error() != "repository-scoped runners require repository-proven code" {
+		t.Fatalf("claim refusal = %v", err)
+	}
+	detail, err := e.RunDetail(t.Context(), capability.Authorized{Target: capability.Target{Team: "a", RunID: "run"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Notices) != 1 || !strings.HasPrefix(detail.Notices[0].Reason, "repository-scoped runners require repository-proven code") {
+		t.Fatalf("status lost provenance refusal: %+v", detail.Notices)
+	}
+	t.Log(detail.Notices[0].Reason)
+	demand.Labels = nil
+	if err := e.Store.AsOperator().RecordRunnerPoll(t.Context(), demand); err != nil {
+		t.Fatal(err)
+	}
+	detail, err = e.RunDetail(t.Context(), capability.Authorized{Target: capability.Target{Team: "a", RunID: "run"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, notice := range detail.Notices {
+		if strings.HasPrefix(notice.Reason, "repository-scoped runners require repository-proven code") {
+			t.Fatalf("mismatched runner reported as a provenance refusal: %+v", detail.Notices)
 		}
 	}
 }

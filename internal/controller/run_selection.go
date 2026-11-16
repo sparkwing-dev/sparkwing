@@ -31,7 +31,7 @@ func parseRunSelection(r *http.Request) (controllerwire.RunQuery, error) {
 	if v.Has("limit") {
 		n, err := strconv.Atoi(v.Get("limit"))
 		if err != nil || n < 1 {
-			return q, invalidEngineBody("limit must be a positive integer")
+			return q, invalidEngineBody("limit must be a positive integer; use limit=1")
 		}
 		q.Limit = min(n, store.MaxRunListLimit)
 	}

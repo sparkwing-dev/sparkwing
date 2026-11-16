@@ -4509,6 +4509,131 @@ components:
         - source_attempt
       type: object
       x-sparkwing-go-type: controllerwire.StepReportRequest
+    internal.controllerwire.Subscription:
+      additionalProperties: true
+      properties:
+        created_at:
+          type: integer
+        created_by:
+          type: string
+        description:
+          type: string
+        event_types:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        id:
+          type: string
+        pipelines:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        repositories:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        statuses:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        updated_at:
+          type: integer
+        url:
+          type: string
+      required:
+        - id
+        - url
+        - event_types
+        - statuses
+        - pipelines
+        - repositories
+        - created_by
+        - created_at
+        - updated_at
+      type: object
+      x-sparkwing-go-type: controllerwire.Subscription
+    internal.controllerwire.SubscriptionDeletion:
+      additionalProperties: true
+      properties:
+        deleted:
+          type: boolean
+        id:
+          type: string
+      required:
+        - id
+        - deleted
+      type: object
+      x-sparkwing-go-type: controllerwire.SubscriptionDeletion
+    internal.controllerwire.SubscriptionSecret:
+      additionalProperties: true
+      properties:
+        replayed:
+          type: boolean
+        secret:
+          type: string
+        subscription:
+          $ref: '#/components/schemas/internal.controllerwire.Subscription'
+      required:
+        - subscription
+        - secret
+      type: object
+      x-sparkwing-go-type: controllerwire.SubscriptionSecret
+    internal.controllerwire.SubscriptionWrite:
+      additionalProperties: true
+      properties:
+        description:
+          type: string
+        event_types:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        pipelines:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        repositories:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        statuses:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        url:
+          type: string
+      required:
+        - url
+      type: object
+      x-sparkwing-go-type: controllerwire.SubscriptionWrite
+    internal.controllerwire.Subscriptions:
+      additionalProperties: true
+      properties:
+        subscriptions:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.controllerwire.Subscription'
+              type: array
+            - type: "null"
+      required:
+        - subscriptions
+      type: object
+      x-sparkwing-go-type: controllerwire.Subscriptions
     internal.controllerwire.TeamSettings:
       additionalProperties: true
       properties:
@@ -4581,6 +4706,8 @@ components:
     internal.controllerwire.TimerStateView:
       additionalProperties: true
       properties:
+        activation_unknown:
+          type: boolean
         binary:
           type: string
         detail:
@@ -4603,6 +4730,7 @@ components:
         - path
         - binary
         - detail
+        - activation_unknown
       type: object
       x-sparkwing-go-type: controllerwire.TimerStateView
     internal.controllerwire.UserCodeRequest:
@@ -16321,6 +16449,179 @@ paths:
             liveness: credential
         retry: safe
       x-sparkwing-wire: undocumented
+  /api/v1/subscriptions:
+    get:
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.Subscriptions'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: List run event subscriptions
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/subscriptions
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: safe
+    post:
+      parameters:
+        - description: Retain one key and the exact body when replaying a request.
+          in: header
+          name: Idempotency-Key
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.SubscriptionWrite'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.SubscriptionSecret'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Create a run event subscription
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/subscriptions
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: idempotency_key
+  /api/v1/subscriptions/{subscription}:
+    delete:
+      parameters:
+        - in: path
+          name: subscription
+          required: true
+          schema:
+            type: string
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.SubscriptionDeletion'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Delete a run event subscription
+      x-sparkwing-policy:
+        method: DELETE
+        path: /api/v1/subscriptions/{subscription}
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: safe
+    get:
+      parameters:
+        - in: path
+          name: subscription
+          required: true
+          schema:
+            type: string
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.Subscription'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Read a run event subscription
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/subscriptions/{subscription}
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: safe
+  /api/v1/subscriptions/{subscription}/rotate-secret:
+    post:
+      parameters:
+        - in: path
+          name: subscription
+          required: true
+          schema:
+            type: string
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.SubscriptionSecret'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Replace a subscription's signing secret
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/subscriptions/{subscription}/rotate-secret
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - team.admin
+            binding: none
+            liveness: credential
+        retry: never
   /api/v1/team:
     delete:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -56,6 +57,8 @@ func TestAwardMismatchDeletesJobAndFailsAward(t *testing.T) {
 	for name, mutate := range awardMutations() {
 		t.Run(name, func(t *testing.T) {
 			l, p := requestedPod(t)
+			var logs strings.Builder
+			l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 			kube := l.Kube
 			control := l.Control.(*controlFake)
 			if _, err := l.LaunchOne(t.Context()); err != nil {
@@ -77,6 +80,9 @@ func TestAwardMismatchDeletesJobAndFailsAward(t *testing.T) {
 			}}
 			if err := l.Sync(t.Context()); err == nil {
 				t.Fatal("mismatch accepted")
+			}
+			if !strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "Cloud Pod rejected") {
+				t.Fatal(logs.String())
 			}
 			if !rejected {
 				t.Fatal("award was not failed")
@@ -241,6 +247,8 @@ func TestMalformedJobIsDeletedWithoutBlockingNextLaunch(t *testing.T) {
 	for _, annotation := range []string{bindingAnnotation, reservationAnnotation, deadlineAnnotation, bootstrapAnnotation} {
 		t.Run(annotation, func(t *testing.T) {
 			l, kube, _, control := fixture()
+			var logs strings.Builder
+			l.Logger = slog.New(slog.NewTextHandler(&logs, nil))
 			if _, err := l.LaunchOne(t.Context()); err != nil {
 				t.Fatal(err)
 			}
@@ -255,6 +263,9 @@ func TestMalformedJobIsDeletedWithoutBlockingNextLaunch(t *testing.T) {
 			control.remove = true
 			if err = l.Sync(t.Context()); err != nil {
 				t.Fatalf("malformed Job blocks claims: %v", err)
+			}
+			if !strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "deleting malformed Cloud Job") {
+				t.Fatal(logs.String())
 			}
 			if _, err = kube.BatchV1().Jobs("cloud").Get(t.Context(), job.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 				t.Fatalf("malformed Job survived: %v", err)

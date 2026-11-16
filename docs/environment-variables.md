@@ -71,6 +71,7 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | `SPARKWING_JOB_ID` | [node protocol](node-protocol.md) |
 | `SPARKWING_RUN_ID` | [architecture](architecture.md) |
 | `SPARKWING_GATE_INDEX` | [hooks](hooks.md) |
+| `SPARKWING_GATE_PUSH_REFS` | [hooks](hooks.md#reading-what-is-being-pushed) |
 | `SPARKWING_DEVELOPMENT_BUILD` | [versioning](versioning.md) |
 
 ## Test
@@ -78,9 +79,11 @@ Sparkwing code. See [node protocol](node-protocol.md).
 | Variable | Why it stays |
 |---|---|
 | `SPARKWING_TESTLEAK_HOST` | Marks the re-executed test binary in `internal/testleak`; it crosses exec, so it cannot be a flag. |
+| `SPARKWING_TEST_MANAGER_GUARD_DIR` | Shares the deny guard and its invocation record with re-executed test children. It is an internal test marker, not permission to use a manager. |
 | `SPARKWING_TEST_PG_URL` | Points the store test suite at a PostgreSQL database. |
 | `SPARKWING_TEST_SHELL_BASH` | Names the Git Bash that runs a Windows test's fake `#!/bin/sh` tool; it crosses exec into the stand-in executable, so it cannot be a flag. |
 | `SPARKWING_TEST_SHELL_EXE` | Marks the test binary `internal/testshell` re-executes as a Windows test's fake tool; it crosses exec, so it cannot be a flag. |
+| `SPARKWING_TEST_USER_MANAGER` | Set to `1` only in the dedicated quiet native user-manager qualification tier to run real systemd or launchd tests. Ordinary runs use fakes or the unmanaged fixture backend and skip native cases visibly. |
 | `SPARKWING_TEST_STORE` | Selects the store backend the store test suite runs against. |
 
 ## Other tools
@@ -146,13 +149,24 @@ process starts, so logs show `***` in their place. A `GOPROXY` entry or
 access token there. Cloud and shared runners drop
 these settings unless the operator's allow list names them.
 
+When a CLI submission explicitly lists a reserved name in
+`run.submit_env_allow`, it warns on stderr with the name and repair, even if
+that variable is unset. Wildcard patterns still filter silently. Controller
+and runner refusals also name the variable; none of these diagnostics print
+its value. For tool settings such as `APPDATA` or `PSModulePath`, set the
+variable in the pipeline's job environment instead, or ask the runner operator
+to set it on the runner host and include its name in the operator's
+`run.submit_env_allow`. Adding it to the requester's allow-list cannot override
+this restriction. Engine-controlled names remain engine-controlled, and
+credential-shaped names must use declared pipeline secrets.
+
 A run can submit only its own names through `run.submit_env_allow`. Intake
 refuses, and the CLI does not capture, any name the registry above owns other
 than `AWS_REGION`, `AWS_DEFAULT_REGION`, `NO_COLOR`, `CLICOLOR_FORCE` and
 `TERM`, any `SPARKWING_*` or Go toolchain name (`GOAUTH`, `GOCACHEPROG`, and
 similar), and any name that loads code into a job or tool, in any case:
 `LD_*`, `DYLD_*`, `GIT_*`, `SSH_*`, `CGO_*`, `NODE_*`, npm, yarn, pip and other
-package-manager settings, `BASH_ENV`, `ENV`, `PYTHONPATH`, `JAVA_TOOL_OPTIONS`,
+package-manager settings, `BASH_ENV`, `ENV`, `PYTHONPATH`, `PSModulePath`, `JAVA_TOOL_OPTIONS`,
 and similar. Submitted names reach a shared runner only when its operator also
 lists them, never replace a value the host sets itself, and never reach the
 pipeline compile. Remote builds on a host the
@@ -176,6 +190,11 @@ compile, which otherwise runs with `CGO_ENABLED=0`; see
 | `SPARKWING_TEST_*` | Protocol | CLI or test marker; no pipeline inheritance. |
 | `HOME` | Tool | Minimal process base. |
 | `USERPROFILE` | Tool | Windows home directory for native tools. |
+| `APPDATA` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `HOMEDRIVE` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `HOMEPATH` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `XDG_DATA_HOME` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
+| `PSModulePath` | Tool | Tool-owned; remote pipeline delivery requires operator allow-list unless minimal or network base. |
 | `TMPDIR` | Tool | Minimal process base. |
 | `LANG` | Tool | Minimal process base. |
 | `LC_*` | Tool | Minimal process base. |

@@ -17,12 +17,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/testmanager"
+
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 func TestDesktopUpdaterRealIntakeRaceAndRollback(t *testing.T) {
+	testmanager.Require(t)
 	cli := os.Getenv("SPARKWING_LOCAL_E2E_BINARY")
 	if cli == "" {
 		t.Skip("set SPARKWING_LOCAL_E2E_BINARY to a CLI built from this worktree")

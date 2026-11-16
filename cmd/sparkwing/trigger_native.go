@@ -37,7 +37,7 @@ func prepareNativeTrigger(ctx context.Context, flags triggerFlags) (result contr
 	if machine.Run != nil {
 		allow = machine.Run.SubmitEnvAllow
 	}
-	submitted, err := procenv.Submit(captured, allow, masker)
+	submitted, err := captureSubmittedEnvironment(captured, allow, masker)
 	if err != nil {
 		return result, err
 	}

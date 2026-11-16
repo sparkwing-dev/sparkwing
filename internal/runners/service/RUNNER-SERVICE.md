@@ -9,7 +9,9 @@ Install and refresh also share the private file writer. Preflight and mutation
 require absolute native registration paths. Literal command arguments preserve dollar signs, spaces
 and percent signs without a shell.
 Both execute `sparkwing-runner start --config PATH` in the foreground. They
-start at login and restart on failure. Windows installation returns
+start at login and restart on failure. Signal-only cancellation of `start` or
+`warm` exits 0 after shutdown; a runtime or cleanup failure still exits 1.
+Windows installation returns
 `ErrUnsupported` so the caller can use its existing service manager.
 
 Enrollment captures PATH for both service managers and prepends the installed

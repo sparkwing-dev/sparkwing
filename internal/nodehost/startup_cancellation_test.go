@@ -27,7 +27,7 @@ func TestStartupRefusalAfterCancellationReportsCancelledBeforeHeartbeat(t *testi
 			input := storedExecutionInput(t, f, &ClaimedNodeHost{})
 			input.Entry = &source.Entry{Engine: input.Engine}
 			actor := executorActor(input)
-			if err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, actor, nil); err != nil {
+			if granted, err := awaitStart(t.Context(), f.Tenant, runstate.CapacityBinding{RunID: input.Accepted.RunID, NodeID: input.NodeID, Generation: int64(input.Generation)}, actor, nil); err != nil || !granted {
 				t.Fatal(err)
 			}
 			_, _, deps, processes := executorFixture(t)

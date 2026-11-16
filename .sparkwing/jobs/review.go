@@ -16,14 +16,19 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // ReviewArgs are the author's inputs to a review run.
 type ReviewArgs struct {
-	Brief string `flag:"brief" desc:"The change's objective; when set it wins over the ticket and the commit messages."`
-	Skip  string `flag:"skip" desc:"Findings to skip with a reason, as 'F3=reason; F4=reason'. Only P2 and P3 findings off strict paths may be skipped."`
+	Brief    string `flag:"brief" desc:"The change's objective; when set it wins over the ticket and the commit messages."`
+	Skip     string `flag:"skip" desc:"Findings to skip with a reason, as 'F3=reason; F4=reason'. Only P2 and P3 findings off strict paths may be skipped."`
+	base     string
+	checkout string
+	checks   *queuedChecks
+	head     sparkwing.Ref[landHead]
 }
 
 // Review runs the AI code review that .review.yaml describes against the
@@ -66,7 +71,7 @@ func reviewJobNode(plan *sparkwing.Plan, in ReviewArgs, branch string, prePush b
 	if prePush {
 		cores += float64(prePushReservationCores(currentHost().cpus))
 	}
-	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch, prePush: prePush}).
+	return sparkwing.Job(plan, "review", &reviewJob{args: in, branch: branch, prePush: prePush, Checks: in.checks, Head: in.head}).
 		Inline().
 		Timeout(45 * time.Minute).
 		NoProgressTimeout(30 * time.Minute).
@@ -83,19 +88,24 @@ type reviewJob struct {
 	args    ReviewArgs
 	branch  string
 	prePush bool
+	Checks  *queuedChecks
+	Head    sparkwing.Ref[landHead]
 }
 
 func (j *reviewJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	if j.prePush {
-		if _, err := (&PrePush{}).Work(w); err != nil {
+		if _, err := (&PrePush{Checks: j.Checks, Head: j.Head}).Work(w); err != nil {
 			return nil, err
 		}
 	}
-	return sparkwing.Step(w, "review", j.run), nil
+	return sparkwing.Step(w, "review", checkedValue(j.Checks, "review/review", j.Head, j.run)), nil
 }
 
 func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 	root := sourceTreeRoot()
+	if j.args.checkout != "" {
+		root = j.args.checkout
+	}
 	if root == "" {
 		return reviewRecord{}, errors.New("review: cannot find the repository root")
 	}
@@ -108,8 +118,7 @@ func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 		return reviewRecord{}, err
 	}
 	git := func(ctx context.Context, args ...string) (string, error) {
-		out, err := sparkwing.Exec(ctx, "git", args...).Dir(root).String()
-		return strings.TrimSpace(out), err
+		return reviewGit(ctx, root, args...)
 	}
 	common, err := git(ctx, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
@@ -118,7 +127,7 @@ func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 	branch := j.branch
 	if branch == "" {
 		if b, err := git(ctx, "symbolic-ref", "--short", "-q", "HEAD"); err == nil {
-			branch = b
+			branch = strings.TrimSpace(b)
 		}
 	}
 	deps := reviewDeps{
@@ -127,11 +136,11 @@ func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 		showTicket: showTicket,
 		standards:  func(ctx context.Context, diff string) (string, error) { return overwingStandards(ctx, root, diff) },
 		reviewer:   newReviewer,
-		recordDir:  filepath.Join(common, "sparkwing-review"),
+		recordDir:  filepath.Join(strings.TrimSpace(common), "sparkwing-review"),
 		now:        time.Now,
 		logf:       func(format string, args ...any) { sparkwing.Info(ctx, format, args...) },
 	}
-	rec, file, err := runReview(ctx, deps, policy, reviewInputs{branch: branch, brief: j.args.Brief, skip: j.args.Skip})
+	rec, file, err := runReview(ctx, deps, policy, reviewInputs{branch: branch, brief: j.args.Brief, skip: j.args.Skip, base: j.args.base})
 	if err != nil {
 		return reviewRecord{}, err
 	}
@@ -158,6 +167,7 @@ type reviewInputs struct {
 	branch string
 	brief  string
 	skip   string
+	base   string
 }
 
 const (
@@ -181,10 +191,15 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	if err != nil {
 		return reviewRecord{}, "", fmt.Errorf("review: resolve the tree: %w", err)
 	}
-	base, err := d.git(ctx, "merge-base", reviewBaseRef, "HEAD")
-	if err != nil {
-		return reviewRecord{}, "", fmt.Errorf("review: no merge base with %s; fetch it first: %w", reviewBaseRef, err)
+	baseRef := in.base
+	if baseRef == "" {
+		baseRef = reviewBaseRef
 	}
+	base, err := d.git(ctx, "merge-base", baseRef, "HEAD")
+	if err != nil {
+		return reviewRecord{}, "", fmt.Errorf("review: no merge base with %s; fetch it first: %w", baseRef, err)
+	}
+	head, tree, base = strings.TrimSpace(head), strings.TrimSpace(tree), strings.TrimSpace(base)
 	branch := in.branch
 	if branch == "" {
 		branch = "detached-" + short(head)
@@ -201,20 +216,39 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	rec.Notes = nil
 	objective, notes := resolveObjective(ctx, d, p, in, base)
 	objectiveKey := fmt.Sprintf("%x", sha256.Sum256([]byte(objective.Source+"\x00"+objective.Ref+"\x00"+objective.text)))
-	sameTree := prior != nil && prior.Tree == tree && prior.ObjectiveKey == objectiveKey
+	sameTree := prior != nil && prior.Tree == tree && prior.Base == base && prior.ObjectiveKey == objectiveKey
 	rec.Objective, rec.ObjectiveKey = objective, objectiveKey
 	rec.Notes = append(rec.Notes, notes...)
 	rec.Tree, rec.Commit, rec.Base = tree, head, base
 	d.logf("review timing: phase=resolve elapsed=%s reused=%t", d.now().Sub(started), sameTree)
 
-	if sameTree {
-		rec.Notes = append(rec.Notes, "tree and objective unchanged since the last review, so no reviewer ran; skips were reapplied")
-	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree); err != nil {
+	diff, err := reviewDiff(ctx, d, base, head)
+	if err != nil {
+		return reviewRecord{}, "", fmt.Errorf("review: diff %s..%s: %w", short(base), short(head), err)
+	}
+
+	changes, modified, err := reviewChangedPaths(ctx, d, base, head)
+	if err != nil {
 		return reviewRecord{}, "", err
 	}
+
+	diff.requireChangedPaths(modified)
+	// safety: a verdict over an omitted patch cannot approve bytes the reviewer has never seen.
+	if sameTree && len(diff.missing) == 0 && slices.ContainsFunc(rec.Findings, func(f reviewFinding) bool { return f.Reviewer == binaryReviewOwner && f.Rule == "missing-diff-review" }) {
+		sameTree = false
+		rec.Notes = append(rec.Notes, "diff coverage recovered, so reviewers must inspect the rendered changes")
+	}
+
+	if sameTree {
+		rec.Notes = append(rec.Notes, "tree and objective unchanged since the last review, so no reviewer ran; skips were reapplied")
+	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree, diff, changes); err != nil {
+		return reviewRecord{}, "", err
+	}
+	diff.enforceBinaryReview(&rec, p, changes)
+	files := slices.Concat(changes...)
 	started = d.now()
-	rec.Notes = append(rec.Notes, applySkips(p, rec.Findings, skips)...)
-	rec.settle(p)
+	rec.Notes = append(rec.Notes, applySkips(p, rec.Findings, skips, files)...)
+	rec.settle(p, files)
 	if err := saveReviewRecord(file, rec); err != nil {
 		return reviewRecord{}, "", fmt.Errorf("review: write the record: %w", err)
 	}
@@ -222,26 +256,32 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	return rec, file, nil
 }
 
-func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree string) error {
+func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree string, diff reviewDiffResult, changes [][]string) error {
 	started := d.now()
-	diff, err := d.git(ctx, "diff", "--no-color", "--no-ext-diff", base, head)
-	if err != nil {
-		return fmt.Errorf("review: diff %s..%s: %w", short(base), short(head), err)
+	var err error
+	var files []string
+	profiles := map[string][]string{}
+	for _, change := range changes {
+		for _, file := range change {
+			if !slices.Contains(files, file) {
+				files = append(files, file)
+			}
+		}
+		// safety: copying or renaming out of strict scope still needs its destination reviewed.
+		for profile := range p.strictReviewers(change) {
+			for _, file := range change {
+				if !slices.Contains(profiles[profile], file) {
+					profiles[profile] = append(profiles[profile], file)
+				}
+			}
+		}
 	}
-	names, err := d.git(ctx, "diff", "--name-only", "--no-ext-diff", base, head)
-	if err != nil {
-		return fmt.Errorf("review: list changed files: %w", err)
-	}
-	files := strings.Fields(names)
-	d.logf("review timing: phase=diff elapsed=%s bytes=%d files=%d", d.now().Sub(started), len(diff), len(files))
+	profiles[defaultReviewer] = files
+	d.logf("review timing: phase=diff elapsed=%s bytes=%d files=%d", d.now().Sub(started), len(diff.text), len(files))
 	started = d.now()
 	objective := rec.Objective
 	pass := reviewPass{Tree: tree, Commit: head, At: d.now().UTC()}
 
-	profiles := map[string][]string{defaultReviewer: files}
-	for profile, strictFiles := range p.strictReviewers(files) {
-		profiles[profile] = strictFiles
-	}
 	for _, ref := range rec.Reviewers {
 		if _, ok := profiles[ref.Profile]; !ok && rec.openBy(ref.Profile) {
 			profiles[ref.Profile] = nil
@@ -261,7 +301,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	}
 	standards := ""
 	if p.usesStandards() {
-		if standards, err = d.standards(ctx, diff); err != nil {
+		if standards, err = d.standards(ctx, diff.text); err != nil {
 			rec.Notes = append(rec.Notes, "house standards unavailable, so the standards rule was judged without them: "+err.Error())
 			standards = ""
 		}
@@ -285,11 +325,9 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	results := make([]profileResult, len(order))
 	prompts := make([]reviewPrompt, len(order))
 	for i, profile := range order {
-		scoped := diff
+		scoped := diff.text
 		if profile != defaultReviewer {
-			if scoped, err = scopedDiff(ctx, d, base, head, profiles[profile]); err != nil {
-				return err
-			}
+			scoped = diff.scoped(profiles[profile])
 		}
 		prompts[i] = reviewPrompt{
 			policy: p, profile: profile, objective: objective, standards: standards,
@@ -337,17 +375,10 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	return nil
 }
 
-func scopedDiff(ctx context.Context, d reviewDeps, base, head string, files []string) (string, error) {
-	if len(files) == 0 {
-		return "", nil
-	}
-	args := append([]string{"diff", "--no-color", "--no-ext-diff", base, head, "--"}, files...)
-	out, err := d.git(ctx, args...)
-	if err != nil {
-		return "", fmt.Errorf("review: diff the strict paths: %w", err)
-	}
-	return out, nil
-}
+// safety: a model call emits nothing until it answers, so this bound keeps a
+// hung reviewer from holding the serial land slot when review shares a job
+// whose no-progress deadline is longer than review's own.
+const reviewModelCallTimeout = 30 * time.Minute
 
 func runProfile(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, profile, model string, prompt reviewPrompt) (bool, error) {
 	rv, err := d.reviewer(model)
@@ -359,7 +390,12 @@ func runProfile(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRe
 	resume := p.Rereview.SameReviewer && prev.Session != "" && prev.Model == model
 	call := func(session, text, mode string) (reviewAnswer, error) {
 		started := d.now()
-		answer, err := rv.review(ctx, d.root, session, text)
+		callCtx, cancel := context.WithTimeout(ctx, reviewModelCallTimeout)
+		answer, err := rv.review(callCtx, d.root, session, text)
+		if err != nil && ctx.Err() == nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("model call exceeded %s: %w", reviewModelCallTimeout, err)
+		}
+		cancel()
 		d.logf("review timing: phase=model profile=%s model=%s mode=%s elapsed=%s prompt_bytes=%d failed=%t", profile, model, mode, d.now().Sub(started), len(text), err != nil)
 		return answer, err
 	}
@@ -577,8 +613,8 @@ const severityTable = `| Severity | Meaning | Blocks |
 | --- | --- | --- |
 | P0 | Objective not met, or a security or data-loss risk that is likely or severe | yes |
 | P1 | Significant security, correctness or usability risk; or a design-rule violation | yes |
-| P2 | Real but bounded issue; fixing it is worthwhile | no, except on a strict path at or below its block_at |
-| P3 | Suggestion, clarity, minor cleanup | no |`
+| P2 | Real but bounded issue; fixing it is worthwhile | no, except on a strict path at or below its block_at, or an unattributed location |
+| P3 | Suggestion, clarity, minor cleanup | no, except an unattributed location |`
 
 func (r reviewPrompt) fresh() string {
 	var b strings.Builder
@@ -610,7 +646,7 @@ func (r reviewPrompt) fresh() string {
 		b.WriteString("\n")
 	}
 	if r.profile != defaultReviewer {
-		fmt.Fprintf(&b, "You review only these strict-path files; another reviewer covers the rest: %s\n\n", strings.Join(r.files, ", "))
+		fmt.Fprintf(&b, "You review only these strict-path files; another reviewer covers the rest: %q\n\n", r.files)
 	}
 	if strings.TrimSpace(r.standards) != "" {
 		b.WriteString("## House standards\n\n" + r.standards + "\n\n")
@@ -627,7 +663,7 @@ func (r reviewPrompt) fresh() string {
 	}
 	b.WriteString(r.diffSection())
 	b.WriteString(r.answerFormat())
-	return b.String()
+	return strings.ToValidUTF8(b.String(), "\ufffd")
 }
 
 func (r reviewPrompt) rereview() string {
@@ -643,17 +679,22 @@ func (r reviewPrompt) rereview() string {
 	b.WriteString("## Your findings\n\n" + findingsJSON(r.prior) + "\n\n")
 	b.WriteString(r.diffSection())
 	b.WriteString(r.answerFormat())
-	return b.String()
+	return strings.ToValidUTF8(b.String(), "\ufffd")
 }
 
 func (r reviewPrompt) diffSection() string {
 	diff := r.diff
 	note := ""
 	if len(diff) > maxPromptDiff {
-		diff = diff[:maxPromptDiff]
+		end := maxPromptDiff
+		for end > 0 && !utf8.RuneStart(diff[end]) {
+			end--
+		}
+		diff = diff[:end]
 		note = fmt.Sprintf("The diff was cut at %d bytes; read the rest with `git diff %s %s`.\n\n", maxPromptDiff, r.base, r.head)
 	}
-	return "## Diff\n\n" + note + "```diff\n" + diff + "\n```\n\n"
+	coverage := "Metadata-only binary summaries are UNREVIEWED CONTENT. You must inspect every present blob using its object id and safe inspection command before approving. If content remains unreviewed, return a blocking finding for the coverage gap. The job independently blocks binary summaries unless the file is on a non-strict route, has no executable mode or shebang, and has a known asset extension; model findings cannot clear that block.\n\n"
+	return "## Diff\n\n" + coverage + note + "```diff\n" + diff + "\n```\n\n"
 }
 
 func (r reviewPrompt) answerFormat() string {
@@ -661,7 +702,7 @@ func (r reviewPrompt) answerFormat() string {
 	return "## Answer\n\nReply with one JSON object and nothing else:\n\n" +
 		"{\"findings\": [{\"id\": \"" + prefix + "1\", \"severity\": \"P0|P1|P2|P3\", \"rule\": \"<rule id, or empty>\", " +
 		"\"file\": \"path:line\", \"summary\": \"<what is wrong and why it matters>\", \"status\": \"open|fixed\"}]}\n\n" +
-		"Give new findings ids starting with " + prefix + ". Return every finding you still hold, fixed ones included. An empty findings array means the change passes.\n"
+		"Give new findings ids starting with " + prefix + ". Return every finding you still hold, fixed ones included. For file locations, use the exact changed filename, optionally followed by numeric :line or :line:column. The longest known filename wins; an unmatched or malformed location blocks an open finding and cannot be author-skipped. An empty findings array reports no model findings.\n"
 }
 
 func findingsJSON(fs []reviewFinding) string {

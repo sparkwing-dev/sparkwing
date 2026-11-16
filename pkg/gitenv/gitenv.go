@@ -31,6 +31,11 @@ var bindingVars = []string{
 // after [Unbind] has removed the binding git itself acts on.
 const GateIndexVar = "SPARKWING_GATE_INDEX"
 
+// PushRefsVar holds the pre-push hook's stdin: one local ref, local object
+// ID, remote ref and remote object ID per line. Shell capture strips trailing
+// newlines; every pipeline declared for the hook receives the same value.
+const PushRefsVar = "SPARKWING_GATE_PUSH_REFS"
+
 // Unbind records the hook's index path under [GateIndexVar] and removes every
 // variable git binds a working context with, so a command run from here reads
 // the repository rather than the commit under construction.

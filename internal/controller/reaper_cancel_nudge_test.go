@@ -1,0 +1,162 @@
+package controller
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+)
+
+func TestParentCancelNudgesChildSweepAfterCommit(t *testing.T) {
+	e, h, claim := childIntakeFixture(t)
+	tenant, err := e.Store.ForTeam(t.Context(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentBefore, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := engineClaimHTTP(t, h, claim, "POST", "/api/v1/runs/run/children", childIntakeBody(t, "deploy", parentBefore.Request.Request.Git), 201)
+	var child controllerwire.CreateRunResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &child); err != nil {
+		t.Fatal(err)
+	}
+	childRow, err := tenant.ReadRun(t.Context(), child.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchildRequest := childRow.Request
+	grandchildRequest.RunID = "grandchild"
+	grandchildRequest.Request.Lineage.ParentRunID = child.RunID
+	grandchildRequest.Request.Lineage.ParentJobID = "body"
+	grandchildJSON, err := json.Marshal(grandchildRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,lineage_json,log_retention_class,log_retention_days,parent_run_id,parent_node_id) SELECT team,'grandchild',number+1,pipeline,'running',?,request_hash,request_sealed_at,repo_key,dispatch,intake_mode,created_principal,created_at,lineage_json,log_retention_class,log_retention_days,id,'body' FROM runs WHERE team='a' AND id=?`, grandchildJSON, child.RunID)
+	raw, record, err := teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "a", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "cancel-nudge"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsControl}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childCommitted := make(chan string, 2)
+	e.Store.SetRunCancellationObserver(func(_ context.Context, team store.Team, id string) error {
+		if team == "a" && (id == child.RunID || id == "grandchild") {
+			select {
+			case childCommitted <- id:
+			default:
+			}
+		}
+		return nil
+	})
+	defer e.Store.SetRunCancellationObserver(nil)
+	checked := make(chan error, 1)
+	nudge := e.cancelCommitted
+	e.cancelCommitted = func() {
+		checkCtx, stop := context.WithTimeout(t.Context(), time.Second)
+		defer stop()
+		// hack: A second write detects a pre-commit wake without relying on query timing.
+		row, readErr := tenant.ReadRun(checkCtx, "run")
+		if readErr == nil && row.CancelRequestedAt == nil {
+			readErr = fmt.Errorf("nudge preceded committed cancel intent")
+		}
+		if readErr == nil {
+			actor := runstate.Actor{Kind: runstate.ActorOperator, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: record.Prefix}, CapabilityPrefix: record.Prefix}
+			replay, replayErr := tenant.TransitionRun(checkCtx, runstate.RunTransition{RunID: "run", To: runstate.RunCancelled, Cause: runstate.RunCancel, Actor: actor, Reason: "requested"})
+			readErr = replayErr
+			if readErr == nil && !replay.Replayed {
+				readErr = fmt.Errorf("cancel write was not committed before notification")
+			}
+		}
+		select {
+		case checked <- readErr:
+		default:
+		}
+		nudge()
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	// hack: An hour-long backstop makes early descendant cancellation depend on wake delivery.
+	go func() { defer close(done); e.Server.runReaper(ctx, time.Hour) }()
+	defer func() { cancel(); <-done }()
+	bound, stop := context.WithTimeout(t.Context(), 2*time.Second)
+	defer stop()
+	engineClaimHTTP(t, h, raw, "POST", "/api/v1/runs/run/cancel", `{"reason":"requested"}`, 200)
+	select {
+	case err := <-checked:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-bound.Done():
+		t.Fatal("committed parent cancellation did not signal reaper")
+	}
+	for observed := range 2 {
+		select {
+		case <-childCommitted:
+		case <-bound.Done():
+			t.Fatalf("descendant cancellation waited for the ten-second sweep after %d commits", observed)
+		}
+	}
+	grandchildRow, err := tenant.ReadRun(t.Context(), "grandchild")
+	if err != nil || grandchildRow.CancelRequestedAt == nil {
+		t.Fatalf("grandchild cancellation row=%+v error=%v", grandchildRow, err)
+	}
+	row, err := tenant.ReadRun(t.Context(), child.RunID)
+	if err != nil || row.CancelRequestedAt == nil {
+		t.Fatalf("child cancellation row=%+v error=%v", row, err)
+	}
+	parent, err := tenant.ReadRun(t.Context(), "run")
+	if err != nil || parent.CancelRequestedAt == nil {
+		t.Fatalf("parent cancellation row=%+v error=%v", parent, err)
+	}
+	if elapsed := row.CancelRequestedAt.Sub(*parent.CancelRequestedAt); elapsed >= 2*time.Second {
+		t.Fatalf("child cancellation row lagged committed parent by %s", elapsed)
+	}
+}
+
+func TestReaperCancelNudgesCoalesce(t *testing.T) {
+	server := New(nil, nil)
+	for range 1000 {
+		server.nudgeReaper()
+	}
+	if cap(server.reapWake) != 1 || len(server.reapWake) != 1 {
+		t.Fatalf("wake queue capacity=%d length=%d", cap(server.reapWake), len(server.reapWake))
+	}
+	<-server.reapWake
+}
+
+func TestReaperNudgeDoesNotSampleOperationalSeries(t *testing.T) {
+	restoreGlobals(t)
+	before := mustSample(t, scrapeRegistry(t), "sparkwing_pending_nodes")
+	t.Cleanup(func() { setPendingNodes(int(before)) })
+	engine, _ := engineRuntimeStore(t)
+	const sentinel = 123456
+	setPendingNodes(sentinel)
+	synctest.Test(t, func(t *testing.T) {
+		server := New(engine.Store, nil)
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { defer close(done); server.runReaper(ctx, 10*time.Second) }()
+		defer func() { cancel(); <-done }()
+		server.nudgeReaper()
+		synctest.Wait()
+		if got := mustSample(t, scrapeRegistry(t), "sparkwing_pending_nodes"); got != sentinel {
+			t.Fatalf("nudge sampled operational series: %v", got)
+		}
+		tick, stop := context.WithTimeout(ctx, 10*time.Second)
+		defer stop()
+		<-tick.Done()
+		synctest.Wait()
+		if got := mustSample(t, scrapeRegistry(t), "sparkwing_pending_nodes"); got != 0 {
+			t.Fatalf("ticker did not sample actual empty queue: %v", got)
+		}
+	})
+}

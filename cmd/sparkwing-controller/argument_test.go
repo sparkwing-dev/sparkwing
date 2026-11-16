@@ -40,3 +40,19 @@ func TestControllerRejectsRemovedLiveLogFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestControllerRejectsInsecureCookiesFlag(t *testing.T) {
+	for _, flag := range []string{"--insecure-cookies", "--insecure-cookies=false"} {
+		t.Run(flag, func(t *testing.T) {
+			home := filepath.Join(t.TempDir(), "uncreated")
+			t.Setenv("SPARKWING_HOME", home)
+			err := run([]string{flag, "--credentials-dir=/nonexistent"})
+			if err == nil || !strings.Contains(err.Error(), "unknown flag") {
+				t.Fatalf("removed flag %s: %v, want unknown flag", flag, err)
+			}
+			if _, err := os.Stat(home); !os.IsNotExist(err) {
+				t.Fatalf("startup touched home: %v", err)
+			}
+		})
+	}
+}

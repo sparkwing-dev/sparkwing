@@ -31,10 +31,11 @@ import (
 )
 
 // CloudControl supplies awarded bindings from the controller and checks their continued authority.
+// Claim returns an award and the controller's minimum interval before the next poll.
 // Sync must return exactly one decision for each supplied binding, including dead or cancelled claims.
 type CloudControl interface {
 	Prepare(context.Context, []capability.LeaseRef) (time.Time, error)
-	Claim(context.Context, string, []string) (*CloudJobAward, error)
+	Claim(context.Context, string, []string) (*CloudJobAward, time.Duration, error)
 	Sync(context.Context, []CloudJobObservation) ([]CloudJobState, error)
 }
 
@@ -138,35 +139,57 @@ func (l *Launcher) Run(ctx context.Context) error {
 	defer retiring.Wait()
 	retiring.Go(func() { l.retireLoop(ctx) })
 	var cooldown time.Time
+	var pollAfter time.Duration
 	firstClaim := true
 	for ctx.Err() == nil {
 		if err := l.reportWarmPools(ctx); err != nil {
+			if shutdownFault(ctx, err) == nil {
+				return nil
+			}
 			if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
 				logger.Info("warm capacity observation deferred; the next complete sample replaces it", "error", err)
 			} else {
 				logger.Warn("warm capacity observation failed", "error", err)
 			}
 		}
+		if ctx.Err() != nil {
+			return nil
+		}
 		synced := l.syncActive(ctx)
+		if synced != nil && shutdownFault(ctx, synced) == nil {
+			return nil
+		}
 		if blocking(synced) != nil {
 			logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
-			cooldown = time.Now().Add(retryWait(synced, 0))
+			cooldown = later(cooldown, time.Now().Add(retryWait(synced, 0)))
 		} else if synced != nil {
 			logger.Error("Cloud node or Job teardown faults require operator inspection if they persist; suspect nodes are excluded from placement and quarantines use "+quarantineAnnotation+"; claiming continues", "error", synced)
+		}
+		if ctx.Err() != nil {
+			return nil
 		}
 		if blocking(synced) == nil {
 			// safety: held awards without a Job or capacity Pod renew only here, so claim backoff must not skip them.
 			err := l.placeWaiting(ctx)
 			startupRateLimit := false
-			if err == nil && !time.Now().Before(cooldown) {
+			if err == nil && ctx.Err() == nil && !time.Now().Before(cooldown) {
 				var launched bool
-				cooldown = time.Now().Add(poll)
-				launched, err = l.claim(ctx)
-				failure, ok := err.(*apierr.Error) //nolint:errorlint // Joined faults must remain WARN.
-				startupRateLimit = firstClaim && !launched && ok && failure.Code == hosterr.RateLimited
+				var suggestedPoll time.Duration
+				launched, suggestedPoll, err = l.claim(ctx)
+				// safety: an award can fail during placement; only failed claim responses retain the old advice.
+				if err == nil || launched {
+					pollAfter = suggestedPoll
+				}
+				// safety: admission precedes the response, so request latency cannot shorten the server's interval.
+				cooldown = time.Now().Add(max(poll, pollAfter))
+				startupRateLimit = firstClaim && !launched && claimRateLimited(err)
 				firstClaim = false
 			}
 			if err != nil {
+				fault := shutdownFault(ctx, err)
+				if fault == nil || ctx.Err() != nil && fault == ErrNoDedicatedNode { //nolint:errorlint // Only the sole expected placement wait is quiet.
+					return nil
+				}
 				if startupRateLimit {
 					logger.Info("launcher initial claim deferred by controller rate limit", failureAttrs(err)...)
 				} else if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
@@ -208,6 +231,50 @@ func later(a, b time.Time) time.Time {
 	return b
 }
 
+func claimRateLimited(err error) bool {
+	// safety: transport wrappers preserve a lone refusal; joined placement or cleanup faults must still warn.
+	for cause := err; cause != nil; cause = errors.Unwrap(cause) {
+		if _, joined := cause.(interface{ Unwrap() []error }); joined {
+			return false
+		}
+	}
+	var failure *apierr.Error
+	return errors.As(err, &failure) && failure.Code == hosterr.RateLimited
+}
+
+func shutdownFault(ctx context.Context, err error) error {
+	if ctx.Err() == nil || err == nil {
+		return err
+	}
+	// safety: a joined cancellation must not hide an independent placement or cleanup fault.
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		parts := joined.Unwrap()
+		if len(parts) == 0 {
+			return err
+		}
+		var faults []error
+		for _, part := range parts {
+			if fault := shutdownFault(ctx, part); fault != nil {
+				faults = append(faults, fault)
+			}
+		}
+		if len(faults) == 1 {
+			return faults[0]
+		}
+		return errors.Join(faults...)
+	}
+	if wrapped := errors.Unwrap(err); wrapped != nil {
+		if shutdownFault(ctx, wrapped) == nil {
+			return nil
+		}
+		return err
+	}
+	if errors.Is(err, ctx.Err()) {
+		return nil
+	}
+	return err
+}
+
 func retryWait(err error, poll time.Duration) time.Duration {
 	if delay, ok := hosterr.RetryDelay(err); ok {
 		return max(delay, poll)
@@ -238,19 +305,21 @@ func (l *Launcher) LaunchOne(ctx context.Context) (launched bool, err error) {
 	if err := l.placeWaiting(ctx); err != nil {
 		return false, err
 	}
-	return l.claim(ctx)
+	launched, _, err = l.claim(ctx)
+	return launched, err
 }
 
-func (l *Launcher) claim(ctx context.Context) (bool, error) {
+func (l *Launcher) claim(ctx context.Context) (bool, time.Duration, error) {
 	blocked := make([]string, 0, len(l.Config.StoppedTeams))
 	for _, team := range l.Config.StoppedTeams {
 		blocked = append(blocked, TeamNodeValue(l.Config.Namespace, team))
 	}
-	award, err := l.Control.Claim(ctx, l.Config.Namespace, blocked)
+	award, pollAfter, err := l.Control.Claim(ctx, l.Config.Namespace, blocked)
 	if err != nil || award == nil {
-		return false, err
+		return false, pollAfter, err
 	}
-	return l.launch(ctx, award)
+	launched, err := l.launch(ctx, award)
+	return launched, pollAfter, err
 }
 
 func (l *Launcher) placeWaiting(ctx context.Context) error {

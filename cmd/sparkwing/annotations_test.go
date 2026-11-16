@@ -171,7 +171,7 @@ func TestReviewAnnotationsPlainIsOneValuePerLine(t *testing.T) {
 	f := reviewFixture()
 	f.run.Jobs[0].Annotations = []nodewire.Annotation{{Level: "info", Message: "first\nsecond\rline"}}
 	out, err := runReviewFake(t, f, []string{"runs", "annotations", "list", "--run", "412", "-o", "plain"})
-	if err != nil || out != "first second line\n" {
+	if err != nil || out != "\"first\\nsecond\\rline\"\n" {
 		t.Fatalf("plain annotation=%q err=%v", out, err)
 	}
 	out, err = runReviewFake(t, f, []string{"runs", "annotations", "add", "--run", "412", "--job", "build", "--step", "compile", "--message", "note", "-o", "plain"})

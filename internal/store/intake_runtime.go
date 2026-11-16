@@ -211,6 +211,7 @@ func admitRun(ctx context.Context, tx *storeTx, team Team, request IntakeRequest
 	if snapshot.spec != nil {
 		result.Inputs = runspec.DisplaySpec(*snapshot.spec)
 	}
+	result.Inputs.Lineage = snapshot.execution.Lineage
 	if request.IdempotencyKey == "" {
 		scope = ""
 		digest = ""
@@ -610,6 +611,7 @@ func admissionResultTx(ctx context.Context, tx *storeTx, team Team, id string) (
 		return AdmissionResult{}, err
 	}
 	result := AdmissionResult{RunID: id, Number: run.Number, Request: run.Request, Inputs: run.Display(), OwnerUnit: run.Owner, Replayed: true}
+	result.Inputs.Lineage = run.Lineage
 	if run.Request.Request.Mode == runspec.IntakePublish {
 		result.OwnerUnit = nil
 	}

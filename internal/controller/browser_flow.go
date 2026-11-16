@@ -66,34 +66,34 @@ const flowCookieTTL = 10 * time.Minute
 
 // safety: the flow cookie is what proves the browser finishing a flow is the one that started it, and it holds the
 // verifier only that browser has. Lax because the provider returns with a cross-site top-level GET.
-func setFlowCookie(w http.ResponseWriter, name string, v any, secure bool) bool {
+func setFlowCookie(w http.ResponseWriter, name string, v any) bool {
 	raw, err := json.Marshal(v)
 	if err != nil {
 		apierrhttp.NoteResponseError(w, err)
 		return false
 	}
-	writeFlowCookie(w, name, base64.RawURLEncoding.EncodeToString(raw), int(flowCookieTTL/time.Second), secure)
+	writeFlowCookie(w, name, base64.RawURLEncoding.EncodeToString(raw), int(flowCookieTTL/time.Second))
 	return true
 }
 
-func clearFlowCookie(w http.ResponseWriter, name string, secure bool) {
-	writeFlowCookie(w, name, "", -1, secure)
+func clearFlowCookie(w http.ResponseWriter, name string) {
+	writeFlowCookie(w, name, "", -1)
 }
 
-func writeFlowCookie(w http.ResponseWriter, name, value string, maxAge int, secure bool) {
+func writeFlowCookie(w http.ResponseWriter, name, value string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     cookieName(name, secure),
+		Name:     name,
 		Value:    value,
 		Path:     "/",
 		MaxAge:   maxAge,
 		HttpOnly: true,
-		Secure:   secure,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-func readFlowCookie(r *http.Request, name string, secure bool, v any) bool {
-	c, err := r.Cookie(cookieName(name, secure))
+func readFlowCookie(r *http.Request, name string, v any) bool {
+	c, err := r.Cookie(name)
 	if err != nil || c.Value == "" {
 		return false
 	}

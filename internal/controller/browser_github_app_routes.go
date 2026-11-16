@@ -104,8 +104,8 @@ func (s *Server) readGitHubAppForm(r *http.Request, csrf string) error {
 	if err := r.ParseForm(); err != nil {
 		return invalidEngineBody("invalid GitHub connection form")
 	}
-	if len(r.CookiesNamed(cookieName(csrfCookieName, s.cookiesSecure()))) != 1 || len(r.PostForm["csrf_token"]) != 1 ||
-		!validFormCSRF(r, s.cookiesSecure()) || !constantTimeEqual(r.PostForm.Get("csrf_token"), csrf) {
+	if len(r.CookiesNamed(csrfCookieName)) != 1 || len(r.PostForm["csrf_token"]) != 1 ||
+		!validFormCSRF(r) || !constantTimeEqual(r.PostForm.Get("csrf_token"), csrf) {
 		return hosterr.Authorization(hosterr.ReasonReauthRequired, "invalid CSRF token")
 	}
 	for key, values := range r.PostForm {

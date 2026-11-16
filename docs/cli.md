@@ -18,6 +18,17 @@ when stdout is redirected. `--output pretty|json|plain` (or `-o`) overrides
 the default. JSON reports occupy one line; JSON lists emit one object per
 line, with an empty stream for no results. Errors go to stderr.
 
+Human-readable fields quote C0/C1 controls, DEL and bidirectional formatting
+characters as visible escapes. Truncated summaries keep complete UTF-8 runes
+within their byte limit. Pipeline completion hints and documentation listing
+titles and summaries use the same escaping and rune-safe limits. JSON records
+retain the original field values.
+Run statistics, schedule and repository metadata, and attributed log searches
+also escape their fields in plain mode.
+Use `runs logs -o plain` for the original log text, including terminal controls.
+Interactive debug sessions and compiler/install diagnostic streams retain their
+terminal behavior.
+
 Repository registration uses `repos add --checkout PATH` and
 `repos remove --checkout PATH`. Their JSON receipts include the action,
 absolute path and affected count. `version hold` and
@@ -41,6 +52,26 @@ modes are `pretty`, `json`, and `plain`.
 Cache JSON reports expose their fields directly through `.entries` and similar
 fields. Cache failures return a nonzero status with no stdout record. Plain cache output is the cache directory for `cache info`,
 the key for `cache explain`, and the reclaimed entry count for `cache prune`.
+
+### Refusals and repair
+
+JSON failures use an `error` object with `code`, `message`, and an optional
+`hint`. Plain and pretty output print the message and hint on stderr. These
+refusals exit nonzero and include the repair in the final diagnostic:
+
+| Refusal | Code | Repair |
+|---|---|---|
+| Missing required secret | `bad_request` | Follow the scoped `secrets set` command in the message, then submit a new run. `runs status` retains the same repair for members. |
+| Local-key creation would leave the selected home, or a sealed store has no key | `bad_request` | Restore the existing key, or set `SPARKWING_SECRETS_KEY_FILE` to a private key file inside the selected `SPARKWING_HOME`. A new key cannot open values sealed under an old key. |
+| TypeScript manifest has no `main` | `bad_request` | Set `"main": "index.ts"` in the named `package.json`, using the actual pipeline entry file. |
+| Pipeline cache input is unreadable | `bad_request` | Restore read access for the current user to the named input, then retry. |
+| Integer argument has the wrong type | `invalid_args` | Use a base-10 whole number with the named flag, such as `--n=42`. Supplied values may be masked. |
+| Compiled pipeline cache entry fails verification | `integrity_failure` | Run `sparkwing cache prune --all-entries`, then repeat the original command to rebuild from source. Entries in use are skipped. |
+| Downloaded artifact conflicts with its stored metadata | `conflict` | The diagnostic names the run, job and artifact. Ask the controller operator to restore that stored artifact from a trusted copy, then repeat the download. |
+
+Artifact downloads also verify size and digest after transfer. A mismatch
+returns `integrity_failure` and publishes no destination file. Signed URLs
+and unrecognized storage response text stay out of the diagnostic.
 
 ## sparkwing run
 
@@ -276,6 +307,9 @@ when redirecting the Markdown artifact to a file.
 Misspelled command words suggest the closest command in the same group. Run the
 suggested command with `--help` to see its flags. An unknown flag on `runs list`
 names the accepted flags and points to `--help`.
+
+Invalid `runs list --since` durations include the example `--since 1h`.
+Run-list HTTP limit refusals include `limit=1`; retry with a positive integer.
 
 `runs status` in plain and pretty formats includes `started_at`, `finished_at`
 and `duration` for the run, plus each job's start, finish and duration. Missing

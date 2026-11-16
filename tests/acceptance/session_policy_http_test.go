@@ -198,8 +198,23 @@ func TestSessionFlowHTTPLifetimeCases(t *testing.T) {
 				if count != 1 || stored != now.Add(test.expiry).UnixNano() {
 					t.Fatalf("refused session was changed: count=%d expiry=%d", count, stored)
 				}
-				if test.age >= 0 && !strings.Contains(w.Body.String(), "maximum lifetime") {
-					t.Fatalf("refused session: count=%d body=%s", count, w.Body.String())
+				const publicRefusal = `{"error":{"code":"unauthenticated","message":"credential is unavailable"}}` + "\n"
+				if w.Body.String() != publicRefusal {
+					t.Fatalf("public session refusal: %s", w.Body.String())
+				}
+				if test.age >= 0 {
+					var lifetimeAudit bool
+					for line := range strings.SplitSeq(f.logs.String(), "\n") {
+						if strings.Contains(line, "msg=audit") && strings.Contains(line, "status=401") && strings.Contains(line, "route=/api/v1/auth/session") && strings.Contains(line, `reason="session exceeded its maximum lifetime"`) {
+							lifetimeAudit = true
+						}
+					}
+					if !lifetimeAudit {
+						t.Fatalf("private lifetime audit missing: %s", f.logs)
+					}
+				}
+				if strings.Contains(f.logs.String(), f.raw) || strings.Contains(f.logs.String(), f.csrf) {
+					t.Fatalf("session proof exposed in audit: %s", f.logs)
 				}
 				return
 			}

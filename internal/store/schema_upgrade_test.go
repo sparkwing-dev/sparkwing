@@ -2,13 +2,13 @@ package store_test
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 const buildTrustSchema35 = `CREATE TABLE team_build_trust (
@@ -18,6 +18,10 @@ const buildTrustSchema35 = `CREATE TABLE team_build_trust (
 
 func addSchema35BuildTrust(t *testing.T, st *store.Store) {
 	t.Helper()
+	store.DropRunEventSchemaForTest(t, st)
+	if _, err := st.DB().Exec(`ALTER TABLE nodes DROP COLUMN group_wait_started_at`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.DB().Exec(buildTrustSchema35); err != nil {
 		t.Fatal(err)
 	}
@@ -25,19 +29,10 @@ func addSchema35BuildTrust(t *testing.T, st *store.Store) {
 
 func TestSchemaUpgradeRemovesBuildTrustFromVersion36AndPreservesConfiguredInstall(t *testing.T) {
 	target := storetest.New(t)
-	dialect, location := store.DialectSQLite, target.Path()
-	if location == "" {
-		dialect, location = store.DialectPostgres, target.DSN()
-	}
 	cipher := drillCipher(t)
-	st := store.OpenSchema36ForTest(t, dialect, location, store.WithPolicies(func(*store.Store) (store.Policies, error) {
+	st := target.Open(t, store.WithPolicies(func(*store.Store) (store.Policies, error) {
 		return store.Policies{Intake: storetest.IntakePolicy{}, SessionKeys: cipher}, nil
 	}))
-	if dialect == store.DialectSQLite {
-		teststore.RegisterSQLite(t, st, location)
-	} else {
-		teststore.RegisterPostgres(t, st, location)
-	}
 	populateInstall(t, st, cipher)
 	for _, statement := range []string{
 		`INSERT INTO local_runner_instances(id,capability_prefix,machine,pid,process_birth,version,build_identity,state) SELECT 'kept-runner',prefix,'kept-machine',1,'kept-birth','kept-version','kept-build','active' FROM capabilities WHERE subject_id='runner-1'`,
@@ -60,6 +55,7 @@ func TestSchemaUpgradeRemovesBuildTrustFromVersion36AndPreservesConfiguredInstal
 	}
 	rowsBefore := snapshotRows(t, st, queries)
 	before := fingerprintInstall(t, st, cipher)
+	store.PrepareSchema36ForTest(t, st)
 	if _, err := st.DB().Exec(`INSERT INTO team_build_trust(team,trust_local_builds) VALUES ('default',1)`); err != nil {
 		t.Fatal(err)
 	}
@@ -108,10 +104,12 @@ func schema30Store(t *testing.T, target *storetest.Target) {
 	t.Helper()
 	st := target.Open(t)
 	dropActionsSchema(t, st)
+	store.DropRunEventSchemaForTest(t, st)
 	for _, statement := range []string{
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`,
 		`INSERT INTO secrets(team,name,value,principal,created_at,updated_at) VALUES ('kept','TOKEN','sealed-configuration','fixture',1,1)`,
 		buildTrustSchema35,
+		`ALTER TABLE nodes DROP COLUMN group_wait_started_at`,
 		`DROP INDEX idx_runs_live_children`,
 		`DROP TABLE local_runner_instances`,
 		`DROP TABLE local_run_secrets`,
@@ -310,8 +308,9 @@ func schemaShape(t *testing.T, st *store.Store) string {
 		`SELECT name || ' ' || sql FROM sqlite_master WHERE type = 'view' ORDER BY name`,
 	}
 	if st.Dialect() == store.DialectPostgres {
+		// safety: fixture downgrades leave dropped-column ordinal gaps in Postgres; compare visible column order.
 		queries = []string{
-			`SELECT table_name || '.' || ordinal_position || '.' || column_name || '.' || data_type || '.' || is_nullable || '.' || COALESCE(column_default, '') || '.' || COALESCE(generation_expression, '') FROM information_schema.columns WHERE table_schema = current_schema() ORDER BY table_name, ordinal_position`,
+			`SELECT table_name || '.' || row_number() OVER (PARTITION BY table_name ORDER BY ordinal_position) || '.' || column_name || '.' || data_type || '.' || is_nullable || '.' || COALESCE(column_default, '') || '.' || COALESCE(generation_expression, '') FROM information_schema.columns WHERE table_schema = current_schema() ORDER BY table_name, ordinal_position`,
 			`SELECT conrelid::regclass::text || ' ' || conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint WHERE connamespace = current_schema()::regnamespace ORDER BY 1`,
 			`SELECT indexname || ' ' || tablename FROM pg_indexes WHERE schemaname = current_schema() ORDER BY 1`,
 			`SELECT table_name || ' ' || view_definition FROM information_schema.views WHERE table_schema = current_schema() ORDER BY 1`,
@@ -469,7 +468,13 @@ func snapshotRows(t *testing.T, st *store.Store, queries []string) string {
 			if err := rows.Scan(pointers...); err != nil {
 				t.Fatal(err)
 			}
-			fmt.Fprintln(&out, values)
+			var stable []any
+			for i, col := range cols {
+				if col != "group_wait_started_at" {
+					stable = append(stable, values[i])
+				}
+			}
+			fmt.Fprintln(&out, stable)
 		}
 		if err := rows.Err(); err != nil {
 			t.Fatal(err)
@@ -479,4 +484,86 @@ func snapshotRows(t *testing.T, st *store.Store, queries []string) string {
 		}
 	}
 	return out.String()
+}
+
+func TestSchemaUpgradeAddsGroupWaitClockToVersion37(t *testing.T) {
+	target := storetest.New(t)
+	f := newStoreRecoveryFixtureAt(t, false, target)
+	before, err := f.tenant.ReadNode(t.Context(), f.ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.DropRunEventSchemaForTest(t, f.s)
+	for _, statement := range []string{`ALTER TABLE nodes DROP COLUMN group_wait_started_at`, `UPDATE sparkwing_schema_version SET version=37,baseline_digest='7da3f341c2c5b6cc6fd60afb1a881979dfc5b64e79589a551522c655b5099e64'`} {
+		if _, err := f.s.DB().ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.s = target.Open(t, store.WithPolicies(sealStorePolicies))
+	f.tenant, err = f.s.ForTeam(t.Context(), f.tenant.Team())
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := f.tenant.ReadNode(t.Context(), f.ref)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("schema 37 job changed: before=%+v after=%+v err=%v", before, after, err)
+	}
+	var clocks int
+	if err := f.s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM nodes WHERE group_wait_started_at IS NOT NULL`).Scan(&clocks); err != nil || clocks != 0 {
+		t.Fatalf("upgrade invented wait clocks: count=%d err=%v", clocks, err)
+	}
+}
+
+func TestSchemaUpgradeAddsRunEventTablesToVersion38(t *testing.T) {
+	target := storetest.New(t)
+	f := newStoreRecoveryFixtureAt(t, false, target)
+	store.DropRunEventSchemaForTest(t, f.s)
+	if _, err := f.s.DB().ExecContext(t.Context(), `UPDATE sparkwing_schema_version SET version=38,baseline_digest='d7d89dd6049c6139e01bae0a845983414393d5b7c622a2172c60fa1292e5d7da'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	f.s = target.Open(t, store.WithPolicies(sealStorePolicies))
+	fresh := storetest.New(t).Open(t)
+	if a, b := schemaShape(t, f.s), schemaShape(t, fresh); a != b {
+		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
+	}
+	team, run := string(f.tenant.Team()), string(f.ref.RunID)
+	for _, statement := range []string{
+		`INSERT INTO run_event_subscriptions(team,id,url,event_types,secret,created_principal,created_at,updated_at) VALUES ('` + team + `','sub_a','https://hooks.example/a','["run.finished"]','sealed','admin',1,1)`,
+		`INSERT INTO run_event_subscriptions(team,id,url,event_types,secret,created_principal,created_at,updated_at) VALUES ('` + team + `','sub_b','https://hooks.example/b','["run.finished"]','sealed','admin',1,1)`,
+		`INSERT INTO run_event_deliveries(team,subscription_id,event_id,run_id,event_type,body,state,next_at,deadline_at,created_at) VALUES ('` + team + `','sub_a','` + run + `/2','` + run + `','dev.sparkwing.run.finished.v1',X'7b7d','pending',1,2,1)`,
+		`INSERT INTO run_event_deliveries(team,subscription_id,event_id,run_id,event_type,body,state,next_at,deadline_at,created_at) VALUES ('` + team + `','sub_b','` + run + `/2','` + run + `','dev.sparkwing.run.finished.v1',X'7b7d','pending',1,2,1)`,
+	} {
+		if _, err := f.s.DB().ExecContext(t.Context(), blobLiteral(f.s, statement)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.s.DB().ExecContext(t.Context(), blobLiteral(f.s, `INSERT INTO run_event_deliveries(team,subscription_id,event_id,run_id,event_type,body,state,next_at,deadline_at,created_at) VALUES ('`+team+`','sub_a','x/1','`+run+`','t',X'7b7d','lost',1,2,1)`)); err == nil {
+		t.Fatal("delivery accepted an unknown state")
+	}
+	count := func() int {
+		var n int
+		if err := f.s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM run_event_deliveries`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if _, err := f.s.DB().ExecContext(t.Context(), `DELETE FROM run_event_subscriptions WHERE id='sub_a'`); err != nil || count() != 1 {
+		t.Fatalf("subscription delete left %d deliveries, err=%v", count(), err)
+	}
+	if _, err := f.s.DB().ExecContext(t.Context(), `DELETE FROM runs WHERE id='`+run+`'`); err != nil || count() != 0 {
+		t.Fatalf("run delete left %d deliveries, err=%v", count(), err)
+	}
+}
+
+func blobLiteral(st *store.Store, statement string) string {
+	if st.Dialect() == store.DialectPostgres {
+		return strings.ReplaceAll(statement, "X'7b7d'", "decode('7b7d','hex')")
+	}
+	return statement
 }

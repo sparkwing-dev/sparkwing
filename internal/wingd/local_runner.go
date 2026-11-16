@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -19,8 +21,9 @@ import (
 
 const localRunnerPath = "/api/v1/local/runners"
 
-// safety: a runner holding jobs keeps running past this bound and finishes them against the next controller.
-const localRunnerRetireWait = 5 * time.Second
+// LocalRunnerRetireWait bounds explicit local runner shutdown. Runners holding
+// jobs keep running past this bound and finish against the next controller.
+const LocalRunnerRetireWait = 5 * time.Second
 
 type runnerWake struct {
 	mu      sync.Mutex
@@ -171,32 +174,129 @@ func (d *Daemon) retireLocalRunner(ctx context.Context) error {
 		return err
 	}
 	d.runnerChanges.lock()
-	instance, err := registry.ActiveLocalRunner(ctx, subject)
+	instance := d.retiringRunner
+	if instance != nil {
+		alive, err := LocalRunnerProcessAlive(*instance)
+		if err != nil || !alive {
+			if err == nil {
+				d.retiringRunner = nil
+			}
+			d.runnerChanges.unlock()
+			return err
+		}
+	}
+	if instance == nil {
+		var active localhostwire.LocalRunnerInstance
+		active, err = registry.ActiveLocalRunner(ctx, subject)
+		if err == nil {
+			// safety: the persisted drain removes this incarnation from active discovery.
+			instance = &active
+			d.retiringRunner = instance
+		}
+	}
 	var failure *apierr.Error
 	if err == nil {
 		err = registry.DrainLocalRunner(ctx, subject, instance.ID)
 	}
 	d.runnerChanges.unlock()
-	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
+	if instance == nil && errors.As(err, &failure) && failure.Code == apierr.NotFound {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
 	d.runnerWake.notify()
-	ctx, cancel := context.WithTimeout(ctx, localRunnerRetireWait)
+	ctx, cancel := context.WithTimeout(ctx, LocalRunnerRetireWait)
 	defer cancel()
 	for {
-		alive, err := LocalRunnerProcessAlive(instance)
-		if err != nil || !alive {
+		alive, err := LocalRunnerProcessAlive(*instance)
+		if err != nil {
 			return err
+		}
+		if !alive {
+			d.runnerChanges.lock()
+			if d.retiringRunner == instance {
+				d.retiringRunner = nil
+			}
+			d.runnerChanges.unlock()
+			return nil
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("local runner %s (pid %d) is still running; controller shutdown is incomplete; run sparkwing dashboard open to let held work finish, then retry sparkwing daemon stop: %w", instance.ID, instance.PID, ctx.Err())
+			return &runnerHoldsWork{instance: *instance, cause: ctx.Err()}
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+// safety: carries the held runner so the stop can finish once that process exits.
+type runnerHoldsWork struct {
+	instance localhostwire.LocalRunnerInstance
+	cause    error
+}
+
+func (e *runnerHoldsWork) Error() string {
+	return fmt.Sprintf("local runner %s (pid %d) is still finishing held work: %v", e.instance.ID, e.instance.PID, e.cause)
+}
+
+func (e *runnerHoldsWork) Unwrap() error { return e.cause }
+
+func (e *runnerHoldsWork) failure(home string) *apierr.Error {
+	return &apierr.Error{
+		Code:    hosterr.Unavailable,
+		Message: fmt.Sprintf("local runner %s (pid %d) is still finishing held work; the local controller stops on its own once that runner exits", e.instance.ID, e.instance.PID),
+		Hint: "Until then, other sparkwing commands, `sparkwing runs cancel` included, wait briefly and fail with " +
+			"\"the local controller is still stopping\". `sparkwing daemon status` reports stopped once the work finishes. " +
+			"To abandon the held work now, run `" + abandonRunnerCommand(home, e.instance) + "`.",
+	}
+}
+
+// safety: a systemd runner's jobs run in its unit's cgroup, so only killing the unit ends them; stopping it waits for
+// the work.
+func abandonRunnerCommand(home string, instance localhostwire.LocalRunnerInstance) string {
+	switch runtime.GOOS {
+	case "windows":
+		return fmt.Sprintf("taskkill /F /T /PID %d", instance.PID)
+	case "linux":
+		if info, err := os.Stat("/run/systemd/system"); err == nil && info.IsDir() {
+			return "systemctl --user kill --signal=SIGKILL " + LocalRunnerServiceName(home, instance.ID) + ".service"
+		}
+	}
+	return fmt.Sprintf("kill -KILL %d", instance.PID)
+}
+
+// safety: a stop that outlasted its wait leaves the controller draining with a runner that still needs it to accept
+// results; finishing here once that runner exits spares the user a second stop and later commands a wedged controller.
+func (d *Daemon) finishDrainAfterRunner(ctx context.Context, instance localhostwire.LocalRunnerInstance) {
+	d.runnerChanges.lock()
+	if d.finishingDrain {
+		d.runnerChanges.unlock()
+		return
+	}
+	d.finishingDrain = true
+	d.runnerChanges.unlock()
+	go func() {
+		for {
+			changed := d.runnerWake.subscribe()
+			if alive, err := LocalRunnerProcessAlive(instance); err == nil && !alive {
+				break
+			}
+			select {
+			case <-d.quit:
+				return
+			case <-changed:
+			case <-time.After(time.Second):
+			}
+		}
+		if err := d.retireLocalRunner(ctx); err != nil {
+			d.runnerChanges.lock()
+			d.finishingDrain = false
+			d.runnerChanges.unlock()
+			d.cfg.logf("local controller stop is incomplete after runner %s exited: %v", instance.ID, err)
+			return
+		}
+		d.shutdownWithReason("drain")
+	}()
 }
 
 var errControllerStopping = &apierr.Error{Code: hosterr.Unavailable, Message: "the local controller is stopping"}

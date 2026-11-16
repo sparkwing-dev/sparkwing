@@ -22,7 +22,7 @@ func testGoSDKFakeHostAttributeMasks(t *testing.T) {
 		{"keys", "attribute-sentinel", `{"attribute-sentinel":"visible","nested":{"prefix-attribute-sentinel":true}}`, `{"***":"visible","nested":{"prefix-***":true}}`},
 		{"numbers", "1234567", `{"pin":1234567,"nested":[12345678,{"pin":1234567}]}`, `{"masked_attrs":"***"}`},
 		{"large-numbers", "9007199254740993", `{"pin":9007199254740993}`, `{"masked_attrs":"***"}`},
-		{"escaped-values", "attribute\"sentinel\nvalue", `{"nested":[{"value":"attribute\"sentinel\nvalue"}]}`, `{"nested":[{"value":"***"}]}`},
+		{"escaped-values", "attribute\"sentinel\nvalue", `{"nested":[{"value":"attribute\"sentinel\nvalue"}]}`, `{"nested":[{"***":"***"}]}`},
 		{"unmasked-number", "attribute-sentinel", `{"number":9007199254740993,"count":3}`, `{"number":9007199254740993,"count":3}`},
 		{"boolean", "true", `{"flag":true,"other":false}`, `{"masked_attrs":"***"}`},
 		{"null", "null", `{"empty":null}`, `{"masked_attrs":"***"}`},

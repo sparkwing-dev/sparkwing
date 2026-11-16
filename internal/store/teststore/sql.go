@@ -105,7 +105,7 @@ func sqliteDSN(path string) string {
 	if strings.HasPrefix(uri, "file://") {
 		uri = "file://" + strings.TrimPrefix(uri, "file:")
 	}
-	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=foreign_keys(on)", uri, store.DefaultBusyTimeoutMS)
+	return fmt.Sprintf("%s?_txlock=immediate&_pragma=busy_timeout(%d)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(on)", uri, store.DefaultBusyTimeoutMS)
 }
 
 // SQL returns a connection of the fixture's own to the database behind st.
@@ -171,15 +171,22 @@ func openLocation(loc location) (*sql.DB, error) {
 	return sql.Open(driver, loc.dsn)
 }
 
-// Exec runs statements through the fixture's shared connection, closed by
-// the test that opened or registered st. It projects repository routing and
-// claim indexes when declarations change. Use SQL for intentional corruption.
-func Exec(ctx context.Context, st *store.Store, query string, args ...any) (sql.Result, error) {
+func registeredDB(st *store.Store) (*sql.DB, error) {
 	value, ok := locations.Load(st)
 	if !ok {
 		return nil, fmt.Errorf("teststore: store was not opened or registered through teststore")
 	}
-	db := value.(location).db
+	return value.(location).db, nil
+}
+
+// Exec runs statements through the fixture's shared connection, closed by
+// the test that opened or registered st. It projects repository routing and
+// claim indexes when declarations change. Use SQL for intentional corruption.
+func Exec(ctx context.Context, st *store.Store, query string, args ...any) (sql.Result, error) {
+	db, err := registeredDB(st)
+	if err != nil {
+		return nil, err
+	}
 	result, err := db.ExecContext(ctx, rebind(st, query), args...)
 	if err != nil {
 		return nil, err

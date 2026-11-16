@@ -101,7 +101,7 @@ func NativeHosting(cfg NativeHostingConfig) Hosting {
 
 		processes = services.Config.Processes
 		closeResources = func() error { return errors.Join(services.Close(), private.Close()) }
-		// safety: an exchanged eval award holds no source.read, so it restores the plan's prepared source instead of fetching.
+		// perf: Cloud awards reuse the planning owner's verified executable instead of rebuilding it.
 		if cfg.PrepareSource {
 			storage, bindErr := private.BindStorage(ctx, principal)
 			if bindErr != nil {

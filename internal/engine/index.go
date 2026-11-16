@@ -47,9 +47,9 @@ func (r *Resolver) sdkIndex(ctx context.Context, now time.Time) (IndexResult, er
 	result, err = mapping.Index(ctx, now)
 	if err != nil {
 		if ctx.Err() != nil {
-			return IndexResult{}, ctx.Err()
+			return IndexResult{}, err
 		}
-		return IndexResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: err.Error(), Hint: "Run `sparkwing update` once online to cache the verified version policy."}
+		return IndexResult{}, &apierr.Error{Code: hosterr.Unavailable, Message: err.Error(), Hint: "Run `sparkwing update` once online to cache the signed version policy."}
 	}
 	return result, nil
 }
@@ -99,7 +99,7 @@ func (r *Resolver) indexPolicy(ctx context.Context, now time.Time, persist bool)
 		return IndexResult{Index: candidate}, nil
 	}
 	if ctx.Err() != nil {
-		return IndexResult{}, ctx.Err()
+		return IndexResult{}, err
 	}
 	// safety: Another process may have persisted a revocation while this resolver was fetching.
 	persisted, cacheErr := r.loadIndex(now)
@@ -182,7 +182,7 @@ func (r *Resolver) localIndex(now time.Time) IndexResult {
 		}
 		return IndexResult{Index: VerifiedIndex{offline: true}, Notices: []engineid.Notice{notice}}
 	}
-	result := indexResult(r.index, errors.Join(fmt.Errorf("local-only execution uses cached policy without a network refresh"), err))
+	result := indexResult(r.index, err)
 	for i := range result.Notices {
 		result.Notices[i].Hint = PolicyRefreshHint
 	}

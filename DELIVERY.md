@@ -14,27 +14,112 @@ launcher when testing isolated tool state.
 
 ## Landing a change
 
-Agents and the lead land every change with `sparkwing run land`, so each
-landing goes through Sparkwing itself. From a clean work branch:
+Agents and the lead submit every landing through main's trusted
+`bin/queue-land.sh` entrypoint below. It invokes Sparkwing with main's pipeline
+definition against the candidate checkout. Ordinary interactive Land remains
+available for operator use from a clean work branch. Operators must fetch main
+and pin its pipeline source too. Set `candidate` to the absolute worktree path:
 
 ```bash
-sparkwing run land --sw-dry-run                     # preview; nothing is pushed
-sparkwing run land --sw-stop-at verify              # gate and review, stop before the push
-sparkwing run land --sw-allow-risk destructive,prod  # land on main
+candidate=/absolute/path/to/candidate
+git -C "$candidate" fetch origin main
+main_sha="$(git -C "$candidate" rev-parse --verify 'origin/main^{commit}')"
+sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-dry-run
+sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-stop-at verify --sw-allow-risk destructive,prod
+sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-allow-risk destructive,prod
 ```
+
+Land refuses any other step bound before a job runs, provided the installed engine
+forwards the bounds into the plan's run context. A bound narrows only the job that
+holds it, so the land job would still push a tree whose skipped checks never ran.
+Only `--sw-stop-at verify`, which stops before the push, and `--sw-dry-run`
+accept bounds. An engine that does not forward the bounds leaves them empty, and
+Land then plans a bounded run as unbounded, so pass no other bound.
+
+An unpinned ordinary Land compiles the candidate's definition. For a registry
+change, the operator must also review its `land` entrypoint mapping and arguments:
+the pipeline-source pin selects code, while candidate aliases still apply.
 
 Lands run on owned hardware. Policy, gate, review and push use that machine.
 The land queue invokes it with `--sw-route local`.
 
 ### Queue focused lands
 
-Submit from each clean candidate worktree:
+Extract the submission script from freshly fetched main, then invoke that copy.
+This works even when a local checkout named `main` is behind the remote. Set
+`candidate` to the absolute clean worktree path:
 
 ```bash
-sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --queued --brief 'Describe the goal to review'
+candidate=/absolute/path/to/candidate
+(
+  set -e
+  git -C "$candidate" fetch origin main
+  main_sha="$(git -C "$candidate" rev-parse --verify 'origin/main^{commit}')"
+  queue_script="$(mktemp)"
+  trap 'rm -f "$queue_script"' EXIT
+  git -C "$candidate" show "$main_sha:bin/queue-land.sh" > "$queue_script"
+  bash "$queue_script" -C "$candidate" --brief 'Describe the goal to review'
+)
+```
+
+Track the returned run:
+
+```bash
 sparkwing queue list
 sparkwing runs status --run <returned-run-id> --follow -o json
 ```
+
+The script fetches `origin/main`, resolves its exact SHA, verifies its own blob
+against that commit, and refuses a candidate `.sparkwing/sparkwing.yaml` that
+differs from main. That registry determines the `land` entrypoint even when
+pipeline code is pinned. Restore main's registry before using this queue.
+Registry changes require a separately reviewed operator landing with main's
+pipeline source pinned. The refusal prints that exact command, including the
+resolved SHA, checkout and brief.
+The submitted command is:
+
+```bash
+sparkwing run land -C <candidate> --sw-detached --sw-route local --sw-pipeline-ref <main-SHA> --sw-allow-risk destructive,prod -- --queued --queued-main <main-SHA> --brief 'Describe the goal to review'
+```
+
+`--sw-pipeline-ref` compiles main's complete pipeline source and local module
+dependencies. `WorkDir` remains the candidate checkout. The queued preconditions
+compare freshly fetched main to `--queued-main` before merging and again when
+capturing the gated HEAD, then refresh main again before the queued push. If main
+moved while the entry waited or the checks ran, the run refuses
+and names the submission script. Enqueue again to compile the new gate.
+The remote update uses `--force-with-lease=refs/heads/main:<planned-base-SHA>`
+as an atomic compare-and-swap. Before sending it, Land proves that the planned
+base is an ancestor of the gated commit, so the update can only fast-forward
+from that exact base. An already-at-target/no-op result is a refusal, because it
+does not confirm an update from the planned base.
+It never falls back to the branch's definition. Use `--foreground` on the script
+to wait in the terminal, or `--dry-run` to preview without a push.
+
+Changes to `land.go`, pre-push, or other pipeline Go files use this same path.
+Main's gate judges the merged checkout, and its `affected-tests` job runs the
+branch's own focused pipeline tests from the changed `.sparkwing/jobs` package.
+Run the focused pipeline tests before submission too. The proposed pipeline
+definition becomes the trusted gate only after it lands on main. A failing
+proposed pipeline test blocks its landing even when main's definition plans.
+
+This is a local delivery boundary. The SDK run context exposes the candidate
+commit but no pipeline ref, so `--queued-main` cannot independently prove which
+code the submitter selected. The verified script owns that selection. Bypassing
+the entrypoint or making a direct push is not stopped locally. Server-side branch
+protection with a status issued only by main's gate is separate enforcement.
+
+Runtime gate inputs remain candidate-controlled. Main's compiled jobs execute
+candidate scripts such as `bin/check-changelog.sh`, `bin/sync-docs.sh --check`,
+`bin/gen-cli-docs.sh`, and `bin/gen-config-docs.sh`, and read candidate policy
+such as `.review.yaml` and `.golangci.yml`. A branch can weaken a check by making
+its script return success or relaxing its configuration. Review must inspect
+those changes until the runtime checkers and their policy are separately pinned.
+This change protects pipeline compilation, not all gate enforcement inputs.
+Running a script from main's checkout alone does not fix that boundary: these
+scripts derive their repository root from their own path, then compile checker
+or generator code from that root. Trusted checker code needs an explicit
+candidate input root, including its transitive helpers and configuration.
 
 Each entry is a durable `land` run in the dashboard. Detached intake returns
 its run ID; keep that receipt to wait for the entry, inspect logs and failures,
@@ -53,16 +138,418 @@ review uses the supplied goal rather than inferring one from the branch name.
 Ordinary interactive lands keep their objective fallback. Queued lands refuse
 a changed submission or dirty checkout,
 merge fetched `origin/main` before capturing HEAD, then run source policy and
-the full pre-push tier alongside review against that merged checkout. They
-push only when the branch, HEAD and checkout still match. If main moves again,
+the fast pre-push checks against that merged checkout. After both pass, the
+inline `affected-tests` job runs review and the hosted Gate's affected short
+and critical Go tests as independent steps under one fail-fast owner. A review
+failure cancels in-flight tests through the existing step cancellation path,
+which joins child exit and drains output. A test failure cancels review.
+Push waits for policy, fast checks and both steps to pass on the same tree.
+The fast job reserves its compiler allowance separately (nine cores on a
+16-CPU host), releasing it before the combined job reserves seven test cores
+plus 0.25 for review. These reservations are admission accounting, not CPU
+limits. Fast checks have a 45-minute execution deadline and a 30-minute
+no-progress deadline. The combined job has 45-minute execution and no-progress
+deadlines, and each reviewer model call inside it stops after 30 minutes, so a
+silent reviewer cannot hold the land slot past review's own bound. Review
+starts after policy and fast checks; small-change measurements must include
+that start delay.
+They push only when the branch, HEAD and checkout still match. If main moves again,
 the push fails rather than merging an unchecked tree; enqueue again after
 inspecting the failure. A conflict aborts the merge and records its remedy in
 the failed run.
 
-This focused mode uses the queue's owned-hardware landing policy: it omits
-the broad desktop and Cloud gates. Run focused lane tests before submitting.
+Queued authorizing checks bind their SDK process to the original local owner
+checkout, using the immutable repository path rather than an isolated checkout
+of the submitted pre-merge commit. Preconditions capture the merged commit and
+tree, the run ID and every required policy, fast, review and test check. Each
+check verifies that owner branch, HEAD and cleanliness before and after its body,
+and records the actual tree and outcome. Both verification and queued push
+require every receipt for that run to pass on the tree being pushed. Missing,
+unreadable, failed or mismatched receipts block landing. Receipts live under
+`<git common dir>/sparkwing-land-checks/<run>/<role>/<step>.json`; logs also
+record each full checked tree. Review uses the pinned `queued-main` SHA, so it
+does not depend on a worker clone carrying `origin/main`. Ordinary standalone
+review still compares against `origin/main`.
+
+This mode uses the queue's owned-hardware landing policy: local affected Go
+tests are the primary test gate. Hosted CI supplies additional verification.
+It omits the broad desktop and Cloud gates. Run focused lane tests before submitting.
 Ordinary `land` retains its full gate. This is a repository pipeline feature;
 a different repository must define its own landing policy before using it.
+
+Review prompts retain UTF-8 text patches unchanged. Text-like files with
+invalid UTF-8 keep their patch with only invalid bytes escaped as `\xNN`,
+marked "contains invalid UTF-8; bytes escaped". Files containing NUL or more
+than 30% invalid/control bytes use binary path, byte size and SHA-256 metadata
+for each side. Changed names use NUL delimiters and literal pathspecs for
+strict-review routing. The prompt budget truncates at a UTF-8 rune boundary.
+
+### Local affected Go tests
+
+The pre-push hook runs its fast checks for every push. Updates targeting
+`refs/heads/main` then run `affected-tests`; branch pushes finish after the fast
+checks. Each non-deletion main update must name the checked-out HEAD's OID;
+`git push origin topic:main` from another commit is refused with a checkout
+remedy before test selection. Every ref update is inspected, including main updates
+after other refs. Deletions add no affected tests. An explicit
+`sparkwing run pre-push` also runs the test phase. Queued Land
+runs those test bodies alongside review after policy and fast checks pass.
+Ordinary Land already runs the full Gate and adds no duplicate test job.
+The hook and queued Land read the complete committed push range, including deletions and
+both paths of renames. An unrelated staged file cannot narrow the tests.
+
+Queued Land stops admitting packages after its first observed test or build
+failure. Packages already admitted finish all their selected bodies, and the
+job reports every failure it observes before returning. Pending short and
+critical packages are listed by module and phase, with exact local commands
+to rerun all selected work. A successful run still executes every selected
+short and full critical test. The pre-push hook, explicit PrePush, Gate and
+ordinary Land keep their collect-all behavior.
+
+Queued package commands compile with `-p 1` and retain the runtime width of
+their assigned module or store lane. The coordinator shares the module and
+store allocation with collect-all execution and bounds admission within each
+lane. The three store shards form one admitted package costing three command
+slots: a failure in one shard lets all three finish, and a pending store
+package appears once in the skipped inventory. With store and other root
+packages selected alongside pipeline work at allowance seven, pipeline uses
+one slot, root's ordinary lane uses three and its store shards use one each.
+Critical modules retain the full allowance after all short work joins.
+
+The coordinator joins admitted commands and drains their output before
+cleaning the shared test home. Explicit run cancellation and deadlines still
+interrupt running work through the existing process-owner cleanup. Package
+admission can change command startup and cache costs; the correctness proof
+does not measure those costs.
+
+Affected tests for main use the remote OID Git advertises on hook stdin,
+independently of local `origin/main`. Main updates must fast-forward; a rewind
+or unverified remote base is refused with a fetch remedy. Creating
+main selects every committed Go module's short tests and the full critical set.
+All changes count, including type changes and both paths of renames.
+
+The job reuses the hosted Gate's package planner and command runner. It runs
+`go test -short` over the reverse dependency closure, including test imports
+and registered file readers, then the critical set without `-short` when Go
+inputs changed. Changelog-only changes select no tests. Other documentation
+runs its registered readers. The `affected-tests` job has a 45-minute execution deadline,
+separate from the fast checks' one-minute warning. Each Go package test binary
+retains its 25-minute timeout; this is not a deadline for the entire multi-package
+Go command. The local test job uses `max(1, (NumCPU-1)/2)` for both
+its scheduling reservation and combined Go command allowance: seven on a
+16-CPU host, regardless of the submitter's `GOMAXPROCS` or the SDK's `CI` marker. This is
+not an aggregate CPU cap: seven test processes can each use seven Go execution
+threads, besides compiler and nested subprocess work. The job reports package
+counts, critical-test counts, failures, package timings and test timings.
+
+Repository-scanning source guards carry the existing `//sparkwing:critical`
+tag because their filesystem reads are absent from the import graph. Every Go
+input change, including a test in another committed module, runs the named Git
+fixture, source ownership, ANSI, SQL ownership, configuration-directory,
+environment documentation, source-hint, SDK documentation, SDK boundary and SDK sandbox guards
+without `-short`. The guard inventory and its cross-module selection are pinned
+by `TestAffectedTestsAlwaysSelectRepositoryScanningGuards`; an unsafe unrelated
+Git fixture is exercised by
+`TestAffectedTestsRejectUnsafeGitInUnrelatedTestPackages`. These tags share the
+existing critical phase and deadline. Documentation-only selection is unchanged.
+
+Measured on 2026-11-12, 13 guard bodies excluding the SDK documentation guards
+summed to 5.54 seconds in one shared-host run. The eight-package command for the 11 root guards took
+81.09 seconds wall and 137.45 seconds CPU, including compilation and waited
+children, at load1 13.2-17.5. The two SDK guards ran with `-race` in 5.75 seconds
+wall and 4.40 seconds CPU. These mixed-cache command timings do not measure
+incremental Land latency. The critical-size guard counts all committed modules.
+
+The shared affected-test runner sets nonempty `GOFLAGS=-mod=readonly` for
+selection and execution. This overrides process and saved flags while keeping
+other saved Go settings, including `GOPROXY`, `GOPRIVATE` and `GONOSUMDB`.
+Hosted affected Gate and ordinary Land's merge recheck use that same flag
+policy and retain their existing CPU policy. Other affected build and vet
+checks keep their existing flag and runtime CPU policies.
+
+When the root selection includes `internal/store`, its short tests use three
+concurrent commands, each with `GOMAXPROCS=1` and `-p 1`. Other selected root
+packages run alongside them with the remaining root-module command allowance. A seven-wide root allowance becomes
+four for the other packages and one per store shard. Store-only selections need
+an allowance of at least three; selections with other root packages need at
+least four. Smaller allowances retain the unsplit short command. Each command
+in collect-all execution keeps the existing `GOMAXPROCS`/`-p` pairing; queued
+execution uses the singleton compiler width described above. Summed command
+widths stay within the allowance, which is not an operating-system CPU cap.
+
+Selected modules run their short commands together when the job's allowance
+can give each active module one worker. Root receives the remainder. If root
+has no short work, the first active module receives the remainder. At allowance
+seven, pipeline and root short tests use one and six; when SDK short tests are
+also selected, pipeline and SDK use one each and root uses five. Root's store
+shards consume their three workers from that assigned root allowance. A lone
+module keeps the full allowance. When there are more active short modules than
+workers, the modules run sequentially, each with the full allowance.
+
+All short commands across all modules join before any full critical command
+starts. Critical modules run sequentially with the full job allowance.
+Collect-all callers continue critical coverage after a short failure; queued
+Land stops future admission while already admitted packages finish.
+
+Queued short lanes start selected packages from a static hint list first,
+in the order below. Other packages retain their relative order. Hints apply
+within existing lanes: they select no additional work, move no package between
+lanes and leave critical ordering unchanged. Store shards remain one admitted
+package with their existing command order and slots. Hook and Gate callers
+keep their collect-all ordering. The list uses no runtime-learned durations.
+
+Measured on 2026-11-11, one broad queued diagnostic on `3da0442b9` selected
+66 root and two pipeline short packages on a shared 16-logical-CPU host.
+Its allowance seven assigned one pipeline worker, three ordinary root
+workers and one per store shard. Top-level bodies were forced with
+`-count=1`; package commands used `-p 1` and their assigned runtime width.
+
+| Start-first package, in hint order | Observed command span, s |
+| --- | ---: |
+| `cmd/sparkwing` | 444.109 |
+| `internal/controller` | 426.233 |
+| `internal/store` (three overlapping shards) | 357.109 |
+| `sparkwing-pipelines/jobs` | 316.731 |
+| `internal/bincache` | 308.097 |
+| `tests/acceptance` | 202.705 |
+
+The runner took 835.553 s. Acceptance started 605.522 s after the first test
+command and was the only remaining selected short command for the final
+189.956 s. These are baseline costs, not measured savings from the hints.
+Package spans include Go driver/build and test-binary work; store's shard
+durations are not added. Shared load1 median/max was 13.763/22.586. This
+single forced-body sample does not measure default Go result-cache overhead
+or an end-to-end Land. Narrow selections that already fit their lanes have
+little admission-order benefit. Changing order can change contention,
+cache sharing and which failure is observed first; performance needs paired
+measurements without changing coverage or fail-fast behavior.
+
+Three interleaved FIFO/hint pairs on 2026-11-11 used the identical
+`a59a9a28f` tree, the same 13-file cohort and allowance seven. FIFO removed
+only the coordinator's hint call through a Go overlay; nested tests used the
+candidate source in both arms. Each sample used one ordinary Go slot, with
+`-count=1`, shared build caches and no load-based exclusions.
+
+| Pair | FIFO runner, s | Hint runner, s | Runner change | Short-span change, s |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 727.676 | 695.567 | -4.41% | -50.971 |
+| 2 | 704.137 | 575.042 | -18.33% | -125.424 |
+| 3 | 652.664 | 652.071 | -0.09% | +2.938 |
+
+Runner medians were 704.137 / 652.071 s (FIFO / hints), a 7.39% reduction
+in the ratio of medians. Ranges were 652.664-727.676 / 575.042-695.567 s;
+inclusive IQRs were 37.506 / 60.263 s. The paired median runner saving was
+32.109 s. All six had exact top-level run/pass/skip parity: 7,908 root and
+774 pipeline short test runs, plus 31 Linux critical passes and seven
+Windows-only critical declarations absent. Selection, all 81 commands,
+lane widths, atomic store admission and the critical join were unchanged.
+
+The third pair was effectively tied: its short span increased 2.938 s,
+while its critical span fell 3.609 s. These samples do not establish a
+stable, meaningful saving. FIFO/hint load1 medians were 7.333/15.734,
+13.382/14.344 and 10.401/16.342. Other owners, load, host iowait and steal
+were recorded at 1 Hz without replacing samples. One shared host, one
+time window, fixed FIFO-before-hints order and changing cache/compile
+context limit attribution. This measures forced-body affected tests, not
+default result-cache processing or end-to-end Land. Existing deadlines
+remain unchanged.
+
+Compiler identity discovery stats a PATH candidate before resolving its symlinks.
+A missing tool costs one stat per nonempty PATH directory. Existing tools retain
+the resolved path, size and modification-time identity. There is no process memo,
+so a newly installed higher-priority compiler is visible on the next call.
+Pipeline and real-Go SDK installation fixtures restrict PATH to the directories
+supplying their required tools when they do not test PATH discovery. Product
+and job PATH remain unchanged.
+
+A before/after pair on 2026-11-11 used base `2b52cfec5` and candidate
+`abc8e9759`, Go 1.26.11, `GOFLAGS=-mod=readonly`, `GOMAXPROCS=7` and `-p 1`.
+Both outer commands retained the real WSL PATH, including 32 mounted Windows
+entries. Each package command started with its own empty private GOCACHE and
+private home. Default test-result caching remained enabled, with no `-count`;
+all four commands ran bodies and saved results. Compilation is outside the
+test-executable and post-`ok` intervals below.
+
+| Package | Executable before / after, s | `ok` to first cache-save observation before / after, s |
+| --- | ---: | ---: |
+| `internal/bincache` | 212.745 / 39.720 | 391.489 / 4.997 |
+| `cmd/sparkwing` | 340.905 / 239.942 | 132.079 / 17.215 |
+
+Bincache testlog operations fell from 930,770 to 312,840, with mounted Windows
+file operations falling from 144,130 to zero. CLI operations fell from 805,200
+to 643,662, with mounted Windows operations falling from 35,728 to 1,024.
+Existing test run/pass/skip inventories matched exactly, and the three added
+identity/call-count guards passed. Whole command walls, including cold build
+work and excluding slot wait, were 667.806 / 73.837 s for bincache and
+673.888 / 469.536 s for CLI.
+
+This is one pair per package on a shared host, combining the product scan
+change with fixture PATH isolation. It does not isolate their separate gains
+or establish stable end-to-end Land savings. Bincache load1 medians were
+13.438 / 10.359; CLI medians were 11.038 / 11.749. Save markers were observed
+with nominal 100 ms polling. Both CLI CPU observers missed their final exit
+sample after the save markers; raw Go timestamps and the input intervals were
+retained. These measurements change no test selection, gate tier or deadline.
+
+Three interleaved SDK installation package pairs on 2026-11-12 used base
+`76afada1a` and code `11610638c`, Go 1.26.11, `GOMAXPROCS=3`, `-p 1`,
+`-short` and default result caching. All fifteen original top-level cases were
+selected; the two short-mode skips stayed unchanged. The new ambient-compiler
+fixture guard was checked separately. Each command copied the same private
+compiled-only cache seed and used fresh product/user state. The outer PATH
+kept its 32 mounted entries; only the candidate's real-Go fixtures narrowed
+their tool directories. No result-cache replay replaced test bodies.
+
+| Measure, seconds | Before median (range) | After median (range) |
+| --- | ---: | ---: |
+| Whole Go command wall | 102.746 (100.929–103.684) | 45.569 (45.468–45.753) |
+| Whole Go command CPU | 71.797 (70.833–72.121) | 62.622 (62.343–62.810) |
+| Native test wall | 65.867 (64.577–66.060) | 43.335 (43.149–43.430) |
+| Native test CPU | 64.877 (63.468–65.503) | 60.042 (59.663–60.141) |
+| Native `ok` to terminal package event | 36.251 (34.236–38.543) | 1.694 (1.666–1.767) |
+
+CPU is wait4 user+sys including waited descendants in each stated scope;
+the native and whole-command columns overlap. Whole-command wall fell
+54.85%, 55.75% and 55.87% per pair; CPU fell 13.17%, 13.17% and 11.33%.
+Mounted testlog stats fell from 5,376 / 5,632 / 5,888 to zero. Outcome
+inventories matched after normalizing two local-SDK cases' temporary path
+names. Native quick-check payloads retain their per-invocation random inputs.
+The full candidate package also passed all 30 parent/leaf cases with race
+detection, including both real-compiler cases skipped by short mode.
+
+Cache copying, compile-only priming, npm preparation and manifest hashing are
+outside the observations. Native CPU supervision restores Go's usual local
+testlog argument, which `-exec` otherwise omits; retained logs and cache-save
+events prove input replay stayed active. Load1 medians were 4.55 / 3.31,
+2.82 / 2.88 and 2.92 / 2.98. Two other Go-slot holders were present, and all
+samples were retained. This is one shared WSL host and one time window,
+with exact native timestamps and 1 Hz host/process samples. It measures the
+SDK package, not end-to-end Land, and changes no tier, selection or deadline.
+
+A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
+store shards S at `340ebed3f`, and module overlap with store shards M at
+`406208403`. All share root b61 and the same 13-file selection: two pipeline
+packages, 66 root packages and 37 critical declarations. All 30 runnable Linux
+critical bodies passed; seven declarations are Windows-only. The SDK module
+was unselected, so this timing does not measure three-module execution.
+
+The study used Go 1.26.11, `GOFLAGS=-mod=readonly` and top-level `-count=1`.
+Compile-only warmup covered two pipeline packages and the union of 69 root
+short/critical packages, including the three critical-only packages. All nine
+samples ran in one 92.37-minute shared-desktop window, ordered U/S/M, S/M/U,
+M/U/S. Each variant had three observations with forced test bodies. The common
+command allowance was seven: U ran pipeline then root at seven; S ran pipeline
+at seven, then root at four plus three width-one store shards; M overlapped
+pipeline at one with root at three plus three width-one store shards.
+
+Shared runner wall times in seconds, excluding Go-slot wait:
+
+| Variant / source | Round 1 | Round 2 | Round 3 | Median | Min / max | Inclusive IQR |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| U, Unsplit (`b61a1fe4e`) | 684.559 | 589.469 | 612.010 | 612.010 | 589.469 / 684.559 | 47.545 |
+| S, Store shards (`340ebed3f`) | 683.201 | 574.933 | 629.455 | 629.455 | 574.933 / 683.201 | 54.134 |
+| M, Modules together (`406208403`) | 603.686 | 555.893 | 578.596 | 578.596 | 555.893 / 603.686 | 23.897 |
+
+Statistics use the unrounded observations; IQR uses inclusive quartiles.
+Min/max and IQR describe these observations, not confidence intervals. S's
+median was 2.8506% longer than U's. Its same-round changes were -0.1983%,
+-2.4659% and +2.8506%, so store sharding did not establish a consistent whole-run
+improvement. The median of each run's slowest store package JSON elapsed time
+fell from 452.270 s to 185.226 s. That compares U's single store package result
+with S's slowest shard result, not summed command wall time.
+
+M's median runner time was 5.4597% below U and 8.0799% below S. M finished
+sooner than S in all three rounds, by 11.6385%, 3.3116% and 8.0799%.
+Pipeline command median increased from S's 96.549 s to M's 153.177 s, while
+root short span increased from 511.392 s to 569.457 s. The overlapped runs had
+lower runner wall in this cohort; overlapping component times cannot be added.
+M includes store sharding, so this study does not isolate module overlap without
+store sharding or establish that sharding is necessary inside M.
+
+All root short and critical test inventories and outcomes matched. S adds
+three passing pipeline guards, and M adds two more. One unchanged pipeline
+capacity guard passes in U/S and skips in M because its test binary starts at
+width one. Source comparisons disclose these guards and candidate documentation
+changes. Every run joined all short commands before full critical tests, stayed
+within overlapping command width seven and completed with no owned survivors.
+
+These three interleaved shared-host observations do not establish causality,
+a flake rate or a general latency guarantee. Host load varied.
+These observations supersede the earlier provisional single-pair claim.
+Raw sources, plans, command/test JSON, resource traces, receipts and the final
+independent recount are retained under
+`~/evidence/sparkwing/land-test-speedups-2026-11-11/repeated-speed-study/`.
+
+Keep the 45-minute job execution ceiling. The slowest runner observation here
+was 684.559 s, leaving about 33m35s below that ceiling for runner work alone.
+This study does not time cold dependency installation, all wider selections or
+other host CPU counts; job preparation and shared-host contention can consume
+more time. The 25-minute Go timeout applies to each package test binary, not
+the whole command. Neither deadline nor the existing tier allocation changes.
+
+The affected runner installs missing locked SDK dependencies with
+`npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund` when
+acceptance or the native TypeScript host package is selected. It also prepares
+dashboard Node dependencies when acceptance needs them. `xwing app install`
+includes both dependency roots.
+
+Warm-build-cache observations on Go 1.26.10, with `GOMAXPROCS=2`, `-p 2`,
+`-short -count=1` and an explicit compile-only warm-up on 2026-11-10:
+
+| Change shape | Selected short packages | Selection wall time | Short command wall time | Result |
+| --- | ---: | ---: | ---: | --- |
+| Changelog only | 0 | 1.03 s | No command | Passed |
+| `internal/doccheck` | 1 root | 0.92 s | 7.37 s | Passed |
+| Broad 36-file change | 2 pipeline + 65 root | 0.98 s | 1432.94 s | Passed |
+
+The separate 37-critical-test invocation took 14.99 s and passed. These are
+individual observations on shared hardware, with SDK and dashboard dependencies
+installed. The broad short commands took 65.67 s in the pipeline module and
+1367.27 s in the root module. That observation originally justified the
+45-minute job ceiling. It is an execution ceiling, not a latency target or a
+guarantee for every change shape.
+
+A matching-width replay on 2026-11-11 pinned source `15834b6d4`, Go 1.26.10,
+the same 13-file selection, warm compilation and `-count=1`. It selected two
+pipeline packages, 66 root packages and 37 critical declarations in ten
+packages. Modules and short/critical commands ran sequentially:
+
+| Command allowance (`GOMAXPROCS` / `-p`) | Pipeline short | Root short | Critical | Replay wall | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 1 / 1 | 164.48 s | 1941.21 s | 24.33 s | 2130.45 s | Passed |
+| 7 / 7 | 91.90 s | 662.59 s | 8.98 s | 763.88 s | Passed |
+
+The seven-worker observation was 64.1% shorter and left 32m16s below the
+45-minute ceiling. Retain that ceiling for wider changes, cold dependency or
+build preparation, shared-host load and timeout diagnostics. Two completed
+local queued lands also recorded 664 s and 729 s at `-p 8`; those used different
+revisions and selections and are operational context, not the matched replay.
+The earlier inherited-limit land exceeded 45 minutes before completing its
+66 root packages and critical set.
+
+Both replay widths used empty process `GOFLAGS`, private homes and no saved
+Go environment file, isolating command width. They do not time the later
+explicit readonly-flag correction, which has separate unit and native
+execution proof. Both entered the same 8,592 top-level tests; root and critical
+outcomes matched. One pipeline capacity guard skipped at width one and passed
+at seven. All 30 Linux critical bodies passed; seven other selected declarations
+are Windows-only. Root test-package lifetimes peaked at one and seven concurrent
+packages. These are single shared-host observations: mean one-minute load,
+including the replay, was 12.47 and 22.47 respectively. Replay wall includes
+less than half a second of driver bookkeeping.
+
+An installed-candidate controller test-file change selected 2 pipeline and 36
+root packages plus the full critical set. With native `GOMAXPROCS=8`, `-p 8`,
+and `GOFLAGS=-trimpath`, PrePush passed in 757.03 s including preparation; the
+affected phase took 746.80 s. Uncached package durations included store 462.93 s,
+CLI 287.20 s, controller 277.58 s and acceptance 191.44 s; package durations
+overlap. Its changelog-only affected phase took 1.08 s and selected no tests.
+
+Race tests remain a separate local or hosted lane, available with
+`sparkwing run gate --sw-only race-touched`. The broad shape selects five
+packages for `-race -short`; store races remain at the release boundary.
+Their additional wall time was not measured here. The lane retains its
+70-minute execution ceiling and 52m30s package timeout.
 
 When moving from an external queue, let its active land finish, stop that
 worker, preserve any manual holds, and submit each remaining eligible worktree
@@ -157,9 +644,10 @@ resolving a review output blob. Its `verify` step requires the review record's t
 tree with result `pass` and HEAD unchanged since the preconditions. Its `push`
 step fetches `origin/main` and runs
 `git push --no-verify origin <HEAD>:refs/heads/main` without force when the
-pushed commit's tree is the tree the gate and review judged (the gate runs
-every check the pre-push hook makes, the qatrust vet included); a merged tree
-pushes through the hook. It carries the
+pushed commit's tree is the tree the gate judged or the merged tree whose
+delta passed its recheck. The gate and merge-delta recheck cover all fast
+push checks and affected tests, so Land's own push skips the hook without
+repeating those bodies. It carries the
 `destructive` and `prod` risks, as release's `push-tag` does. After a refused
 push, the step fetches main and checks its ancestry. It merges main only when
 main is not an ancestor of the pushed commit. Otherwise it preserves the
@@ -172,10 +660,12 @@ merges it into the branch in the checkout (`git merge --no-ff`, the default
 git identity and signing; never a rebase). Independent changelog and migration
 fragments merge as separate files. Orientation table additions use union merge;
 changes to the same rule need review. The push step
-then runs `go build` in every module
-and the affected-test selection over the files that differ between the gated
-tree and the merged tree, then pushes the merge. The review is not run again:
-it judged the branch's own diff, and the re-check covers what the merge
+then builds the affected package closure and repeats the changelog, OpenAPI,
+API-snapshot, default and qatrust vet, and fast lint checks on the merged tree.
+Vet and lint cover both the branch range and the merge delta, including new
+packages from main. It runs affected tests once over the files that differ
+between the gated tree and the merged tree, then pushes the merge. The review
+is not run again: it judged the branch's own diff, and the re-check covers what the merge
 brought in. It
 merges at most three times per land. A conflict aborts the merge, leaves the
 branch as the gate judged it and names `git merge origin/main` to run by hand.
@@ -369,9 +859,16 @@ not hosted latency.
 
 `@sparkwing/sdk` has its own version in `sdk/typescript/package.json`.
 An engine release verifies the signed version index, then compares its recorded
-TypeScript SDK source digest with the selected source. The digest covers tracked
-SDK files and native bridge workflow inputs, excluding generated output and
-package version metadata. An unchanged digest retains the existing SDK entry
+TypeScript SDK source digest with the selected source. The digest includes tracked
+SDK paths by default, including new inputs and npm's automatically packed files
+such as LICENSE. Package manifest version fields are omitted. The native/package
+workflow slice is also included, as is all of `test/nativehost/`: Windows publication executes
+that package and binds its whole fixture tree into verification receipts.
+Known unit tests and their helpers, examples, implementation notes, formatter
+config and generated output are explicitly excluded. Changing this
+input set changes existing source hashes, so adopting the rule needs a new SDK
+version once. Recoveries of pre-change SDK entries also refuse the new hash;
+the signed identities are not rewritten. An unchanged digest retains the existing SDK entry
 and skips native assembly and npm publication. Changed source requires a new
 SDK version. Bump both package manifests before cutting the engine release.
 The first independent SDK version is `0.72.0`.
@@ -627,6 +1124,13 @@ share the capacity-one `sparkwing-post-deploy-work` job group. A waiting example
 that group while its weather child or serialized probe runs, so other scan jobs cannot fill
 the desktop's other slot. Probe children use a separate capacity-one job group to avoid
 waiting on their parent's group. The small staging and production smokes retain Cloud placement.
+The example's simulated `deploy` job has a two-minute execution deadline, including
+startup, render, apply and rollout. It runs no `kubectl`: after printing its tour
+output, apply waits for the controller to acknowledge its annotation; rollout
+also waits for an annotation and summary acknowledgement. The budget allows
+these reporting requests and host scheduling delays rather than treating the
+printed output as completion. A missing acknowledgement or stalled job still
+fails within the deadline; the fixture adds no sleep or retry of its own.
 Promotion does not wait for the full scan. All `deploy-scan` runs share the capacity-one
 `sparkwing-post-deploy` run group. Queued scans whose source is no longer main's tip stop
 before building or running fixtures, so the newest waiting revision wins. The target team's
@@ -859,10 +1363,10 @@ as root, at the versions the deploy machines already use:
 sudo install -d -o root -g root -m 0755 /opt/sparkwing-deploy /opt/sparkwing-deploy/bin
 cd "$(mktemp -d)"
 # Go, matching go.mod's toolchain line
-curl -fsSLO https://go.dev/dl/go1.26.10.linux-amd64.tar.gz
-curl -fsSL "https://go.dev/dl/?mode=json&include=all" | grep -A3 '"go1.26.10.linux-amd64.tar.gz"' | grep sha256  # compare
-sha256sum go1.26.10.linux-amd64.tar.gz
-sudo tar -C /opt/sparkwing-deploy -xzf go1.26.10.linux-amd64.tar.gz
+curl -fsSLO https://go.dev/dl/go1.26.11.linux-amd64.tar.gz
+curl -fsSL "https://go.dev/dl/?mode=json&include=all" | grep -A3 '"go1.26.11.linux-amd64.tar.gz"' | grep sha256  # compare
+sha256sum go1.26.11.linux-amd64.tar.gz
+sudo tar -C /opt/sparkwing-deploy -xzf go1.26.11.linux-amd64.tar.gz
 sudo ln -sf /opt/sparkwing-deploy/go/bin/go /opt/sparkwing-deploy/bin/go
 # kubectl
 curl -fsSLO https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
@@ -947,14 +1451,18 @@ file. Other syntax and workflow checks remain active.
 
 - **The three tiers:** `pre-commit` judges the staged change against this
   repo's source policy and nothing else; the git pre-commit hook runs it.
-  `pre-push` is the fast tier the git pre-push hook runs, and it repeats
+  `pre-push` begins with the fast phase the git pre-push hook runs, and it repeats
   nothing the commit tier already ran: the changelog, OpenAPI and API-snapshot
   gates, and `go build`, `go vet` and the fast linter subset over the packages
   the push touches, with no package-count cutoff. The linter includes the
   depguard dependency rules. A
   runner reserves the combined CPU demand of those three concurrent compiler
   tasks, up to 9 cores. Smaller runners divide their available cores across
-  the tasks.
+  the tasks. After that phase passes, a separate `affected-tests` job runs
+  the shared affected short and critical Go tests for main updates (and explicit
+  manual runs). Branch pushes keep the fast checks alone. The
+  [local affected-test policy](#local-affected-go-tests) defines its scheduling
+  reservation, explicit command width and owned Go flags.
   The tiers shift left, so a
   push whose commits skipped the commit hook is judged by `gate` rather than a second
   time here. Rebase replay does not fire pre-commit, and automatic merges use
@@ -966,6 +1474,29 @@ file. Other syntax and workflow checks remain active.
   main runs `gate` and `race-touched` over the change since the push's previous
   commit (or the pull request base), and the full suite, `pre-release`, the
   store race lanes and Postgres conformance run nightly and on dispatch.
+  Native runner composition tests in
+  `internal/cluster/production_runtime_integration_test.go` are ordinary tests,
+  without the `rewrite_integration` build tag. Affected tests cover them when
+  cluster or its dependencies change; full, nightly and release suites always
+  include them, and touched-package race runs exercise them too. They use
+  private fixture homes, fake HTTP transports and a private in-process daemon,
+  not Docker containers or managed user services. Other packages' tagged
+  `rewrite_integration` suites remain outside this coverage claim.
+  The CLI’s `TestRunAnywhereRunnerHostsPlanEvaluationAndJobs` is also an
+  ordinary Unix test. Full Gate and nightly/dispatch full suites run its
+  personal-runner plan, evaluation, generated jobs and sealed-origin assertions
+  without a build tag. Short-mode affected and release tests visibly skip this
+  SDK-build case; it uses the unmanaged test backend and manager PATH guards,
+  so no native service-qualification window is needed. Its fixture selects a
+  private key file and a live controller clock for the real CLI’s signed origin
+  proof. Other CLI integration cases retain their existing tags.
+  On a shared Linux host its repaired test body took 37.05 seconds, including
+  SDK fixture preparation and actual CLI/runner subprocess execution. This is
+  an observed full-test cost, not a new deadline or an end-to-end gate budget.
+  On a shared Linux host, these cases took 4.81 seconds of an 11.56-second
+  cluster suite; a warm-cache command took 15.02 seconds wall time. Cold
+  compilation of the baseline cluster suite took 202.90 seconds including
+  10.34 seconds of test execution. These are observations, not new budgets.
   The full acceptance suite includes `TestFeatureE2E`, which exercises placement
   deadlines, failed-only retries with outputs and artifacts, and child-run
   cancellation against isolated local controller processes. Run just these with
@@ -984,16 +1515,24 @@ file. Other syntax and workflow checks remain active.
   A hook script names its pipeline, so a checkout whose hooks
   were installed when the pre-push hook ran `gate` keeps running `gate` until
   `sparkwing pipeline hooks install` rewrites them.
-- **The three check classes and their budgets:** `pre-commit` is the source
-  policy at 3 seconds, `pre-push` the fast tier with a one-minute budget,
+- **Budget warnings and execution deadlines:** `pre-commit` is the source
+  policy at 3 seconds, the fast phase of `pre-push` has a one-minute budget,
   and the release cut, the `release-cut-checks` job the `release` pipeline runs
   before it tags, 40 minutes including 30 minutes of lint-lock allowance
   and ten minutes for build, full lint, the short test suite,
   published-version, Go-directive and SDK-pin checks, and changelog-link and docs-sidebar checks.
+  The read-only `typescript-release` check verifies the published policy index's
+  signature and runs the hosted release's SDK decision against the selected source.
+  It rejects a changed SDK digest under an existing version before creating a tag,
+  including in dry runs and cuts that reuse exact-source CI.
   Build, lint, dependency preparation, the SDK suite and short tests run in sequence.
   The job allows one hour to finish those serial checks while retaining the
   40-minute budget warning.
-  Each of those jobs times its own steps and warns when its slowest step's
+  The broad short-test phase reuses the affected-test command owner and its
+  25-minute timeout for each package binary, including an unsharded store.
+  It does not fall back to Go's ten-minute default under load. Module ordering,
+  command width and the one-hour job deadline are unchanged.
+  Each of those budgeted phases times its own steps and warns when its slowest step's
   own run time overruns the class, naming the step and its cost, so a class
   cannot regrow unnoticed. A tier whose checks all passed still passes: when
   the budget failed green tiers, authors under machine load committed with
@@ -1007,7 +1546,9 @@ file. Other syntax and workflow checks remain active.
   time a step waits for a core or a step slot, or the 2.5 s the pipeline
   binary takes to recompile after a Go change. On a host at load 28, a
   pre-commit whose slowest check took 473 ms spanned 3.8 s and failed the
-  old span budget. The verdict line reports both numbers. The
+  old span budget. The verdict line reports both numbers. Pre-push's
+  affected Go tests have their own 45-minute job deadline and are outside
+  the fast phase's warning budget. The
   formatters are the per-file cost in the commit tier, and `goimports` inside
   `golangci-lint fmt` is all of it: over a hundred Go files `gofumpt` measured
   0.38 s, `goimports` 10.9 s and `gofmt` 0.09 s, so a Go file costs about
@@ -1036,6 +1577,34 @@ file. Other syntax and workflow checks remain active.
   still regenerates every reference page and rejects changed, missing or stale
   generated pages. `TestCommandReferenceMatchesRegistry` also compares the
   committed pages with the renderer compiled into the full CLI.
+  Both gate modes and pre-push run `build-published-sdk` after their workspace
+  build, using the same compiler allowance. Affected Gate, pre-push and merge
+  rechecks compile the host target plus linux/arm64, the deploy-image target.
+  With at least two compiler cores, those builds overlap and split the existing
+  allowance; otherwise they run sequentially. A linux/arm64 host builds once.
+  Full Gate, including the nightly full tier, compiles all six release targets:
+  Linux, macOS and Windows on amd64 and arm64. The remaining targets are caught
+  at the full tier and at release, not per land. The CLI and runner build on
+  every target; the controller builds on Linux and macOS.
+  Each target uses `CGO_ENABLED=0`, `GOWORK=off`, `GOENV=off`, empty `GOFLAGS`
+  and `-mod=readonly -trimpath`. The selected SDK must have a published version
+  and no replacement. This also bypasses vendor copies and alternate modfiles.
+  Go input changes, including SDK-only changes and package-owned files of any
+  extension, select the check. Package-owned Markdown is included conservatively
+  because it can be embedded, including deleted inputs. Unowned documentation
+  still skips the check; full gate always runs it. Merge rechecks retain it over the
+  combined branch and merge delta. Publish a standalone Go SDK API change first,
+  wait for its module version to resolve, then bump the root `go.mod` requirement
+  before the root uses that API. Workspace conformance remains a separate check.
+  The full-tier matrix measured 18m21s while filling missing cross-target caches
+  and 54-58 seconds with the same source and warm caches on one compiler core.
+  The host/deploy check, measured three times on the same `aee29e9e1` source,
+  took a median 17.37s wall and 17.28s CPU with one compiler core. Splitting
+  three cores across the two targets took 10.51s wall and 20.21s CPU at the
+  median. Shared load1 ranged from 4.0 to 5.3. These are warm-cache compiler
+  timings, excluding admission, not end-to-end land measurements. The fast
+  phase retains its one-minute warning. The build follows the workspace build
+  rather than increasing its compiler reservation.
   Without `--full`, vet and build cover the affected dependency closure. Its test step
   runs `go test -short` on changed packages
   and their reverse dependency closure, including production, internal-test
@@ -1274,8 +1843,161 @@ file. Other syntax and workflow checks remain active.
   test whose name or file names an authorization, fence, expiry, masking,
   tenant or secret boundary keeps running whole; the rest skip as slow. That
   brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
-- **What the two hooks cost:** measured on this 16-core Linux host. `pre-push`
-  retains a ten-second target when the compiler cache is warm. Run records
+- **TypeScript native fixture build, measured 2026-11-12:** the nativehost
+  test process compiles its unchanged SDK once, retaining the resolved Node
+  path, SDK directory and original build error. Protocol, Conformance and
+  JobIDVectors retain their cases and separate protocol processes. The Node
+  local-pack test keeps its independent production build. The native
+  `TestSDKFixtureBuildsOnce` guard counts actual compiler invocations on both
+  success and failure. Its counting executable uses a Unix shell; Windows
+  retains the real native tests.
+
+  Three interleaved A1B1A2B2A3B3 pairs used the same `0d7b18969` source,
+  with A disabling only the new cache through a Go overlay and B using it.
+  Both used identical Go JSON/tool tracing instrumentation. Go 1.26.11 ran
+  the whole `TestTypeScriptBoundary` with `GOMAXPROCS=3`, `-p 1` and `-short`.
+  Each sample copied the same compiled-only private seed containing both
+  helper variants and the outer/nested Go flag variants. Priming, copying,
+  hashing and slot wait are excluded. Acceptance test-binary CPU is wait4 user
+  plus system time, including descendants reaped by `acceptance.test`.
+  These binary measurements cover both the Node SDK cell and the nested
+  nativehost Go cell.
+
+  | Pair | Acceptance binary wall A / B, s | Acceptance binary CPU A / B, s | Whole Go wall change | Load1 median A / B |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 20.797 / 17.547 | 34.108 / 27.452 | -11.02% | 8.478 / 11.243 |
+  | 2 | 25.868 / 24.794 | 37.937 / 37.126 | +2.58% | 9.755 / 13.206 |
+  | 3 | 20.343 / 18.345 | 33.664 / 28.383 | -7.22% | 10.388 / 8.759 |
+
+  Acceptance test-binary wall medians, covering both cells, were 20.797/18.345 s
+  (-11.79%), with ranges
+  20.343-25.868/17.547-24.794 s. Acceptance test-binary CPU medians were
+  34.108/28.383 s (-16.78%), with ranges
+  33.664-37.937/27.452-37.126 s. Whole Go wall medians were
+  24.419/22.014 s, but pair 2 regressed 2.58%; a stable
+  whole-command wall saving is inconclusive. The unmodified Node cell was
+  slower in B in all three pairs, so its drift is not attributed to this cache.
+  The nested Go cell's separate CPU medians were 15.959/8.972 s, including
+  that Go command's build and link work.
+  Every sample retained 145 Node assertions, 15 native Go parent/leaf cases
+  and both acceptance cells with exact outcome parity. Native compiler
+  invocations fell from two to one. Load, owners, iowait and steal were recorded
+  at 1 Hz without filtering. This is one shared WSL host and one window,
+  with no whole-Land saving claim or change to selection, lanes or deadlines.
+  The earlier cold private-cache probe included an 80.296 s nested-Go prefix
+  before its first compiler and is kept separate from these warm pairs.
+  Evidence: `~/evidence/sparkwing/typescript-boundary-cost-2026-11-12/` and
+  the native SDK fixture packet beside it.
+
+- **Storage acceptance fixture creation, measured 2026-11-12:** the depcache
+  properties create their isolated current-schema SQLite databases through
+  `teststore.Open` and reopen persisted data through `OpenExisting`. The common
+  controller fixture takes that opener explicitly. Other callers retain their
+  previous opener. All archive, output, scope-forgery, corruption and revocation
+  checks remain, with 128 fixed-seed cases per backend (the existing 16-case
+  prefix under race). Cells and cases keep their serial order.
+
+  A fresh private-cache probe on `afd8a186f` took 198.48 s in `TestStorage`:
+  filesystem/S3 depcache took 84.96/89.61 s. The Go post-`ok` interval was
+  2.123 s. CPU/block profiles of those two leaves used in-process HTTP recorders
+  and map-backed S3, not an external service. Repeated schema setup accounted
+  for 13.26 s of 81.28 sampled CPU seconds. With candidate `0d8b8f961`, it fell
+  to 2.08 s of 58.33 sampled CPU seconds; nested DDL execution fell from
+  11.12 to 0.04 s. Authority-chain work remained substantial at 28.37/24.50 s.
+  Profiled runs are diagnostic observations, not performance pairs; summed idle
+  SQL-pool blocking time is not elapsed test time.
+
+  Three interleaved A/B pairs used source-bound, precompiled test binaries,
+  fresh per-sample homes/state and GOCACHE directories, runtime width seven,
+  the full `TestStorage` cohort and no profiler flags. Build/link and Go result
+  caching are outside these samples. The parent test's reported duration
+  includes its bodies and cleanup:
+
+  | Pair | Before / after body, s | Body change | Load1 median before / after |
+  | --- | ---: | ---: | ---: |
+  | 1 | 57.87 / 89.99 | +55.50% | 3.901 / 16.952 |
+  | 2 | 69.62 / 55.10 | -20.86% | 13.653 / 8.500 |
+  | 3 | 65.89 / 48.06 | -27.06% | 7.182 / 5.461 |
+
+  Body medians were 65.89/55.10 s, a -16.38% ratio of medians. Ranges were
+  57.87-69.62/48.06-89.99 s; inclusive IQRs were 5.875/20.965 s. Separate
+  admitted command walls, including tool startup and excluding slot wait,
+  were A [61.562, 74.187, 69.745] and B [93.592, 59.403, 52.088] s.
+  Their medians were 69.745/59.403 s, a -14.83% ratio of medians.
+
+  All six had exact test outcome and cell/leaf-result parity: 16 test runs
+  and passes, 15 cells and 15 assertion leaves each. Property seeds/counts
+  and cell declarations have identical source. Load, other slot owners,
+  iowait and steal were captured at 1 Hz without excluding samples.
+  The paired signs differ and load shifted sharply. Wall-time improvement
+  is inconclusive; these numbers establish no stable Land saving and change
+  no gate tier, deadline or test budget.
+
+- **Reporting fixture setup, measured 2026-11-11:** typed `teststore.SeedRun`
+  inserts its known routing identity and sealed provenance with the new row.
+  Provenance projections come from decoding that new row’s JSON once, so
+  JSON normalization stays consistent without changing the caller’s arguments.
+  It does not rewrite earlier reporting rows. Generic fixture `Exec` retains
+  its projection behavior for arbitrary SQL changes. A real SQLite update
+  trigger guards the write boundary, and a separate test guards generic SQL
+  projection.
+
+  The two web history regressions retain all 202 and 250 seeded runs, the
+  older-than-200 match, exclusion before the limit, 125 unique results over
+  four cursor pages, and every existing assertion. In a separate baseline
+  profile, seeding consumed 99.68–99.72% of their body wall time; the repeated
+  identity projector appeared on 93.01% of sampled CPU stacks. CPU share is
+  not wall-time share.
+
+  Three interleaved A/B pairs used the same clean `f23203f69` source on this
+  shared 16-logical-CPU host. A restored only the two original helper files
+  from `0c7738eda`; B used typed seeding. Both ran the same instrumented test
+  bodies with Go 1.26.11, `GOMAXPROCS=3`, `-p 1 -count=1 -short`, readonly
+  modules and `GOWORK=off` with the local SDK replacement. No CPU profiling,
+  noise exclusions, replacements or extra warmups entered these six samples.
+
+  | Pair | Combined body wall A / B, s | B minus A / A | Load1 median A / B | Load1 maximum A / B |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 369.970 / 4.222 | -98.859% | 16.99 / 14.43 | 24.57 / 14.91 |
+  | 2 | 417.706 / 3.952 | -99.054% | 16.23 / 13.21 | 31.47 / 13.40 |
+  | 3 | 407.950 / 4.687 | -98.851% | 13.35 / 16.82 | 15.85 / 16.82 |
+
+  | Body | A median, s (min–max) | B median, s (min–max) |
+  | --- | ---: | ---: |
+  | Older filtered match | 159.861 (154.094–170.716) | 1.878 (1.806–1.989) |
+  | Cursor pages | 246.989 (210.110–253.856) | 2.416 (2.075–2.698) |
+  | Combined | 407.950 (369.970–417.706) | 4.222 (3.952–4.687) |
+
+  The combined linear empirical IQR was 23.868 s for A and 0.367 s for B.
+  The ratio of combined medians fell 98.965%; median paired percentage change
+  was -98.859%. These are targeted passing-body measurements on one shared
+  host in one fixed A-before-B window. They exclude cleanup, compilation and
+  slot waiting; those intervals and the per-sample owner/iowait/steal traces
+  are retained separately. Prior validation warmed the two variants in
+  different contexts, so compile/link cache parity is unproven. This does
+  not measure whole-Gate or Land latency, or a future flake rate. Raw profiles,
+  scripts, six samples and complete source archives are retained with the
+  `web-paging-test-cost-2026-11-11` measurement.
+
+  A later correctness follow-up (`6427439d9`) restored persisted-JSON
+  normalization and guarded caller argument ownership. Three separate,
+  unpaired confirmations of the same two instrumented bodies took 6.684,
+  5.754 and 5.666 s combined (median 5.754 s; range 5.666–6.684 s; linear IQR
+  0.509 s). They retain the same Go settings and full datasets. These are
+  confirmations on the corrected code, not replacements for the six paired
+  samples or a measurement of the follow-up’s incremental cost.
+- **Native recovery simulation:** `TestStartGateSeededRecovery` runs seed 1
+  with and without compute under `-short`; the full class runs all eight seeds
+  in both modes. Each case still covers lost plan capacity, an already released
+  job, fresh work, approval, expansion and cleanup. The fixture advances external
+  events from scheduling snapshots, forces admission retry completions to cancel
+  waits while the competitor holds capacity, and fails after 64 scheduling passes.
+  A wait callback cannot drive external events because retry completions may keep
+  the owner from entering it. The full 16-case family measured 10.0 seconds without
+  race on this loaded 16-core host (load 22); keep its permutation coverage in the
+  full class while retaining both compute paths in affected landing gates.
+- **What the fast hook phases cost:** measured on this 16-core Linux host. The fast
+  phase of `pre-push` retains a ten-second target when the compiler cache is warm. Run records
   expose total and per-step durations, but they carry no compiler-cache
   temperature signal, so the target is measured rather than enforced. A warm
   integrated run over 13 changed Go files took 10.678 s and missed the target;
@@ -1514,6 +2236,43 @@ file. Other syntax and workflow checks remain active.
   removes the shared-runner capacity shortfall. A complete hosted batch under
   the split is still unmeasured.
 
+- **Fixture SQL synchronization, measured 2026-11-12:** the separate SQLite
+  connections used by `teststore.SQL` and `Exec` set `synchronous(NORMAL)`,
+  matching the production store. SQLite applies this pragma per connection;
+  the fixture previously defaulted to FULL. The native
+  `TestSQLiteFixtureConnectionUsesNormalSynchronization` guard reads the
+  connection's actual mode (2 before, 1 after). Each trust case retains its
+  own store, signing key and claims.
+
+  Three interleaved A/B pairs ran every one of the 19
+  `TestAppParentChildrenPreserveOnlyExactRevisionTrust` leaves on source
+  `76afada1a`. B applied only the fixture DSN line through a Go overlay.
+  Relevant fixture/controller sources are unchanged on implementation base
+  `18ee4831b`. Go 1.26.11 used `GOMAXPROCS=3`, `-p 1` and `-short` on the
+  shared 16-CPU WSL host. Every sample copied the same private, compiled-only
+  cache seed; result caching remained enabled. Cache copying, hashing and
+  slot wait are outside the observations. Native CPU is wait4 user plus
+  system time, including descendants reaped by the test binary.
+
+  | Pair | Native wall before / after, s | Native CPU before / after, s | Load1 median before / after |
+  | --- | ---: | ---: | ---: |
+  | 1 | 18.477 / 13.355 | 13.046 / 12.274 | 6.192 / 8.295 |
+  | 2 | 20.499 / 12.838 | 13.178 / 11.855 | 8.717 / 8.579 |
+  | 3 | 19.609 / 12.421 | 14.303 / 11.901 | 8.224 / 9.252 |
+
+  Native wall medians were 19.609/12.838 s (-34.53%), with ranges
+  18.477-20.499/12.421-13.355 s. CPU medians were 13.178/11.901 s (-9.69%),
+  with ranges 13.046-14.303/11.855-12.274 s. Whole Go command wall medians
+  were 24.413/17.853 s (-26.87%), including warm driver/build work and cache
+  bookkeeping. All six samples had identical 20 run/pass results, including
+  the parent, without skips or failures. Load, other Go-slot owners, iowait
+  and steal were recorded at 1 Hz; no samples were discarded. The earlier
+  n=1 diagnostic had no wall-time win (16.294/16.461 s) and remains in the
+  evidence. One host, one window and one test cohort establish no whole-Land
+  saving and change no gate tier, lane width, deadline or test budget.
+  Evidence: `~/evidence/sparkwing/controller-app-parent-cost-2026-11-12/`
+  and the fixture SQLite synchronization packet beside it.
+
 - **Fixture SQL connection reuse, 2026-11-01:** `teststore.Exec` retains one
   connection per registered store, closed by the opening test's cleanup. Its
   SQLite DSN keeps foreign keys, the busy timeout and immediate transactions.
@@ -1594,6 +2353,43 @@ file. Other syntax and workflow checks remain active.
   missing or failed names. Wall time fell about 17% and CPU about 16% in
   these shared-host samples.
 
+- **RSA fixture leases, measured 2026-11-12:** GitHub App and JWKS fixtures,
+  including Google and GitHub OIDC, share `internal/rsatest.New`. The process
+  generates a 2048-bit key only when no free material exists. Each live fixture
+  has an exclusive lease and its own parsed key object. Its own `t.Cleanup`
+  returns the material after issuer cleanup; parent-owned fixtures retain their
+  keys until parent cleanup. The pool retains the live-lease high-water mark,
+  rather than generating for every construction. No key material is checked in,
+  and scanner and snapshot policy are unchanged.
+
+  Three interleaved A/B pairs ran the whole `internal/controller` short class
+  on the same `f75692d80` source tree. A restored only the original two
+  generating helper files through a Go overlay; B used the pooled helpers.
+  Go 1.26.11, `GOWORK=auto`, `GOFLAGS=-mod=readonly`, `GOMAXPROCS=3` and
+  `go test -json -p 1 -short -timeout 25m` were fixed. Every sample used private
+  homes and a private clone of the same compile-only cache seed, warmed for
+  both variants. A native process wrapper recorded user plus system CPU,
+  including waited children, and restored Go's test input log. Compilation and
+  cache cloning are outside these native timings.
+
+  | Pair | CPU before / after | CPU delta | Wall before / after | Wall delta |
+  | --- | ---: | ---: | ---: | ---: |
+  | 1 | 221.540 / 164.652 s | -25.68% | 249.622 / 166.779 s | -33.19% |
+  | 2 | 198.739 / 184.972 s | -6.93% | 184.614 / 175.476 s | -4.95% |
+  | 3 | 225.507 / 164.958 s | -26.85% | 230.723 / 180.211 s | -21.89% |
+
+  Native medians were 221.540 to 164.958 CPU seconds (-25.54%) and
+  230.723 to 175.476 wall seconds (-23.94%), comparing the medians.
+  CPU ranges were 198.739-225.507 before and 164.652-184.972 after;
+  wall ranges were 184.614-249.622 and 166.779-180.211 seconds.
+  All six inventories match exactly: 2,266 passes and 69 conditional skips.
+  This was one shared host and one time window, with no quiet reservation or
+  sample exclusions. Median load1 before/after was 9.68/4.09, 4.46/7.46 and
+  9.93/5.07 by pair. Raw load and Go-slot owners were recorded at 1 Hz, along
+  with CPU iowait and steal. These are package observations, not a forecast
+  for an entire queued land. Evidence, overlays, cache manifests and native
+  rusage are in the runtime RSA lease pool packet under `~/evidence/sparkwing/`.
+
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
   give the command a timeout the package actually fits in. Measured on a
   16-core Linux box, `GOWORK=off go test -count=1 <pkg>`. The CLI sample
@@ -1620,6 +2416,51 @@ file. Other syntax and workflow checks remain active.
   retain real compiler coverage. Independent subprocess tests run in parallel.
   Contention can still extend these samples; the suggested timeouts leave
   room above the measurements.
+
+- **Offline uploaded fixture builds, measured 2026-11-12:** the nested
+  `go test` in `TestKubernetesE2EUploadedFixtureBuildsWithoutCallerCheckout`
+  uses `-trimpath -count=1`. Trimmed source paths let fresh uploaded checkouts
+  reuse build objects; `-count=1` keeps the run-ID/log proof executing. The
+  self-contained bundle/clone, readonly modules, `GOWORK=off`, `GOPROXY=off`
+  and `GOSUMDB=off` checks remain. The native cache guard checks equal test
+  executable bytes at two source paths and four actual proof-body executions.
+
+  Three alternating before/after pairs compared main `136fdd93c` with code
+  `7e0da3f79`, Go1.26.11, `GOMAXPROCS=7`, one shared 16-CPU Linux host and one
+  time window. This is the standalone module allowance; a broad queued Land
+  can give the pipeline module one worker. Each sample copied the same private
+  cache snapshot, already primed for both modes. Test binaries were compiled
+  once per arm. Their compilation, cache copies, priming and queue wait are
+  outside native timings. Nested fixture compilation is included.
+
+  | Pair | Before / after wall, s | Wall delta | Before / after CPU, s | CPU delta | Median load1, before / after |
+  | --- | --- | --- | --- | --- | --- |
+  | 1 | 10.308 / 3.656 | -64.53% | 40.391 / 5.015 | -87.58% | 6.178 / 6.352 |
+  | 2 | 10.335 / 3.764 | -63.58% | 38.410 / 5.181 | -86.51% | 7.568 / 7.187 |
+  | 3 | 10.394 / 3.742 | -64.00% | 39.105 / 5.115 | -86.92% | 6.592 / 6.178 |
+
+  Median native wall was 10.335 -> 3.742 s (-63.80%); median user+system CPU
+  was 39.105 -> 5.115 s (-86.92%). Wall ranges were 10.308-10.394 and
+  3.656-3.764 s; CPU ranges were 38.410-40.391 and 5.015-5.181 s.
+  Linux `wait4` CPU includes the test process and children it waited for;
+  direct-process and waited-child ticks are also retained separately.
+  Every sample passed the complete guard, with no selected skip or failure.
+  Load1 ranged 6.083-7.759; another job held a second Go slot throughout. All samples are included. This narrow warm cache result
+  does not measure the whole affected-tests job or a whole Land.
+
+  The initial seed made the first trimmed build more expensive. A probe at `6bc12d4f1`, starting
+  each variant from the same private cache with warm platform dependencies,
+  took 35.853 CPU s / 7.903 wall s for the normal command versus 141.231 CPU s /
+  22.106 wall s for its first trimmed command. A second fresh checkout used
+  34.972 CPU s / 7.392 wall s normally, versus 1.442 CPU s / 0.834 wall s
+  trimmed: 80 local compiler actions versus none, with the proof body run in
+  both variants. The common-cache refresh for `136fdd93c` cost another
+  24.303 CPU s / 6.082 wall s outside the paired samples. Retained cache
+  contents govern that startup cost; an empty-cache bootstrap was not measured.
+  No test selection, lane width, deadline or production engine verification
+  policy changed. Raw commands, source/bundle/cache snapshots, profiles,
+  CPU-scope self-check, outcomes and 1 Hz load/owner data are in
+  `/home/bombuntu/evidence/sparkwing/cli-fixture-staging-cost-2026-11-12/`.
 
 - **Normal broad check:** `sparkwing run gate` covers every committed Go
   module, the dashboard TypeScript unit, full ESLint, production build,
@@ -1657,11 +2498,14 @@ file. Other syntax and workflow checks remain active.
   every other run on the OS. It is not a way around a full queue. It does not
   move the user config directory, which answers to `XDG_CONFIG_HOME` and the
   per-file overrides, because what lives there is machine-wide and outlives any
-  one home. Every config write from a command running under a home of its own
-  is refused rather than sent to the machine's config, naming both paths and
-  the value that keeps the write inside the home: `SPARKWING_CONFIG` for
-  `config.yaml`, `SPARKWING_SECRETS_KEY_FILE` for the local secrets key. The
-  local secrets themselves live in the home's own `state.db`, and the home
+  one home. Config writes outside a redirected home are refused unless a
+  per-file override selects their destination. The refusal names both paths
+  and the override, such as `SPARKWING_CONFIG` for `config.yaml`. Local keys
+  follow the state home and are created there on first need. Without an
+  explicit selector, the default home keeps its existing config-directory key
+  even if a home-local key also exists. `SPARKWING_SECRETS_KEY_FILE` selects a
+  different key file. The local secrets themselves live in the home's own
+  `state.db`, and the home
   does not import the machine's `secrets.env` or `config.env`. No variable
   moves `version-hold`.
 - **Lint rules:** golangci-lint judges only code new since origin/main. Uploaded
@@ -1702,7 +2546,7 @@ file. Other syntax and workflow checks remain active.
 - **Go directive policy:** the release cut and `pre-release`, beside its version
   checks, reject patch-level requirements in the published root module and
   template registry modules: `go 1.26` and `go 1.26.0` pass; `go 1.26.3` fails.
-  Our modules select the patched Go 1.26.10 toolchain separately.
+  Our modules select the patched Go 1.26.11 toolchain separately.
   Pipeline and fixture modules are excluded from this release check. Init and
   pipeline scaffolding share a generator that takes only the running Go
   version's major and minor; this step runs a focused scaffold test against a
@@ -1790,7 +2634,7 @@ file. Other syntax and workflow checks remain active.
 - **Store dialect matrix:** `sparkwing run store-postgres` runs the
   `internal/store` tests that exercise PostgreSQL with
   `SPARKWING_TEST_STORE=postgres`, so every store test that opens through
-  `internal/store/storetest` exercises the Postgres dialect instead of a SQLite
+  `internal/store/internal/storetest` exercises the Postgres dialect instead of a SQLite
   file. It compiles one `internal/store` test binary, lists its top-level
   Test, Example and Fuzz names, and runs every one except two kinds. The
   internal tests in the files named by
@@ -1808,15 +2652,24 @@ file. Other syntax and workflow checks remain active.
   `TestStorePostgresSelectionCoversTheStoreInventory` in `.sparkwing/jobs`,
   when a named file is missing, declares no internal test, or reaches
   `SPARKWING_TEST_PG_URL` or the `pgx` driver directly or through a helper or
-  constant in the internal test files; remove such a file from the list. The
-  sorted selection is assigned round-robin, each
+  constant in the internal test files; remove such a file from the list.
+  Ready-store fixtures (`storetest.Open` and `OpenPostgres`) reuse one initialized
+  PostgreSQL template per test process/server and clone a database for each
+  fixture. Their TestMain closes the cache and drops its templates after every
+  fixture has closed. Servers without CREATE DATABASE permission use the
+  existing fresh-schema path. `New` and `NewPostgres` still reserve empty
+  schemas for migration, reopening and cases with multiple schemas in one database;
+  the named fresh-open and schema-lock tests use those constructors explicitly.
+  A killed process on a configured server can leave `sw_fixture_clone_*` and
+  `sw_fixture_template_*` databases; remove them only after their owner is gone.
+  The embedded server's disposable cluster is removed at run teardown.
+  The sorted selection is assigned round-robin, each
   name exactly once, to one `GOMAXPROCS=1` shard process per core a Go step
   may hold: four on the hosted four-core runner, the Go step bound
   (`(cpus-1)/2` shared, `cpus/2` under `CI`) elsewhere. Each shard gets a
   database of its own, created on the server before the shards start and
-  dropped `WITH (FORCE)` afterwards, because the store's migration advisory
-  lock is per database: shards sharing one database queue every fixture's
-  schema apply behind each other. The shard URL drops `dbname` and `database`
+  dropped `WITH (FORCE)` afterwards, because raw-target schema initialization uses a
+  database-scoped migration advisory lock. The shard URL drops `dbname` and `database`
   query options, which pgx reads over the URL path, and a `service` reference
   is refused. A run killed outright can leave `sparkwing_store_shard_*`
   databases on a configured server, and so can a `CREATE DATABASE` whose
@@ -1888,6 +2741,46 @@ file. Other syntax and workflow checks remain active.
   command against a fresh local controller in a private home. It fails when
   the host refuses unix sockets; a sandbox that is known to refuse them sets
   `SPARKWING_TEST_NO_LOCAL_SOCKETS=1` to skip it instead.
+
+- **Native user-manager qualification:** ordinary Go tests deny unexpected
+  `systemd-run`, `systemctl`, and `launchctl` calls. Workflow fixtures use the
+  existing unmanaged runner backend through a compile-time overlay; release
+  binaries never receive that overlay. `TestLocalControllerSmoke` and local-run
+  workflows remain in the full suite, and
+  `TestReleaseBuildExcludesUserManagerFixtureInjection` checks the release boundary.
+  Managed installation, cgroup and restart tests skip visibly unless
+  `SPARKWING_TEST_USER_MANAGER=1` is set. This dedicated manual tier must run in a
+  quiet window for changes to managed runner startup, upgrades, cgroups or service
+  lifecycle. Use one test at a time, with no concurrent lands, deploys or service
+  trials; private homes do not isolate the user manager. Never enable the gate
+  globally in shared full-suite or race jobs. Schedule the tier on a dedicated
+  service host for nightly qualification. Its initial budget is 20 minutes,
+  excluding cold compilation; record measured runtime before changing that budget.
+
+  On Linux, run the named cases sequentially with the gate set, private
+  `HOME`/`SPARKWING_HOME`, and disposable Go temporary state. The binary input
+  must be the absolute CLI artifact, not its state-binding candidate launcher:
+
+  ```sh
+  export SPARKWING_TEST_USER_MANAGER=1
+  export SPARKWING_LOCAL_E2E_BINARY=/absolute/built/sparkwing
+  go test -count=1 -p 1 ./internal/wingd -run '^TestManagedUnitsPrivateConfigWithSystemd$'
+  go test -count=1 -p 1 ./internal/wingd/client -run '^TestServiceDaemonLeavesCallerCgroup$'
+  go test -count=1 -p 1 ./cmd/sparkwing -run '^TestDetachedLocalRunnerSurvivesControllerRestartAndRollsBuild$'
+  go test -count=1 -p 1 ./cmd/sparkwing -run '^TestDrainingLocalOwnerAwaitsChildWhileSuccessorRunsDependencies$'
+  go test -count=1 -p 1 ./cmd/sparkwing -run '^TestManagedControllerPreservesKeyAcrossRestart$'
+  go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterSystemdLifetimeAndControllerKeys$'
+  go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterRealIntakeRaceAndRollback$'
+  go test -count=1 -p 1 ./bin -run '^TestDesktopUpdaterProvidedBinaryControllerInspection$'
+  go test -tags=rewrite_integration -count=1 -p 1 ./cmd/sparkwing -run '^TestReviewProductionExecutionBindings$'
+  ```
+
+  The provided-binary local-controller feature scenarios also need this gate;
+  follow `tests/acceptance/LOCAL_FEATURES.md`. On macOS, use the same gate for
+  native launchd coverage in the platform qualification window. List user units
+  before and after each case and verify every test-owned unit is gone. The
+  package-level guard remains enabled for all ordinary runs, even if a test
+  handles and ignores the manager's error.
 
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is

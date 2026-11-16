@@ -53,6 +53,15 @@ type LoopConfig struct {
 	Kubernetes bool
 }
 
+// safety: warn without withdrawing claims that held hosts may need for dependencies.
+const claimDegradedAfter = 10 * time.Minute
+
+// safety: controller availability needs rechecking sooner than the shared client advice ceiling.
+const maxClaimRetryAfter = 5 * time.Minute
+
+// safety: permanent claim failures must remain visible without flooding a long valid drain.
+const claimDrainWarningInterval = 5 * time.Minute
+
 // Loop claims triggers and jobs until stopped and joins held work before returning.
 type Loop struct {
 	Config       LoopConfig
@@ -61,11 +70,51 @@ type Loop struct {
 	CheckVersion func(context.Context, string) error
 	OnError      func(error)
 	// OnClaimsStopped runs once before joining hosts when the claim loop exits.
-	OnClaimsStopped func()
-	mu              sync.Mutex
-	drain           chan struct{}
-	running         bool
-	draining        bool
+	OnClaimsStopped  func()
+	mu               sync.Mutex
+	drain            chan struct{}
+	running          bool
+	draining         bool
+	unreachableSince time.Time
+	claimFailure     error
+	drainingUnits    int
+}
+
+// HealthError reports unavailable claims while preserving held work and transport recovery.
+func (l *Loop) HealthError() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.claimFailure != nil {
+		units := "units"
+		if l.drainingUnits == 1 {
+			units = "unit"
+		}
+		return fmt.Errorf("claiming stopped: %w; draining %d held %s", l.claimFailure, l.drainingUnits, units)
+	}
+	if !l.unreachableSince.IsZero() && time.Since(l.unreachableSince) >= claimDegradedAfter {
+		return fmt.Errorf("degraded: controller unreachable since %s", l.unreachableSince.UTC().Format(time.RFC3339))
+	}
+	return nil
+}
+
+func (l *Loop) setUnreachableSince(since time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.unreachableSince = since
+}
+
+func (l *Loop) setClaimFailure(err error, held int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.claimFailure, l.drainingUnits = err, held
+}
+
+func (l *Loop) updateDrainingUnits(held int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.claimFailure != nil {
+		l.drainingUnits = held
+	}
 }
 
 // Drain stops new claims and makes Run join held hosts without cancelling their
@@ -155,17 +204,23 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 	defer timer.Stop()
 	results := make(chan unitResult, l.Config.MaxConcurrent)
 	workSlots := make(chan struct{}, l.Config.MaxConcurrent)
+	admissionWaiters := make(chan struct{}, l.Config.MaxConcurrent)
 	ownerSlots := make(chan struct{}, l.Config.MaxConcurrent)
 	active := make(map[capability.LeaseRef]struct{})
 	awaitChanged := make(chan struct{}, 1)
 	idleSince, pollAt, backoffUntil := time.Now(), time.Time{}, time.Time{}
 	var transportSince time.Time
+	var nextTransportWarning time.Time
+	transportAttempt := 0
 	claimed := 0
 	var failed failedWork
-	var hostErr error
+	var firstCancellation, firstFailure error
+	var hostFailures uint64
+	var fatalClaim error
 	finish := func(result unitResult) {
 		pollAt = time.Time{}
 		delete(active, result.key)
+		l.updateDrainingUnits(len(active))
 		if len(active) == 0 {
 			idleSince = time.Now()
 		}
@@ -173,8 +228,15 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			if l.OnError != nil {
 				l.OnError(result.err)
 			}
-			if hostErr == nil {
-				hostErr = result.err
+			if OnlyCancellation(result.err, context.Cause(ctx)) {
+				if firstCancellation == nil {
+					firstCancellation = result.err
+				}
+			} else {
+				hostFailures++
+				if firstFailure == nil {
+					firstFailure = result.err
+				}
 			}
 		}
 	}
@@ -188,8 +250,30 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 		}
 	}
-	accept := func(outcome claimOutcome) error {
+	noteFatalClaim := func(err error) {
+		if err == nil || fatalClaim != nil || controllerclient.RetryableClaimError(err) {
+			return
+		}
+		if _, advised := hosterr.RetryDelay(err); advised || claims.Err() != nil && OnlyCancellation(err, context.Cause(claims)) {
+			return
+		}
+		fatalClaim = err
+		l.setClaimFailure(err, len(active))
+		slog.Error("runner claiming stopped; draining held work", "err", err, "held_units", len(active))
+	}
+	accept := func(outcome claimOutcome) (acceptErr error) {
 		defer func() {
+			if acceptErr != nil {
+				noteFatalClaim(acceptErr)
+			}
+			if outcome.err == nil && acceptErr == nil {
+				// safety: claim availability alone resets degradation; heartbeats do not.
+				transportSince = time.Time{}
+				l.setUnreachableSince(transportSince)
+				nextTransportWarning = time.Time{}
+				transportAttempt = 0
+			}
+
 			if outcome.workSlot != nil {
 				outcome.workSlot()
 			}
@@ -255,6 +339,19 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 					changed()
 				}
 			})
+			hostCtx = nodehost.WithAdmissionWait(hostCtx, func() (func(context.Context), func()) {
+				select {
+				case admissionWaiters <- struct{}{}:
+				default:
+					return nil, func() {}
+				}
+				resume := nodehost.AwaitSlot(hostCtx)()
+				var once sync.Once
+				stop := func() {
+					once.Do(func() { <-admissionWaiters; changed() })
+				}
+				return func(ctx context.Context) { resume(ctx); stop() }, stop
+			})
 			err := l.Host.Host(hostCtx, unit)
 			slotMu.Lock()
 			if release != nil {
@@ -263,6 +360,17 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			slotMu.Unlock()
 			results <- unitResult{key: key, err: err}
 		}()
+		return nil
+	}
+	stoppedClaimError := func(err error) error {
+		// safety: a local drain cancels only claims; mixed error trees must still fail.
+		if ctx.Err() == nil && policyInterrupted(claims, err) {
+			return nil
+		}
+		if err != nil {
+			noteFatalClaim(err)
+			return fmt.Errorf("claim runner work: %w", err)
+		}
 		return nil
 	}
 	var pending <-chan claimOutcome
@@ -297,10 +405,22 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			l.OnClaimsStopped()
 		}
 		if pending != nil {
-			runErr = errors.Join(runErr, accept(<-pending))
+			outcome := <-pending
+			runErr = errors.Join(runErr, accept(outcome), stoppedClaimError(outcome.err))
+		}
+		var warnings <-chan time.Time
+		if fatalClaim != nil && len(active) > 0 {
+			ticker := time.NewTicker(claimDrainWarningInterval)
+			defer ticker.Stop()
+			warnings = ticker.C
 		}
 		for len(active) > 0 {
-			finish(<-results)
+			select {
+			case result := <-results:
+				finish(result)
+			case <-warnings:
+				slog.Warn("runner claiming remains stopped; draining held work", "err", fatalClaim, "held_units", len(active))
+			}
 		}
 		if !updateStarted.IsZero() {
 			reason := "held work finished"
@@ -309,7 +429,10 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 			slog.Info("runner update drain exited", "reason", reason, "current_version", l.Config.Version, "target_version", updateTarget, "held_units", len(active), "elapsed", time.Since(updateStarted))
 		}
-		runErr = errors.Join(runErr, hostErr, context.Cause(ctx))
+		if hostFailures > 1 {
+			firstFailure = fmt.Errorf("%d hosted units failed; first failure: %w", hostFailures, firstFailure)
+		}
+		runErr = errors.Join(runErr, firstCancellation, firstFailure, context.Cause(ctx))
 		if l.Config.FailOnFailedWork {
 			runErr = errors.Join(runErr, failed.err())
 		}
@@ -326,6 +449,10 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		}
 		if claims.Err() != nil || (l.Config.MaxClaims > 0 && claimed >= l.Config.MaxClaims) || l.lifecycleWait(limits.VersionIndexRefresh, idleSince, len(active) == 0) == 0 {
 			return nil, nil
+		}
+		if !nextTransportWarning.IsZero() && !time.Now().Before(nextTransportWarning) {
+			slog.Warn("runner degraded: controller unreachable", "since", transportSince, "elapsed", time.Since(transportSince), "held_units", len(active))
+			nextTransportWarning = time.Now().Add(5 * time.Minute)
 		}
 		nextClaim := pollAt
 		if backoffUntil.After(nextClaim) {
@@ -391,38 +518,45 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 		if pending == nil && nextClaim.After(time.Now()) {
 			wait = min(wait, time.Until(nextClaim))
 		}
+		if !nextTransportWarning.IsZero() {
+			wait = min(wait, max(time.Until(nextTransportWarning), 0))
+		}
 		timer.Reset(l.lifecycleWait(wait, idleSince, len(active) == 0))
 		select {
 		case outcome := <-pending:
 			pending = nil
 			if err := accept(outcome); err != nil {
-				return nil, err
+				return nil, errors.Join(err, outcome.err)
 			}
 			if claims.Err() != nil {
-				return nil, nil
+				return nil, stoppedClaimError(outcome.err)
 			}
 			select {
 			case <-drain:
-				return nil, nil
+				return nil, stoppedClaimError(outcome.err)
 			default:
 			}
-			if controllerclient.RetryableTransportError(outcome.err) {
+			if controllerclient.RetryableClaimError(outcome.err) {
 				if transportSince.IsZero() {
 					transportSince = time.Now()
+					l.setUnreachableSince(transportSince)
+					nextTransportWarning = transportSince.Add(claimDegradedAfter)
 				}
-				if time.Since(transportSince) < 5*time.Second {
-					// safety: a fresh poll never replays a claim whose award reply was lost.
-					backoffUntil = time.Now().Add(min(l.Config.PollInterval, time.Second))
-					continue
+				delay := min(controllerclient.RetryBackoff(transportAttempt, l.Config.PollInterval), 30*time.Second)
+				transportAttempt = min(transportAttempt+1, 6)
+				if advised, ok := hosterr.RetryDelay(outcome.err); ok {
+					delay = max(delay, min(advised, maxClaimRetryAfter))
 				}
-			} else {
-				transportSince = time.Time{}
+				// safety: a fresh poll never replays a claim whose award reply was lost.
+				backoffUntil = time.Now().Add(delay)
+				continue
 			}
 			if delay, ok := hosterr.RetryDelay(outcome.err); ok {
-				backoffUntil = time.Now().Add(max(delay, l.Config.PollInterval))
+				backoffUntil = time.Now().Add(max(min(delay, maxClaimRetryAfter), l.Config.PollInterval))
 				continue
 			}
 			if outcome.err != nil {
+				noteFatalClaim(outcome.err)
 				return nil, fmt.Errorf("claim runner work: %w", outcome.err)
 			}
 			if outcome.response.Claim == nil {
@@ -469,22 +603,7 @@ func (l *Loop) checkPolicy(ctx context.Context) (bool, error) {
 }
 
 func policyInterrupted(ctx context.Context, err error) bool {
-	if ctx.Err() == nil || err == nil {
-		return false
-	}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		parts := joined.Unwrap()
-		for _, part := range parts {
-			if !policyInterrupted(ctx, part) {
-				return false
-			}
-		}
-		return len(parts) > 0
-	}
-	if wrapped := errors.Unwrap(err); wrapped != nil {
-		return policyInterrupted(ctx, wrapped)
-	}
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	return ctx.Err() != nil && OnlyCancellation(err, nil)
 }
 
 func (l *Loop) request() controllerwire.ClaimRequest {

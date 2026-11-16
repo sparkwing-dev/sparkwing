@@ -206,7 +206,7 @@ func parseSkips(raw string) (map[string]string, error) {
 
 // safety: an earlier skip reopens once the reviewer makes it blocking, so an
 // author skip never outlives a raised severity.
-func applySkips(p reviewPolicy, findings []reviewFinding, skips map[string]string) []string {
+func applySkips(p reviewPolicy, findings []reviewFinding, skips map[string]string, files []string) []string {
 	var notes []string
 	found := map[string]bool{}
 	for i := range findings {
@@ -214,11 +214,13 @@ func applySkips(p reviewPolicy, findings []reviewFinding, skips map[string]strin
 		reason, asked := skips[f.ID]
 		found[f.ID] = found[f.ID] || asked
 		switch {
-		case f.Status == findingSkipped && !p.skippable(*f):
+		case f.Status == findingSkipped && !p.skippable(*f, files):
 			f.Status, f.SkipReason = findingOpen, ""
 			notes = append(notes, fmt.Sprintf("%s reopened: it is %s and blocks, so only the reviewer clears it", f.ID, f.Severity))
 		case !asked || f.Status == findingFixed:
-		case !p.skippable(*f):
+		case f.Reviewer == binaryReviewOwner:
+			notes = append(notes, fmt.Sprintf("skip of %s refused: binary or unreadable content requires human review; no override exists", f.ID))
+		case !p.skippable(*f, files):
 			notes = append(notes, fmt.Sprintf("skip of %s refused: it is %s and blocks, so only the reviewer clears it", f.ID, f.Severity))
 		default:
 			f.Status, f.SkipReason = findingSkipped, reason
@@ -237,10 +239,10 @@ func applySkips(p reviewPolicy, findings []reviewFinding, skips map[string]strin
 	return notes
 }
 
-func (r *reviewRecord) settle(p reviewPolicy) {
+func (r *reviewRecord) settle(p reviewPolicy, files []string) {
 	r.BlockingOpen = 0
 	for _, f := range r.Findings {
-		if f.Status == findingOpen && p.blocks(f) {
+		if f.Status == findingOpen && p.blocks(f, files) {
 			r.BlockingOpen++
 		}
 	}

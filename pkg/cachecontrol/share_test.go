@@ -78,6 +78,11 @@ func TestSharedHomesRefuseMismatchedInputsWithoutCompiler(t *testing.T) {
 }
 
 func TestSharedHomesRebuildChangedInputs(t *testing.T) {
+	tool, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Dir(tool))
 	for _, change := range []string{"source", "build tags"} {
 		t.Run(change, func(t *testing.T) {
 			t.Setenv("GOWORK", "off")

@@ -45,6 +45,7 @@ type Server struct {
 	logger               *slog.Logger
 	healthMu             sync.Mutex
 	healthFailures       int
+	reapWake             chan struct{}
 
 	hostKeyScan       func(ctx context.Context, host string, port int) (ssh.PublicKey, error)
 	identityLinkLimit perMinuteLimiter
@@ -277,6 +278,7 @@ func (s *Server) buildRegisteredRouters() *registeredMux {
 	endpoints = append(endpoints, s.authorityEndpoints()...)
 	endpoints = append(endpoints, s.capabilityEndpoints()...)
 	endpoints = append(endpoints, s.credentialEndpoints()...)
+	endpoints = append(endpoints, s.subscriptionEndpoints()...)
 	endpoints = append(endpoints, s.sizingEndpoints()...)
 	endpoints = append(endpoints, s.creditEndpoints()...)
 	endpoints = append(endpoints, s.queueEndpoints()...)
@@ -448,6 +450,13 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	go s.runLicenseAlarm(ctx, licenseAlarmInterval)
 	actionsDone := make(chan struct{})
 	go func() { defer close(actionsDone); s.runActionsDispatcher(ctx) }()
+	deliveryDone := make(chan struct{})
+	go func() {
+		defer close(deliveryDone)
+		if err := s.DeliverRunEvents(ctx); err != nil {
+			s.logger.Error("run event delivery stopped", "err", err)
+		}
+	}()
 	inboxDone := make(chan struct{})
 	go func() {
 		defer close(inboxDone)
@@ -457,6 +466,7 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 		stopWorkers()
 		<-inboxDone
 		<-actionsDone
+		<-deliveryDone
 	}()
 
 	errCh := make(chan error, len(servers))
@@ -484,19 +494,31 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	return err
 }
 
+func (s *Server) nudgeReaper() {
+	select {
+	case s.reapWake <- struct{}{}:
+	default:
+	}
+}
+
 func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		sample := false
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.reap(ctx)
-			s.reconcileOwnedRuns(ctx)
-			if err := s.ReconcileRunEffects(ctx); err != nil && ctx.Err() == nil {
-				s.logger.Error("run completion failed", "err", err)
-			}
+			sample = true
+		case <-s.reapWake:
+		}
+		s.reap(ctx)
+		s.reconcileOwnedRuns(ctx)
+		if err := s.ReconcileRunEffects(ctx); err != nil && ctx.Err() == nil {
+			s.logger.Error("run completion failed", "err", err)
+		}
+		if sample {
 			s.sampleOperationalSeries(ctx)
 		}
 	}
@@ -538,15 +560,19 @@ func (s *Server) reap(ctx context.Context) {
 			"node_id", w.NodeID, "policy", w.Policy,
 			"arrived_at", w.ArrivedAt.Format(time.RFC3339))
 	}
-	if recoveries, err := s.operator.ReapUnits(ctx, 500); err != nil {
+	recoveries, err := s.operator.ReapUnits(ctx, 500)
+	if err != nil {
 		s.logger.Error("work recovery sweep failed", "err", err)
-	} else {
-		for _, recovery := range recoveries {
-			s.logger.Info("recovered expired work",
-				"run_id", recovery.RunID, "node_id", recovery.NodeID,
-				"unit", recovery.Kind, "requeued", recovery.Requeued,
-				"cancelled", recovery.Cancelled, "failed", recovery.Failed,
-				"disruptions", recovery.Disruptions)
+	}
+	for _, recovery := range recoveries {
+		s.logger.Info("recovered expired work",
+			"run_id", recovery.RunID, "node_id", recovery.NodeID,
+			"unit", recovery.Kind, "requeued", recovery.Requeued,
+			"cancelled", recovery.Cancelled, "failed", recovery.Failed,
+			"disruptions", recovery.Disruptions)
+		if recovery.Kind == "child" && recovery.Cancelled {
+			// perf: Only progress schedules another bounded pass, so deeper descendants need not wait for the ticker.
+			s.nudgeReaper()
 		}
 	}
 	s.sweepClaimAttention(ctx, time.Now(), claimAttentionBatch)
@@ -630,6 +656,9 @@ func withRequestLog(
 				logger.Log(ctx, level, "http request failed", "request_id", masker.Mask(rec.id), "method", r.Method, "route", rec.route, "status", status, "err", masker.Mask(cause.Error()))
 			}
 			observeHTTPRequest(rec.route, r.Method, status, elapsed)
+			if status == http.StatusUnauthorized && rw.authRefusal != nil {
+				rec.reason = masker.Mask(rw.authRefusal.Message)
+			}
 			logRequest(ctx, logger, r, rec, status, elapsed, clientIP(r))
 		}
 		// safety: a handler that panics still made its write attempt, so it is
@@ -656,13 +685,19 @@ const statusClientClosedRequest = 499
 
 type statusRecorder struct {
 	http.ResponseWriter
-	status    int
-	cause     error
-	ctx       context.Context
-	committed bool
+	status      int
+	cause       error
+	authRefusal *apierr.Error
+	ctx         context.Context
+	committed   bool
 }
 
 func (r *statusRecorder) ResponseError(err error) {
+	// safety: a 401 must audit its refusal even if another failure was noted first.
+	var refusal *apierr.Error
+	if !r.committed && errors.As(err, &refusal) && refusal.Code == hosterr.Unauthenticated {
+		r.authRefusal = refusal
+	}
 	if r.cause == nil {
 		r.cause = err
 	}

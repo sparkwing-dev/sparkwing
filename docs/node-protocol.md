@@ -122,7 +122,11 @@ A failed pipeline has an `error` with the shared code, message and optional hint
 and details, an empty `args` array and no secret declarations. Other pipelines
 retain their complete descriptions. The host refuses the failed pipeline with
 its sanitized cause before planning. It withholds describe output when any
-pipeline fails because that output may contain unclassified secrets.
+pipeline fails because that output may contain unclassified secrets. The
+refusal and the withheld-output notice name
+`sparkwing pipeline describe --pipeline <name> --show-withheld`, which prints the
+withheld output and errors to the CLI's stderr, masked by registered values. The
+failed pipeline's own secret defaults are unknown and print unmasked.
 
 `isolated_home_required` is a fixed refusal for pipelines that must avoid an
 operational store. Go pipelines return or wrap `sparkwing.ErrIsolatedHomeRequired`
@@ -138,7 +142,8 @@ hint and details for this code and keeps other unclassified output withheld.
 `plan.pipeline` names the SDK registration key, which is the YAML `entrypoint`.
 `args` is an explicit object, including `{}` when empty. `run` requires `run_id`
 and `pipeline`; `run.pipeline` is the invoked YAML pipeline name.
-Optional context includes `git`, `trigger`, `started_at`, `dry_run` and `no_memo`.
+Optional context includes `git`, `trigger`, `started_at`, `dry_run`, `no_memo`,
+`start_at` and `stop_at`. The last two carry the run's step bounds, omitted when unset.
 
 The host selects the argument schema by registration key. For YAML
 `name: deploy-prod, entrypoint: Deploy`, register `Deploy`. Initial planning and
@@ -365,8 +370,13 @@ lines before the result. An optional base64 `stdin` is written to the command.
 `{"exec_cancel":"<id>"}` kills a running command; its `exec_done` still follows,
 with `signaled: true`. A command that never started has `exit_code: -1`, a
 `start_error` and `not_found: true` when the executable is missing. Host lines
-share the request pipe and are identified by their first key. TypeScript output
-callbacks consume the streamed `exec_output` chunks.
+share the request pipe and are identified by their first key. A command that ran
+keeps its observed exit code, signal flag and available output even when its
+host cleanup fails. The host retains that failure and fails the owning attempt
+at process Close, even if the SDK step returns success. Cleanup failure is not a
+launch failure and does not use `start_error`. An already-gone session is not a
+cleanup failure. This uses the existing command wire fields and published SDK.
+TypeScript output callbacks consume the streamed `exec_output` chunks.
 
 ## Host service routes
 

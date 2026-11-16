@@ -21,7 +21,7 @@ func TestDataClientReadsExecutionDepcacheWithoutExposingAuthority(t *testing.T) 
 		ref    string
 		source blob.RestoreSource
 	}{
-		{"manual:account/fixture:feature", blob.RestoreOwnRef}, {"base", blob.RestorePRBase}, {"main", blob.RestoreDefaultBranch},
+		{"manual:account/fixture:feature", blob.RestoreOwnRef}, {"manual:account/fixture:main", blob.RestoreWriterDefault}, {"base", blob.RestorePRBase}, {"main", blob.RestoreDefaultBranch},
 	} {
 		t.Run(tc.ref, func(t *testing.T) {
 			_, records := testDataClient(t, func(request *http.Request) (*http.Response, error) {
@@ -46,7 +46,7 @@ func TestDataClientReadsExecutionDepcacheWithoutExposingAuthority(t *testing.T) 
 }
 
 func FuzzDataClientDepcacheRejectsChangedScope(f *testing.F) {
-	for field := uint8(0); field < 12; field++ {
+	for field := uint8(0); field < 15; field++ {
 		f.Add(field, "foreign")
 	}
 	f.Fuzz(func(t *testing.T, field uint8, value string) {
@@ -56,7 +56,7 @@ func FuzzDataClientDepcacheRejectsChangedScope(f *testing.F) {
 		authority := depcacheAuthority()
 		record := map[string]any{"pipeline": "", "job": "", "provenance": "", "created_at": time.Time{}, "kind": "depcache", "repo": "gh:42", "ref": "manual:account/fixture:feature", "name": "modules", "key": "dep-key", "digest": strings.Repeat("a", 64)}
 		source := blob.RestoreOwnRef
-		switch field % 12 {
+		switch field % 15 {
 		case 0:
 			record["kind"] = "output"
 		case 1:
@@ -81,6 +81,12 @@ func FuzzDataClientDepcacheRejectsChangedScope(f *testing.F) {
 			record["ref"] = "feature"
 		case 11:
 			source = blob.RestoreSource("unknown-" + value)
+		case 12:
+			source, record["ref"] = blob.RestoreWriterDefault, "manual:other-"+value+":main"
+		case 13:
+			source = blob.RestoreWriterDefault
+		case 14:
+			source, record["ref"] = blob.RestoreWriterDefault, "main"
 		}
 		_, records := testDataClient(t, func(*http.Request) (*http.Response, error) {
 			return dataResponse(t, map[string]any{"found": true, "source": source, "record": record}), nil

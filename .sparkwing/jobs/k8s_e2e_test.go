@@ -47,12 +47,18 @@ func TestKubernetesE2EUploadedFixtureBuildsWithoutCallerCheckout(t *testing.T) {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("clone uploaded fixture: %v\n%s", err, output)
 	}
-	cmd = exec.Command("go", "test", "-mod=readonly", "./...")
-	cmd.Dir = filepath.Join(checkout, ".sparkwing")
-	cmd.Env = append(gitcontrol.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false", "GOPROXY=off", "GOSUMDB=off")
+	cmd = uploadedFixtureTestCommand(checkout)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("uploaded Kubernetes fixture: %v\n%s", err, output)
 	}
+}
+
+func uploadedFixtureTestCommand(checkout string) *exec.Cmd {
+	// perf: checkout paths made the same SDK recompile; cached results can hide whether its proof body ran.
+	cmd := exec.Command("go", "test", "-trimpath", "-count=1", "-mod=readonly", "./...")
+	cmd.Dir = filepath.Join(checkout, ".sparkwing")
+	cmd.Env = append(gitcontrol.Env(os.Environ()), "GOWORK=off", "GOFLAGS=-buildvcs=false", "GOPROXY=off", "GOSUMDB=off")
+	return cmd
 }
 
 func TestKubernetesE2EPreflightIsExplicitAndLocalInfrastructureFree(t *testing.T) {

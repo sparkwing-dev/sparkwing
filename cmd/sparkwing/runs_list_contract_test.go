@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 type listingReader struct {
@@ -272,6 +273,82 @@ func TestRunListingQuietJSONAndJobStepGrouping(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), `"key":"`+key+`"`) {
 			t.Fatalf("group %s: %s", group, out.String())
+		}
+	}
+}
+
+func TestRunListingRefusalsIncludeRepairExamples(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--since", "not-a-duration"}, "--since 1h"},
+		{[]string{"--since", "-1h"}, "--since 1h"},
+	} {
+		reader := listingReader{list: func(context.Context, controllerwire.RunQuery) (controllerwire.RunPage, error) {
+			t.Fatal("refused invocation read controller")
+			return controllerwire.RunPage{}, nil
+		}}
+		inv, err := clisurface.Parse("sparkwing", append([]string{"runs", "list"}, tc.args...))
+		if err == nil {
+			err = observeRunList(t.Context(), inv, reader, &bytes.Buffer{}, &bytes.Buffer{}, nil)
+		}
+		if exitCodeFor(err) != 2 || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("args %v lack repair %q: %v", tc.args, tc.want, err)
+		}
+	}
+	reads := 0
+	reader := listingReader{list: func(_ context.Context, q controllerwire.RunQuery) (controllerwire.RunPage, error) {
+		reads++
+		if q.Limit != 1 || q.StartedAfter.IsZero() {
+			t.Fatalf("repair changed query: %+v", q)
+		}
+		return controllerwire.RunPage{}, nil
+	}}
+	if err := observeRunList(t.Context(), listingInvocation(t, "--since", "1h", "--limit", "1"), reader, &bytes.Buffer{}, &bytes.Buffer{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 1 {
+		t.Fatalf("repair did not read controller: %d", reads)
+	}
+}
+
+func TestEmptyPipelineFilterSuggestsTheListedSpelling(t *testing.T) {
+	project := &projectconfig.Config{Pipelines: []projectconfig.Pipeline{{Name: "nightly", Entrypoint: "Nightly"}, {Name: "build", Entrypoint: "Build"}}}
+	for name, want := range map[string]string{
+		"nighty":  `no runs of pipeline "nighty"; sparkwing.yaml lists no such pipeline. Did you mean --pipeline nightly?`,
+		"nightly": "",
+		"deploy":  "",
+	} {
+		if got := pipelineFilterNote(project, name); got != want {
+			t.Errorf("%s: note %q, want %q", name, got, want)
+		}
+	}
+	if got := pipelineFilterNote(nil, "nighty"); got != "" {
+		t.Errorf("no project: note %q", got)
+	}
+}
+
+func TestRunStatusFilterRefusesUnknownStates(t *testing.T) {
+	const states = "--status requires one of pending, running, success, dry_run, failed, cancelled, optionally prefixed with ! to exclude it"
+	for args, want := range map[string]string{
+		"runs list --status succes":           states + "; did you mean success?",
+		"runs list --status !faild":           states + "; did you mean !failed?",
+		"runs list --status nope":             states,
+		"runs list --status SUCCESS":          states + "; did you mean success?",
+		"runs list --status !Failed":          states + "; did you mean !failed?",
+		"runs grep --grep x --status faild":   states + "; did you mean failed?",
+		"runs list --status !failed":          "",
+		"runs logs --grep x --status success": "",
+	} {
+		inv, err := clisurface.Parse("sparkwing", strings.Fields(args))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = parseRunQuery(inv, time.Now())
+		var usage *clisurface.UsageError
+		if want == "" && err != nil || want != "" && (!errors.As(err, &usage) || usage.Message != want) {
+			t.Errorf("%s: error %v, want %q", args, err, want)
 		}
 	}
 }

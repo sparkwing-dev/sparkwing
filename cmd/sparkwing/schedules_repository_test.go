@@ -75,11 +75,12 @@ type scheduleUnitsFixture struct {
 	wingd.ManagedUnitManager
 	calls *[]string
 	units []wingd.ManagedUnit
+	err   error
 }
 
 func (f scheduleUnitsFixture) Inspect(context.Context) ([]wingd.ManagedUnit, error) {
 	*f.calls = append(*f.calls, "inspect")
-	return f.units, nil
+	return f.units, f.err
 }
 
 func (f scheduleUnitsFixture) Refresh(context.Context, string, string) error {
@@ -133,6 +134,9 @@ func newScheduleCommandFixture(t *testing.T) *scheduleCommandFixture {
 			return controllerwire.TickView{At: "2026-10-15T03:00:00Z", Version: "v1.2.3"}, nil
 		}, installTimer: func(context.Context, wingd.LocalStartOptions) error {
 			f.calls = append(f.calls, "install-timer")
+			return nil
+		}, activateTimer: func(context.Context) error {
+			f.calls = append(f.calls, "activate-timer")
 			return nil
 		}, uninstallTimer: func(context.Context) error {
 			f.calls = append(f.calls, "uninstall-timer")
@@ -217,8 +221,68 @@ func TestLocalScheduleInstallCapturesBeforeStartingAndUsesManagedTimers(t *testi
 	if len(f.registrations) != 1 || !reflect.DeepEqual(f.registrations[0].Environment, []string{"CAPTURE=install"}) || !f.registrations[0].Follow || f.registrations[0].Prove || f.registrations[0].Schedules[0].Name != "host" || out.String() != "local-id\n" {
 		t.Fatalf("captured registration: %+v %s", f.registrations, out.String())
 	}
-	if !reflect.DeepEqual(f.calls, []string{"inspect", "start", "register", "install-timer"}) {
+	if !reflect.DeepEqual(f.calls, []string{"inspect", "install-timer", "start", "register"}) {
 		t.Fatalf("installation ordering: %v", f.calls)
+	}
+}
+
+func TestLocalScheduleInstallArmsNothingWhenTheTimerFails(t *testing.T) {
+	f := newScheduleCommandFixture(t)
+	f.services.installTimer = func(context.Context, wingd.LocalStartOptions) error {
+		f.calls = append(f.calls, "install-timer")
+		return errors.New("systemctl --user link: exit status 1")
+	}
+	var out bytes.Buffer
+	err := runScheduleCommandArgs(t.Context(), []string{"install", "--no-prove", "-o", "plain"}, &out, f.command)
+	if err == nil || !strings.Contains(err.Error(), "no schedule was armed") || !strings.Contains(err.Error(), "sparkwing schedules install") || out.Len() != 0 {
+		t.Fatalf("timer failure: %v %q", err, out.String())
+	}
+	if !reflect.DeepEqual(f.calls, []string{"inspect", "install-timer"}) {
+		t.Fatalf("a failed timer still armed schedules: %v", f.calls)
+	}
+}
+
+func TestLocalScheduleInstallNamesTheNextStepForAForeignTimerFile(t *testing.T) {
+	f := newScheduleCommandFixture(t)
+	f.services.units = scheduleUnitsFixture{calls: &f.calls, err: errors.New("/u/sparkwing-crons.timer exists but sparkwing did not write it, so sparkwing will not touch it; move it aside to let sparkwing manage the timer")}
+	var out bytes.Buffer
+	err := runScheduleCommandArgs(t.Context(), []string{"install", "--no-prove", "-o", "plain"}, &out, f.command)
+	if err == nil || !strings.Contains(err.Error(), "no schedule was armed") || !strings.Contains(err.Error(), "move it aside") || !strings.Contains(err.Error(), "run `sparkwing schedules install` again") || out.Len() != 0 {
+		t.Fatalf("foreign timer refusal: %v %q", err, out.String())
+	}
+	if !reflect.DeepEqual(f.calls, []string{"inspect"}) {
+		t.Fatalf("a foreign timer file still armed schedules: %v", f.calls)
+	}
+}
+
+func TestLocalScheduleInstallRemovesAFreshTimerWhenNothingArms(t *testing.T) {
+	f := newScheduleCommandFixture(t)
+	f.services.register = func(context.Context, localScheduleRegistration) (controllerwire.ScheduleRepoWritten, error) {
+		f.calls = append(f.calls, "register")
+		return controllerwire.ScheduleRepoWritten{}, errors.New("proof failed")
+	}
+	var out bytes.Buffer
+	if err := runScheduleCommandArgs(t.Context(), []string{"install", "--no-prove", "-o", "plain"}, &out, f.command); err == nil {
+		t.Fatal("registration failure was not reported")
+	}
+	if !reflect.DeepEqual(f.calls, []string{"inspect", "install-timer", "start", "register", "uninstall-timer"}) {
+		t.Fatalf("fresh timer left behind: %v", f.calls)
+	}
+}
+
+func TestLocalScheduleReinstallRefreshesAndEnablesTheExistingTimer(t *testing.T) {
+	f := newScheduleCommandFixture(t)
+	f.services.units = scheduleUnitsFixture{calls: &f.calls, units: []wingd.ManagedUnit{{Kind: wingd.ManagedSchedule, Home: f.services.options.Home}}}
+	f.services.register = func(context.Context, localScheduleRegistration) (controllerwire.ScheduleRepoWritten, error) {
+		f.calls = append(f.calls, "register")
+		return controllerwire.ScheduleRepoWritten{}, errors.New("proof failed")
+	}
+	var out bytes.Buffer
+	if err := runScheduleCommandArgs(t.Context(), []string{"install", "--no-prove", "-o", "plain"}, &out, f.command); err == nil {
+		t.Fatal("registration failure was not reported")
+	}
+	if !reflect.DeepEqual(f.calls, []string{"inspect", "refresh", "activate-timer", "start", "register"}) {
+		t.Fatalf("reinstall did not enable the existing timer, or removed it: %v", f.calls)
 	}
 }
 
@@ -336,7 +400,7 @@ func TestScheduleInstallRefreshesAnExistingManagedTimer(t *testing.T) {
 	f.services.units = scheduleUnitsFixture{calls: &f.calls, units: []wingd.ManagedUnit{{Kind: wingd.ManagedSchedule, Home: f.services.options.Home}}}
 	f.services.installTimer = nil
 	var out bytes.Buffer
-	if err := runScheduleCommandArgs(t.Context(), []string{"install"}, &out, f.command); err != nil || !reflect.DeepEqual(f.calls, []string{"inspect", "start", "register", "refresh"}) {
+	if err := runScheduleCommandArgs(t.Context(), []string{"install"}, &out, f.command); err != nil || !reflect.DeepEqual(f.calls, []string{"inspect", "refresh", "activate-timer", "start", "register"}) {
 		t.Fatalf("managed refresh: %v %v", f.calls, err)
 	}
 }

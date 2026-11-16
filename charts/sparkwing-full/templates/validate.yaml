@@ -57,6 +57,9 @@
 {{- if and (eq $c.deployment "cloud") (ne $c.store "postgres") -}}
 {{- fail "sparkwing-full: controller.deployment=cloud needs controller.store=postgres" -}}
 {{- end -}}
-{{- if and .Values.ingress.enabled (not .Values.ingress.allowInsecure) (not .Values.ingress.tls) -}}
-{{- fail "sparkwing-full: ingress.enabled=true with an empty ingress.tls publishes the controller API, its tokens and the dashboard's session cookies over plain HTTP, where anyone on the path can read them. Set ingress.tls, or set ingress.allowInsecure=true to publish it unencrypted anyway, which also passes --insecure-cookies so a browser keeps its session" -}}
+{{- if not (kindIs "invalid" (index .Values.ingress "allowInsecure")) -}}
+{{- fail "sparkwing-full: ingress.allowInsecure was removed. Delete it from your values and configure ingress.tls for TLS on the ingress (for example, cert-manager with Let's Encrypt), or disable ingress and use kubectl port-forward" -}}
+{{- end -}}
+{{- if and .Values.ingress.enabled (not .Values.ingress.tls) -}}
+{{- fail "sparkwing-full: ingress.enabled=true with an empty ingress.tls exposes the controller API over plain HTTP; browser login requires Secure cookies. Set ingress.tls for TLS on the ingress (for example, cert-manager with Let's Encrypt), or disable ingress and use kubectl port-forward to reach http://localhost" -}}
 {{- end -}}

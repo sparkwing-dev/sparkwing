@@ -53,6 +53,14 @@ func (p *admissionProgress) observe(record controllerwire.LogRecord) bool {
 	return false
 }
 
+func (p *admissionProgress) announced(record controllerwire.LogRecord) bool {
+	if p == nil || record.Event != runstate.EventAdmissionGranted {
+		return false
+	}
+	wait := p.waits[string(wingwire.NodeHostParticipant(record.RunID, record.JobID))]
+	return wait != nil && wait.printed
+}
+
 func (p *admissionProgress) write(ctx context.Context, out io.Writer, format string, now time.Time) error {
 	if p == nil {
 		return nil
@@ -88,7 +96,11 @@ func (p *admissionProgress) write(ctx context.Context, out io.Writer, format str
 				found = true
 				key := admissionMaterialState(state, waiter)
 				if !wait.printed || wait.last != key {
-					if _, err := fmt.Fprintf(out, "%s: %s\n", wait.record.JobID, opsview.AdmissionWaitLine(state, waiter)); err != nil {
+					separator := ": "
+					if format == "pretty" {
+						separator = " | "
+					}
+					if _, err := fmt.Fprintf(out, "%s%s%s\n", opsview.DisplayText(wait.record.JobID), separator, opsview.DisplayText(opsview.AdmissionWaitLine(state, waiter))); err != nil {
 						return err
 					}
 					wait.printed, wait.last = true, key

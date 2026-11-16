@@ -82,6 +82,7 @@ func (t *runnerSessionTransport) RoundTrip(request *http.Request) (*http.Respons
 		r.Header.Set("Origin", t.base.Scheme+"://"+t.base.Host)
 		r.Header.Set("X-CSRF-Token", t.csrf)
 		// safety: licensed controllers require the prefix even through HTTP loopback port-forwards.
+		// #nosec G124 -- This is an outgoing Cookie request header, not a browser Set-Cookie response.
 		r.Header.Set("Cookie", (&http.Cookie{Name: "__Host-sw_csrf", Value: t.csrf}).String())
 	}
 	return t.transport.RoundTrip(r)

@@ -3,8 +3,11 @@
 package fssecure
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -132,6 +135,62 @@ func TestOnlyStateCredentialsAdmitOwnGroupWrite(t *testing.T) {
 			if (err == nil) != want {
 				t.Errorf("%s at %04o: %v, want ok=%v", open, mode, err, want)
 			}
+		}
+	}
+}
+
+func TestOpenCredentialDistinguishesMissingFromDanglingLink(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := OpenCredential(dir, "token"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing credential: %v, want not-exist", err)
+	}
+	if err := os.Symlink("missing", filepath.Join(dir, "token")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenCredential(dir, "token"); err == nil || errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("dangling credential link: %v, want refusal distinct from missing", err)
+	}
+}
+
+func TestOpenCredentialConcurrentPublication(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source")
+	if err := os.WriteFile(source, []byte("key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := range 500 {
+		name := fmt.Sprintf("key-%d", attempt)
+		ready := make(chan struct{}, 8)
+		var readers sync.WaitGroup
+		for range 8 {
+			readers.Go(func() {
+				if _, err := OpenCredential(dir, name); !errors.Is(err, os.ErrNotExist) {
+					t.Errorf("before publication: %v, want missing", err)
+				}
+				ready <- struct{}{}
+				for {
+					file, err := OpenCredential(dir, name)
+					if errors.Is(err, os.ErrNotExist) {
+						continue
+					}
+					if err != nil {
+						t.Errorf("concurrent publication: %v", err)
+					} else if err := file.Close(); err != nil {
+						t.Error(err)
+					}
+					return
+				}
+			})
+		}
+		for range 8 {
+			<-ready
+		}
+		if err := os.Link(source, filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+		readers.Wait()
+		if t.Failed() {
+			return
 		}
 	}
 }

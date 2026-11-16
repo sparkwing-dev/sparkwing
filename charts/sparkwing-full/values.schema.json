@@ -53,8 +53,7 @@
     "ingress": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "allowInsecure": { "type": "boolean" }
+        "enabled": { "type": "boolean" }
       }
     },
     "serviceAccount": {

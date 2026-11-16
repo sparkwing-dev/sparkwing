@@ -297,7 +297,7 @@ func TestGeneratedFilesEscapeAwkwardValues(t *testing.T) {
 		h := linuxHost(t, exec)
 		h.Binary = fixtureAbsolutePath("/opt/my tools/sparkwing")
 		h.PathEnv = "/opt/my tools:/usr/bin"
-		h.SparkwingHome = "/srv/100% sparkwing"
+		h.SparkwingHome = filepath.Join(t.TempDir(), "100% sparkwing")
 		if _, err := Install(t.Context(), h); err != nil {
 			t.Fatalf("Install: %v", err)
 		}
@@ -305,7 +305,7 @@ func TestGeneratedFilesEscapeAwkwardValues(t *testing.T) {
 		for _, want := range []string{
 			`ExecStart=:"` + fixtureAbsolutePath("/opt/my tools/sparkwing") + `" __tick --home ` + unitfile.SystemdWord(h.SparkwingHome),
 			`Environment="PATH=/opt/my tools:/usr/bin"`,
-			`--home "/srv/100%% sparkwing"`,
+			`100%% sparkwing"`,
 		} {
 			if !strings.Contains(service, want) {
 				t.Errorf("service unit missing %q:\n%s", want, service)
@@ -423,8 +423,10 @@ func TestUninstallRemovesManagedFilesAndRepeatsCleanly(t *testing.T) {
 			wantCalls: []string{
 				"systemctl --user show -p FragmentPath --value sparkwing-crons.timer",
 				"systemctl --user show -p FragmentPath --value sparkwing-crons.service",
-				"systemctl --user disable --now sparkwing-crons.timer sparkwing-crons.service",
+				"systemctl --user stop sparkwing-crons.timer sparkwing-crons.service",
+				"systemctl --user disable sparkwing-crons.timer sparkwing-crons.service",
 				"systemctl --user daemon-reload",
+				"systemctl --user reset-failed sparkwing-crons.timer sparkwing-crons.service",
 			},
 		},
 		{
@@ -618,7 +620,7 @@ func TestLinuxUninstallLeavesAStrangersUnitAlone(t *testing.T) {
 		t.Fatalf("uninstall: %v", err)
 	}
 	for _, c := range exec.calls {
-		if strings.Contains(c, "disable") {
+		if strings.Contains(c, "disable") || strings.Contains(c, " stop ") || strings.Contains(c, "reset-failed") {
 			t.Fatalf("uninstall disabled a unit it does not own: %v", exec.calls)
 		}
 	}
@@ -717,11 +719,56 @@ func TestUninstallRefusesForeignCompanionRegistration(t *testing.T) {
 		t.Fatal("uninstall accepted a foreign companion")
 	}
 	for _, call := range e.calls {
-		if strings.Contains(call, "disable") {
+		if strings.Contains(call, "disable") || strings.Contains(call, " stop ") || strings.Contains(call, "reset-failed") {
 			t.Fatalf("stopped a foreign companion: %v", e.calls)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(UnitDir(h), h.serviceName())); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRenderedTimerWorkingDirectoryUsesStateHome(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			h := linuxHost(t, &fakeExec{})
+			h.GOOS = goos
+			body, want := serviceUnit(h), "WorkingDirectory="+unitfile.SystemdWord(h.SparkwingHome)+"\n"
+			if goos == "darwin" {
+				body = agentPlist(h)
+				want = "<key>WorkingDirectory</key>\n  <string>" + unitfile.XMLText(h.SparkwingHome) + "</string>"
+			}
+			t.Logf("rendered %s unit:\n%s", goos, body)
+			if !strings.Contains(body, want) {
+				t.Fatalf("missing state working directory %q:\n%s", want, body)
+			}
+		})
+	}
+}
+
+func TestInstallPreparesWorkingDirectoryBeforeStarting(t *testing.T) {
+	for _, makeHost := range []func(*testing.T, *fakeExec) Host{linuxHost, darwinHost} {
+		f := &fakeExec{}
+		h := makeHost(t, f)
+		t.Run(h.GOOS, func(t *testing.T) {
+			h.SparkwingHome = filepath.Join(t.TempDir(), "missing", "state")
+			h.LogPath = ""
+			startChecked := false
+			h.Exec = func(ctx context.Context, name string, args ...string) (string, error) {
+				if name == "systemctl" && len(args) > 1 && args[1] == "enable" || name == "launchctl" && len(args) > 0 && args[0] == "bootstrap" {
+					startChecked = true
+					if info, err := os.Stat(h.SparkwingHome); err != nil || !info.IsDir() {
+						t.Errorf("working directory absent before start: %v", err)
+					}
+				}
+				return f.run(ctx, name, args...)
+			}
+			if _, err := Install(t.Context(), h); err != nil {
+				t.Fatal(err)
+			}
+			if !startChecked {
+				t.Fatal("fixture never started the unit")
+			}
+		})
 	}
 }

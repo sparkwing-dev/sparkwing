@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/opsview"
+
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 
@@ -203,9 +205,9 @@ func printSparkCatalog(summary sparkCatalogSummary, field, libModule string, blo
 	if summary.Description != "" {
 		title += " -- " + summary.Description
 	}
-	fmt.Println(title)
+	fmt.Println(opsview.DisplayText(title))
 	if summary.Source != "" {
-		fmt.Printf("%s\n", summary.Source)
+		fmt.Printf("%s\n", opsview.DisplayText(summary.Source))
 	}
 	fmt.Println()
 	nameWidth, stabilityWidth := 0, 0
@@ -214,20 +216,20 @@ func printSparkCatalog(summary sparkCatalogSummary, field, libModule string, blo
 		stabilityWidth = max(stabilityWidth, len(b.Stability))
 	}
 	for _, b := range blocks {
-		fmt.Printf("  %-*s  %-*s  %s\n", nameWidth, b.Name, stabilityWidth, b.Stability, b.Description)
+		fmt.Printf("  %-*s  %-*s  %s\n", nameWidth, opsview.DisplayText(b.Name), stabilityWidth, opsview.DisplayText(b.Stability), opsview.DisplayText(b.Description))
 	}
 	fmt.Println()
 
 	if libModule != "" {
-		fmt.Printf("import: %s/<name>\n", libModule)
+		fmt.Printf("import: %s/<name>\n", opsview.DisplayText(libModule))
 	}
 	if field == "modules" {
-		fmt.Printf("edit one: sparkwing pipeline sparks inflate --library %s\n", blockValue(blocks[0]))
+		fmt.Printf("edit one: sparkwing pipeline sparks inflate --library %s\n", opsview.DisplayText(blockValue(blocks[0])))
 		return
 	}
 	if libModule != "" {
 		fmt.Printf("these are packages inside one Go module; edit the library: "+
-			"sparkwing pipeline sparks inflate --library %s\n", libModule)
+			"sparkwing pipeline sparks inflate --library %s\n", opsview.DisplayText(libModule))
 		return
 	}
 	fmt.Println("these are packages inside one Go module; inflate the library by its module path.")

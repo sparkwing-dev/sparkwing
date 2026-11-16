@@ -1,7 +1,9 @@
 package wingd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -74,21 +76,30 @@ func (d *Daemon) controllerHTTP(next http.Handler) http.Handler {
 		case "drain":
 			d.recordJournal("drain_begin", nil, nil)
 			remaining, err := d.beginDrain()
+			retirementFailed := false
 			if err == nil && r.URL.Query().Get("runner") == "retire" {
 				err = d.retireLocalRunner(r.Context())
+				retirementFailed = err != nil
 			}
 			defer func() {
-				// safety: deliver even a failed drain acknowledgement before cancelling HTTP handlers.
+				// safety: flush acknowledgements before cancelling their HTTP handlers.
 				if flush, ok := w.(http.Flusher); ok {
 					flush.Flush()
 				}
-				d.shutdownWithReason("drain")
+				if !retirementFailed {
+					d.shutdownWithReason("drain")
+				}
 			}()
-			if err != nil {
+			var holds *runnerHoldsWork
+			switch {
+			case errors.As(err, &holds):
+				d.finishDrainAfterRunner(context.WithoutCancel(r.Context()), holds.instance)
+				writeLoginFailure(w, holds.failure(d.layout.home))
+			case err != nil:
 				writeLoginFailure(w, &apierr.Error{Code: hosterr.Internal, Message: err.Error()})
-				return
+			default:
+				writeControllerHTTP(w, wingwire.DrainAck{HoldersRemaining: remaining})
 			}
-			writeControllerHTTP(w, wingwire.DrainAck{HoldersRemaining: remaining})
 		default:
 			http.NotFound(w, r)
 		}

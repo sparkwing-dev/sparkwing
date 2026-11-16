@@ -124,7 +124,7 @@ func BuildEnv(ctx context.Context, dir string, env []string, overlay string) ([]
 	s := getSession(ctx, env)
 	r, err := inspect(ctx, s, dir, overlay)
 	if err != nil && ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, err
 	}
 	if err != nil && !errors.Is(err, s.err) {
 		return nil, err

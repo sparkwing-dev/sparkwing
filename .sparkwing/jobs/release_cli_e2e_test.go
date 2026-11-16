@@ -66,7 +66,10 @@ func TestReleaseCLIWithConcurrentMainActor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			writeDeliveryTool(t, filepath.Join(tools, "go"), fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n 'run ./internal/doccheck --sidebar docs'|'test ./cmd/sparkwing -run ^TestPipelineScaffoldDoesNotRequireGoPatch$ -count=1') exit 0;;\nesac\nexec %q \"$@\"\n", realGo))
+			writeDeliveryTool(t, filepath.Join(tools, "go"), fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n 'run ./internal/doccheck --sidebar docs'|'test ./cmd/sparkwing -run ^TestPipelineScaffoldDoesNotRequireGoPatch$ -count=1'|'run ./cmd/verify-release --index-out '*|'mod download %s@v0.1.0') exit 0;;\nesac\nexec %q \"$@\"\n", sdkModulePath, realGo))
+			for _, tool := range []string{"curl", "node"} {
+				writeDeliveryTool(t, filepath.Join(tools, tool), "#!/bin/sh\nexit 0\n")
+			}
 			for _, module := range []string{".sparkwing", kubernetesE2EPipelineModuleRel} {
 				cmd := exec.CommandContext(ctx, realGo, "-C", filepath.Join(repo, module), "mod", "tidy")
 				if out, err := cmd.CombinedOutput(); err != nil {
@@ -77,8 +80,15 @@ func TestReleaseCLIWithConcurrentMainActor(t *testing.T) {
 			gitRun(t, repo, "-c", "commit.gpgsign=false", "commit", "--no-verify", "-m", "release fixture")
 			source := strings.TrimSpace(gitRun(t, repo, "rev-parse", "HEAD"))
 			gitRun(t, repo, "-c", "tag.gpgsign=false", "tag", pin)
+			digest, err := sdkSourceDigest(newTestContext(t), repo, source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gitRun(t, repo, "-c", "tag.gpgsign=false", "tag", "-a", "sparkwing/v0.1.0", source,
+				"-m", "SDK v0.1.0\n\n"+sdkDigestMarker+digest)
 			origin := t.TempDir()
 			gitRun(t, origin, "init", "--bare", "-b", "main")
+			gitRun(t, origin, "config", "core.hooksPath", filepath.Join(origin, "hooks"))
 			gitRun(t, repo, "remote", "add", "origin", origin)
 			gitRun(t, repo, "push", "origin", "main", "--tags")
 			actor := filepath.Join(t.TempDir(), "actor")

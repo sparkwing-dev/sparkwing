@@ -106,7 +106,7 @@ func TestMemberTokenHTTPSessionTimeoutAndLogout(t *testing.T) {
 				request.Header.Set("Authorization", "Session "+raw)
 				request.Header.Set("Origin", "https://controller.test")
 				request.Header.Set(csrfHeaderName, csrf)
-				request.AddCookie(&http.Cookie{Name: cookieName(csrfCookieName, engine.Server.cookiesSecure()), Value: csrf})
+				request.AddCookie(&http.Cookie{Name: csrfCookieName, Value: csrf})
 				response := httptest.NewRecorder()
 				handler.ServeHTTP(response, request)
 				if response.Code != http.StatusNoContent {
