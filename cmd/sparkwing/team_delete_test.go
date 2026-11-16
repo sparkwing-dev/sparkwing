@@ -141,7 +141,7 @@ func TestTeamDeletePrintsTheSlugOrTheRevokedProfile(t *testing.T) {
 		want   []string
 	}{
 		{"plain", []string{"acme\n"}},
-		{"pretty", []string{"acme", "pending", "--profile work"}},
+		{"pretty", []string{"acme", "pending", "--profile work", "credit and payment records", "audit log", "backups", "about 7 days", "docs read --topic auth"}},
 	} {
 		inv, err := clisurface.Parse("sparkwing", []string{"team", "delete", "--profile", "work", "--confirm", "acme", "-o", tc.format})
 		if err != nil {
