@@ -127,3 +127,40 @@ test("freshness expiring after preview removes the destructive form", async ({ p
   await expect(page.getByRole("button", { name: "Sign in again", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Delete account permanently" })).toHaveCount(0);
 });
+
+for (const waitlisted of [true, false]) {
+  for (const width of [1280, 390]) {
+    test(`${waitlisted ? "waitlisted" : "teamless"} account reaches deletion from Home at ${width}px`, async ({ page }, testInfo) => {
+      await onboardingFixture(page, { noTeam: true });
+      await page.route("**/api/v1/me", route => route.fulfill({ json: {
+        user: { id: "u1", email: "korey@example.test", name: "Korey" },
+        active_team: null, waitlisted, memberships: [], invitations: [],
+      } }));
+      await page.route("**/api/v1/me/team-deletions", route => route.fulfill({ json: { deletions: [], truncated: false, next_cursor: "" } }));
+      const archiveNotice = readFileSync(resolve(__dirname, "../../../docs/account-deletion-retention.md"), "utf8").split("\n\n")[1];
+      await page.route("**/api/v1/me/deletion", route => route.fulfill({ json: {
+        account_id: "u1", teams: [], blocked_teams: [], sign_in_required: false,
+        archive_notice: archiveNotice, credential_notice: "Account credentials are revoked immediately.",
+      } }));
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto("/");
+      await expect(page.getByRole("heading", { name: waitlisted ? "You're on the list" : "Create your first team", exact: true })).toBeVisible();
+      const account = page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: "Account", exact: true });
+      await expect(account).toBeVisible();
+      await expect(account).toHaveAttribute("href", "/account");
+      const before = await account.boundingBox();
+      await page.screenshot({ path: testInfo.outputPath("landing.png"), fullPage: true });
+      await account.click();
+      await expect(page).toHaveURL(/\/account$/);
+      await expect(page.getByRole("heading", { name: "Your account", exact: true })).toBeVisible();
+      expect(await account.boundingBox()).toEqual(before);
+      const review = page.getByRole("button", { name: "Review account deletion" });
+      await expect(review).toBeVisible();
+      await review.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath("account.png"), fullPage: true });
+      await review.click();
+      await expect(page.getByRole("button", { name: "Delete account permanently" })).toBeDisabled();
+      await expect(page.getByLabel("Type your account ID to confirm:", { exact: false })).toBeFocused();
+    });
+  }
+}

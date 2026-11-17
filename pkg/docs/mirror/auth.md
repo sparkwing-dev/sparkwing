@@ -1029,6 +1029,8 @@ session. The preview lists every team where you are the only member. Their runs
 and operational data go with them. Type the account ID to confirm in the
 dashboard. In the CLI, first read the preview, then repeat the account ID with
 `--confirm ACCOUNT_ID` and each listed team with `--confirm-team SLUG`.
+Waitlisted accounts and accounts without a team can open **Account** from the
+top navigation to reach the same deletion page.
 
 `GET /api/v1/me/deletion` returns `account_id`, `teams`, `blocked_teams`,
 `sign_in_required`, the shared-token `credential_notice`, and the documentation-owned

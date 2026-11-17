@@ -19,6 +19,9 @@
 
 ### Fixed
 
+- **web:** Reach Account from the waitlist and before joining a team
+  The top navigation keeps an Account link available for both states.
+
 - **cli:** Explain account deletion before listing confirmation requirements
   Account deletion help includes the plain introduction shown by other commands.
 
