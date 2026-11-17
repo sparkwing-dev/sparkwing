@@ -676,3 +676,11 @@ OIDC audit identity privacy is owned by `internal/store/audit_oidc.go` and
 scope, rollback and external-key matching. `TestNativeOIDCMintCommittedIdentityProperty`
 checks the HTTP mint surface. Schema 40 installs the pending marker. Configured
 store startup reconciles before serving and preserves audit retention.
+Linux process inspection treats ENOENT and ESRCH as absent processes. Owners:
+`internal/procgroup/session_linux.go` and
+`internal/wingd/admission_process_liveness_linux.go`. Guards:
+`TestSessionIdentityVanished` and `TestAdmissionProcessRunningVanished`.
+
+Runner claim dispatch rechecks cancellation after version policy validation.
+Owner: `internal/runners/loop.go`; guard:
+`TestLoopDoesNotClaimAfterPolicyCancelsContext`.
