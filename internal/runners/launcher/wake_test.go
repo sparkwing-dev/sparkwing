@@ -179,6 +179,79 @@ func TestRunHoldsClaimWithoutBlockingReconciliation(t *testing.T) {
 	}
 }
 
+func TestLauncherReconnectsWhenDrainConsumesCleanTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, _, _ := fixture()
+		l.Poll = 5 * time.Second
+		var claims, watches atomic.Int32
+		var err error
+		l.Control, err = NewControllerControl(launcherWireFake{
+			claim: func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				claims.Add(1)
+				<-ctx.Done()
+				return controllerwire.ClaimResponse{}, ctx.Err()
+			},
+			sync: func(context.Context, controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+				return controllerwire.LauncherSyncResponse{}, nil
+			},
+		}, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, second := watch.NewRaceFreeFake(), watch.NewRaceFreeFake()
+		kube.PrependWatchReactor("pods", func(ktesting.Action) (bool, watch.Interface, error) {
+			if watches.Add(1) == 1 {
+				return true, first, nil
+			}
+			return true, second, nil
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		started := time.Now()
+		var paused atomic.Bool
+		entered, resume := make(chan struct{}), make(chan struct{})
+		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+			if time.Since(started) >= podWatchTimeout && paused.CompareAndSwap(false, true) {
+				close(entered)
+				select {
+				case <-resume:
+				case <-ctx.Done():
+				}
+			}
+			return false, nil, nil
+		})
+		done := make(chan error, 1)
+		go func() { done <- l.Run(ctx) }()
+		defer func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+		}()
+		synctest.Wait()
+		time.Sleep(podWatchTimeout)
+		synctest.Wait()
+		select {
+		case <-entered:
+		default:
+			t.Fatal("reconciliation did not pause after draining")
+		}
+		// bug: the event wakes another pass whose drain consumes the following clean close.
+		first.Modify(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "capacity"}})
+		first.Stop()
+		close(resume)
+		synctest.Wait()
+		if got := claims.Load(); got != 1 {
+			t.Fatalf("held claim count=%d, want one pending throughout reconnect", got)
+		}
+		if got := watches.Load(); got != 2 {
+			t.Fatalf("watches after drain consumed clean timeout=%d, want immediate reconnect", got)
+		}
+		if elapsed := time.Since(started); elapsed != podWatchTimeout {
+			t.Fatalf("drained timeout reconnect advanced clock by %s", elapsed-podWatchTimeout)
+		}
+	})
+}
+
 type wakeAllocationControl struct {
 	CloudControl
 	resources *match.Resources

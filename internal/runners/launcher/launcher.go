@@ -318,6 +318,10 @@ func (l *Launcher) Run(ctx context.Context) error {
 			claims.start(ctx, poll)
 		}
 		wait := min(poll, max(time.Until(nextReconcile), 0))
+		if pods == nil {
+			// perf: draining can close the watch after this pass's connection check.
+			wait = min(wait, max(time.Until(reconnect), 0))
+		}
 		if blocking(synced) == nil {
 			for _, award := range l.waitingAwards() {
 				// perf: container exit should release a held successor before the next claim poll.
