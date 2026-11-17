@@ -19,6 +19,8 @@ type checkoutContract struct {
 	RefundEvent json.RawMessage `json:"refund_event"`
 	Token       string          `json:"token"`
 	Deployment  string          `json:"deployment"`
+	Mode        string          `json:"mode"`
+	ModeHeader  string          `json:"mode_header"`
 	MinCents    int64           `json:"min_cents"`
 	MaxCents    int64           `json:"max_cents"`
 	Routes      map[string]struct {
@@ -63,12 +65,18 @@ func (c checkoutContract) client(t *testing.T, token, route string, status int, 
 		if err != nil {
 			t.Fatal(err)
 		}
-		if r.URL.Path != want.Path || !sameJSON(t, sent, want.Request) {
-			t.Fatalf("%s call %s %s; want the contract request %s %s", route, r.URL.Path, sent, want.Path, want.Request)
+		if r.URL.Path != want.Path || !sameJSON(t, sent, want.Request) || r.Header.Get(c.ModeHeader) != c.Mode {
+			t.Fatalf("%s call %s %s mode %q; want the contract request %s %s mode %q", route, r.URL.Path, sent, r.Header.Get(c.ModeHeader), want.Path, want.Request, c.Mode)
 		}
-		return refillReply(status, string(body)), nil
+		reply := refillReply(status, string(body))
+		reply.Header = http.Header{c.ModeHeader: {c.Mode}}
+		return reply, nil
 	})
 	return checkout
+}
+
+func (c checkoutContract) pairing() checkoutPairing {
+	return checkoutPairing{deployment: c.Deployment, mode: capability.PaymentMode(c.Mode)}
 }
 
 func contractFields(t *testing.T, raw json.RawMessage) map[string]any {
@@ -90,7 +98,7 @@ func (c checkoutContract) refill(t *testing.T) store.Refill {
 // and holds the contract's payment bounds.
 func TestEveryCheckoutCallMatchesTheSharedContract(t *testing.T) {
 	c := loadCheckoutContract(t)
-	if c.MinCents != store.MinCardPaymentCents || c.MaxCents != store.MaxCardPaymentCents {
+	if c.MinCents != store.MinCardPaymentCents || c.MaxCents != store.MaxCardPaymentCents || c.ModeHeader != checkoutModeHeader {
 		t.Fatalf("contract bounds %d..%d; controller %d..%d", c.MinCents, c.MaxCents, store.MinCardPaymentCents, store.MaxCardPaymentCents)
 	}
 	if len(c.Routes) != 5 {
@@ -113,22 +121,22 @@ func TestEveryCheckoutCallMatchesTheSharedContract(t *testing.T) {
 	}
 
 	page, out := pageFor("checkout", capability.BillingPageCredits)
-	if err := c.client(t, c.Token, "checkout", http.StatusOK, c.Routes["checkout"].Response).openReservedPage(ctx, c.Deployment, page, ""); err != nil ||
+	if err := c.client(t, c.Token, "checkout", http.StatusOK, c.Routes["checkout"].Response).openReservedPage(ctx, c.pairing(), page, ""); err != nil ||
 		page.URL != out["url"] || page.ProviderID != out["id"] || page.ExpiresAt.Unix() != int64(out["expires_at"].(float64)) {
 		t.Fatalf("checkout page %+v: %v", page, err)
 	}
 	page, out = pageFor("card_setup", capability.BillingPageCard)
 	email := contractFields(t, c.Routes["card_setup"].Request)["email"].(string)
-	if err := c.client(t, c.Token, "card_setup", http.StatusOK, c.Routes["card_setup"].Response).openReservedPage(ctx, c.Deployment, page, email); err != nil ||
+	if err := c.client(t, c.Token, "card_setup", http.StatusOK, c.Routes["card_setup"].Response).openReservedPage(ctx, c.pairing(), page, email); err != nil ||
 		page.URL != out["url"] || page.ProviderID != out["id"] || page.Customer != out["customer"] {
 		t.Fatalf("card setup page %+v: %v", page, err)
 	}
 	in, out := contractFields(t, c.Routes["portal"].Request), contractFields(t, c.Routes["portal"].Response)
-	if url, err := c.client(t, c.Token, "portal", http.StatusOK, c.Routes["portal"].Response).portal(ctx, c.Deployment, in["team"].(string), in["customer"].(string)); err != nil || url != out["url"] {
+	if url, err := c.client(t, c.Token, "portal", http.StatusOK, c.Routes["portal"].Response).portal(ctx, c.pairing(), in["team"].(string), in["customer"].(string)); err != nil || url != out["url"] {
 		t.Fatalf("portal %q: %v", url, err)
 	}
 	in, out = contractFields(t, c.Routes["refund"].Request), contractFields(t, c.Routes["refund"].Response)
-	if refund, status, err := c.client(t, c.Token, "refund", http.StatusOK, c.Routes["refund"].Response).refund(ctx, c.Deployment, store.Team(in["team"].(string)), in["payment_intent"].(string), in["reason"].(string)); err != nil ||
+	if refund, status, err := c.client(t, c.Token, "refund", http.StatusOK, c.Routes["refund"].Response).refund(ctx, c.pairing(), store.Team(in["team"].(string)), in["payment_intent"].(string), in["reason"].(string)); err != nil ||
 		refund != out["refund"] || status != out["status"] {
 		t.Fatalf("refund %q %q: %v", refund, status, err)
 	}
@@ -149,7 +157,7 @@ func TestEveryCheckoutCallMatchesTheSharedContract(t *testing.T) {
 			if tc.Body != nil {
 				strictJSON(t, tc.Body, &refillResponse{})
 			}
-			res, err := c.client(t, c.Token, "refill", tc.HTTPStatus, tc.Body).refill(t.Context(), c.Deployment, c.refill(t))
+			res, err := c.client(t, c.Token, "refill", tc.HTTPStatus, tc.Body).refill(t.Context(), c.pairing(), c.refill(t))
 			got := res.Failure
 			if errors.Is(err, errRefillNoCard) {
 				got = store.RefillNoCard
@@ -176,7 +184,7 @@ func TestCheckoutRefusalsAreClassifiedAsTheSharedContractSays(t *testing.T) {
 			if refusal.Name == "wrong_token" {
 				token, status = "bct_another_token", http.StatusOK
 			}
-			_, err := c.client(t, token, "refill", status, []byte(`{"error":"refused"}`)).refill(t.Context(), c.Deployment, c.refill(t))
+			_, err := c.client(t, token, "refill", status, []byte(`{"error":"refused"}`)).refill(t.Context(), c.pairing(), c.refill(t))
 			if errors.Is(err, errCheckoutRefused) != refusal.Final || errors.Is(err, errCheckoutUnavailable) == refusal.Final {
 				t.Fatalf("status %d classified as %v; want final %v", refusal.HTTPStatus, err, refusal.Final)
 			}

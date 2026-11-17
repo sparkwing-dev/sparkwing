@@ -52,6 +52,7 @@ func newFakeCheckout(t *testing.T) (*fakeCheckout, string) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Sparkwing-Payment-Mode", string(capability.PaymentTest))
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"id": "cs_test_1", "url": url, "expires_at": time.Now().Add(31 * time.Minute).Unix(),

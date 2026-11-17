@@ -23,7 +23,7 @@ func TestBillingPagesRequireTheControllersPaymentMode(t *testing.T) {
 					t.Fatal(err)
 				}
 				var sessionID string
-				s.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+				s.checkout.http.Transport = pairedBillingPageTransport(func(*http.Request) (*http.Response, error) {
 					customer := ""
 					if route == "card" {
 						customer = "cus_mode"
