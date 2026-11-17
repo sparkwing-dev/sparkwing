@@ -71,6 +71,9 @@ func TestPublicWireTypeLookup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if string(raw) != `{"name":"REGION","description":"region","default":"west"}` {
+		t.Fatalf("environment JSON = %s", raw)
+	}
 	var decoded EnvironmentDescription
 	if err = json.Unmarshal(raw, &decoded); err != nil || !reflect.DeepEqual(env, decoded) {
 		t.Fatalf("environment=%+v error=%v", decoded, err)

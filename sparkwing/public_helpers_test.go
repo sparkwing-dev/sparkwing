@@ -145,7 +145,7 @@ func TestPublicServicesCallbackAndCleanup(t *testing.T) {
 		}
 		return failure
 	})
-	if !called || !errors.Is(err, failure) || host.request.Operation != "services.Stop" {
+	if !called || !errors.Is(err, failure) || host.request.Operation != "services.Stop" || string(host.request.Args) != `[[{"name":"db","hostPort":1234,"cleanup_id":"owned"}]]` {
 		t.Fatalf("called=%v operation=%s args=%s error=%v", called, host.request.Operation, host.request.Args, err)
 	}
 }

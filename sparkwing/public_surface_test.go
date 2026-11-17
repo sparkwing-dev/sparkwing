@@ -224,6 +224,12 @@ func TestPublicGroupDeclarations(t *testing.T) {
 		t.Fatalf("class=%v", doc.AdmissionClass)
 	}
 	for _, s := range doc.Jobs[1:] {
+		if s.SkipIfBudgetMS == nil || *s.SkipIfBudgetMS != 1000 {
+			t.Fatalf("member %s skip budget = %v, want 1000ms", s.ID, s.SkipIfBudgetMS)
+		}
+		if s.Retry == nil || s.Retry.BackoffMS == nil || *s.Retry.BackoffMS != 1000 {
+			t.Fatalf("member %s retry = %+v, want 1000ms backoff", s.ID, s.Retry)
+		}
 		if !slices.Equal(s.NeedsIfPresent, []string{"producer"}) || !slices.Equal(s.NeedsGenerated, []string{generator.ID()}) || s.Memo == nil || *s.Memo.TTLMS != 60000 || len(s.Caches) != 2 || s.Caches[0].Path != ".tools" || s.Caches[1].Resolver != "go-modules" || !slices.Equal(s.Artifacts, []string{"out/*"}) || len(s.Env) != 1 || s.Env["MODE"].Value != "test" || !s.Env["MODE"].Startup || len(s.Concurrency) != 1 || *s.Concurrency[0].Cost != 2 || len(s.Consumes) != 1 || s.Consumes[0].Into != "input" || !slices.Equal(s.Requires, []string{"linux"}) || !s.Inline || !s.Optional || !s.ContinueOnError || len(s.Closures.SkipIf) != 1 || len(s.Closures.BeforeRun) != 1 || len(s.Closures.AfterRun) != 1 || s.Closures.Verify == "" || s.Retry.Attempts != 2 {
 			t.Fatalf("member=%+v", s)
 		}
