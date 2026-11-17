@@ -198,7 +198,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 	for ctx.Err() == nil {
 		claims.receive()
 		reconcile = reconcile || !time.Now().Before(nextReconcile)
-		// perf: a completed award must not queue behind another slow reconciliation; the burst bound still yields to safety work.
+		// perf: consume a ready award before slow reconciliation; the burst bound still yields to safety work.
 		applyClaim := claims.result != nil && claims.result.award != nil && claimed < maxClaimsPerCycle && blocking(synced) == nil && !time.Now().Before(cooldown)
 		if applyClaim {
 			reconcile = false
