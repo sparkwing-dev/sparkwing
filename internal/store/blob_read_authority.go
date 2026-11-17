@@ -76,10 +76,6 @@ func requireBlobMemoTx(ctx context.Context, tx *storeTx, a blobActor) error {
 	if err := tx.QueryRowContext(ctx, "SELECT spec_json FROM nodes WHERE team=? AND run_id=? AND node_id=?", id.Team, id.RunID, id.NodeID).Scan(&raw); err != nil {
 		return err
 	}
-	raw, err := decodeNodeSpec(tx.store, Team(id.Team), id.RunID, id.NodeID, raw)
-	if err != nil {
-		return err
-	}
 	var spec nodewire.JobSpec
 	if err := json.Unmarshal(raw, &spec); err != nil {
 		return err
@@ -279,10 +275,6 @@ func blobDependenciesTx(ctx context.Context, tx *storeTx, team Team, run, node s
 		var id string
 		var raw []byte
 		if err := rows.Scan(&id, &raw); err != nil {
-			return nil, nil, errors.Join(err, rows.Close())
-		}
-		raw, err := decodeNodeSpec(tx.store, team, run, id, raw)
-		if err != nil {
 			return nil, nil, errors.Join(err, rows.Close())
 		}
 		var spec nodewire.JobSpec

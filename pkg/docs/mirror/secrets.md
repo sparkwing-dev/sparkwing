@@ -174,6 +174,10 @@ fire history, and job defaults declared with `WithArgs`, using the same keyring
 as run arguments. Authorized runners receive the restored values. Hashes and
 replay comparisons use the original plaintext documents.
 
+Dependency, memo, child-pipeline and declared-step metadata remain readable
+without the argument key. Reads that return full job specs still require the key
+to restore defaults and refuse the read if it is unavailable.
+
 Existing plaintext rows remain readable until `sparkwing operator secrets rotate`
 seals them. Run `sparkwing operator secrets rotate --verify` afterward and require
 `plaintext_run_arguments: 0`, `previous_key_only: 0` and no unreadable rows before

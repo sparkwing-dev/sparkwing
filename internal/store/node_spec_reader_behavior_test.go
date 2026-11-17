@@ -22,7 +22,7 @@ func TestNodeSpecReadersPreserveSealedDefaultsAndMetadata(t *testing.T) {
 			s := dialect.target(t).Open(t, store.WithPolicies(sealStorePolicies))
 			plan := admitArgumentRun(t, s, "readers", []nodewire.JobSpec{
 				{ID: "build", Steps: []nodewire.StepSpec{{ID: "body"}}},
-				{ID: "alpha", Steps: []nodewire.StepSpec{{ID: "body"}}, Needs: []string{"build"}, Arguments: []nodewire.ArgumentDescription{jobArgument()}},
+				{ID: "alpha", Steps: []nodewire.StepSpec{{ID: "body"}}, Needs: []string{"build"}},
 			})
 			tenant := teamOf(t, s, plan)
 			want := nodewire.JobSpec{
@@ -85,13 +85,32 @@ func TestNodeSpecReadersPreserveSealedDefaultsAndMetadata(t *testing.T) {
 				}
 				t.Fatal("snapshot lost node")
 			})
-			t.Run("declared-steps", func(t *testing.T) {
+			readSteps := func(t *testing.T) {
+				t.Helper()
 				steps, err := tenant.ListDeclaredSteps(t.Context(), plan.RunID)
 				if err != nil || !slices.Equal(steps["alpha"], []string{"first", "second"}) {
 					t.Fatalf("declared steps changed: %v", err)
 				}
-			})
+			}
+			t.Run("declared-steps", readSteps)
 			s.CheckNodeSpecMetadataReadersForTest(t, tenant.Team(), plan.RunID, "alpha")
+			t.Run("without-argument-key", func(t *testing.T) {
+				s.WithoutNodeArgumentKeyForTest(t)
+				t.Run("declared-steps", readSteps)
+				s.CheckNodeSpecMetadataReadersForTest(t, tenant.Team(), plan.RunID, "alpha")
+				t.Run("node-fails-closed", func(t *testing.T) {
+					row, err := tenant.ReadNode(t.Context(), runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: "alpha"})
+					if err == nil || len(row.Spec) != 0 {
+						t.Fatal("node reader exposed a spec without decoding its defaults")
+					}
+				})
+				t.Run("snapshot-fails-closed", func(t *testing.T) {
+					snapshot, err := tenant.ReadSnapshot(t.Context(), plan.RunID)
+					if err == nil || len(snapshot.Nodes) != 0 {
+						t.Fatal("snapshot exposed nodes without decoding their defaults")
+					}
+				})
+			})
 		})
 	}
 }

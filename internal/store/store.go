@@ -884,10 +884,6 @@ func (t *Tenant) ListDeclaredSteps(ctx context.Context, runID string) (_ map[str
 		if err := rows.Scan(&node, &spec); err != nil {
 			return nil, err
 		}
-		spec, err = decodeNodeSpec(t.s, t.team, runID, node, spec)
-		if err != nil {
-			continue
-		}
 		var declared struct {
 			Steps []struct {
 				ID string `json:"id"`

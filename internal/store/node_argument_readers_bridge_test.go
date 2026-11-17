@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -11,6 +12,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
+
+// WithoutNodeArgumentKeyForTest removes only the argument key for this test's metadata reads.
+func (s *Store) WithoutNodeArgumentKeyForTest(t *testing.T) {
+	t.Helper()
+	cipher := s.runEnvCipher
+	s.runEnvCipher = nil
+	t.Cleanup(func() { s.runEnvCipher = cipher })
+}
 
 // CheckNodeSpecMetadataReadersForTest exercises the internal metadata readers on a persisted sealed node.
 func (s *Store) CheckNodeSpecMetadataReadersForTest(t *testing.T, team Team, run, node string) {
@@ -28,7 +37,14 @@ func (s *Store) CheckNodeSpecMetadataReadersForTest(t *testing.T, team Team, run
 		}},
 		{"memo", func(tx *storeTx) error {
 			actor := blobActor{authority: blob.Authority{Attempt: runspec.Optional[runspec.AttemptIdentity]{Set: true, Value: runspec.AttemptIdentity{Team: string(team), RunID: run, NodeID: node}}}}
-			return requireBlobMemoTx(t.Context(), tx, actor)
+			if err := requireBlobMemoTx(t.Context(), tx, actor); err != nil {
+				return err
+			}
+			actor.authority.Attempt.Value.NodeID = "build"
+			if err := requireBlobMemoTx(t.Context(), tx, actor); !errors.Is(err, blob.ErrDigestNotReadable) {
+				return fmt.Errorf("undeclared memo read was accepted")
+			}
+			return nil
 		}},
 		{"child-award", func(tx *storeTx) error {
 			id, err := encodeAwardUnit(UnitRef{Kind: capability.UnitNode, RunID: runspec.RunID(run), NodeID: runspec.NodeID(node)})
