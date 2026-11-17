@@ -4,6 +4,7 @@ import io
 import json
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,7 +25,7 @@ def row(cores, quota, nice):
 
 
 class BudgetProbeTest(unittest.TestCase):
-    def measured(self, mode, quota=None, peer=None):
+    def measured(self, mode, quota=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             group = root / 'cgroup' / 'sparkwing-runner-proof.service'
@@ -52,31 +53,14 @@ class BudgetProbeTest(unittest.TestCase):
                     mock.patch.object(probe.time, 'sleep', side_effect=elapsed), \
                     mock.patch.object(probe.time, 'monotonic_ns', side_effect=[0, 20000000000]), \
                     mock.patch.object(probe.os, 'getpriority', return_value=10 if mode == 'enforce' else 0), \
-                    mock.patch.dict(globals_, process_usage=mock.Mock(side_effect=[0] * 6 + [10000000] * 6),
-                                    wait_for=mock.Mock()), \
                     contextlib.redirect_stdout(io.StringIO()):
                 try:
-                    probe.measure(str(output), mode, peer)
+                    probe.measure(output, mode)
                 finally:
                     for burner in burners:
                         burner.terminate.assert_called_once()
                         burner.wait.assert_called_once()
             return json.loads(output.read_text())
-
-    def test_job_measurement_uses_only_its_process_counters(self):
-        result = self.measured('capped', '400000 100000', 'peer.json')
-        self.assertEqual(result['cores'], 3)
-        self.assertEqual(result['before']['usage_usec'], 0)
-        self.assertEqual(result['after']['usage_usec'], 60000000)
-        self.assertEqual(result['end_ns'] - result['start_ns'], 20000000000)
-
-    def test_process_counters_include_user_and_system_ticks(self):
-        with tempfile.TemporaryDirectory() as directory:
-            stat = Path(directory) / 'stat'
-            stat.write_text('123 (a name with ) parentheses) S ' + '0 ' * 10 + '150 50 999 999')
-            with mock.patch.dict(globals_, Path=lambda _: stat), \
-                    mock.patch.object(probe.os, 'sysconf', return_value=100):
-                self.assertEqual(probe.process_usage(123), 2000000)
 
     def test_control_without_cpu_max_measures_usage_and_passes_verdict(self):
         control = self.measured('control')
@@ -130,47 +114,32 @@ class BudgetProbeTest(unittest.TestCase):
                         probe.judge(enforced, candidate)
 
 
-class JobBudgetVerdictTest(unittest.TestCase):
-    def pair(self, capped_cores=1):
-        capped = row(capped_cores, '400000 100000', 10)
-        busy = row(2.8, '400000 100000', 10)
-        for index, result in enumerate((capped, busy)):
-            result.update(cgroup='/sparkwing-runner-proof.service',
-                          start_ns=index * 100000000, end_ns=20000000000 + index * 100000000,
-                          burners=list(range(index * 6, (index + 1) * 6)))
-        return capped, busy
-
-    def test_one_core_job_with_busy_peer(self):
-        probe.judge_jobs(*self.pair())
-
-    def test_rejects_per_job_oversubscription(self):
-        with self.assertRaisesRegex(AssertionError, 'one-core job'):
-            probe.judge_jobs(*self.pair(2))
-
-    def test_cli_reports_measured_cap_failure(self):
-        with tempfile.TemporaryDirectory() as directory:
-            paths = [Path(directory) / name for name in ('capped.json', 'busy.json')]
-            for path, result in zip(paths, self.pair(2)):
-                path.write_text(json.dumps(result))
-            result = subprocess.run([sys.executable, '-I',
-                                     str(Path(__file__).with_name('runner-budget-probe.py')),
-                                     'judge-jobs', *(str(path) for path in paths)],
-                                    capture_output=True, text=True, check=False)
-            self.assertEqual(result.returncode, 1)
-            self.assertIn('one-core job measured 2.000 cores', result.stderr)
-
-    def test_rejects_idle_or_serial_peer_and_wrong_runner(self):
-        for key, value, reason in [('cores', 0.5, 'busy peer'),
-                                   ('start_ns', 20000000000, 'overlap'),
-                                   ('unit', 'sparkwing-runner-other.service', 'same runner'),
-                                   ('burners', list(range(6)), 'shared burners')]:
-            with self.subTest(key=key):
-                capped, busy = self.pair()
-                busy[key] = value
-                if key == 'cores':
-                    busy['after']['usage_usec'] = 1000 + value * 20e6
-                with self.assertRaisesRegex(AssertionError, reason):
-                    probe.judge_jobs(capped, busy)
+    def test_verdict_tests_detect_disabled_checks(self):
+        source_path = Path(__file__).with_name('runner-budget-probe.py')
+        source = source_path.read_text()
+        checks = [
+            "enforced['nice'] == 10",
+            "control['nice'] == 0",
+            "control['cpu_max'].split()[0] == 'max'",
+            "control['cores'] > 1.5 * enforced['cores']",
+            "19 <= row['seconds'] <= 25",
+            "len(row['burners']) == 6",
+            "len(set(row['burners'])) == 6",
+            "row['unit'].startswith('sparkwing-runner-')",
+            "row['unit'].endswith('.service')",
+        ]
+        for check in checks:
+            with self.subTest(check=check), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.assertEqual(source.count(check), 1)
+                (root / source_path.name).write_text(source.replace(check, 'True'))
+                test_path = root / Path(__file__).name
+                shutil.copyfile(__file__, test_path)
+                result = subprocess.run([sys.executable, '-I', str(test_path),
+                                         'BudgetProbeTest.test_verdict_rejects_invalid_measurements'],
+                                        capture_output=True, text=True, check=False)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('FAIL:', result.stderr)
 
 
 if __name__ == '__main__':

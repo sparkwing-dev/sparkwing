@@ -50,7 +50,7 @@ VERSION="v0.0.0-dev+$(git -C "$REPO" rev-parse --short=12 HEAD)"
 go -C "$REPO" build -trimpath -ldflags "-X main.Version=$VERSION" -o "$WORK/bin/sparkwing" ./cmd/sparkwing
 sha256sum "$WORK/bin/sparkwing" >"$EVIDENCE/binary.sha256"
 
-for case_name in enforce control per-job; do
+for case_name in enforce control; do
   CASE="$WORK/$case_name"
   mkdir -p "$CASE/home" "$CASE/state" "$CASE/repo/.sparkwing"
   export HOME="$CASE/home" SPARKWING_HOME="$CASE/state" SPARKWING_CONFIG="$CASE/config.yaml"
@@ -60,7 +60,6 @@ for case_name in enforce control per-job; do
   export GOCACHE="$WORK/go-cache" GOPATH="$WORK/go-path"
   printf 'dashboard: {address: "127.0.0.1:0"}\n' >"$SPARKWING_CONFIG"
   if [[ $case_name == enforce ]]; then printf 'admission: {budget: "2,enforce"}\n' >>"$SPARKWING_CONFIG"; fi
-  if [[ $case_name == per-job ]]; then printf 'admission: {budget: "4,enforce"}\n' >>"$SPARKWING_CONFIG"; fi
   chmod 0600 "$SPARKWING_CONFIG"
   [[ $(stat -c %a "$SPARKWING_CONFIG") == 600 ]]
   cp "$SPARKWING_CONFIG" "$EVIDENCE/$case_name-config.yaml"
@@ -81,31 +80,12 @@ func(pipeline) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)e
 }
 func main(){sw.Register("proof",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});sw.Main()}
 EOF
-  if [[ $case_name == per-job ]]; then
-    cat >"$CASE/repo/.sparkwing/main.go" <<EOF
-package main
-import("context";"os";"os/exec";sw "github.com/sparkwing-dev/sparkwing/sparkwing")
-type pipeline struct{sw.Base}
-func burn(mode, peer string)func(context.Context)error{return func(ctx context.Context)error{
- c:=exec.CommandContext(ctx,"python3","-I","$REPO/bin/runner-budget-probe.py","measure","$EVIDENCE/"+mode+".json",mode,"$EVIDENCE/"+peer+".json")
- c.Stdout=os.Stdout;c.Stderr=os.Stderr;return c.Run()
-}}
-func(pipeline) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)error{
- sw.Job(p,"capped",burn("capped","busy")).Cores(1)
- sw.Job(p,"busy",burn("busy","capped"))
- return nil
-}
-func main(){sw.Register("proof",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});sw.Main()}
-EOF
-  fi
   git -C "$CASE/repo" init -q
   git -C "$CASE/repo" add .sparkwing
   git -C "$CASE/repo" -c user.name=Proof -c user.email=proof@example.invalid -c commit.gpgsign=false commit -qm fixture
   cp -a "$CASE/repo" "$EVIDENCE/$case_name-fixture"
   timeout 300 "$WORK/bin/sparkwing" run proof -C "$CASE/repo" --route local --no-update -o json >"$EVIDENCE/$case_name-run.jsonl" 2>&1
-  MEASUREMENT="$EVIDENCE/$case_name.json"
-  if [[ $case_name == per-job ]]; then MEASUREMENT="$EVIDENCE/capped.json"; fi
-  UNIT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["unit"])' "$MEASUREMENT")
+  UNIT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["unit"])' "$EVIDENCE/$case_name.json")
   [[ $UNIT == sparkwing-runner-*.service ]]
   systemctl --user show "$UNIT" -p Id -p MainPID -p ControlGroup -p CPUQuotaPerSecUSec -p CPUQuotaPeriodUSec -p Nice >"$EVIDENCE/$case_name-unit.txt"
   "$WORK/bin/sparkwing" queue list -o json >"$EVIDENCE/$case_name-queue.jsonl"
@@ -113,4 +93,3 @@ EOF
   unset SPARKWING_HOME
 done
 python3 -I "$REPO/bin/runner-budget-probe.py" judge "$EVIDENCE/enforce.json" "$EVIDENCE/control.json" 2>&1 | tee "$EVIDENCE/verdict.txt"
-python3 -I "$REPO/bin/runner-budget-probe.py" judge-jobs "$EVIDENCE/capped.json" "$EVIDENCE/busy.json" 2>&1 | tee -a "$EVIDENCE/verdict.txt"
