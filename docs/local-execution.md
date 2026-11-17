@@ -236,7 +236,7 @@ separate `SPARKWING_HOME`.
 The controller in the OS account's `~/.sparkwing` remains running while idle. An on-demand
 controller for another home exits after 20 minutes with no active runs, queued
 work, connected clients or runner-held work, and retires its supervised runner.
-Runner control polling does not count as client activity. The controller log
+Runner control polling and socket liveness probes do not count as client activity. The controller log
 records the home and idle duration. The next CLI call starts a fresh controller.
 A `.sparkwing` directory under an overridden `HOME` counts as a private home.
 If the OS account home cannot be identified, automatic exit is disabled.

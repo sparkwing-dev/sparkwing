@@ -292,7 +292,9 @@ idle keep-alive sockets and hijacked connections. Controller activity updates
 cannot erase that count. The OS account's default home and installed login services
 remain running while idle. Private on-demand controllers retire their runner and
 exit after 20 minutes without work, admission participants or client connections.
-Runner claim, lifecycle and probe traffic does not extend that interval. The
+Runner claim, lifecycle and probe traffic does not extend that interval. Raw
+socket liveness probes do not reset idle time, including probes from another
+controller's stale-socket cleanup. The
 runtime checks fresh store activity before retirement. Account-home lookup errors
 keep the controller running. The next client starts a new controller through the
 same election path. Explicit stop, context cancellation and runtime failure also

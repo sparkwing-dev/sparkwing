@@ -146,7 +146,7 @@ func (d *Daemon) serveIdleAPI(ctx context.Context, listener net.Listener, local 
 		case http.StateNew:
 			d.idleClients[connection] = idleClient{}
 		case http.StateClosed, http.StateHijacked:
-			if client := d.idleClients[connection]; !client.background {
+			if client := d.idleClients[connection]; client.classified && !client.background {
 				d.idleSince = time.Now()
 			}
 			delete(d.idleClients, connection)

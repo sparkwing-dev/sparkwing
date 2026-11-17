@@ -388,3 +388,44 @@ func TestBackgroundHandshakeDoesNotResetPrivateIdle(t *testing.T) {
 		}
 	})
 }
+
+func TestSocketLivenessProbesDoNotResetPrivateIdle(t *testing.T) {
+	initIdleTestSignals()
+	synctest.Test(t, func(t *testing.T) {
+		d, err := New(Config{Home: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.idleSince = time.Now()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
+		owner, err := controllerPeerIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		serving := make(chan error, 1)
+		go func() { serving <- d.serveIdleAPI(ctx, listener, localhostwire.LocalHTTP{API: http.NotFoundHandler()}) }()
+		joined := make(chan struct{})
+		go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+		for range 3 {
+			client, server := net.Pipe()
+			listener.connections <- localHTTPConnection{Conn: server, peer: owner}
+			synctest.Wait()
+			client.Close()
+			synctest.Wait()
+			time.Sleep(7 * time.Minute)
+			synctest.Wait()
+		}
+		select {
+		case <-d.quit:
+		default:
+			t.Error("socket liveness probes kept an idle private controller alive")
+		}
+		cancel()
+		<-joined
+		if err := <-serving; err != nil {
+			t.Fatal(err)
+		}
+	})
+}
