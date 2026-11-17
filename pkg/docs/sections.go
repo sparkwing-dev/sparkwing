@@ -268,8 +268,9 @@ func SearchSections(query string) []Section {
 			continue
 		}
 		for _, s := range secs {
-			hay := strings.ToLower(searchAliasesPattern.ReplaceAllString(s.Body, ""))
-			head := strings.ToLower(s.Heading + " " + s.Slug + " " + searchAliases(s.Body))
+			text, aliases := searchText(s.Body)
+			hay := strings.ToLower(text)
+			head := strings.ToLower(s.Heading + " " + s.Slug + " " + aliases)
 
 			crumb := strings.ToLower(s.Breadcrumb)
 			score, all := 0, true

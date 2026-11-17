@@ -184,8 +184,8 @@ func All() string {
 }
 
 // Search returns entries whose title, slug, or body contain every
-// space-separated token in query (case-insensitive). Title/slug and declared search-alias hits
-// rank above body-only matches. Empty query returns List().
+// space-separated token in query (case-insensitive). Title, slug and declared
+// search-alias hits rank above body-only matches. Empty query returns List().
 func Search(query string) []Entry {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -202,8 +202,9 @@ func Search(query string) []Entry {
 		if err != nil {
 			continue
 		}
-		titleHay := strings.ToLower(e.Title + " " + e.Slug + " " + searchAliases(body))
-		hay := titleHay + " " + strings.ToLower(searchAliasesPattern.ReplaceAllString(body, ""))
+		text, aliases := searchText(body)
+		titleHay := strings.ToLower(e.Title + " " + e.Slug + " " + aliases)
+		hay := titleHay + " " + strings.ToLower(text)
 
 		var score int
 		all := true
@@ -240,13 +241,16 @@ func Search(query string) []Entry {
 // vocabulary from one guide cannot change matches for unrelated guides.
 var searchAliasesPattern = regexp.MustCompile(`(?m)^<!-- search-aliases: (.+) -->$`)
 
-func searchAliases(body string) string {
+func searchText(body string) (string, string) {
+	if !strings.Contains(body, "<!-- search-aliases: ") {
+		return body, ""
+	}
 	var aliases strings.Builder
 	for _, match := range searchAliasesPattern.FindAllStringSubmatch(body, -1) {
 		aliases.WriteString(match[1])
 		aliases.WriteByte(' ')
 	}
-	return aliases.String()
+	return searchAliasesPattern.ReplaceAllString(body, ""), aliases.String()
 }
 
 // Changelog returns the embedded changelog with unreleased fragments collected.
