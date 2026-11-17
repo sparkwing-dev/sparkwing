@@ -42,7 +42,7 @@ sparkwing pipeline list
 
 Print one pipeline's full metadata
 
-Show a pipeline's arguments, jobs and triggers without executing its jobs.
+Show a pipeline's arguments and triggers without executing it. Use pipeline plan to see its jobs.
 
 ### Flags
 

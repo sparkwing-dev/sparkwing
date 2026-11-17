@@ -65,7 +65,7 @@ Read or add annotations attached to a run.
 
 Append an annotation to a job or step
 
-Attach a notice, warning or error to a run.
+Add an info annotation to a job or step in a run.
 
 Plain emits run/job[/step]. JSON retains the controller replay result.
 
@@ -172,7 +172,7 @@ The controller derives the approver from authentication. Plain emits run/job. JS
 
 List pending approvals (or one run's history)
 
-List approval requests and their decisions for a run.
+List pending approvals across runs, or the approvals and decisions for one run with --run.
 
 Without --run, list pending approvals. With --run, include resolved history. Plain emits run/job.
 
@@ -398,7 +398,7 @@ sparkwing runs logs --run RUN_ID --job build --follow
 
 Delete finished runs older than a threshold, or by id
 
-Remove old local run history. Preview the selected records before deleting them.
+Remove old run history, locally or on a controller with --profile. Use --dry-run to preview what would be deleted.
 
 Select --run, including --run - for IDs on stdin, or --older-than. Age selection reads every page and includes only terminal runs started before the cutoff. A failed selection deletes nothing.
 
