@@ -1256,6 +1256,9 @@ func (d *isolationDriver) capacityRun(p kubePod) string {
 		p.Metadata.Labels["sparkwing.dev/capacity-request"] != "true" || p.Metadata.Labels["app.kubernetes.io/managed-by"] != "sparkwing-launcher" {
 		return ""
 	}
+	if !capacityPodShape(p.rawSpec) {
+		return ""
+	}
 	var demand struct {
 		Binding awardBinding `json:"binding"`
 	}

@@ -1180,28 +1180,52 @@ func TestConformRefusesForeignWorkloadsClaimingCapacity(t *testing.T) {
 	}
 }
 
+func isoCapacityJSON(t *testing.T, run, team string) []byte {
+	t.Helper()
+	var pod map[string]any
+	if err := json.Unmarshal([]byte(`{"spec":{"automountServiceAccountToken":false,"securityContext":{"runAsUser":65534,"runAsGroup":65534,"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"capacity","image":"runner@sha256:fixture","command":["/bin/sh","-c","trap 'exit 0' TERM; /usr/bin/sleep \"$1\" & wait","capacity"],"args":["1200"],"imagePullPolicy":"IfNotPresent","terminationMessagePath":"/dev/termination-log","terminationMessagePolicy":"File","resources":{"requests":{"cpu":"2","memory":"5529Mi","ephemeral-storage":"20Gi"},"limits":{"cpu":"2","memory":"5529Mi","ephemeral-storage":"20Gi"}},"securityContext":{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"capabilities":{"drop":["ALL"]}}}]}}`), &pod); err != nil {
+		t.Fatal(err)
+	}
+	b := awardBinding{Kind: "work", UnitID: "fixture-unit", Team: team, RunID: run, NodeID: "output-allowed", Generation: 1}
+	binding, _ := json.Marshal(map[string]any{"binding": b})
+	raw := fmt.Sprintf("%q/%q/%q/%q/%q/%d/%d/%q/%d", b.UnitID, b.Team, b.RunID, b.NodeID, b.Kind, b.Generation, b.Attempt, b.SourceNodeID, b.SourceGeneration)
+	sum := sha256.Sum256([]byte(raw))
+	pod["metadata"] = map[string]any{
+		"name": "sw-capacity-" + hex.EncodeToString(sum[:24]), "namespace": isoJobNS,
+		"annotations": map[string]string{"sparkwing.dev/capacity-demand": string(binding)},
+		"labels":      map[string]string{"sparkwing.dev/capacity-request": "true", "app.kubernetes.io/managed-by": "sparkwing-launcher", "sparkwing.dev/team": teamNodeValue(isoJobNS, team)},
+	}
+	data, err := json.Marshal(pod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func isoCapacityDriver() isolationDriver {
+	runner := launcherPod()
+	runner.Spec.Containers[0].Image = "runner@sha256:fixture"
+	runner.Metadata.OwnerReferences = controlledBy("Job", "uid-own-job")
+	d := isolationDriver{args: isoArgs(), runs: []*isolationRun{{RunID: "run-1", Team: "stg-iso-b"}}, seen: newPlacementLog()}
+	d.seen.jobRun["uid-own-job"] = "run-1"
+	d.seen.samples = []placementSample{{pods: map[string][]runPod{"B1": {{kubePod: runner}}}}}
+	return d
+}
+
 func TestPlacementAcceptsOnlyTheRunsInertCapacityPod(t *testing.T) {
 	for _, mode := range []string{"own", "foreign-team", "foreign-run", "wrong-name", "unsafe-command", "host-network", "different-image", "privileged"} {
 		t.Run(mode, func(t *testing.T) {
-			var pod kubePod
-			data := `{"spec":{"automountServiceAccountToken":false,"securityContext":{"runAsUser":65534,"runAsGroup":65534,"runAsNonRoot":true},"containers":[{"name":"capacity","image":"runner@sha256:fixture","command":["/bin/sh","-c","trap 'exit 0' TERM; /usr/bin/sleep \"$1\" & wait","capacity"],"args":["1200"],"securityContext":{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"capabilities":{"drop":["ALL"]}}}]}}`
-			if err := json.Unmarshal([]byte(data), &pod); err != nil {
-				t.Fatal(err)
-			}
-			b := awardBinding{Kind: "work", UnitID: "fixture-unit", Team: "stg-iso-b", RunID: "run-1", NodeID: "output-allowed", Generation: 1}
+			run, team := "run-1", "stg-iso-b"
 			if mode == "foreign-team" {
-				b.Team = "stg-iso-a"
+				team = "stg-iso-a"
 			}
 			if mode == "foreign-run" {
-				b.RunID = "run-9"
+				run = "run-9"
 			}
-			binding, _ := json.Marshal(map[string]any{"binding": b})
-			pod.Metadata.Namespace = isoJobNS
-			pod.Metadata.Annotations = map[string]string{"sparkwing.dev/capacity-demand": string(binding)}
-			pod.Metadata.Labels = map[string]string{"sparkwing.dev/capacity-request": "true", "app.kubernetes.io/managed-by": "sparkwing-launcher", "sparkwing.dev/team": teamNodeValue(isoJobNS, b.Team)}
-			raw := fmt.Sprintf("%q/%q/%q/%q/%q/%d/%d/%q/%d", b.UnitID, b.Team, b.RunID, b.NodeID, b.Kind, b.Generation, b.Attempt, b.SourceNodeID, b.SourceGeneration)
-			sum := sha256.Sum256([]byte(raw))
-			pod.Metadata.Name = "sw-capacity-" + hex.EncodeToString(sum[:24])
+			var pod kubePod
+			if err := json.Unmarshal(isoCapacityJSON(t, run, team), &pod); err != nil {
+				t.Fatal(err)
+			}
 			switch mode {
 			case "wrong-name":
 				pod.Metadata.Name += "x"
@@ -1215,12 +1239,7 @@ func TestPlacementAcceptsOnlyTheRunsInertCapacityPod(t *testing.T) {
 				yes := true
 				pod.Spec.Containers[0].SecurityContext.Privileged = &yes
 			}
-			runner := launcherPod()
-			runner.Spec.Containers[0].Image = "runner@sha256:fixture"
-			runner.Metadata.OwnerReferences = controlledBy("Job", "uid-own-job")
-			d := isolationDriver{args: isoArgs(), runs: []*isolationRun{{RunID: "run-1", Team: "stg-iso-b"}}, seen: newPlacementLog()}
-			d.seen.jobRun["uid-own-job"] = "run-1"
-			d.seen.samples = []placementSample{{pods: map[string][]runPod{"B1": {{kubePod: runner}}}}}
+			d := isoCapacityDriver()
 			node := d.isolationNodeOf(isoNode("node-b1"), []kubePod{pod})
 			want := ""
 			if mode == "own" {
@@ -1244,6 +1263,66 @@ func TestNodeCaptureResolvesAJobCreatedDuringTheObservation(t *testing.T) {
 	uid := "uid-sw-run-1-" + isolationprobe.ProbeJob
 	if d.seen.jobRun[uid] != "run-1" {
 		t.Fatalf("new Job owner %q remains unresolved: %v", uid, d.seen.jobRun)
+	}
+}
+
+func TestCapacityPlacementRejectsAdditionalExecutionPathsFromRawJSON(t *testing.T) {
+	for _, c := range []struct{ name, where, field, value string }{
+		{"postStart exec", "container", "lifecycle", `{"postStart":{"exec":{"command":["/bin/sh","-c","echo extra code"]}}}`},
+		{"preStop exec", "container", "lifecycle", `{"preStop":{"exec":{"command":["/bin/sh","-c","echo extra code"]}}}`},
+		{"liveness exec", "container", "livenessProbe", `{"exec":{"command":["/bin/sh","-c","echo extra code"]}}`},
+		{"readiness exec", "container", "readinessProbe", `{"exec":{"command":["/bin/sh","-c","echo extra code"]}}`},
+		{"startup exec", "container", "startupProbe", `{"exec":{"command":["/bin/sh","-c","echo extra code"]}}`},
+		{"HTTP probe", "container", "livenessProbe", `{"httpGet":{"path":"/","port":8080}}`},
+		{"ephemeral container", "pod", "ephemeralContainers", `[{"name":"debug","image":"attacker","command":["/bin/sh"],"targetContainerName":"capacity"}]`},
+		{"init container", "pod", "initContainers", `[{"name":"init","image":"attacker","command":["/bin/sh"]}]`},
+		{"environment injection", "container", "env", `[{"name":"LD_PRELOAD","value":"/tmp/extra.so"}]`},
+		{"environment source", "container", "envFrom", `[{"configMapRef":{"name":"extra"}}]`},
+		{"device plugin resource", "container", "resources", `{"requests":{"example.com/device":"1"}}`},
+		{"resource claim", "container", "resources", `{"claims":[{"name":"extra"}]}`},
+		{"container root override", "container.securityContext", "runAsUser", `0`},
+		{"container group override", "container.securityContext", "runAsGroup", `0`},
+		{"container nonroot override", "container.securityContext", "runAsNonRoot", `false`},
+		{"alternate runtime", "pod", "runtimeClassName", `"extra-runtime"`},
+		{"shared process namespace", "pod", "shareProcessNamespace", `true`},
+		{"pod sysctls", "pod.securityContext", "sysctls", `[{"name":"kernel.shm_rmid_forced","value":"1"}]`},
+		{"future container path", "container", "futureExecutionHandler", `{"exec":{"command":["/bin/sh"]}}`},
+		{"future pod path", "pod", "futureExecutionHandler", `{"exec":{"command":["/bin/sh"]}}`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var raw map[string]any
+			if err := json.Unmarshal(isoCapacityJSON(t, "run-1", "stg-iso-b"), &raw); err != nil {
+				t.Fatal(err)
+			}
+			spec := raw["spec"].(map[string]any)
+			container := spec["containers"].([]any)[0].(map[string]any)
+			target := spec
+			switch c.where {
+			case "container":
+				target = container
+			case "container.securityContext":
+				target = container["securityContext"].(map[string]any)
+			case "pod.securityContext":
+				target = spec["securityContext"].(map[string]any)
+			}
+			var value any
+			if err := json.Unmarshal([]byte(c.value), &value); err != nil {
+				t.Fatal(err)
+			}
+			target[c.field] = value
+			data, err := json.Marshal(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var pod kubePod
+			if err := json.Unmarshal(data, &pod); err != nil {
+				t.Fatal(err)
+			}
+			d := isoCapacityDriver()
+			if got := d.isolationNodeOf(isoNode("node-b1"), []kubePod{pod}).Pods[0].Run; got != "" {
+				t.Fatalf("extra execution path was exempted as run %q", got)
+			}
+		})
 	}
 }
 

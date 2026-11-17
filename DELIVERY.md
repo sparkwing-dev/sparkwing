@@ -1501,7 +1501,10 @@ A tested node may hold the run's own Job pods, cluster-listed DaemonSet pods,
 and the launcher's inert capacity placeholder for that same run and team.
 Job and DaemonSet owners are matched by UID. A capacity pod must match its
 binding-derived name, team label, runner image and unprivileged sleep-only
-spec. Another team's or run's capacity pod still fails placement. If a Job
+spec. The driver retains its complete raw spec and accepts only the expected
+capacity fields. Lifecycle hooks, probes, init/ephemeral containers,
+environment injection, security overrides and unknown execution fields all
+fail placement. Another team's or run's capacity pod still fails placement. If a Job
 starts between capture calls, the driver reads Jobs again to resolve the newly
 observed owner's UID and retains that capture.
 

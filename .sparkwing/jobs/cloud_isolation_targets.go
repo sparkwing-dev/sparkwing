@@ -78,6 +78,7 @@ type kubeContainer struct {
 }
 
 type kubePod struct {
+	rawSpec  json.RawMessage
 	Metadata kubeMeta `json:"metadata"`
 	Spec     struct {
 		NodeName                     string `json:"nodeName"`
@@ -107,6 +108,25 @@ type kubePod struct {
 			Status string `json:"status"`
 		} `json:"conditions"`
 	} `json:"status"`
+}
+
+// UnmarshalJSON retains the full spec so capacity grading cannot overlook fields outside the
+// discovery projection.
+func (p *kubePod) UnmarshalJSON(data []byte) error {
+	type plain kubePod
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw struct {
+		Spec json.RawMessage `json:"spec"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*p = kubePod(decoded)
+	p.rawSpec = raw.Spec
+	return nil
 }
 
 func (p kubePod) ready() bool {
