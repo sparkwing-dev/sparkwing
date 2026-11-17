@@ -1013,13 +1013,16 @@ the remaining wait, not total copy time. A failed seed copy still starts cold.
 Exchange and renewal success describe the RPC result, before subsequent binding
 or cancellation checks. Launcher preparation and reservation omit expected
 capacity/predecessor wait results. Successful preparation can still repeat while
-an award waits. These records carry run, unit and claim generation.
+an award waits. Launcher records carry run, unit and claim generation;
+bootstrap records do not, and are told apart by the Pod whose log carries them.
 `launcher_capacity_observed` is emitted from launch only after Job creation and
 admission validation succeed, when the existing capacity Pod read provided a
 running container with a known start time. Abandonment and failed Job creation
 emit no capacity observation. The interval includes polling, reservation,
 capacity release and Job creation, and overlaps the local operation spans. Its
-Kubernetes-to-launcher clock interval is clamped at zero if negative. The other
+Kubernetes-to-launcher clock interval is clamped at zero if negative. Kubernetes
+reports the container start in whole seconds, so this interval can read up to
+about 1 s long. The other
 durations use process-local monotonic time. Capacity release measures the API
 request, not kubelet teardown. Job creation ends before Secret publication and
 activation. Do not add overlapping stages or infer absent boundaries as zero.
