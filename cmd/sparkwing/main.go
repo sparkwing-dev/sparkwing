@@ -357,8 +357,8 @@ func runSparkwing(args []string) (result error) {
 		return dispatchRunWithEngine(inv, switchToolchain)
 	case "sparkwing pipeline list":
 		return runPipelineList(inv)
-	case "sparkwing pipeline describe":
-		return runPipelineDescribe(inv)
+	case "sparkwing pipeline show":
+		return runPipelineShow(inv)
 	case "sparkwing pipeline plan":
 		return runPipelinePlan(inv)
 	case "sparkwing pipeline lint":
@@ -379,8 +379,8 @@ func runSparkwing(args []string) (result error) {
 		return runSparksUpdate(inv)
 	case "sparkwing pipeline sparks inflate":
 		return runSparksInflate(inv)
-	case "sparkwing cache info":
-		return runCacheInfo(inv)
+	case "sparkwing cache status":
+		return runCacheStatus(inv)
 	case "sparkwing cache explain":
 		return runCacheExplain(inv)
 	case "sparkwing cache prune":
@@ -393,8 +393,8 @@ func runSparkwing(args []string) (result error) {
 		return runXrepoRemove(inv)
 	case "sparkwing repos prune":
 		return runXrepoPrune(inv)
-	case "sparkwing repos info":
-		return runReposInfo(inv)
+	case "sparkwing repos show":
+		return runReposShow(inv)
 	case "sparkwing repos update":
 		return runReposUpdate(inv)
 	case "sparkwing login":
@@ -411,7 +411,7 @@ func runSparkwing(args []string) (result error) {
 		return runCompletion(inv)
 	case "sparkwing runs logs", "sparkwing runs grep":
 		return runRunsLogs(context.Background(), inv)
-	case "sparkwing debug attach", "sparkwing debug env":
+	case "sparkwing debug attach", "sparkwing debug show":
 		return runDebug(inv)
 	case "sparkwing __complete":
 		return runInternalComplete(inv)

@@ -1,12 +1,12 @@
 # Inspecting a job
 
-`sparkwing debug env` reads the job's public status, current executor and active
+`sparkwing debug show` reads the job's public status, current executor and active
 pause. Use a stable run ID or the team's run number. Add `--profile NAME` for a
 remote controller. Without a profile, the command reads the local controller.
 
 ```sh
-sparkwing debug env --run 412 --job build -o pretty
-sparkwing debug env --run 412 --job build --profile ci -o json
+sparkwing debug show --run 412 --job build -o pretty
+sparkwing debug show --run 412 --job build --profile ci -o json
 ```
 
 JSON output contains the resolved run ID and number, job status and attempt,
@@ -15,7 +15,7 @@ A failed pause read is an error. Pause diagnostics are masked before the
 controller returns them.
 
 Local runs honor `--pause-before JOB`, `--pause-after JOB` and
-`--pause-on-failure`. Inspect the persisted pause with `debug env`, then
+`--pause-on-failure`. Inspect the persisted pause with `debug show`, then
 release it with `debug resume`. A pause after failure preserves the job
 error and failed outcome.
 
@@ -34,12 +34,12 @@ sparkwing debug attach --run 412 --job build --profile ci
 The controller supplies the pod, namespace and execution container. The command
 uses your local `kubectl` credentials. `--namespace NAME` overrides the namespace.
 Cloud jobs do not support shell attachment because Cloud admission refuses
-`exec` and `attach` connections. Use `debug env` and `runs logs` to inspect a
+`exec` and `attach` connections. Use `debug show` and `runs logs` to inspect a
 Cloud job. To investigate a failure interactively, reproduce it locally with
 `--pause-on-failure`.
 
 Local processes and runners without a Kubernetes target also report that
-attachment is unavailable. Use `debug env` to inspect those jobs.
+attachment is unavailable. Use `debug show` to inspect those jobs.
 
 With `-o json`, attach first emits the execution target, then streams shell output
 in `{"kind":"debug_output","text":"..."}` records. Use `-o plain` for raw shell

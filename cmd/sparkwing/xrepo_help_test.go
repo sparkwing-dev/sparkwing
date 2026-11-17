@@ -75,7 +75,7 @@ func TestXrepoRegistryDescribesRuntimeInputs(t *testing.T) {
 	assertFlag(t, surfaceCommand("sparkwing repos list"), "output", "o")
 	assertFlag(t, surfaceCommand("sparkwing repos list"), "pipelines", "")
 
-	for _, command := range []Command{surfaceCommand("sparkwing repos add"), surfaceCommand("sparkwing repos delete"), surfaceCommand("sparkwing repos info")} {
+	for _, command := range []Command{surfaceCommand("sparkwing repos add"), surfaceCommand("sparkwing repos delete"), surfaceCommand("sparkwing repos show")} {
 		if len(command.PosArgs) != 0 {
 			t.Errorf("%s advertises positional arguments", command.Path)
 		}

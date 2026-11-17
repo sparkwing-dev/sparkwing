@@ -75,7 +75,7 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	budget.step(w, "test-sleeps", checkTestSleeps)
 	budget.step(w, "tracked-binaries", checkTrackedBinaries)
 	budget.step(w, "docs-mirror", checkDocsMirror)
-	budget.step(w, "changelog-links", checkChangelogLinks)
+	budget.step(w, "changelog-links", checkTrackedChangelogLinks)
 	budget.step(w, "home-resolution", checkHomeResolution)
 	budget.verdict(w)
 	return nil, nil

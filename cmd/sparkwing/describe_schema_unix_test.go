@@ -17,7 +17,7 @@ import (
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func TestPipelineDescribeRefusesUnusableSourceInsteadOfCachedMetadata(t *testing.T) {
+func TestPipelineShowRefusesUnusableSourceInsteadOfCachedMetadata(t *testing.T) {
 	for _, cached := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cold", true: "stale"}[cached], func(t *testing.T) {
 			t.Setenv("SPARKWING_HOME", t.TempDir())
@@ -34,7 +34,7 @@ func TestPipelineDescribeRefusesUnusableSourceInsteadOfCachedMetadata(t *testing
 			}
 			var resultErr error
 			out := captureStdout(t, func() {
-				resultErr = runPipelineDescribeArgs([]string{"--pipeline=deploy-prod", "-o=json"})
+				resultErr = runPipelineShowArgs([]string{"--pipeline=deploy-prod", "-o=json"})
 			})
 			if resultErr == nil || strings.TrimSpace(out) != "" {
 				t.Fatalf("unusable source returned a successful schema: output=%s error=%v", out, resultErr)
@@ -43,7 +43,7 @@ func TestPipelineDescribeRefusesUnusableSourceInsteadOfCachedMetadata(t *testing
 	}
 }
 
-func TestPipelineDescribeUsesLiveEntrypointSchemaProperty(t *testing.T) {
+func TestPipelineShowUsesLiveEntrypointSchemaProperty(t *testing.T) {
 	dir, registered := aliasProject(t)
 	fixture, counter := filepath.Join(t.TempDir(), "pipeline"), filepath.Join(t.TempDir(), "starts")
 	property := func(value string, secretsOnly bool) bool {
@@ -66,7 +66,7 @@ func TestPipelineDescribeUsesLiveEntrypointSchemaProperty(t *testing.T) {
 		calls := 0
 		var resultErr error
 		out := captureStdout(t, func() {
-			resultErr = runPipelineDescribeCommandArgs(args, func(name string, inspect func(context.Context, pipelineentry.Command, string) error) error {
+			resultErr = runPipelineShowCommandArgs(args, func(name string, inspect func(context.Context, pipelineentry.Command, string) error) error {
 				calls++
 				if name != "deploy-prod" {
 					return errors.New("lost the invoked pipeline")
@@ -95,7 +95,7 @@ func TestPipelineDescribeUsesLiveEntrypointSchemaProperty(t *testing.T) {
 	}
 }
 
-func TestPipelineDescribePropagatesAcquisitionAndProtocolFailures(t *testing.T) {
+func TestPipelineShowPropagatesAcquisitionAndProtocolFailures(t *testing.T) {
 	for _, mode := range []string{"acquire", "protocol", "registration", "binding"} {
 		t.Run(mode, func(t *testing.T) {
 			dir, _ := aliasProject(t)
@@ -118,7 +118,7 @@ func TestPipelineDescribePropagatesAcquisitionAndProtocolFailures(t *testing.T) 
 				}
 				var resultErr error
 				out := captureStdout(t, func() {
-					resultErr = runPipelineDescribeCommandArgs(args, func(_ string, inspect func(context.Context, pipelineentry.Command, string) error) error {
+					resultErr = runPipelineShowCommandArgs(args, func(_ string, inspect func(context.Context, pipelineentry.Command, string) error) error {
 						if mode == "acquire" {
 							return failure
 						}

@@ -42,7 +42,7 @@ type unreadable struct {
 
 const unjudgeable = "cannot judge this file; import time by name"
 
-const usageText = `usage: sleepcheck [-staged | -base ref] [-allow-no-diff] <root>
+const usageText = `usage: sleepcheck [-staged | -base ref] [-allow-no-diff] [-tracked] <root>
 
 <root> is one directory to walk, normally the repository root; sleepcheck
 takes no list of files. It walks every _test.go file under <root> and skips
@@ -86,6 +86,7 @@ func usage() {
 }
 
 func main() {
+	tracked := flag.Bool("tracked", false, "only read tracked source files")
 	staged := flag.Bool("staged", false, "only report waits in the staged diff (the pre-commit gate)")
 	base := flag.String("base", "", "only report waits added vs the fork point from this git ref")
 	allowNoDiff := flag.Bool("allow-no-diff", false, "pass instead of failing when the diff cannot be computed; the run gates nothing")
@@ -99,7 +100,11 @@ func main() {
 	var added map[string]map[int]bool
 	if *staged || *base != "" {
 		var aerr error
-		added, aerr = scopedAdds(root, *staged, *base)
+		if *tracked {
+			added, aerr = gatescope.TrackedAddedLines(root, *staged, *base, "*_test.go")
+		} else {
+			added, aerr = scopedAdds(root, *staged, *base)
+		}
 		if aerr != nil {
 			if !*allowNoDiff {
 				fmt.Fprintln(os.Stderr, diffFailure(*base, aerr))
@@ -111,14 +116,18 @@ func main() {
 		}
 	}
 
-	findings, unread, err := scanScoped(root, added)
+	walk := gatescope.Walk
+	if *tracked {
+		walk = gatescope.WalkTracked
+	}
+	findings, unread, err := scanWithWalk(root, added, walk)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sleepcheck:", err)
 		os.Exit(2)
 	}
 	allowed, stale := approvedWaits(root, approvedExternalBoundaries)
 	findings = withoutApproved(findings, allowed)
-	unusedMarkers, err := unconsumedBoundaryMarkers(root, allowed)
+	unusedMarkers, err := unconsumedBoundaryMarkersWithWalk(root, allowed, walk)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sleepcheck:", err)
 		os.Exit(2)
@@ -157,9 +166,13 @@ func scan(root string) ([]finding, []unreadable, error) {
 }
 
 func scanScoped(root string, added map[string]map[int]bool) ([]finding, []unreadable, error) {
+	return scanWithWalk(root, added, gatescope.Walk)
+}
+
+func scanWithWalk(root string, added map[string]map[int]bool, walk func(string, string, func(string, string)) error) ([]finding, []unreadable, error) {
 	var findings []finding
 	var unread []unreadable
-	err := gatescope.Walk(root, "_test.go", func(path, rel string) {
+	err := walk(root, "_test.go", func(path, rel string) {
 		if added != nil && !gatescope.Touched(added, root, path) {
 			return
 		}

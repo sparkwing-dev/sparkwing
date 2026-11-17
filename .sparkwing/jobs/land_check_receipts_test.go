@@ -262,6 +262,8 @@ func TestQueuedLandCompleteReceiptsAuthorizeOnlyTheMergedOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newLandRemote(t)
+	writeAPISnapshotFixture(t, r.dev, "")
+	r.git(r.dev, "add", "cmd/apidiff/main.go", ".apidiff")
 	r.commit(r.dev, map[string]string{
 		"AGENTS.md": "# Fixture\n", ".review.yaml": string(policy),
 		"go.mod":                 "module fixture\n\ngo 1.26.0\n",

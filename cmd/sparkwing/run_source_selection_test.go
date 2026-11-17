@@ -217,7 +217,7 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 	writeSnapshotFile(t, repo, ".sparkwing/sparkwing.yaml", "pipelines:\n  - name: deploy-prod\n    entrypoint: HEADEntry\n    source: OLD\n", 0o600)
 	var inspectionErr error
 	described := captureStdout(t, func() {
-		inspectionErr = runSparkwing([]string{"pipeline", "describe", "--pipeline=deploy-prod", "-o=json"})
+		inspectionErr = runSparkwing([]string{"pipeline", "show", "--pipeline=deploy-prod", "-o=json"})
 	})
 	var schema nodewire.PipelineDescription
 	if inspectionErr != nil || json.Unmarshal([]byte(described), &schema) != nil || schema.Help != "OLD/DIRTY" {

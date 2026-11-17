@@ -142,7 +142,7 @@ func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
 	// perf: a stable tool path lets all entry points use the same compiled SDK fixture.
 	t.Setenv("PATH", tools+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	for _, entry := range []string{"help", "describe", "plan", "preparation", "trigger", "trigger-working-tree"} {
+	for _, entry := range []string{"help", "show", "plan", "preparation", "trigger", "trigger-working-tree"} {
 		t.Run(entry, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("GOMODCACHE", offlineGoEnv(t, "GOMODCACHE"))
@@ -173,7 +173,7 @@ func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
 			writeSnapshotFile(t, repo, ".sparkwing/main.go", pipeline, 0o600)
 			t.Chdir(repo)
 			args := []string{"run", "burst", "--help"}
-			if entry == "describe" || entry == "plan" {
+			if entry == "show" || entry == "plan" {
 				args = []string{"pipeline", entry, "--pipeline", "burst"}
 			}
 			inv, err := clisurface.Parse("sparkwing", args)
@@ -183,8 +183,8 @@ func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
 			switch entry {
 			case "help":
 				err = dispatchRunWithEngine(inv, func(string, func() error) error { t.Fatal("help selected execution engine"); return nil })
-			case "describe":
-				err = runPipelineDescribe(inv)
+			case "show":
+				err = runPipelineShow(inv)
 			case "plan":
 				err = runPipelinePlan(inv)
 			case "trigger", "trigger-working-tree":

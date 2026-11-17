@@ -47,14 +47,36 @@ func installToGreenOutcome(stdout string, err error) (string, bool, error) {
 	return "", false, err
 }
 
-func runMarkdownlint(jobContext context.Context) error {
-	_, err := sparkwing.Bash(jobContext, markdownlintCommand).Run()
-	return err
+func runMarkdownlint(ctx context.Context) error {
+	files, err := listNames(ctx, `ls-files -z -- '*.md'`)
+	if err != nil {
+		return err
+	}
+	var selected []string
+	for _, file := range files {
+		if (!strings.Contains(file, "/") || strings.HasPrefix(file, "docs/")) && filepath.Base(file) != "CHANGELOG.md" {
+			selected = append(selected, ":"+file)
+		}
+	}
+	for _, batch := range argBatches(selected) {
+		if _, err := sparkwing.Bash(ctx, markdownlintCommand+" --no-globs "+shellQuoteAll(batch)).Run(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func runActionlint(jobContext context.Context) error {
-	_, err := sparkwing.Bash(jobContext, actionlintCommand).Run()
-	return err
+func runActionlint(ctx context.Context) error {
+	files, err := listNames(ctx, `ls-files -z -- '.github/workflows/*.yml' '.github/workflows/*.yaml'`)
+	if err != nil {
+		return err
+	}
+	for _, batch := range argBatches(files) {
+		if _, err := sparkwing.Bash(ctx, actionlintCommand+" -- "+shellQuoteAll(batch)).Env("GOWORK", "auto").Run(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runReleaseBinaryVulnerabilityScan(jobContext context.Context) (resultErr error) {
@@ -251,10 +273,7 @@ func checkPreReleaseDocExamples(ctx context.Context) error {
 }
 
 func checkPreReleaseAPISnapshot(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Env("GOWORK", "auto").Run(); err != nil {
-		return errors.New("api-snapshot: drift -- run `bash bin/regen-api-snapshot.sh` and commit .apidiff/")
-	}
-	return nil
+	return checkTrackedAPISnapshot(ctx)
 }
 
 func preReleaseShell(command string) func(context.Context) error {

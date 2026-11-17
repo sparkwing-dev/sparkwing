@@ -79,10 +79,10 @@ func attachObservedDebug(ctx context.Context, inv clisurface.Invocation, job con
 		return &apierr.Error{Code: hosterr.IllegalTransition, Message: "job has no running executor to attach to"}
 	}
 	if job.Execution == nil {
-		return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "job has no Kubernetes attachment target. Cloud jobs do not support shell attachment", Hint: "use sparkwing debug env or sparkwing runs logs to inspect the job"}
+		return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "job has no Kubernetes attachment target. Cloud jobs do not support shell attachment", Hint: "use sparkwing debug show or sparkwing runs logs to inspect the job"}
 	}
 	if job.Execution.Kind != "kubernetes" {
-		return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "job executor has no Kubernetes attachment target", Hint: "use sparkwing debug env to inspect the job"}
+		return &apierr.Error{Code: hosterr.CapabilityUnsupported, Message: "job executor has no Kubernetes attachment target", Hint: "use sparkwing debug show to inspect the job"}
 	}
 	target := *job.Execution
 	if inv.Has("namespace") {

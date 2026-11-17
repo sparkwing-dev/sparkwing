@@ -21,7 +21,7 @@ func TestSurfaceGrammarContract(t *testing.T) {
 		"tokens list", "secrets list", "profiles list", "queue list", "daemon status",
 		"daemon events --run r1 --limit 1", "daemon events --kind queued,grant --kind release --since 1d",
 		"daemon events --run r1 --explain",
-		"dashboard status", "cache info", "repos list", "debug env --run r1 --job j1",
+		"dashboard status", "cache status", "repos list", "debug show --run r1 --job j1",
 		"pipeline sparks inflate --library templates",
 		"cache warm", "wingd run --home private-home", "__tick --home private-home", "operator limits show", "doctor", "info", "version", "update", "docs list", "examples", "commands", "completion",
 	} {

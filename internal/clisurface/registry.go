@@ -22,7 +22,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing cache", Flags: []Flag{}},
 		{Path: "sparkwing cache explain", Rules: []string{"Explain the .sparkwing directory found from the working directory or -C DIR. Every pipeline in a repository shares one binary, so the command takes no pipeline name."}, Flags: []Flag{}},
-		{Path: "sparkwing cache info", Flags: []Flag{
+		{Path: "sparkwing cache status", Flags: []Flag{
 			{Name: "all-entries"},
 			{Name: "docs"},
 		}},
@@ -80,7 +80,7 @@ func Registry() []Command {
 			{Name: "namespace", Argument: "NAME"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing debug env", Flags: []Flag{
+		{Path: "sparkwing debug show", Flags: []Flag{
 			{Name: "run", Argument: "ID", Required: true},
 			{Name: "job", Argument: "JOB", Required: true},
 			{Name: "profile", Argument: "NAME"},
@@ -208,7 +208,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing pipeline", Flags: []Flag{}},
-		{Path: "sparkwing pipeline describe", Flags: []Flag{
+		{Path: "sparkwing pipeline show", Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "secrets"},
 			{Name: "show-withheld"},
@@ -262,7 +262,7 @@ func Registry() []Command {
 			{Name: "spark", Argument: "NAME", Required: true},
 		}},
 		{Path: "sparkwing pipeline sparks update", Flags: []Flag{}},
-		{Path: "sparkwing pipeline upgrade", Rules: []string{"Bump the current repository's Go or TypeScript SDK pin to the latest permitted SDK entry in the signed policy, or the SDK selected by --version. Select the newest permitted engine that accepts that SDK's declared protocol. SDK and engine versions are independent. Resolve native lockfiles and verify compilation/type checking plus describe/plan with the verified engine. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services."}, Flags: []Flag{
+		{Path: "sparkwing pipeline upgrade", Rules: []string{"Bump the current repository's Go or TypeScript SDK pin to the latest permitted SDK entry in the signed policy, or the SDK selected by --version. Select the newest permitted engine that accepts that SDK's declared protocol. SDK and engine versions are independent. Resolve native lockfiles and verify compilation/type checking plus pipeline details and plans with the verified engine. Discover the detail command from that engine's command index. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services."}, Flags: []Flag{
 			{Name: "version", Argument: "TAG"},
 			{Name: "dry-run"},
 		}},
@@ -380,7 +380,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing repos", Flags: []Flag{}},
 		{Path: "sparkwing repos add", Rules: []string{"--checkout is required; it must be a local path."}, Flags: []Flag{}},
-		{Path: "sparkwing repos info", Rules: []string{"--checkout is required; repository identity is distinct from local checkout."}, Flags: []Flag{}},
+		{Path: "sparkwing repos show", Rules: []string{"--checkout is required; repository identity is distinct from local checkout."}, Flags: []Flag{}},
 		{Path: "sparkwing repos list", Rules: []string{"Inventory includes each checkout SDK kind (go or typescript) and its native SDK pin. TypeScript pins come from the npm lockfile when present. JSON uses sdk and pin; plain appends SDK kind after name, pin and primary path."}, Flags: []Flag{
 			{Name: "checkouts"},
 			{Name: "pipelines"},
@@ -731,7 +731,7 @@ func Registry() []Command {
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets get", Rules: []string{"Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so get refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
+		{Path: "sparkwing secrets show", Rules: []string{"Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so show refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "repo", Argument: "REPO", Requires: []string{"pipeline"}},
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},

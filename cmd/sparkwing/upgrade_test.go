@@ -185,17 +185,18 @@ func TestUpgradePlainReportsTargetVersion(t *testing.T) {
 	}
 }
 
-// A TypeScript pipeline type-checks only when it configures tsc; without a tsconfig, node
-// strips its types, so describe and plan are its whole verification.
+// safety: TypeScript without tsconfig has only detail and plan checks.
 func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		sdk      engineid.SDKKind
 		tsconfig bool
+		readVerb string
 	}{
-		{name: "go", sdk: engineid.GoSDK},
-		{name: "typescript", sdk: engineid.TypeScriptSDK},
-		{name: "typescript with tsconfig", sdk: engineid.TypeScriptSDK, tsconfig: true},
+		{name: "go", sdk: engineid.GoSDK, readVerb: "show"},
+		{name: "go with published read verb", sdk: engineid.GoSDK, readVerb: "describe"},
+		{name: "typescript", sdk: engineid.TypeScriptSDK, readVerb: "show"},
+		{name: "typescript with tsconfig", sdk: engineid.TypeScriptSDK, tsconfig: true, readVerb: "show"},
 	} {
 		sdk := tc.sdk
 		t.Run(tc.name, func(t *testing.T) {
@@ -230,6 +231,9 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 					t.Fatalf("unfiltered environment: %v", env)
 				}
 				commands = append(commands, append([]string{program}, args...))
+				if program == selected.Executable && args[0] == "commands" {
+					return []byte(`{"path":"sparkwing pipeline ` + tc.readVerb + `"}`), nil
+				}
 				if program == selected.Executable && len(args) > 1 && args[1] == "list" {
 					return catalog.Bytes(), nil
 				}
@@ -248,7 +252,7 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 					wantNative = [][]string{{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}}
 				}
 			}
-			if installs != 1 || len(commands) != len(wantNative)+5 {
+			if installs != 1 || len(commands) != len(wantNative)+6 {
 				t.Fatalf("commands: %v", commands)
 			}
 			if !reflect.DeepEqual(commands[:len(wantNative)], wantNative) {
@@ -256,7 +260,13 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 			}
 			commands = commands[len(wantNative):]
 			for _, command := range commands {
-				if command[0] != selected.Executable || command[1] != "pipeline" || (command[2] != "list" && command[2] != "describe" && command[2] != "plan") {
+				if command[1] == "commands" {
+					if command[0] != selected.Executable || len(command) != 7 || command[2] != "--path" || command[3] != "sparkwing pipeline" || command[4] != "--limit" || command[5] != "40" || command[6] != "--output=json" {
+						t.Fatalf("command discovery: %v", command)
+					}
+					continue
+				}
+				if command[0] != selected.Executable || command[1] != "pipeline" || (command[2] != "list" && command[2] != tc.readVerb && command[2] != "plan") {
 					t.Fatalf("unverified engine or body command: %v", command)
 				}
 			}
@@ -280,7 +290,7 @@ func TestUpgradeVerifierSeparatesPipelineCodeFromOperationalFailures(t *testing.
 		{name: "module download", failCommand: "go mod download", output: "go: github.com/sparkwing-dev/sparkwing@v0.68.0: Get \"https://proxy.golang.org/...\": dial tcp: lookup proxy.golang.org: no such host"},
 		{name: "removed package", failCommand: "go build", output: "main.go:5:2: no required module provides package github.com/sparkwing-dev/sparkwing/pkg/runner", code: true},
 		{name: "SDK install", install: errors.New("selected engine SDK installation: SDK install failed after 1 attempt: exec: \"go\": executable file not found in $PATH")},
-		{name: "unregistered entrypoint", failCommand: "describe", output: `{"error":{"code":"unknown_pipeline","message":"sparkwing.yaml names entrypoint \"Gate\", which the SDK does not register"}}`, code: true},
+		{name: "unregistered entrypoint", failCommand: "show", output: `{"error":{"code":"unknown_pipeline","message":"sparkwing.yaml names entrypoint \"Gate\", which the SDK does not register"}}`, code: true},
 		{name: "plan failure", failCommand: "plan", output: `{"error":{"code":"plan_failed","message":"plan: job \"build\" needs an undeclared job"}}`, code: true},
 		{name: "engine unavailable", failCommand: "plan", output: `{"error":{"code":"unavailable","message":"the local admission daemon did not answer"}}`},
 		{name: "malformed discovery", failCommand: "list", output: "not json"},
@@ -291,6 +301,9 @@ func TestUpgradeVerifierSeparatesPipelineCodeFromOperationalFailures(t *testing.
 				return engine.SDKCommand{Directory: filepath.Join(root, ".sparkwing"), Command: []string{filepath.Join(root, "sdk-entry")}}, tc.install
 			}, exec: func(_ context.Context, _ string, _ procenv.Env, program string, args ...string) ([]byte, error) {
 				line := strings.Join(append([]string{program}, args...), " ")
+				if len(args) > 0 && args[0] == "commands" {
+					return []byte(`{"path":"sparkwing pipeline show"}`), nil
+				}
 				if tc.failCommand != "" && strings.Contains(line, tc.failCommand) {
 					if tc.failCommand == "list" {
 						return []byte(tc.output), nil
@@ -323,7 +336,7 @@ func TestUpgradeVerifierRejectsMalformedPipelineList(t *testing.T) {
 
 func TestUpgradeVerifierStopsAtFailure(t *testing.T) {
 	root := upgradeFixture(t, engineid.GoSDK)
-	for _, failAt := range []int{1, 2, 3, 4, 5, 6} {
+	for _, failAt := range []int{1, 2, 3, 4, 5, 6, 7} {
 		calls := 0
 		failure := errors.New("verification failed")
 		verifier := upgradeVerifier{install: func(context.Context, engine.Resolved, engine.SDKInstallRequest) (engine.SDKCommand, error) {
@@ -332,10 +345,13 @@ func TestUpgradeVerifierStopsAtFailure(t *testing.T) {
 				return engine.SDKCommand{}, failure
 			}
 			return engine.SDKCommand{Directory: filepath.Join(root, ".sparkwing"), Command: []string{filepath.Join(root, "sdk-entry")}}, nil
-		}, buildEnv: func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error) { return procenv.Env{}, nil }, exec: func(context.Context, string, procenv.Env, string, ...string) ([]byte, error) {
+		}, buildEnv: func(procenv.Kind, procenv.Base, procenv.Runtime) (procenv.Env, error) { return procenv.Env{}, nil }, exec: func(_ context.Context, _ string, _ procenv.Env, _ string, args ...string) ([]byte, error) {
 			calls++
 			if calls == failAt {
 				return nil, failure
+			}
+			if len(args) > 0 && args[0] == "commands" {
+				return []byte(`{"path":"sparkwing pipeline show"}`), nil
 			}
 			return []byte("{\"name\":\"check\"}\n"), nil
 		}}

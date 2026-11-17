@@ -91,6 +91,12 @@ func checkCLIVerbs(contentDir string) bool {
 }
 
 func judgeInvocation(inv cliVerb, valid, posArgs map[string]bool) string {
+	if publishedMigrationRE.MatchString(filepath.ToSlash(inv.file)) {
+		inv.tokens = historicalReadWords(inv.tokens)
+		if inv.args != nil {
+			inv.args = historicalReadWords(inv.args)
+		}
+	}
 	if inv.args != nil || inv.err != nil {
 		err := inv.err
 		if err == nil {
@@ -105,6 +111,28 @@ func judgeInvocation(inv cliVerb, valid, posArgs map[string]bool) string {
 		return fmt.Sprintf("%s:%d: `%s` -- no such command %q", inv.file, inv.line, inv.raw, unknown)
 	}
 	return ""
+}
+
+var publishedMigrationRE = regexp.MustCompile(`^migrations/v[0-9]+\.[0-9]+\.[0-9]+\.md$`)
+
+// safety: released guides retain their original command spellings, while
+// their selectors and flags still have to satisfy the current grammar.
+func historicalReadWords(words []string) []string {
+	words = slices.Clone(words)
+	i := 0
+	if len(words) > 0 && words[0] == "sparkwing" {
+		i++
+	}
+	if len(words) < i+2 {
+		return words
+	}
+	switch strings.Join(words[i:i+2], " ") {
+	case "pipeline describe", "repos info", "secrets get", "debug env":
+		words[i+1] = "show"
+	case "cache info":
+		words[i+1] = "status"
+	}
+	return words
 }
 
 func loadRegistry() (valid, posArgs map[string]bool) {

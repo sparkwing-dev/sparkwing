@@ -17,6 +17,33 @@ func TestRepositoryCLIExamplesUseCurrentGrammar(t *testing.T) {
 	}
 }
 
+func TestReleasedReadVerbExamplesKeepTheirFlagsValidated(t *testing.T) {
+	for _, command := range []string{
+		"sparkwing pipeline describe --pipeline build",
+		"sparkwing repos info -C PATH",
+		"sparkwing cache info --docs",
+		"sparkwing secrets get --secret REGION",
+		"sparkwing debug env --run r1 --job build",
+	} {
+		t.Run(command, func(t *testing.T) {
+			for _, file := range []string{"migrations/v0.74.0.md", "migrations/unreleased/example.md", "cli.md"} {
+				for _, extra := range []string{"", " --bogus"} {
+					content := t.TempDir()
+					path := filepath.Join(content, file)
+					if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					writeDoc(t, filepath.Dir(path), filepath.Base(path), "```bash\n"+command+extra+"\n```\n")
+					want := file == "migrations/v0.74.0.md" && extra == ""
+					if got := checkCLIVerbs(content); got != want {
+						t.Errorf("%s: %s%s accepted=%t, want %t", file, command, extra, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestMigrationUpgradeUsesPublishedReleaseSelection(t *testing.T) {
 	guide, err := os.ReadFile(filepath.Join("..", "..", "docs", "migrations", "v0.68.0.md"))
 	if err != nil {

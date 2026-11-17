@@ -531,7 +531,7 @@ project settings.
 `definePipeline` registers an implementation. Import its module from the
 package's `main` entry and call `await main()` there. The YAML `entrypoint`
 names that registration, while YAML `name` is the name passed to `sparkwing run`.
-`pipeline list` reads YAML. `pipeline describe` reads declarations and
+`pipeline list` reads YAML. `pipeline show` reads declarations and
 `pipeline plan` renders the resolved DAG without dispatching jobs.
 
 ```ts
@@ -631,7 +631,7 @@ Use satisfiable guard tokens and check branch semantics in
 TypeScript `pipeline lint` prints an unsupported notice and exits zero. JSON
 reports `status: "unsupported"`. It analyzes neither TypeScript source nor its
 guards, so it cannot serve as an authoring gate. Run your TypeScript checker,
-`pipeline describe`, `pipeline plan` and focused execution tests. The host
+`pipeline show`, `pipeline plan` and focused execution tests. The host
 validates declarations and graphs when they are submitted.
 
 ### Local runs, schedules and child runs

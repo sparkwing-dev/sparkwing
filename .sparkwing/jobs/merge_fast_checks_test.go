@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ func TestMergeRecheckRejectsQATrustOnlyIntegrationBreak(t *testing.T) {
 	isolateTestHome(t)
 	r := newLandRemote(t)
 	configurePublishedSDKFixture(t, r.dev)
+	writeAPISnapshotFixture(t, r.dev, "")
 	r.git(r.dev, "add", ".")
 	base := map[string]string{
 		"internal/api.go":           "package internal\nfunc Value() int { return 1 }\n",
@@ -41,6 +43,11 @@ func TestMergeRecheckRetainsPushContractChecks(t *testing.T) {
 	for _, name := range []string{"changelog", "api-spec", "api-snapshot"} {
 		t.Run(name, func(t *testing.T) {
 			root := publishedSDKFixture(t)
+			message := ""
+			if name == "api-snapshot" {
+				message = "merge contract api-snapshot failed"
+			}
+			writeAPISnapshotFixture(t, root, message)
 			for _, check := range []string{"changelog", "api-spec", "api-snapshot"} {
 				body := "exit 0\n"
 				if check == name {
@@ -60,4 +67,14 @@ func TestMergeRecheckRetainsPushContractChecks(t *testing.T) {
 			}
 		})
 	}
+}
+
+func writeAPISnapshotFixture(t *testing.T, root, message string) {
+	t.Helper()
+	body := "package main\nimport (\"os\";\"path/filepath\")\nfunc main(){if err:=os.MkdirAll(os.Args[1],0755);err!=nil{panic(err)};if err:=os.WriteFile(filepath.Join(os.Args[1],\"surface.txt\"),[]byte(\"surface\\n\"),0644);err!=nil{panic(err)}}\n"
+	if message != "" {
+		body = fmt.Sprintf("package main\nimport (\"fmt\";\"os\")\nfunc main(){fmt.Fprintln(os.Stderr,%q);os.Exit(1)}\n", message)
+	}
+	writeGoFile(t, filepath.Join(root, "cmd/apidiff/main.go"), body)
+	writeGoFile(t, filepath.Join(root, ".apidiff/surface.txt"), "surface\n")
 }
