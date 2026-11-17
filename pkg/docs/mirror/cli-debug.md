@@ -27,6 +27,8 @@ Interactive debugging for pipeline runs
 
 Attach to a running Kubernetes target (Cloud jobs unsupported)
 
+Attach a shell to a running job's Kubernetes target. Cloud jobs do not support shell attachment.
+
 ### Flags
 
 | Flag | Description |
@@ -44,6 +46,8 @@ Attach to a running Kubernetes target (Cloud jobs unsupported)
 
 Inspect public job, executor and pause diagnostics
 
+Show a job's public execution details and current pause state.
+
 ### Flags
 
 | Flag | Description |
@@ -55,11 +59,20 @@ Inspect public job, executor and pause diagnostics
 | `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
 | `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+
+### Examples
+
+```sh
+# Inspect one job's public diagnostics
+sparkwing debug env --run RUN_ID --job build
+```
 
 ## `sparkwing debug resume`
 
 Resume a paused job
 
+Resume a paused job in the selected run.
+
 ### Flags
 
 | Flag | Description |
@@ -71,3 +84,10 @@ Resume a paused job
 | `--run ID` | Run ID or per-team run number. (required) |
 | `--job JOB` | Job within the selected run. (required) |
 | `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+
+### Examples
+
+```sh
+# Resume a paused job
+sparkwing debug resume --run RUN_ID --job build
+```

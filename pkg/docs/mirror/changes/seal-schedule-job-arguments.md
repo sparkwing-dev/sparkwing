@@ -4,7 +4,7 @@
   Keyed stores seal schedule declarations, overrides, consent and fire history,
   and `WithArgs` defaults in plans, node specs and expansion bodies. Existing
   plaintext rows remain readable and the operator secrets rotation seals them.
-  The schema baseline advances to version 40 so older binaries refuse the
+  The schema baseline advances to version 41 so older binaries refuse the
   changed argument format.
   Node metadata stays readable while argument defaults are sealed.
   Upgrade all controller readers before resuming writes. See the

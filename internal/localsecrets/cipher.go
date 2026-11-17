@@ -81,3 +81,12 @@ func (c *Cipher) opener() (*secrets.Cipher, error) {
 	}
 	return inner, nil
 }
+
+// OIDCAuditDigest uses the external local secrets keyring and its retained previous key.
+func (c *Cipher) OIDCAuditDigest(keyID, field, value string) (string, string, error) {
+	inner, err := c.ring.ensure(context.Background(), c.st)
+	if err != nil {
+		return "", "", err
+	}
+	return inner.OIDCAuditDigest(keyID, field, value)
+}

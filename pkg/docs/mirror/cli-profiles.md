@@ -38,6 +38,8 @@ sparkwing profiles list
 
 Add a controller connection profile
 
+Save a controller connection and credential as a named profile.
+
 ### Flags
 
 | Flag | Description |
@@ -63,6 +65,8 @@ sparkwing profiles add --controller https://ci.example.com --profile prod --toke
 
 Remove a controller connection profile
 
+Remove a saved controller connection and revoke its token. Use --keep-token to remove only the local profile.
+
 ### Flags
 
 | Flag | Description |
@@ -74,9 +78,18 @@ Remove a controller connection profile
 | `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
 | `--keep-token` | Remove only the local connection, without revoking its token at the controller. |
 
+### Examples
+
+```sh
+# Remove a local profile while keeping its token
+sparkwing profiles delete --profile prod --keep-token
+```
+
 ## `sparkwing profiles list`
 
 Print every registered profile
+
+List saved controller connections without revealing their credentials.
 
 ### Flags
 
@@ -98,6 +111,8 @@ sparkwing profiles list
 
 Update a profile's controller URL or token
 
+Change a saved profile's controller URL or replace its token from stdin.
+
 ### Flags
 
 | Flag | Description |
@@ -114,6 +129,8 @@ Update a profile's controller URL or token
 
 Print one controller connection profile
 
+Show one saved controller connection without revealing its credential.
+
 ### Flags
 
 | Flag | Description |
@@ -123,3 +140,10 @@ Print one controller connection profile
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
+
+### Examples
+
+```sh
+# Inspect a saved connection
+sparkwing profiles show --profile prod
+```

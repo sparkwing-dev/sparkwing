@@ -329,9 +329,15 @@ runner enrollment, and invitation acceptance commit their audit events in the
 same transaction. These events contain IDs and closed decision values, without
 approval comments, cancellation reasons, email addresses or other personal text.
 Each OIDC token a run mints is audited as `oidc.minted` in the transaction that
-rechecks the run's authority, naming the run, a digest of its job, the
-audience, and the token's `jti`, subject and expiry, so a leaked token traces to
-its mint. A token whose audit row does not commit is never returned.
+rechecks the run's authority. Its attributes are `node_digest`,
+`audience_digest`, `subject_digest`, `digest_key_id`, `token_id` and `expires_at`.
+Audience and subject use field-separated HMAC-SHA-256 under the external secrets
+keyring. The raw audience and subject never enter new audit rows. A token's
+random `jti`, opaque run ID and expiry still trace it to its mint. These fixed
+identifiers contain no caller text. The subject is digested because it includes
+pipeline and ref text. Every audience is digested because callers choose it.
+See [audit investigation](oidc.md#audit-investigation) for candidate matching,
+key rotation and retained-copy limits. A token whose audit row does not commit is never returned.
 An authenticated request refused because of the run, job, claim, child or team
 it names is audited as `access.refused` in the acting credential's own team. The
 row names the actor, the HTTP method, the registered route template, the refusal
@@ -447,7 +453,7 @@ history use the same keyring and argument envelopes. Each binds the team,
 schedule or fire ID and column kind. A fire also binds its schedule ID. Whole
 document envelopes have a numeric `argument_document_version`, which distinguishes
 them from string-valued argument maps even when an argument is named
-`sealed_arguments` or `body`. Store schema 40 prevents older binaries from
+`sealed_arguments` or `body`. Store schema 41 prevents older binaries from
 misreading these envelopes.
 A listing that meets a run whose envelope cannot be
 opened shows that run's argument values as `(unavailable)` and lists the other

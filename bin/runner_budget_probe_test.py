@@ -4,6 +4,9 @@ import io
 import json
 from pathlib import Path
 import runpy
+import shutil
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -109,6 +112,34 @@ class BudgetProbeTest(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(AssertionError, 'control lacks CPU headroom'):
                         probe.judge(enforced, candidate)
+
+
+    def test_verdict_tests_detect_disabled_checks(self):
+        source_path = Path(__file__).with_name('runner-budget-probe.py')
+        source = source_path.read_text()
+        checks = [
+            "enforced['nice'] == 10",
+            "control['nice'] == 0",
+            "control['cpu_max'].split()[0] == 'max'",
+            "control['cores'] > 1.5 * enforced['cores']",
+            "19 <= row['seconds'] <= 25",
+            "len(row['burners']) == 6",
+            "len(set(row['burners'])) == 6",
+            "row['unit'].startswith('sparkwing-runner-')",
+            "row['unit'].endswith('.service')",
+        ]
+        for check in checks:
+            with self.subTest(check=check), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.assertEqual(source.count(check), 1)
+                (root / source_path.name).write_text(source.replace(check, 'True'))
+                test_path = root / Path(__file__).name
+                shutil.copyfile(__file__, test_path)
+                result = subprocess.run([sys.executable, '-I', str(test_path),
+                                         'BudgetProbeTest.test_verdict_rejects_invalid_measurements'],
+                                        capture_output=True, text=True, check=False)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('FAIL:', result.stderr)
 
 
 if __name__ == '__main__':

@@ -86,6 +86,8 @@ Install / uninstall git pre-commit + pre-push + post-commit hooks
 
 Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers
 
+Install this repository's Git hooks from the triggers declared in sparkwing.yaml.
+
 ### Flags
 
 | Flag | Description |
@@ -94,11 +96,20 @@ Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml trigge
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+### Examples
+
+```sh
+# Install this repository's declared Git hooks
+sparkwing pipeline hooks install
+```
 
 ## `sparkwing pipeline hooks status`
 
 Report declared, installed, and missing sparkwing hooks
 
+Show which declared Sparkwing Git hooks are installed or missing.
+
 ### Flags
 
 | Flag | Description |
@@ -108,9 +119,18 @@ Report declared, installed, and missing sparkwing hooks
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 
+### Examples
+
+```sh
+# Check this repository's Git hooks
+sparkwing pipeline hooks status
+```
+
 ## `sparkwing pipeline hooks uninstall`
 
 Remove sparkwing-managed git hooks
+
+Remove this repository's Sparkwing-managed Git hooks.
 
 ### Flags
 
@@ -125,6 +145,8 @@ Remove sparkwing-managed git hooks
 
 Check Go pipeline source for idiomatic anti-patterns; report TypeScript lint as unsupported
 
+Check Go pipeline source for common mistakes. Use --rules to read the rules. TypeScript lint is unsupported.
+
 ### Flags
 
 | Flag | Description |
@@ -136,6 +158,13 @@ Check Go pipeline source for idiomatic anti-patterns; report TypeScript lint as 
 | `--pipeline NAME` | Pipeline name. |
 | `--rules` | Print the lint rules with what each forbids and why, without analyzing any source. |
 | `--dir DIR` | Analyze Go pipeline source in this directory instead of .sparkwing/jobs, or .sparkwing when there is no jobs directory. |
+
+### Examples
+
+```sh
+# Check this repository's Go pipelines
+sparkwing pipeline lint
+```
 
 ## `sparkwing pipeline list`
 
@@ -244,6 +273,8 @@ Manage sparks libraries declared in .sparkwing/sparkwing.yaml
 
 Add a library to the sparks: block
 
+Add a Go library to this project's sparks declarations.
+
 ### Flags
 
 | Flag | Description |
@@ -260,6 +291,8 @@ Add a library to the sparks: block
 
 List the blocks a spark library offers
 
+List the reusable blocks a sparks library offers.
+
 ### Flags
 
 | Flag | Description |
@@ -275,6 +308,8 @@ List the blocks a spark library offers
 
 Remove a library from the sparks: block
 
+Remove a library from this project's sparks declarations.
+
 ### Flags
 
 | Flag | Description |
@@ -288,6 +323,8 @@ Remove a library from the sparks: block
 ## `sparkwing pipeline sparks inflate`
 
 Copy a spark library's source into this repo so you can edit it
+
+Copy a sparks library's source into this repository and replace its dependency with the local copy.
 
 Copy one library module into the project and replace its dependency with that local source. JSON emits the module, version, destination and replacement; plain emits the destination.
 
@@ -305,6 +342,8 @@ Copy one library module into the project and replace its dependency with that lo
 
 Validate a spark.json library manifest
 
+Validate a sparks library's spark.json manifest.
+
 ### Flags
 
 | Flag | Description |
@@ -319,6 +358,8 @@ Validate a spark.json library manifest
 
 Show declared sparks libraries and their resolved versions
 
+List this project's declared sparks libraries and resolved versions.
+
 ### Flags
 
 | Flag | Description |
@@ -332,6 +373,8 @@ Show declared sparks libraries and their resolved versions
 ## `sparkwing pipeline sparks update`
 
 Re-resolve every declared library
+
+Resolve every declared sparks library again and update the project's dependency overlay.
 
 ### Flags
 

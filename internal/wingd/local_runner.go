@@ -268,6 +268,10 @@ func abandonRunnerCommand(home string, instance localhostwire.LocalRunnerInstanc
 // safety: a stop that outlasted its wait leaves the controller draining with a runner that still needs it to accept
 // results; finishing here once that runner exits spares the user a second stop and later commands a wedged controller.
 func (d *Daemon) finishDrainAfterRunner(ctx context.Context, instance localhostwire.LocalRunnerInstance) {
+	d.finishDrainWithProbe(ctx, instance, LocalRunnerProcessAlive)
+}
+
+func (d *Daemon) finishDrainWithProbe(ctx context.Context, instance localhostwire.LocalRunnerInstance, alive func(localhostwire.LocalRunnerInstance) (bool, error)) {
 	d.runnerChanges.lock()
 	if d.finishingDrain {
 		d.runnerChanges.unlock()
@@ -278,7 +282,7 @@ func (d *Daemon) finishDrainAfterRunner(ctx context.Context, instance localhostw
 	go func() {
 		for {
 			changed := d.runnerWake.subscribe()
-			alive, err := LocalRunnerProcessAlive(instance)
+			running, err := alive(instance)
 			if err != nil && d.resumePrivateIdle() {
 				d.runnerChanges.lock()
 				d.finishingDrain = false
@@ -287,7 +291,7 @@ func (d *Daemon) finishDrainAfterRunner(ctx context.Context, instance localhostw
 				go d.watchPrivateIdle(ctx)
 				return
 			}
-			if err == nil && !alive {
+			if err == nil && !running {
 				break
 			}
 			select {

@@ -40,11 +40,7 @@ func (op *Operator) installAuditProtection(ctx context.Context, tx *storeTx) err
 		if _, err := tx.execContext(ctx, `CREATE TRIGGER audit_events_recording_time BEFORE INSERT ON audit_events FOR EACH ROW EXECUTE FUNCTION stamp_audit_recording()`); err != nil {
 			return err
 		}
-		_, err := tx.execContext(ctx, `CREATE FUNCTION reject_audit_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
- IF TG_OP = 'DELETE' THEN
-  IF OLD.recorded_at < `+auditRetentionCutoffSQL(tx.dialect)+` THEN RETURN OLD; END IF;
- END IF;
- RAISE EXCEPTION 'audit events are append-only within retention'; END $$`)
+		err := replaceAuditUpdateGuard(ctx, tx, "")
 		if err != nil {
 			return err
 		}
@@ -66,9 +62,10 @@ func (op *Operator) installAuditProtection(ctx context.Context, tx *storeTx) err
         BEGIN SELECT RAISE(IGNORE); END`); err != nil {
 		return err
 	}
-	if _, err := tx.execContext(ctx, `CREATE TRIGGER audit_events_no_UPDATE BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit events are append-only'); END`); err != nil {
+	if err := replaceAuditUpdateGuard(ctx, tx, ""); err != nil {
 		return err
 	}
+
 	if _, err := tx.execContext(ctx, `CREATE TRIGGER audit_events_no_DELETE BEFORE DELETE ON audit_events
  WHEN NOT COALESCE(OLD.recorded_at < `+auditRetentionCutoffSQL(tx.dialect)+`,0)
  BEGIN SELECT RAISE(ABORT, 'audit events are append-only within retention'); END`); err != nil {

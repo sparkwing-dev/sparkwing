@@ -93,7 +93,11 @@ func runRestore(args []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return store.Policies{}, err
 		}
-		return store.Policies{RunEnvironment: selected}, nil
+		digests, ok := selected.(store.OIDCAuditDigester)
+		if !ok {
+			return store.Policies{}, errors.New("restore requires an OIDC audit digest keyring")
+		}
+		return store.Policies{RunEnvironment: selected, AuditDigests: digests}, nil
 	}))
 	if err != nil {
 		return err

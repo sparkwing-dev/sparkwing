@@ -20,7 +20,7 @@ import (
 func authorityStore(t *testing.T) *Store {
 	t.Helper()
 	now := time.Now()
-	s := &Store{db: rewriteSchemaDB(t), dialect: DialectSQLite, clock: func() time.Time { return now }, runEnvCipher: fixtureSecretCipher(t)}
+	s := &Store{db: rewriteSchemaDB(t), dialect: DialectSQLite, clock: func() time.Time { return now }, runEnvCipher: fixtureSecretCipher(t), auditDigests: fixtureSecretCipher(t)}
 	rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1)")
 	return s
 }

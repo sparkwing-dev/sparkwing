@@ -5,14 +5,19 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 )
 
 func admissionProcessRunning(pid int) error {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	return admissionProcessRunningRead(pid, os.ReadFile)
+}
+
+func admissionProcessRunningRead(pid int, readFile func(string) ([]byte, error)) error {
+	data, err := readFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
 			return fmt.Errorf("%w: process %d", procgroup.ErrProcessAbsent, pid)
 		}
 		return err

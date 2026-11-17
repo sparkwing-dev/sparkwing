@@ -566,6 +566,10 @@ func TestPipelineNewTypeScriptUpdatesDeclaredEntry(t *testing.T) {
 	if commandErr != nil {
 		t.Fatal(commandErr)
 	}
+	kept, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil || string(kept) != manifest {
+		t.Fatalf("existing package.json changed: %q, %v", kept, err)
+	}
 	body, err := os.ReadFile(entry)
 	if err != nil || !strings.HasPrefix(string(body), original) || !strings.Contains(string(body), `import "./../jobs/hello.ts";`) {
 		t.Fatalf("declared entry = %q, %v", body, err)

@@ -30,6 +30,8 @@ The machine's fleet of sparkwing repos and their SDK pins
 
 Register a checkout
 
+Register a local checkout in Sparkwing's repository inventory. Pass its path with --checkout.
+
 --checkout is required; it must be a local path.
 
 ### Flags
@@ -44,6 +46,8 @@ Register a checkout
 ## `sparkwing repos delete`
 
 Remove a registered checkout
+
+Remove a local checkout from Sparkwing's repository inventory. Pass its path with --checkout.
 
 --checkout is required; registry basename fallback is refused.
 
@@ -60,6 +64,8 @@ Remove a registered checkout
 
 Inspect repository versions, worktrees, and pipelines
 
+Show the registered repository and checkout selected by --checkout.
+
 --checkout is required; repository identity is distinct from local checkout.
 
 ### Flags
@@ -75,6 +81,8 @@ Inspect repository versions, worktrees, and pipelines
 
 List the machine's fleet of sparkwing repos
 
+List registered repositories and their SDK versions. Use --checkouts to inspect individual checkouts.
+
 Inventory includes each checkout SDK kind (go or typescript) and its native SDK pin. TypeScript pins come from the npm lockfile when present. JSON uses sdk and pin; plain appends SDK kind after name, pin and primary path.
 
 ### Flags
@@ -88,9 +96,18 @@ Inventory includes each checkout SDK kind (go or typescript) and its native SDK 
 | `--checkouts` | List each registered local checkout with its status instead of the per-repository version summary. |
 | `--pipelines` | With --checkouts, include each checkout's pipeline names, on by default and turned off with --pipelines=false; refused without --checkouts. |
 
+### Examples
+
+```sh
+# List registered checkouts
+sparkwing repos list --checkouts
+```
+
 ## `sparkwing repos prune`
 
 Remove checkouts whose pipeline directory is gone
+
+Remove repository inventory entries for checkouts that no longer contain a .sparkwing directory.
 
 ### Flags
 
@@ -104,6 +121,8 @@ Remove checkouts whose pipeline directory is gone
 ## `sparkwing repos update`
 
 Update repository SDK versions and compare pipeline plans
+
+Update registered repositories to a published SDK release. Use --dry-run to preview the changes.
 
 Apply by default; --dry-run previews. --all-repos requires --yes for bulk changes.
 

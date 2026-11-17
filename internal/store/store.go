@@ -101,6 +101,7 @@ type Store struct {
 	csrfKeyMu          sync.Mutex
 	csrfKey            []byte
 	csrfCipher         SessionKeyCipher
+	auditDigests       OIDCAuditDigester
 	githubCheckMu      sync.Mutex
 	commits            commitSignal
 }
@@ -309,7 +310,7 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, path stri
 		s.githubLocks.SetMaxIdleConns(2)
 		s.githubLocks.SetConnMaxIdleTime(5 * time.Minute)
 	}
-	if err := s.configurePolicyOptions(opts); err != nil {
+	if err := s.configurePolicyOptions(ctx, opts); err != nil {
 		return nil, errors.Join(err, s.Close())
 	}
 	return s, nil
@@ -1338,7 +1339,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: fresh stores get this baseline whole; an older store upgrades only through schemaUpgrades.
-const expectedSchemaVersion = 40
+const expectedSchemaVersion = 41
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
