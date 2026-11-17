@@ -328,8 +328,10 @@ when an earlier deployment reported failure.
 
 Deleting an account removes its live identity and revokes its authority immediately.
 Deleting a team closes it immediately and queues its rows and objects for the
-retrying purge. Shared-team history, accounting records, reserved slugs and
-audit identifiers have the explicit exceptions described in
+retrying purge. Shared-team history remains with selected execution actors
+relabeled as "deleted user". Deletion is refused when the account is the sole
+owner of a team with other members. Sparkwing Cloud keeps account IDs in audit
+records for 400 days. Accounting records and reserved slugs also remain. See
 [Deleting a team or account](auth.md#deleting-a-team-or-account).
 
 On Sparkwing Cloud, RDS automated backups retain a seven-day recovery window.
@@ -337,9 +339,12 @@ That is not an every-copy deletion deadline. Accounts which existed on or before
 2026-10-02 may remain in encrypted operator archives. The SQLite pre-cutover
 archive uploaded on 2026-09-15 has a 365-day current-object lifecycle plus
 30 days for noncurrent versions, ending around 2027-10-15. S3 expiry is
-asynchronous. The rule filters only the SQLite prefix. The PostgreSQL
-controller and billing archives uploaded on 2026-10-02 have no scheduled
-expiry and remain until the operator sets a pending retention decision.
+asynchronous. That rule filters `sqlite/`. PostgreSQL controller and billing
+archive dumps, including those uploaded on 2026-10-02, expire 35 days after
+creation under a separate S3 lifecycle rule covering `postgres/`. Noncurrent
+PostgreSQL versions expire 35 days after becoming noncurrent. Current-object
+expiry adds a delete marker; the noncurrent-version rule later removes the
+retained bytes.
 Accounts created after 2026-10-02 are not in any of these archives. Deletion
 does not scrub the archives.
 See [Account deletion retention](account-deletion-retention.md).

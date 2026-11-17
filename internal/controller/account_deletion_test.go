@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,9 @@ func TestSelfDeletePreviewExplainsStaleSignInAndArchive(t *testing.T) {
 	}
 	if expected == "" || plan.ArchiveNotice != expected {
 		t.Fatalf("preview omitted documentation-owned archive notice: %+v", plan)
+	}
+	if !strings.Contains(plan.ArchiveNotice, "35 days after creation") {
+		t.Fatalf("preview omitted PostgreSQL archive expiry: %+v", plan)
 	}
 	f.advance(11 * time.Minute)
 	if code := f.call("DELETE", "/api/v1/me", u.auth, map[string]any{"confirm_account_id": u.id, "confirm_teams": []string{u.team}}, nil); code != http.StatusForbidden {

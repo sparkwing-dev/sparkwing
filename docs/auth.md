@@ -1040,25 +1040,27 @@ you hold or created, including descendants. Other browser and CLI sessions
 stop working immediately. This includes runner and CI tokens you created in
 shared teams, even though those teams remain. Another member should replace
 those credentials before deletion to avoid breaking runners or integrations.
-Sole-member teams close immediately and enter the
-same retrying cleanup as team deletion. If you are the sole owner of a team
-with other members, transfer ownership or delete that team first. Accounts
-without a team, including waitlisted accounts, can delete themselves too.
+Sole-member teams close immediately and enter the same retrying cleanup as team
+deletion. If you are the sole owner of a team with other members, deletion is
+refused. Transfer ownership or delete that team first. Accounts without a team,
+including waitlisted accounts, can delete themselves too.
 
 Shared-team runs, logs, artifacts and other team-owned history remain for the
 remaining members. Selected execution actor fields, such as
-`runs.created_principal`, are relabeled as a deleted user. Other creator and
-financial references retain the opaque account ID.
-[Account deletion retention](account-deletion-retention.md) names those columns. User-supplied
+`runs.created_principal`, are relabeled as "deleted user". Other creator and
+financial references retain the opaque account ID. [Account deletion
+retention](account-deletion-retention.md) names those columns. User-supplied
 content, including logs and artifacts, may still contain personal information.
 That content follows the team's retention policy and is excluded from account
-identity erasure. Financial records remain for accounting. Account deletion preserves security audit records through the configured audit
-horizon, 400 days by default. OIDC audit rows retain keyed audience and subject
-digests, their key ID, and fixed tracing identifiers. They contain no raw OIDC
-audience or subject after the controller completes schema 40 reconciliation.
-An operator holding the external key and a candidate can still confirm a match.
-This retained evidence is pseudonymous, so deletion does not promise that it
-cannot be linked to a known candidate. See [audit investigation](oidc.md#audit-investigation).
+identity erasure. Financial records remain for accounting. Sparkwing Cloud keeps
+account IDs in audit records for 400 days for security and abuse investigation.
+Self-hosted operators configure their own audit horizon. OIDC audit rows retain
+keyed audience and subject digests, their key ID, and fixed tracing identifiers.
+They contain no raw OIDC audience or subject after the controller completes
+schema 40 reconciliation. An operator holding the external key and a candidate
+can still confirm a match. This retained evidence is pseudonymous, so deletion
+does not promise that it cannot be linked to a known candidate. See [audit
+investigation](oidc.md#audit-investigation).
 
 Cloud live account identity and authority disappear in the request transaction.
 Team data normally disappears within minutes, with a final sweep 75 minutes
@@ -1068,9 +1070,12 @@ expires within seven days. Accounts which existed on or before 2026-10-02 may
 remain in encrypted operator archives. The SQLite pre-cutover archive from
 2026-09-15 follows a 365-day lifecycle plus 30 days for noncurrent versions,
 ending around 2027-10-15 with asynchronous S3 expiry. PostgreSQL controller and
-billing archives from 2026-10-02 have no scheduled expiry. Their retention
-awaits an operator decision. Accounts created after 2026-10-02 are not in any
-of these archives. See [Account deletion retention](account-deletion-retention.md).
+billing archive dumps expire 35 days after creation under an S3 lifecycle rule
+covering `postgres/`. Noncurrent PostgreSQL versions expire 35 days after
+becoming noncurrent. Current-object expiry adds a delete marker; the
+noncurrent-version rule later removes the retained bytes. S3 expiry is
+asynchronous. Accounts created after 2026-10-02 are not in any of these
+archives. See [Account deletion retention](account-deletion-retention.md).
 Shared-team history, retained creator IDs, financial records, reserved team
 slugs and audit history are the other exceptions above. Self-hosted operators
 own their backup and object-version retention and must verify their own policy.

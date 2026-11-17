@@ -83,6 +83,9 @@ func TestAccountDeleteCLIThroughAuthenticatedController(t *testing.T) {
 	if !strings.Contains(preview.String(), "device-test") {
 		t.Fatal("preview omitted sole-member team")
 	}
+	if !strings.Contains(preview.String(), "35 days after creation") {
+		t.Fatalf("preview omitted PostgreSQL archive expiry: %s", preview.String())
+	}
 	inv, err = clisurface.Parse("sparkwing", []string{"account", "delete", "--profile", "cloud", "--session-stdin", "--confirm", "member", "--confirm-team", "device-test", "-o", "json"})
 	if err != nil {
 		t.Fatal(err)

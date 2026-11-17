@@ -4,14 +4,14 @@
   Preview and confirm every sole-member team removed with the account. Deletion
   revokes all account sessions and tokens. Sole owners of teams with other
   members must transfer ownership or delete those teams first. Shared-team
-  history, financial records and audit identifiers retain their documented
-  exceptions to account erasure. On Sparkwing Cloud, accounts which existed
-  on or before 2026-10-02
-  may remain in encrypted operator archives. The SQLite archive from
+  history remains with its execution actors relabeled as "deleted user".
+  Financial records remain, and account IDs stay in audit records for 400 days
+  on Sparkwing Cloud. Accounts which existed on or before 2026-10-02 may remain
+  in encrypted operator archives. The SQLite archive from
   2026-09-15 follows a 365-day lifecycle plus 30 noncurrent days, ending around
-  2027-10-15. PostgreSQL archives from 2026-10-02 have no scheduled expiry,
-  pending an operator retention decision. Accounts created after 2026-10-02
-  are not in any of these archives.
+  2027-10-15. PostgreSQL archive dumps expire 35 days after creation under an S3
+  lifecycle rule. Noncurrent versions expire 35 days after becoming noncurrent. S3 expiry
+  is asynchronous. Accounts created after 2026-10-02 are not in these archives.
 
 ### Fixed
 
