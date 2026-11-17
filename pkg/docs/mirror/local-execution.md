@@ -606,7 +606,19 @@ An unavailable controller returns an error. See [admission](admission.md) and
 
 ### Capping sparkwing's share of the machine
 
-Set the machine budget in the private machine file:
+Create the private machine file if it does not exist. These commands keep any
+existing settings and set the required owner-only permissions:
+
+```bash
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing"
+mkdir -p "$config_dir"
+touch "$config_dir/config.yaml"
+chmod 600 "$config_dir/config.yaml"
+```
+
+Edit that file and merge this block into it. If it already has an `admission`
+section, change its `budget` key instead of adding a second section. Keep the
+other settings. See [Permissions and writes](machine-config.md#permissions-and-writes).
 
 ```yaml
 admission:

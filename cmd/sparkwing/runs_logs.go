@@ -52,8 +52,8 @@ func runRunsLogs(ctx context.Context, inv clisurface.Invocation) error {
 	return observeRunLogs(ctx, inv, reader, runs, os.Stdout, os.Stderr, waitStatusPoll)
 }
 
-func followControllerRunLogs(ctx context.Context, options client.EngineOptions, run, format string, out io.Writer, wait func(context.Context, time.Duration) error) error {
-	inv := clisurface.Invocation{Command: clisurface.Command{Path: "sparkwing runs logs"}, Flags: map[string][]string{"run": {run}, "follow": {"true"}, "output": {format}}}
+func followControllerRunLogs(ctx context.Context, options client.EngineOptions, run, format string, out io.Writer, wait func(context.Context, time.Duration) error, verbose bool) error {
+	inv := clisurface.Invocation{Command: clisurface.Command{Path: "sparkwing runs logs"}, Flags: map[string][]string{"run": {run}, "follow": {"true"}, "output": {format}, "verbose": {strconv.FormatBool(verbose)}}}
 	reader, err := client.NewLogReader(options)
 	if err != nil {
 		return err
@@ -171,10 +171,12 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 			if liveProgress && progress.observe(record) {
 				continue
 			}
-			if runLogOutput(inv) == "pretty" {
+			if runLogOutput(inv) == "json" && inv.Bool("verbose") {
+				err = json.NewEncoder(out).Encode(record)
+			} else if runLogOutput(inv) == "pretty" {
 				err = stream.write(out, record)
 			} else {
-				err = writeLogRecord(out, record, runLogOutput(inv), false)
+				err = writeLogRecord(out, record, runLogOutput(inv), inv.Command.Path == "sparkwing runs grep" && runLogOutput(inv) == "json")
 			}
 			if err != nil {
 				return err
@@ -259,15 +261,15 @@ func writeUnloggedFailures(ctx context.Context, inv clisurface.Invocation, runs 
 }
 
 func writeLogRecord(out io.Writer, record controllerwire.LogRecord, format string, search bool) error {
-	if format == "json" {
-		return json.NewEncoder(out).Encode(record)
-	}
 	var diagnostic struct {
 		LeaseKeeper   bool `json:"host_lease_keeper"`
 		RequestTiming bool `json:"host_request_timing"`
 	}
-	if json.Unmarshal([]byte(record.Line), &diagnostic) == nil && (diagnostic.LeaseKeeper || diagnostic.RequestTiming) {
+	if json.Unmarshal([]byte(record.Line), &diagnostic) == nil && (diagnostic.LeaseKeeper || diagnostic.RequestTiming) && !(format == "json" && search) {
 		return nil
+	}
+	if format == "json" {
+		return json.NewEncoder(out).Encode(record)
 	}
 	if format == "pretty" && !search {
 		return (&logStream{}).write(out, record)
