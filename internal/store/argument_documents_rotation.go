@@ -68,9 +68,11 @@ func (r *sealedRotationTx) scheduleArguments(ctx context.Context, team Team, aft
 			columns = columns[:1]
 		}
 		for _, column := range columns {
-			scope, table := scheduleArgumentsScope(column.name), "cron_schedules"
+			scope := scheduleArgumentsScope(column.name)
+			update := `UPDATE cron_schedules SET ` + column.name + `=? WHERE team=? AND id=?`
 			if fires {
-				scope, table = fireArgumentsScope(d.schedule), "cron_fires"
+				scope = fireArgumentsScope(d.schedule)
+				update = `UPDATE cron_fires SET args=? WHERE team=? AND id=?`
 			}
 			value, err := r.argumentBody(team, d.id, scope, column.raw, false)
 			if errors.Is(err, errSealedUnreadable) || err == nil && value == nil {
@@ -79,7 +81,7 @@ func (r *sealedRotationTx) scheduleArguments(ctx context.Context, team Team, aft
 			if err != nil {
 				return after, false, err
 			}
-			if _, err := r.tx.execContext(ctx, `UPDATE `+table+` SET `+column.name+`=? WHERE team=? AND id=?`, string(value), team, d.id); err != nil {
+			if _, err := r.tx.execContext(ctx, update, string(value), team, d.id); err != nil {
 				return after, false, err
 			}
 		}
