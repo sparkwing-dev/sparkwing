@@ -157,15 +157,15 @@ func (l *Launcher) Run(ctx context.Context) error {
 		}
 	}()
 	logger := l.logger()
-	warnWatch := func(err error) {
+	warnWatch := func(err error, verb string) {
 		if watchWarned || shutdownFault(ctx, err) == nil {
 			return
 		}
 		message := "Cloud Pod watch unavailable; polling continues"
 		if apierrors.IsForbidden(err) {
-			message += "; grant watch on pods in the job namespace"
+			message += "; grant " + verb + " on pods in the job namespace"
 		}
-		logger.Warn(message, "namespace", l.Config.Namespace, "resource", "pods", "verb", "watch", "error", err)
+		logger.Warn(message, "namespace", l.Config.Namespace, "resource", "pods", "verb", verb, "error", err)
 		watchWarned = true
 	}
 	observeWatch := func(event watch.Event, ok bool) {
@@ -174,9 +174,9 @@ func (l *Launcher) Run(ctx context.Context) error {
 			return
 		}
 		if event.Type == watch.Error {
-			warnWatch(apierrors.FromObject(event.Object))
+			warnWatch(apierrors.FromObject(event.Object), "watch")
 		} else if ctx.Err() == nil && time.Since(watchStarted) < podWatchTimeout {
-			warnWatch(errors.New("pod watch closed before its timeout"))
+			warnWatch(errors.New("pod watch closed before its timeout"), "watch")
 		}
 		pods.Stop()
 		pods, changes = nil, nil
@@ -195,14 +195,24 @@ func (l *Launcher) Run(ctx context.Context) error {
 	for ctx.Err() == nil {
 		reconcile = reconcile || !time.Now().Before(nextReconcile)
 		if pods == nil && !time.Now().Before(reconnect) {
-			var err error
-			watchStarted = time.Now()
-			pods, err = l.Kube.CoreV1().Pods(l.Config.Namespace).Watch(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher, TimeoutSeconds: ptr(int64(podWatchTimeout / time.Second))})
+			options := metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher, Limit: 1}
+			// perf: one row supplies the collection revision without replaying every Pod.
+			snapshot, err := l.Kube.CoreV1().Pods(l.Config.Namespace).List(ctx, options)
+			verb := "list"
+			if err == nil {
+				verb = "watch"
+				options.Limit = 0
+				options.ResourceVersion = snapshot.ResourceVersion
+				options.TimeoutSeconds = ptr(int64(podWatchTimeout / time.Second))
+				watchStarted = time.Now()
+				pods, err = l.Kube.CoreV1().Pods(l.Config.Namespace).Watch(ctx, options)
+			}
 			if err != nil {
-				warnWatch(err)
+				warnWatch(err, verb)
 				reconnect = time.Now().Add(poll)
 			} else {
 				changes = pods.ResultChan()
+				reconcile = true
 			}
 		}
 		if reconcile {

@@ -436,8 +436,11 @@ A controller without held-claim support keeps the polling fallback.
 A watch on launcher-managed Pods in the job namespace wakes reconciliation
 when capacity starts or predecessor containers exit. Events only request a
 fresh pass through the same reservation, award, UID and admission checks.
-Queued Pod events, including an ADDED replay after reconnecting, share one
-reconciliation pass. The safety poll recovers missed events. A failed or closed
+Each connection first lists at most one matching Pod to obtain the collection's
+resource version, then starts the watch from that version. A full safety sample
+follows the connection, and later changes remain in the watch. This avoids an
+initial replay of every existing Pod, including on unbuffered watch streams.
+Queued Pod events still share one reconciliation pass. The safety poll recovers missed events. A failed or closed
 watch reconnects no sooner than the next poll. A failure streak warns once with
 the namespace, resource and verb. A forbidden watch names the missing permission.
 A healthy event or a full poll interval with a live watch resets the streak. Held same-run successors also retain the
@@ -650,6 +653,8 @@ API-call count. `TestLauncherCoalescesPodWatchReplay`,
 `TestLauncherWarnsOncePerPodWatchFailureStreak` and
 `TestLauncherHeldRepliesKeepSafetyReconciliationOnSchedule` guard burst load,
 visible fallback and safety scheduling.
+`TestLauncherWatchStartsFromFreshSnapshotAfterExpiration` guards versioned
+watch startup and a fresh snapshot after a resource-version expiration.
 
 Poll advice is process-local. The first claim after launcher startup logs a
 controller rate-limit reply at INFO,
