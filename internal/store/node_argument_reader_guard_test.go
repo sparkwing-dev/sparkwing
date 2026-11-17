@@ -25,6 +25,7 @@ func TestNodeSpecReadersDecodeArgumentValues(t *testing.T) {
 		// safety: SQL evaluates only clear approval/closure metadata; it never reads argument defaults.
 		"approval_evaluation.go:evaluationSourceSQL": "",
 	}
+	constants := map[string]ast.Expr{}
 	var quoted func(ast.Expr) string
 	quoted = func(expr ast.Expr) string {
 		switch value := expr.(type) {
@@ -32,6 +33,10 @@ func TestNodeSpecReadersDecodeArgumentValues(t *testing.T) {
 			if value.Kind == token.STRING {
 				raw, _ := strconv.Unquote(value.Value)
 				return raw
+			}
+		case *ast.Ident:
+			if expression, ok := constants[value.Name]; ok {
+				return quoted(expression)
 			}
 		case *ast.BinaryExpr:
 			if value.Op == token.ADD {
@@ -45,6 +50,7 @@ func TestNodeSpecReadersDecodeArgumentValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	files := map[string]*ast.File{}
 	for _, entry := range entries {
 		name := entry.Name()
 		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -54,6 +60,27 @@ func TestNodeSpecReadersDecodeArgumentValues(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		files[name] = file
+		for _, declaration := range file.Decls {
+			group, ok := declaration.(*ast.GenDecl)
+			if !ok || group.Tok != token.CONST {
+				continue
+			}
+			var values []ast.Expr
+			for _, specification := range group.Specs {
+				value := specification.(*ast.ValueSpec)
+				if len(value.Values) > 0 {
+					values = value.Values
+				}
+				for i, expression := range values {
+					if i < len(value.Names) {
+						constants[value.Names[i].Name] = expression
+					}
+				}
+			}
+		}
+	}
+	for name, file := range files {
 		for _, declaration := range file.Decls {
 			fn, ok := declaration.(*ast.FuncDecl)
 			if !ok || fn.Body == nil {
@@ -78,7 +105,7 @@ func TestNodeSpecReadersDecodeArgumentValues(t *testing.T) {
 					text := strings.ToLower(quoted(value))
 					accessesSpec = accessesSpec || strings.Contains(text, "spec_json") && strings.Contains(text, "nodes")
 				case *ast.Ident:
-					columns = columns || value.Name == "nodeReadColumns"
+					columns = columns || strings.Contains(strings.ToLower(quoted(value)), "spec_json")
 				case *ast.CallExpr:
 					switch callee := value.Fun.(type) {
 					case *ast.Ident:
