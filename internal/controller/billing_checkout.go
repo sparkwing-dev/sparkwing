@@ -153,6 +153,10 @@ func (c *billingCheckout) post(ctx context.Context, pairing checkoutPairing, pat
 	// safety: an unpaired service cannot authoritatively accept or refuse a payment, so neither success nor a final
 	// refusal can move a refill, refund or page forward until the response mode matches.
 	if mode := resp.Header.Get(checkoutModeHeader); mode != string(pairing.mode) {
+		if mode == "" {
+			return fmt.Errorf("%w: %w: checkout response has no %s header (HTTP %d); check for an ingress error such as 502, a wrong --billing-url or billing token, or a checkout service whose BILLING_LIVE does not match --payment-mode",
+				errCheckoutUnavailable, errCheckoutMisconfigured, checkoutModeHeader, resp.StatusCode)
+		}
 		return fmt.Errorf("%w: %w: the checkout service answered in Stripe mode %q, this controller runs in %q; set its BILLING_LIVE to match --payment-mode",
 			errCheckoutUnavailable, errCheckoutMisconfigured, mode, pairing.mode)
 	}

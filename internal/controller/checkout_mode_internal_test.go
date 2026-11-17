@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -237,5 +238,25 @@ func TestBillingPageTransportDoesNotSupplyPaymentMode(t *testing.T) {
 	err := checkout.post(t.Context(), checkoutPairing{mode: capability.PaymentTest}, "/internal/portal", nil, &out)
 	if !errors.Is(err, errCheckoutMisconfigured) || !errors.Is(err, errCheckoutUnavailable) {
 		t.Fatalf("headerless answer: %v; want a retryable misconfigured pairing", err)
+	}
+}
+
+func TestHeaderlessCheckoutNamesTransportAndConfigurationCauses(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusBadGateway, http.StatusUnauthorized, http.StatusNotFound} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) }))
+			t.Cleanup(srv.Close)
+			checkout := (&Server{}).WithBillingCheckout(srv.URL, "credential").checkout
+			var out map[string]any
+			err := checkout.post(t.Context(), checkoutPairing{mode: capability.PaymentTest}, "/internal/portal", nil, &out)
+			if !errors.Is(err, errCheckoutMisconfigured) || !errors.Is(err, errCheckoutUnavailable) {
+				t.Fatalf("classification: %v", err)
+			}
+			for _, want := range []string{"Sparkwing-Payment-Mode", "BILLING_LIVE", "ingress", "502", "--billing-url", "token"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q missing %q", err, want)
+				}
+			}
+		})
 	}
 }
