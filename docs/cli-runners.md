@@ -66,7 +66,7 @@ Without --session-stdin a personal runner can be approved in the browser: the co
 | `--trust CLASS` | Which runs this shared runner takes within its --repos scope, which already admits only repository-proven work: verified-default takes only verified default-branch work (signed pushes to the default branch and unmodified fires of admin-armed default-branch schedules), and any takes every proven run; a runner holding a pool with a reserved secret, or a verified-default runner with any pool, takes nothing unless enrolled with --launcher, and unset such a launcher takes only verified default-branch work. Values: verified-default, any. |
 | `--platform PLATFORM` | Record a shared Kubernetes runner at admin enrollment; a runner in a pod stops at its first poll without it. Values: kubernetes. |
 | `--launcher` | Enroll only claims.launch for a shared reserved pool and skip the persistent runner service. |
-| `--team TEAM` | With browser approval, accept an approval only from this team. |
+| `--team TEAM` | With browser approval, accept an approval only from this team. Cannot be combined with --session-stdin: the team chosen in the browser session decides ownership. |
 | `--service-user USER` | Run the runner under this dedicated, unprivileged OS user instead of your own account, so its jobs cannot read your home. Creates the user when absent and installs a system service running as it; asks for sudo before minting the credential. |
 
 ## `sparkwing runners delete`
