@@ -121,6 +121,7 @@
         "cli-repos",
         "cli-run",
         "cli-runners",
+        "cli-account",
         "cli-team",
         "cli-runs",
         "cli-schedules",

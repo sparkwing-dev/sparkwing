@@ -98,6 +98,9 @@ type (
 type auditFirstSuccess struct {
 	RunID string `json:"run_id"`
 }
+type auditAccountDeletion struct {
+	AccountID string `json:"-"`
+}
 type auditRunDeletion struct {
 	RunID string `json:"-"`
 }
@@ -300,6 +303,7 @@ type auditPayload interface{ isAuditPayload() }
 func (auditAdmission) isAuditPayload()            {}
 func (auditTeamCreation) isAuditPayload()         {}
 func (auditFirstSuccess) isAuditPayload()         {}
+func (auditAccountDeletion) isAuditPayload()      {}
 func (auditRunDeletion) isAuditPayload()          {}
 func (auditApprovalDecision) isAuditPayload()     {}
 func (auditCancellation) isAuditPayload()         {}
@@ -353,6 +357,9 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 	case auditFirstSuccess:
 		actorAllowed = c.Actor.system == auditController
 		ev.Kind, ev.RunID = businessEventFirstRunSucceeded, p.RunID
+	case auditAccountDeletion:
+		ev.Kind, ev.SubjectID, ev.Account, repeat = "account.deleted", p.AccountID, p.AccountID, true
+		valid = p.AccountID != ""
 	case auditRunDeletion:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "run.deletion_authorized", p.RunID, p.RunID, true
 	case auditApprovalDecision:

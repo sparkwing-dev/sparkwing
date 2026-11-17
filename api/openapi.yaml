@@ -724,6 +724,61 @@ components:
         - body_hash
       type: object
       x-sparkwing-go-type: controllerwire.AcceptedExpansion
+    internal.controllerwire.AccountDeletionPreview:
+      additionalProperties: true
+      properties:
+        account_id:
+          type: string
+        blocked_teams:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        teams:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+      required:
+        - account_id
+        - teams
+        - blocked_teams
+      type: object
+      x-sparkwing-go-type: controllerwire.AccountDeletionPreview
+    internal.controllerwire.AccountDeletionRequest:
+      additionalProperties: true
+      properties:
+        confirm_account_id:
+          type: string
+        confirm_teams:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+      required:
+        - confirm_account_id
+        - confirm_teams
+      type: object
+      x-sparkwing-go-type: controllerwire.AccountDeletionRequest
+    internal.controllerwire.AccountDeletionResult:
+      additionalProperties: true
+      properties:
+        account_id:
+          type: string
+        deleted_teams:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+      required:
+        - account_id
+        - deleted_teams
+      type: object
+      x-sparkwing-go-type: controllerwire.AccountDeletionResult
     internal.controllerwire.AnnotationWrite:
       additionalProperties: true
       properties:
@@ -9598,6 +9653,39 @@ paths:
         retry: exact_body
       x-sparkwing-wire: undocumented
   /api/v1/me:
+    delete:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.AccountDeletionRequest'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.AccountDeletionResult'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Delete your own account and confirmed sole-member teams
+      x-sparkwing-policy:
+        method: DELETE
+        path: /api/v1/me
+        audience: controller
+        owner: account
+        authentication: capability
+        access:
+          - credential: account_session
+            grants: []
+            binding: none
+            liveness: credential
+        retry: safe
     get:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       responses:
@@ -9651,6 +9739,34 @@ paths:
             liveness: credential
         retry: idempotency_key
       x-sparkwing-wire: undocumented
+  /api/v1/me/deletion:
+    get:
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.AccountDeletionPreview'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Preview account deletion and its exact team scope
+      x-sparkwing-policy:
+        method: GET
+        path: /api/v1/me/deletion
+        audience: controller
+        owner: account
+        authentication: capability
+        access:
+          - credential: account_session
+            grants: []
+            binding: none
+            liveness: credential
+        retry: safe
   /api/v1/me/identities:
     get:
       parameters:

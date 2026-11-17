@@ -326,21 +326,26 @@ when an earlier deployment reported failure.
 
 ### Deleted data in backups
 
-Deleting a team or account removes its rows and objects from the live service.
-Copies remain in backups until those age out:
+Deleting an account removes its live identity and revokes its authority immediately.
+Deleting a team closes it immediately and queues its rows and objects for the
+retrying purge. Shared-team history, accounting records, reserved slugs and
+audit identifiers have the explicit exceptions described in
+[Deleting a team or account](auth.md#deleting-a-team-or-account).
 
-- RDS automated backups keep point-in-time recovery for the instance's backup
-  retention period. On Sparkwing Cloud that is 7 days.
-- A versioned object bucket keeps a deleted object as a noncurrent version
-  until its lifecycle rule expires it. On Sparkwing Cloud the rule is 7 days.
-  S3 rounds each expiry up to the next midnight UTC and removes expired
-  versions asynchronously, so a deleted object is typically gone within 8 days.
-- Manual RDS snapshots never expire. Delete a manual snapshot within the same
-  retention period once the change it protected is verified, or record why it
-  must outlive that period.
+On Sparkwing Cloud, RDS automated backups retain a seven-day recovery window.
+Cloud run-data buckets are unversioned, so a successful object purge leaves no
+noncurrent object versions. Manual RDS snapshots do not expire and must not be
+created for customer data under the seven-day deletion promise. A restore must
+reapply deletions made after its restore point before admitting traffic.
 
-On Sparkwing Cloud, deleted data therefore leaves automated copies in about 7
-days, typically within 8.
+Self-hosted operators must verify their own backup retention. Versioned object
+buckets need noncurrent-version expiry as well as live deletion. S3 rounds
+lifecycle expiry up to midnight UTC and deletes asynchronously, so a seven-day
+lifecycle rule alone cannot prove a strict seven-day erasure deadline. Local
+schema-upgrade backups keep the two newest copies by count, not age; remove
+copies containing deleted data within the promised window. Inventory manual
+snapshots, database/WAL archives and other copies too. The account endpoint
+cannot expire an operator's independent backups.
 
 Restoring a backup taken before a deletion brings the deleted data back.
 Repeat any deletion that happened after the restore point before reopening the

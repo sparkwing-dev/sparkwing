@@ -571,6 +571,8 @@ var commandSynopses = map[string]string{
 	"sparkwing billing standing":                    "Show the team's Cloud standing and latest tier request",
 	"sparkwing billing request-tier":                "Contact operators for High standing, higher limits or larger payments",
 	"sparkwing team":                                "Manage your team",
+	"sparkwing account":                             "Manage your signed-in account",
+	"sparkwing account delete":                      "Preview and delete your account and sole-member teams",
 	"sparkwing team delete":                         "Delete the team and all of its data",
 	"sparkwing team settings":                       "Manage team settings",
 	"sparkwing team settings show":                  "Show the team's enrollment, claim ranking and child-run settings",

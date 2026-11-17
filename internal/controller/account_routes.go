@@ -34,6 +34,8 @@ func (s *Server) accountReader() (AccountReader, error) {
 func (s *Server) accountEndpoints() []controllerwire.Endpoint {
 	return []controllerwire.Endpoint{
 		{Method: "GET", Pattern: "/api/v1/me", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleMe},
+		{Method: "GET", Pattern: "/api/v1/me/deletion", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleAccountDeletionPreview},
+		{Method: "DELETE", Pattern: "/api/v1/me", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleDeleteOwnAccount},
 		{Method: "POST", Pattern: "/api/v1/me/active-team", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleSetActiveTeam},
 		{Method: "GET", Pattern: "/api/v1/me/identities", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleIdentities},
 		{Method: "DELETE", Pattern: "/api/v1/me/identities/{provider}", Authentication: capability.AuthCapability, Decode: authorityTarget, Handle: s.handleIdentityUnlink},

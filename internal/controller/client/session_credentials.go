@@ -26,8 +26,16 @@ func (m *sessionRunnerTokenManager) Logout(ctx context.Context) error {
 
 // NewSessionRunnerTokenManager uses an existing account session without converting bearer authority.
 func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, session string) (SessionRunnerTokenManager, error) {
+	c, err := newSessionEngineClient(ctx, options, session)
+	if err != nil {
+		return nil, err
+	}
+	return &sessionRunnerTokenManager{tokenManager: &tokenManager{client: c, base: "/api/v1/tokens"}}, nil
+}
+
+func newSessionEngineClient(ctx context.Context, options EngineOptions, session string) (*engineClient, error) {
 	if !validSessionValue(session) || options.Bearer != nil {
-		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "runner session enrollment requires only an account-session presentation"}
+		return nil, &apierr.Error{Code: apierr.BadRequest, Message: "requires only an account-session presentation"}
 	}
 	c, err := newEngineClient(options)
 	if err != nil {
@@ -51,7 +59,7 @@ func NewSessionRunnerTokenManager(ctx context.Context, options EngineOptions, se
 		return nil, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned no valid session CSRF proof"}
 	}
 	auth.csrf = proof.CSRFToken
-	return &sessionRunnerTokenManager{tokenManager: &tokenManager{client: c, base: "/api/v1/tokens"}}, nil
+	return c, nil
 }
 
 func validSessionValue(value string) bool {

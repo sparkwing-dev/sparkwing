@@ -1018,18 +1018,52 @@ records of the team's events, such as run cancellations and deletions. The
 slug stays reserved and cannot be reused. `GET /api/v1/me/team-deletions` shows the requester each deletion's
 state.
 
-An owner cannot delete their only team: deleting it means deleting the account.
-Account deletion is an operator action. Ask the deployment's support contact,
-which the refusal names when the controller sets `--support-contact`. On
-Sparkwing Cloud that is support@sparkwing.dev. The
-operator calls `DELETE /api/v1/operator/accounts/{account}` from an operator
-console session. It removes the account's identities, sessions, memberships and
-tokens, and deletes every team the account was the only member of. It refuses
-an account that is the last owner of a team with other members until ownership
-moves or that team is deleted.
+An owner cannot delete their only team through team deletion. Delete the account
+from **Your account > Delete account**, or use `sparkwing account delete
+--profile NAME --session-stdin`. The profile selects the controller, and stdin
+supplies an existing direct account session, as with runner enrollment. A
+profile token cannot delete an account. Prefer the dashboard to avoid copying a
+session. The preview lists every team where you are the only member. Their runs
+and operational data go with them. Type the account ID to confirm in the
+dashboard. In the CLI, first read the preview, then repeat the account ID with
+`--confirm ACCOUNT_ID` and each listed team with `--confirm-team SLUG`.
 
-Deleted data stays in backups for a bounded time; see
-[deleted data in backups](backup-restore.md#deleted-data-in-backups).
+`GET /api/v1/me/deletion` returns `account_id`, `teams` and `blocked_teams`.
+`DELETE /api/v1/me` requires `confirm_account_id` and `confirm_teams`. The
+transaction rechecks the exact team list and refuses a stale confirmation.
+It removes your identities, sessions and memberships and revokes every token
+you hold or created, including descendants. Other browser and CLI sessions
+stop working immediately. Sole-member teams close immediately and enter the
+same retrying cleanup as team deletion. If you are the sole owner of a team
+with other members, transfer ownership or delete that team first. Accounts
+without a team, including waitlisted accounts, can delete themselves too.
+
+Shared-team runs, logs, artifacts and other team-owned history remain for the
+remaining members. Actor fields are relabeled as a deleted user. User-supplied
+content, including logs and artifacts, may still contain personal information.
+That content follows the team's retention policy and is excluded from account
+identity erasure. Financial records remain for accounting. Audit identifiers
+remain for security and abuse investigation under the operator's existing
+retention policy (400 days by default). Most audit records contain identifiers, enums, counts and digests. OIDC mint
+records are an exception: they currently retain the caller-supplied audience
+and generated subject as plain strings. An audience can contain an email or
+other personal text. Account deletion preserves these append-only rows until
+audit retention expires. It does not scrub those strings. Do not put personal
+information or credentials in an OIDC audience.
+
+The Cloud deletion promise covers live account identity and the operational
+data of deleted teams, plus expiry of their automated backup copies within
+seven days. Live account identity and authority disappear in the request
+transaction. Team data normally disappears within minutes, with a final sweep
+75 minutes later for finishing uploads. Failed purges retry and remain visible
+to the operator; a failed purge is not completed erasure. Shared-team history,
+financial records, reserved team slugs and audit identifiers are the explicit
+exceptions above. Self-hosted operators own their backup and object-version
+retention and must configure and verify it before making the same promise.
+See [deleted data in backups](backup-restore.md#deleted-data-in-backups).
+
+Operators retain `DELETE /api/v1/operator/accounts/{account}` for support
+requests. It uses the same account erasure and team cleanup rules.
 
 ### Device sign-in
 
