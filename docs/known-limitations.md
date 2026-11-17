@@ -18,11 +18,12 @@ to run Sparkwing on Windows. Use the [Linux installer](getting-started.md#instal
 
 Native Windows has these limitations:
 
-- The runner service installer supports Linux and macOS only. Windows uses an embedded local runner.
+- The runner service installer supports Linux and macOS only. The controller starts the local runner as a separate background process without login-service supervision.
 - Schedule installation records schedules but does not fire them automatically.
-- When `sparkwing update` restarts a running controller, its embedded runner has a 20-second drain deadline.
+- When `sparkwing update` restarts a running controller, the restart has a 20-second drain deadline.
   A held job may make the restart fail after the new binary is installed. This risk still needs a native Windows acceptance run.
 - Jobs get no OS resource cap, and process termination has no SIGTERM grace period.
+- The Windows arm64 binary has not been tested on native arm64 hardware.
 
 Experimental Go and TypeScript execution needs Git Bash and native tools for the commands a pipeline runs.
 See [Windows with Git Bash](local-execution.md#windows-with-git-bash) for execution and acceptance limits.

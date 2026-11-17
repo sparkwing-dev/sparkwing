@@ -154,8 +154,10 @@ you run `bash bin/build-web.sh` from a repo checkout first. The prebuilt
 release binary has no such limitation.
 
 The bundled `sparkwing-runner` service installer supports Linux and macOS.
-Native Windows uses an embedded local runner. For supported Windows execution,
-use the Linux installer inside WSL2 with systemd user services enabled.
+For an experimental native Windows team runner, start and supervise
+`sparkwing-runner.exe start --config <config-path>` yourself, using the runner
+configuration written during enrollment. For supported Windows execution, use
+the Linux installer inside WSL2 with systemd user services enabled.
 
 ### If the wrong sparkwing runs
 
