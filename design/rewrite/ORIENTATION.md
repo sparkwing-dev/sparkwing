@@ -666,4 +666,5 @@ decision amends an earlier one where noted.
 
 | The standalone Go SDK builds and tests on Go 1.25 without the host module | `sparkwing/go.mod`; `go.work` | `sparkwing/tidy_closure_test.go`: `TestSDKTidyClosureNeedsOnlySmallModules`; SDK floor proof |
 
+| Engine RunContext forwards resolved step bounds through SDK planning so Land can refuse unsafe pushing runs | `internal/nodehost/sdk_code.go`: `executorRunContext` | `internal/nodehost/sdk_run_context_test.go`: `TestSDKRunContextCarriesStepBounds`; `internal/nodehost/sdk_planning_test.go`: `TestSDKPlanningRetainsSealedRunContext` |
 | Go SDK v0.1.0 Plan failures name its nil-Git discovery limitation and the SDK upgrade command without exposing author errors | `internal/nodehost/sdk_planning.go`: `planningError` | `internal/nodehost/sdk_legacy_pin_test.go`: `TestOldSDKPlanFailureNamesUpgradeWithoutExposingPanic` |
