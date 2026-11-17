@@ -29,7 +29,7 @@ cannot test candidates, but a key holder can. Account deletion preserves these
 pseudonymous digests and tracing IDs through the configured audit horizon.
 
 SQLite's automatic pre-upgrade `.bak` file contains the old raw data. Historical
-backups, WAL, PostgreSQL dead tuples, snapshots and replicas need their own
+backups, SQLite free pages, WAL, PostgreSQL dead tuples, snapshots and replicas need their own
 retirement. Restoring an older copy brings the raw data back until the new
 controller reconciles it again. Do not downgrade an upgraded database. To run an
 older binary, restore its matching backup into a separate database and treat its

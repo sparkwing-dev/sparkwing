@@ -327,7 +327,7 @@ A malformed historical payload refuses startup rather than preserving it silentl
 See the [migration guide](migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-40).
 
 Logical database rows lose raw identity text. Old backups, SQLite pre-upgrade
-copies, WAL, PostgreSQL dead tuples, snapshots and replicas can still contain it
+copies, SQLite free pages, WAL, PostgreSQL dead tuples, snapshots and replicas can still contain it
 until their storage and retention policies retire it. Restoring an old database
 requires the new controller and external keys to run reconciliation again before
 serving. Audit retention remains 400 days by default. Account deletion preserves

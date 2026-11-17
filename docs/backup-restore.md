@@ -496,7 +496,7 @@ digests. Preserve retired external keys separately if candidate matching must
 remain possible for its audit horizon. Key rotation does not rewrite audit rows.
 
 The schema upgrade's SQLite `.bak` copy predates the scrub and contains raw
-values. WAL, PostgreSQL dead tuples, older snapshots and replicas may also retain
+values. SQLite free pages, WAL, PostgreSQL dead tuples, older snapshots and replicas may also retain
 raw bytes. Retire these copies under the deployment's retention policy. Logical
 scrubbing does not promise physical erasure of every storage copy. See
 [audit investigation](oidc.md#audit-investigation) for the matching and key-access limits.
