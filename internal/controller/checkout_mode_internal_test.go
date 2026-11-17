@@ -252,7 +252,7 @@ func TestHeaderlessCheckoutNamesTransportAndConfigurationCauses(t *testing.T) {
 			if !errors.Is(err, errCheckoutMisconfigured) || !errors.Is(err, errCheckoutUnavailable) {
 				t.Fatalf("classification: %v", err)
 			}
-			for _, want := range []string{"Sparkwing-Payment-Mode", "BILLING_LIVE", "ingress", "502", "--billing-url", "token"} {
+			for _, want := range []string{"Sparkwing-Payment-Mode", "ingress", "502", "--billing-url", "billing-token credential", "too old"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q missing %q", err, want)
 				}
