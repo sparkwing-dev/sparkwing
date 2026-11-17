@@ -101,7 +101,9 @@ undone by returning the checkout service to test mode.
    cannot return.
 4. Verify:
    - The checkout service's `sparkwing-cloud listening` line shows `"live":true`.
-   - The controller logs no `alert=checkout_misconfigured`.
+   - Check for `alert=checkout_misconfigured` from background refills and
+     refunds. Page requests emit none, so log silence alone does not verify
+     the pairing.
    - Add funds opens a Stripe page whose session id starts with `cs_live_`.
    - A $10 live payment reaches the balance through the live webhook. Keep it
      as live credit, or refund it in the Stripe dashboard: the controller takes
@@ -300,7 +302,9 @@ service) or a 421 (the service's `BILLING_DEPLOYMENT` is another deployment,
 or its `BILLING_LIVE` another Stripe mode). The first one logs
 `alert=checkout_misconfigured` naming the likely cause and its `retry_limit`, once
 until a call is answered again, and fixing the pairing within 6 hours affects no
-team. Any other refusal is about the request itself, such as an amount outside
+team. An answer naming another Stripe mode or no mode is also a
+misconfigured pairing, whatever its HTTP status. Only an answer with the
+matching mode can make another refusal final, such as an amount outside
 the bounds, another team's Stripe customer (403) or a request Stripe refused
 (422), and closes the refill as `checkout_refused` without another call. Either
 failure logs `alert=checkout_failed` for the operator and stops refills the way
