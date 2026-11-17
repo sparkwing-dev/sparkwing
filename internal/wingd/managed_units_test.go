@@ -278,24 +278,24 @@ func TestInstalledControllerIgnoresUnrelatedTimer(t *testing.T) {
 				t.Fatal(err)
 			}
 			native := manager.(*nativeUnits)
-			if err := os.MkdirAll(crontimer.UnitDir(host), 0700); err != nil {
+			if err := os.MkdirAll(crontimer.UnitDir(host), 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(crontimer.UnitDir(host), "sparkwing-crons-"+unitfile.Instance(host.Home, host.SparkwingHome)+".timer"), []byte(body), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(crontimer.UnitDir(host), "sparkwing-crons-"+unitfile.Instance(host.Home, host.SparkwingHome)+".timer"), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			installed, err := manager.ControllerInstalled(t.Context())
 			if err != nil || installed {
 				t.Fatalf("unrelated timer exempted private controller: %v %v", installed, err)
 			}
-			if err := os.WriteFile(native.path(), []byte(body), 0600); err != nil {
+			if err := os.WriteFile(native.path(), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			installed, err = manager.ControllerInstalled(t.Context())
 			if err != nil || installed {
 				t.Fatalf("foreign or incomplete controller exempted home: %v %v", installed, err)
 			}
-			if err := os.WriteFile(native.path(), []byte(native.render("/bin/sparkwing", "v1")), 0600); err != nil {
+			if err := os.WriteFile(native.path(), []byte(native.render("/bin/sparkwing", "v1")), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			installed, err = manager.ControllerInstalled(t.Context())

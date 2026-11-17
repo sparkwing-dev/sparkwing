@@ -146,10 +146,10 @@ func TestStateWatchReportsChangesAndPropagatesReporterFailure(t *testing.T) {
 
 func TestKilledHostRunActivitySettlesAfterLeaseReaper(t *testing.T) {
 	var binding Binding
-	c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
+	c := openFixture(t, func(ctx context.Context, b Binding) (Services, error) {
 		binding = b
-		seedOwner(t, b, "killed-host", true)
-		if _, err := stateSQL(t, b).ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=? WHERE id='killed-host'`, time.Now().Add(time.Hour).UnixNano()); err != nil {
+		seedOwnerContext(t, ctx, b, "killed-host", true)
+		if _, err := stateSQL(t, b).ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE id='killed-host'`, time.Now().Add(time.Hour).UnixNano()); err != nil {
 			t.Fatal(err)
 		}
 		services := serviceFixture(b)

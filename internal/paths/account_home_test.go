@@ -26,7 +26,7 @@ func TestDefaultForHomeIgnoresAmbientSelectors(t *testing.T) {
 func TestDefaultForHomeRecognizesSymlink(t *testing.T) {
 	account := t.TempDir()
 	state := filepath.Join(account, ".sparkwing")
-	if err := os.Mkdir(state, 0700); err != nil {
+	if err := os.Mkdir(state, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	alias := filepath.Join(t.TempDir(), "alias")
