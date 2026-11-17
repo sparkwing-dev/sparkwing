@@ -20,7 +20,7 @@ type SealedRotation struct {
 	GitCredentials  int `json:"git_credentials"`
 	RunEnvironments int `json:"run_environments"`
 	// RunArguments counts resealed run argument envelopes; PlaintextRunArguments counts
-	// documents written before argument sealing, which rotation seals and verify only counts.
+	// run and schedule documents written before argument sealing, which rotation seals and verify only counts.
 	RunArguments          int `json:"run_arguments"`
 	PlaintextRunArguments int `json:"plaintext_run_arguments"`
 	Settings              int `json:"settings"`
@@ -78,7 +78,7 @@ func scopeName(purpose secrets.Purpose, scope string) string {
 	return ""
 }
 
-// RotateSealedValues reseals every tenant's secrets, git credentials, run event signing secrets, run arguments and submitted run environments, and local requester inputs, plus
+// RotateSealedValues reseals every tenant's secrets, git credentials, run event signing secrets, run and schedule arguments and submitted run environments, and local requester inputs, plus
 // signing keys, under the cipher's current key. Each step commits on its own and repeats safely.
 // Verify only counts, reporting how many rows still open under the previous key alone.
 func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authorized, cipher SealedRotationCipher, verify bool) (SealedRotation, error) {
@@ -135,6 +135,16 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 		}
 		if err := step(func(r *sealedRotationTx) error { return r.runEventSubscriptions(ctx, team) }, team); err != nil {
 			return SealedRotation{}, err
+		}
+		for _, fires := range []bool{false, true} {
+			for after, more := "", true; more; {
+				if err := step(func(r *sealedRotationTx) (err error) {
+					after, more, err = r.scheduleArguments(ctx, team, after, fires)
+					return err
+				}, team); err != nil {
+					return SealedRotation{}, err
+				}
+			}
 		}
 		for after, more := "", true; more; {
 			if err := step(func(r *sealedRotationTx) (err error) {
@@ -329,18 +339,18 @@ func (r *sealedRotationTx) settingKey(ctx context.Context, key string) error {
 
 // safety: a page also seals documents stored before argument sealing, so rotation retires their plaintext.
 func (r *sealedRotationTx) runArguments(ctx context.Context, team Team, after string) (string, bool, error) {
-	rows, err := r.tx.queryContext(ctx, `SELECT id,request_json,spec_json FROM runs WHERE team=? AND id>? ORDER BY id LIMIT ?`+r.tx.forUpdate(), team, after, sealedRotationRunPage)
+	rows, err := r.tx.queryContext(ctx, `SELECT id,request_json,spec_json,plan_json FROM runs WHERE team=? AND id>? ORDER BY id LIMIT ?`+r.tx.forUpdate(), team, after, sealedRotationRunPage)
 	if err != nil {
 		return after, false, err
 	}
 	type document struct {
-		run           string
-		request, spec []byte
+		run                 string
+		request, spec, plan []byte
 	}
 	var page []document
 	for rows.Next() {
 		var d document
-		if err := rows.Scan(&d.run, &d.request, &d.spec); err != nil {
+		if err := rows.Scan(&d.run, &d.request, &d.spec, &d.plan); err != nil {
 			return after, false, errors.Join(err, rows.Close())
 		}
 		page = append(page, d)
@@ -359,6 +369,9 @@ func (r *sealedRotationTx) runArguments(ctx context.Context, team Team, after st
 			}},
 			{"spec_json", d.spec, func() ([]byte, error) {
 				return rotateRunDocument(r, team, d.run, specArgumentsScope, d.spec, specArgumentSlots)
+			}},
+			{"plan_json", d.plan, func() ([]byte, error) {
+				return r.argumentBody(team, d.run, planArgumentsScope, d.plan, true)
 			}},
 		} {
 			value, err := column.next()
@@ -383,18 +396,18 @@ func (r *sealedRotationTx) runArguments(ctx context.Context, team Team, after st
 }
 
 func (r *sealedRotationTx) expansionArguments(ctx context.Context, team Team, run string) error {
-	rows, err := r.tx.queryContext(ctx, `SELECT node_id,expansion_registration FROM nodes WHERE team=? AND run_id=? AND expansion_registration IS NOT NULL ORDER BY node_id`+r.tx.forUpdate(), team, run)
+	rows, err := r.tx.queryContext(ctx, `SELECT node_id,spec_json,expansion_body,expansion_registration FROM nodes WHERE team=? AND run_id=? ORDER BY node_id`+r.tx.forUpdate(), team, run)
 	if err != nil {
 		return err
 	}
 	type registration struct {
-		node string
-		raw  []byte
+		node            string
+		raw, spec, body []byte
 	}
 	var found []registration
 	for rows.Next() {
 		var e registration
-		if err := rows.Scan(&e.node, &e.raw); err != nil {
+		if err := rows.Scan(&e.node, &e.spec, &e.body, &e.raw); err != nil {
 			return errors.Join(err, rows.Close())
 		}
 		found = append(found, e)
@@ -403,6 +416,30 @@ func (r *sealedRotationTx) expansionArguments(ctx context.Context, team Team, ru
 		return err
 	}
 	for _, e := range found {
+		for _, column := range []struct {
+			name, scope string
+			raw         []byte
+		}{
+			{"spec_json", nodeArgumentsScope(e.node), e.spec},
+			{"expansion_body", expansionBodyArgumentsScope(e.node), e.body},
+		} {
+			var value []byte
+			var err error
+			if column.name == "spec_json" {
+				value, err = r.nodeArguments(team, run, e.node, column.raw)
+			} else {
+				value, err = r.argumentBody(team, run, column.scope, column.raw, true)
+			}
+			if errors.Is(err, errSealedUnreadable) || err == nil && value == nil {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if _, err := r.tx.execContext(ctx, `UPDATE nodes SET `+column.name+`=? WHERE team=? AND run_id=? AND node_id=?`, value, team, run, e.node); err != nil {
+				return err
+			}
+		}
 		value, err := rotateRunDocument(r, team, run, expansionArgumentsScope(e.node), e.raw, registrationArgumentSlots)
 		if errors.Is(err, errSealedUnreadable) || err == nil && value == nil {
 			continue

@@ -74,12 +74,6 @@ An approval pauses a run until someone answers, and the run's own author can app
 jobs re-runs an approval-gated job without asking again. Protect deploys with reserved pools as above, not with
 approvals.
 
-### Schedule arguments and argument defaults are stored unsealed
-
-A schedule's `args` and the defaults of job arguments declared with `WithArgs` are stored in the controller's database
-without encryption. Team members cannot read them, but a database or backup reader can. Pass credentials only as
-secrets.
-
 ## Runners
 
 ### Personal machines never run push or pull request work

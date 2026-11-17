@@ -72,6 +72,7 @@ var schemaUpgrades = []schemaUpgrade{
 	{from: 37, release: "schema 37", digest: "7da3f341c2c5b6cc6fd60afb1a881979dfc5b64e79589a551522c655b5099e64", statements: []string{`ALTER TABLE nodes ADD COLUMN group_wait_started_at BIGINT CHECK(group_wait_started_at IS NULL OR group_wait_started_at>0)`}},
 	{from: 38, release: "schema 38", digest: "d7d89dd6049c6139e01bae0a845983414393d5b7c622a2172c60fa1292e5d7da", statements: schema39RunEventStatements},
 	{from: 39, release: "schema 39", digest: "bd376ce39b5fdee54f286dd73111f3644264b8cc4cb864a887cd589436eae19b", statements: []string{`CREATE TABLE audit_privacy_migrations (version BIGINT NOT NULL PRIMARY KEY CHECK(version=1), completed BIGINT NOT NULL CHECK(completed IN (0,1)))`, `INSERT INTO audit_privacy_migrations(version,completed) VALUES (1,0)`}},
+	{from: 40, release: "schema 40", digest: "1bcc048252e13edb35021084dd24ad1d7f7adf9eb9cd9ee5fbc291a0ef7df189"},
 }
 
 var schema39RunEventStatements = []string{`CREATE TABLE run_event_subscriptions (
