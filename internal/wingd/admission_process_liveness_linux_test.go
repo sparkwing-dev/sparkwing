@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"testing"
+ "syscall"
 
 	"golang.org/x/sys/unix"
 
@@ -81,5 +82,22 @@ func TestAdmissionUnreapedExitedHolderFreesCapacity(t *testing.T) {
 	var promoted AdmissionHTTPState
 	if err := json.Unmarshal(response.Body.Bytes(), &promoted); err != nil || promoted.Grant == nil {
 		t.Fatalf("waiter after holder exit: HTTP %d: %s, %v", response.Code, response.Body.String(), err)
+	}
+}
+
+func TestAdmissionProcessRunningVanished(t *testing.T) {
+	for _, cause := range []error{syscall.ENOENT, syscall.ESRCH, syscall.EACCES} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			err := admissionProcessRunningRead(123, func(string) ([]byte, error) {
+				return nil, &os.PathError{Op: "open", Path: "/proc/123/stat", Err: cause}
+			})
+			if errors.Is(cause, syscall.EACCES) {
+				if !errors.Is(err, cause) {
+					t.Fatalf("inspection error = %v", err)
+				}
+			} else if !errors.Is(err, procgroup.ErrProcessAbsent) {
+				t.Fatalf("vanished process error = %v", err)
+			}
+		})
 	}
 }

@@ -667,3 +667,8 @@ decision amends an earlier one where noted.
 - 75: Shared Cloud pools bind never-used nodes to one team/run; idle warm nodes may serve one class smaller at requested billing and limits. Warm placeholder authority stays in a dedicated namespace and pools pin the hardened EC2NodeClass.
 
 | The standalone Go SDK builds and tests on Go 1.25 without the host module | `sparkwing/go.mod`; `go.work` | `sparkwing/tidy_closure_test.go`: `TestSDKTidyClosureNeedsOnlySmallModules`; SDK floor proof |
+
+Linux process inspection treats ENOENT and ESRCH as absent processes. Owners:
+`internal/procgroup/session_linux.go` and
+`internal/wingd/admission_process_liveness_linux.go`. Guards:
+`TestSessionIdentityVanished` and `TestAdmissionProcessRunningVanished`.
