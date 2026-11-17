@@ -25,6 +25,14 @@ type claimWait struct {
 	completedAt time.Time
 }
 
+func (c *claimWait) receive() {
+	select {
+	case result := <-c.pending:
+		c.result, c.pending = &result, nil
+	default:
+	}
+}
+
 func (c *claimWait) stop(cancel context.CancelFunc) {
 	cancel()
 	if c.pending != nil {
@@ -74,6 +82,9 @@ func (c *claimWait) start(ctx context.Context, poll time.Duration) {
 	go func() {
 		result := waiter.waitClaim(ctx, c.launcher.Config.Namespace, excluded, poll)
 		result.received = time.Now()
+		if result.award != nil {
+			c.launcher.receiveClaim(ctx, result.award)
+		}
 		done <- result
 	}()
 }

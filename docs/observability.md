@@ -1002,10 +1002,14 @@ They are process logs, not durable startup receipts in `runs status`.
 | `bootstrap_seed_barrier` | Join of the concurrent Go seed copy after Docker readiness |
 | `bootstrap_exchange` | Bootstrap credential exchange RPC |
 | `bootstrap_renewal` | Initial authenticated renewal RPC before native service binding |
+| `launcher_claim_received` | Successful award receipt in the launcher process, a zero-duration marker |
+| `launcher_claim_applied` | Award receipt to its first launch call, before preparation revalidation |
 | `launcher_preparation` | Preparation acknowledgement and initial keeper readiness |
 | `launcher_reservation` | Job construction and node reservation, including an existing predecessor-retirement retry |
 | `launcher_capacity_observed` | Capacity container's reported start to successful Job creation and admission validation |
 | `launcher_capacity_release` | Capacity Pod lookup and deletion request |
+| `launcher_capacity_delete` | UID-fenced placeholder Pod DELETE request inside node reservation, once per consumed Pod |
+| `launcher_capacity_removal` | Wait after DELETE until that Pod UID disappears from the API, once per consumed Pod |
 | `launcher_job_create` | Suspended Job creation request |
 
 Docker readiness and seed copying still overlap. The seed barrier measures only
@@ -1015,17 +1019,28 @@ or cancellation checks. Launcher preparation and reservation omit expected
 capacity/predecessor wait results. Successful preparation can still repeat while
 an award waits. Launcher records carry run, unit and claim generation;
 bootstrap records do not, and are told apart by the Pod whose log carries them.
+Claim receipt and application each emit once per delivered award. Their log
+timestamps distinguish controller delivery from the first launch call, and
+application duration measures the launcher queue. Placement retries emit no
+additional claim application record. A ready award takes priority over the next
+full reconciliation within the bounded claim burst. Launch still revalidates
+the award before reserving a node.
+
 `launcher_capacity_observed` is emitted from launch only after Job creation and
-admission validation succeed, when the existing capacity Pod read provided a
-running container with a known start time. Abandonment and failed Job creation
-emit no capacity observation. The interval includes polling, reservation,
+admission validation succeed, when reservation captured the award's capacity
+container start before deleting its Pod, or the later capacity release read
+provided that start. Abandonment and failed Job creation emit no capacity
+observation. The interval includes polling, reservation,
 capacity release and Job creation, and overlaps the local operation spans. Its
 Kubernetes-to-launcher clock interval is clamped at zero if negative. Kubernetes
 reports the container start in whole seconds, so this interval can read up to
-about 1 s long. The other
-durations use process-local monotonic time. Capacity release measures the API
-request, not kubelet teardown. Job creation ends before Secret publication and
-activation. Do not add overlapping stages or infer absent boundaries as zero.
+about 1 s long. The other durations use process-local monotonic time.
+Capacity delete and removal are
+separate parts of reservation. Removal retains the isolation barrier before Job
+creation and measures API object disappearance, not kubelet teardown. Capacity
+release measures the later lookup and deletion request. Job creation ends before
+Secret publication and activation. Do not add overlapping stages or infer absent
+boundaries as zero.
 
 ## Annotation request timing
 
