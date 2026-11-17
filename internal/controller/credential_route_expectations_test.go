@@ -178,6 +178,8 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"GET", "/api/v1/overflow", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"PUT", "/api/v1/overflow", "controller", "team", "capability", []string{"unbound_member_or_local|runs.write|none|credential"}},
 		{"GET", "/api/v1/me", "controller", "account", "capability", []string{"account_session||none|credential"}},
+		{"GET", "/api/v1/me/deletion", "controller", "account", "capability", []string{"account_session||none|credential"}},
+		{"DELETE", "/api/v1/me", "controller", "account", "capability", []string{"account_session||none|credential"}},
 		{"GET", "/api/v1/me/team-deletions", "controller", "account", "capability", []string{"account_session||none|credential"}},
 		{"POST", "/api/v1/me/active-team", "controller", "account", "capability", []string{"account_session||none|credential"}},
 		{"GET", "/api/v1/me/identities", "controller", "account", "capability", []string{"account_session||none|credential"}},

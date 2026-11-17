@@ -180,7 +180,10 @@ func (l *Launcher) Run(ctx context.Context) error {
 		}
 		pods.Stop()
 		pods, changes = nil, nil
-		reconnect = time.Now().Add(poll)
+		reconnect = time.Now()
+		if event.Type == watch.Error || time.Since(watchStarted) < podWatchTimeout {
+			reconnect = reconnect.Add(poll)
+		}
 	}
 	var retiring sync.WaitGroup
 	defer func() { cancel(); retiring.Wait() }()
@@ -285,13 +288,14 @@ func (l *Launcher) Run(ctx context.Context) error {
 					}
 					// safety: admission precedes the response, so request latency cannot shorten the server's interval.
 					interval := max(poll, pollAfter)
-					if immediate && err == nil {
+					// perf: the sole expected placement wait can continue this burst.
+					claimImmediately = immediate && (err == nil || launched && err == ErrNoDedicatedNode) //nolint:errorlint // Joined provisioning faults retain cooldown.
+					if claimImmediately {
 						interval = 0
 					}
 					cooldown = later(cooldown, claims.completedAt.Add(interval))
 					startupRateLimit = firstClaim && !launched && claimRateLimited(err)
 					firstClaim = false
-					claimImmediately = immediate && err == nil
 				}
 			}
 			if err != nil {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -150,6 +151,59 @@ func TestLauncherBoundsClaimsPerCycle(t *testing.T) {
 			t.Fatalf("ninth claim bypassed bounded cycle: %s", gap)
 		}
 	})
+}
+
+func TestLauncherRequestsFreshCapacityInOneBoundedBurst(t *testing.T) {
+	for _, refused := range []bool{false, true} {
+		t.Run(map[bool]string{false: "capacity requested", true: "capacity request failed"}[refused], func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				l, kube, boundary, _ := fixture()
+				boundary.reserveErr = ErrNoDedicatedNode
+				l.Poll = 5 * time.Second
+				stream := watch.NewRaceFreeFake()
+				kube.PrependWatchReactor("pods", func(ktesting.Action) (bool, watch.Interface, error) { return true, stream, nil })
+				var requests []time.Time
+				kube.PrependReactor("create", "pods", func(action ktesting.Action) (bool, runtime.Object, error) {
+					pod := action.(ktesting.CreateAction).GetObject().(interface{ GetLabels() map[string]string })
+					if pod.GetLabels()[capacityLabel] != "true" {
+						return false, nil, nil
+					}
+					requests = append(requests, time.Now())
+					if refused {
+						return true, nil, fmt.Errorf("%w: capacity API unavailable", ErrNoDedicatedNode)
+					}
+					return false, nil, nil
+				})
+				ctx, cancel := context.WithCancel(t.Context())
+				var passes atomic.Int32
+				var claims []time.Time
+				done := make(chan struct{})
+				go func() {
+					claims, _, _ = productionBurst(ctx, t, l, maxClaimsPerCycle+2, maxClaimsPerCycle+1, cancel, &passes)
+					close(done)
+				}()
+				synctest.Wait()
+				cancel()
+				<-done
+				want := maxClaimsPerCycle
+				if refused {
+					want = 1
+				}
+				if len(requests) != want || len(claims) != want {
+					t.Fatalf("before the safety poll: capacity requests=%d claims=%d, want %d", len(requests), len(claims), want)
+				}
+				if !refused {
+					if got := len(capacityPods(t, kube)); got != want {
+						t.Fatalf("capacity Pods=%d, want %d", got, want)
+					}
+					if spread := requests[want-1].Sub(requests[0]); spread != 0 {
+						t.Fatalf("capacity request burst spread across %s", spread)
+					}
+					t.Logf("%d capacity Pods requested at one fake-clock instant; ninth claim held for safety poll", want)
+				}
+			})
+		})
+	}
 }
 
 func TestLauncherHeldRepliesKeepSafetyReconciliationOnSchedule(t *testing.T) {

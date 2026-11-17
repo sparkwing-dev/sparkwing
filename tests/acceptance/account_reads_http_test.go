@@ -184,10 +184,32 @@ func TestCreditSettingsReadHTTP(t *testing.T) {
 	assertEngineError(t, w, 404, apierr.NotFound)
 }
 
-func TestSelfServiceAccountDeletionIsGoneProperty(t *testing.T) {
+func TestSelfServiceAccountDeletionCapturedInput(t *testing.T) {
+	input := []byte{0x2e, 0x64, 0x92, 0x56, 0x4d, 0xb3, 0xc7, 0x67, 0x1b, 0xf7, 0xb7, 0x3b, 0x27, 0x96, 0xfa, 0xe2, 0x47, 0x79, 0xe6, 0xd9, 0x0e, 0xb3, 0x78, 0x7c, 0xc0, 0x4e, 0x13, 0xd9, 0x98, 0x5a, 0xba, 0xed, 0xf1, 0xee, 0xf9, 0x38}
+	for _, tc := range []struct {
+		name   string
+		input  []byte
+		bearer bool
+	}{{"captured", input, true}, {"empty bearer", nil, true}, {"session", nil, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			if !selfServiceAccountDeletionRefusalProperty(t)(tc.input, tc.bearer) {
+				t.Fatal("input violated account deletion property")
+			}
+		})
+	}
+}
+
+func TestSelfServiceAccountDeletionRejectsEmailConfirmationProperty(t *testing.T) {
+	if err := quick.Check(selfServiceAccountDeletionRefusalProperty(t), &quick.Config{MaxCount: 128}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func selfServiceAccountDeletionRefusalProperty(t *testing.T) func([]byte, bool) bool {
+	t.Helper()
 	f := newSessionFlow(t)
 	h := f.server.Handler()
-	property := func(input []byte, bearer bool) bool {
+	return func(input []byte, bearer bool) bool {
 		body, err := json.Marshal(map[string]string{"confirm_email": hex.EncodeToString(input)})
 		if err != nil {
 			return false
@@ -202,13 +224,18 @@ func TestSelfServiceAccountDeletionIsGoneProperty(t *testing.T) {
 		after, expiry := f.state(t)
 		var accountCount int
 		err = teststore.SQL(t, f.store).QueryRowContext(t.Context(), `SELECT COUNT(*) FROM accounts WHERE id='member'`).Scan(&accountCount)
+		wantStatus, wantCode := http.StatusBadRequest, apierr.BadRequest
+		if bearer {
+			wantStatus, wantCode = http.StatusUnauthorized, hosterr.Unauthenticated
+		}
 		var failure hosterr.Envelope
-		return err == nil && accountCount == 1 && count == after && expires == expiry &&
-			w.Code == 405 && w.Header().Get("Allow") == "GET" && json.Unmarshal(w.Body.Bytes(), &failure) == nil &&
-			failure.Error != nil && failure.Error.Code == hosterr.MethodNotAllowed
-	}
-	if err := quick.Check(property, &quick.Config{MaxCount: 24}); err != nil {
-		t.Fatal(err)
+		ok := err == nil && accountCount == 1 && count == after && expires == expiry &&
+			w.Code == wantStatus && json.Unmarshal(w.Body.Bytes(), &failure) == nil &&
+			failure.Error != nil && failure.Error.Code == wantCode
+		if !ok {
+			t.Logf("DELETE account: bearer=%t status=%d body=%s account=%d sessions=%d/%d expiry=%d/%d query_error=%v", bearer, w.Code, w.Body.String(), accountCount, count, after, expires, expiry, err)
+		}
+		return ok
 	}
 }
 

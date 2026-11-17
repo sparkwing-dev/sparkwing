@@ -57,6 +57,14 @@ func (f *accountWrites) UnlinkAccountIdentity(_ context.Context, a capability.Au
 	return store.IdentityUnlink{}, f.called(a, provider)
 }
 
+func (f *accountWrites) PreviewAccountDeletion(_ context.Context, a capability.Authorized) (store.AccountDeletionPreview, error) {
+	return store.AccountDeletionPreview{AccountID: a.Principal.Capability.Subject.ID}, f.called(a, "preview")
+}
+
+func (f *accountWrites) DeleteOwnAccount(_ context.Context, a capability.Authorized, id string, teams []string) (store.AccountDeletion, error) {
+	return store.AccountDeletion{AccountID: id}, f.called(a, strings.Join(append([]string{id}, teams...), ","))
+}
+
 var _ controller.AccountWriter = (*store.Operator)(nil)
 
 func TestAccountMutationsHTTPUseCommittedStoreAdapter(t *testing.T) {

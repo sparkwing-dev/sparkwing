@@ -182,6 +182,8 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/overflow` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `PUT` | `/api/v1/overflow` | `controller` | `team` | `capability` | `safe` | `unbound_member_or_local` / `runs.write` / `none` / `credential` |
 | `GET` | `/api/v1/me` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |
+| `GET` | `/api/v1/me/deletion` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |
+| `DELETE` | `/api/v1/me` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |
 | `GET` | `/api/v1/me/team-deletions` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |
 | `POST` | `/api/v1/me/active-team` | `controller` | `account` | `capability` | `idempotency_key` | `account_session` / `` / `none` / `credential` |
 | `GET` | `/api/v1/me/identities` | `controller` | `account` | `capability` | `safe` | `account_session` / `` / `none` / `credential` |

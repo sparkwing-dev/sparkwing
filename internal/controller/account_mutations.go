@@ -14,6 +14,8 @@ import (
 
 // AccountWriter rechecks the account session and commits its mutation and session selection together.
 type AccountWriter interface {
+	PreviewAccountDeletion(context.Context, capability.Authorized) (store.AccountDeletionPreview, error)
+	DeleteOwnAccount(context.Context, capability.Authorized, string, []string) (store.AccountDeletion, error)
 	SelectAccountTeam(context.Context, capability.Authorized, store.Team) error
 	CreateAccountTeam(context.Context, capability.Authorized, store.TeamInfo) (store.TeamInfo, error)
 	AcceptAccountInvitation(context.Context, capability.Authorized, string) (store.InvitationAcceptance, error)

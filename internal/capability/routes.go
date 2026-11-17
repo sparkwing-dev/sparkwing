@@ -173,6 +173,8 @@ var routes = []RoutePolicy{
 	route("GET", "/api/v1/overflow", OwnerTeam, RetrySafe, member(RunsRead)),
 	route("PUT", "/api/v1/overflow", OwnerTeam, RetrySafe, member(RunsWrite)),
 	route("GET", "/api/v1/me", ownerAccount, RetrySafe, account()),
+	route("GET", "/api/v1/me/deletion", ownerAccount, RetrySafe, account()),
+	route("DELETE", "/api/v1/me", ownerAccount, RetrySafe, account()),
 	route("GET", "/api/v1/me/team-deletions", ownerAccount, RetrySafe, account()),
 	route("POST", "/api/v1/me/active-team", ownerAccount, RetryIdempotencyKey, account()),
 	route("GET", "/api/v1/me/identities", ownerAccount, RetrySafe, account()),
