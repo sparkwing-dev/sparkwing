@@ -45,7 +45,7 @@ func main(){sw.Register("receipt",func()sw.Pipeline[sw.NoInputs]{return pipeline
 	runSnapshotGit(t, repo, "commit", "-qm", "receipt fixture")
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, cli, "run", "receipt", "-C", repo, "--sw-route", "local", "--sw-no-update", "--sw-run-handle-file", filepath.Join(user, "handle.json"), "-o", "json")
+	command := exec.CommandContext(ctx, cli, "run", "receipt", "-C", repo, "--route", "local", "--no-update", "--run-handle-file", filepath.Join(user, "handle.json"), "-o", "json")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("run: %v\n%s", err, output)
 	}

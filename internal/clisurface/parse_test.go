@@ -44,7 +44,7 @@ func TestParseGrammar(t *testing.T) {
 		{"daemon", "events", "--explain"},
 		{"secrets", "set", "--secret", "NAME", "--value", "sensitive", "--file", "f"},
 		{"runs", "list", "--limit", "1", "--limit", "2"},
-		{"pipeline", "trigger", "check", "--detach", "--sw-workers", "2", "--profile", "prod"},
+		{"pipeline", "trigger", "check", "--detach", "--workers", "2", "--profile", "prod"},
 		{"pipeline", "trigger", "--resume", "r1", "--agent", "codex", "--profile", "prod"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -56,7 +56,7 @@ func TestParseGrammar(t *testing.T) {
 		})
 	}
 	for _, args := range [][]string{
-		{"run", "check", "--sw-workers", "1", "--", "--x=1"},
+		{"run", "check", "--workers", "1", "--", "--x=1"},
 		{"run", "check", "--agent", "claude-code:land-agent", "--", "--x=1"},
 		{"pipeline", "trigger", "check", "--agent", "none", "--profile", "prod"},
 		{"__complete", "--kind=verbs", "--word=", "-o", "plain"},
@@ -116,8 +116,8 @@ func TestParseEveryCommandHelp(t *testing.T) {
 }
 
 func TestRunCacheProfileMayExplicitlyDisableMachineDefault(t *testing.T) {
-	inv, err := Parse("sparkwing", []string{"run", "ci", "--sw-cache-from="})
-	if err != nil || !inv.Has("sw-cache-from") || inv.Value("sw-cache-from") != "" {
+	inv, err := Parse("sparkwing", []string{"run", "ci", "--cache-from="})
+	if err != nil || !inv.Has("cache-from") || inv.Value("cache-from") != "" {
 		t.Fatalf("explicit empty cache profile=%+v %v", inv, err)
 	}
 	for _, args := range [][]string{{"run", "ci", "--publish="}} {
@@ -224,9 +224,9 @@ func TestLintRejectsRemovedStaticFlag(t *testing.T) {
 
 func TestRunInvocationCloudRouting(t *testing.T) {
 	for _, args := range [][]string{
-		{"run", "gate", "--sw-route", "cloud", "--profile", "work", "--sw-detached", "--", "--full"},
-		{"--profile", "work", "run", "gate", "--sw-route", "cloud"},
-		{"run", "gate", "--sw-route", "local"},
+		{"run", "gate", "--route", "cloud", "--profile", "work", "--detach", "--", "--full"},
+		{"--profile", "work", "run", "gate", "--route", "cloud"},
+		{"run", "gate", "--route", "local"},
 	} {
 		if _, err := Parse("sparkwing", args); err != nil {
 			t.Fatalf("%v: %v", args, err)
@@ -234,12 +234,12 @@ func TestRunInvocationCloudRouting(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"run", "gate", "--profile", "work"},
-		{"run", "gate", "--profile", "work", "--sw-route", "local"},
-		{"run", "gate", "--sw-route", "other"},
+		{"run", "gate", "--profile", "work", "--route", "local"},
+		{"run", "gate", "--route", "other"},
 		{"run", "gate", "--allow-secret-file", "a.key"},
-		{"run", "gate", "--sw-route", "cloud", "--allow-secret-file", "a.key"},
+		{"run", "gate", "--route", "cloud", "--allow-secret-file", "a.key"},
 		{"pipeline", "trigger", "gate", "--profile", "work", "--working-tree", "--allow-secret-file", "a.key"},
-		{"run", "gate", "--sw-route", "local", "--allow-secret-file", "a.key"},
+		{"run", "gate", "--route", "local", "--allow-secret-file", "a.key"},
 	} {
 		if _, err := Parse("sparkwing", args); err == nil {
 			t.Fatalf("accepted %v", args)
@@ -277,8 +277,11 @@ func TestMisspelledFlagsAndValuesSuggestTheNearestSpelling(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"run", "build", "--dry-run"}, "flag --dry-run is not accepted; did you mean --sw-dry-run? Pipeline arguments follow --"},
-		{[]string{"run", "build", "--sw-dryrun"}, "unknown flag --sw-dryrun; did you mean --sw-dry-run? Pipeline arguments follow --"},
+		{[]string{"run", "build", "--sw-dry-run"}, "unknown flag --sw-dry-run; did you mean --dry-run? Pipeline arguments follow --"},
+		{[]string{"run", "build", "--sw-detached"}, "unknown flag --sw-detached; did you mean --detach? Pipeline arguments follow --"},
+		{[]string{"run", "build", "--sw-allow-risk", "prod"}, "unknown flag --sw-allow-risk; did you mean --allow-risk? Pipeline arguments follow --"},
+		{[]string{"pipeline", "plan", "--pipeline", "build", "--sw-dry-run"}, "unknown flag --sw-dry-run; did you mean --dry-run? Pipeline arguments follow --"},
+		{[]string{"run", "build", "--sw-dryrun"}, "unknown flag --sw-dryrun; did you mean --dry-run? Pipeline arguments follow --"},
 		{[]string{"runs", "list", "--limt", "5"}, "unknown flag --limt; did you mean --limit?"},
 		{[]string{"runs", "status", "run-deadbeef"}, "unexpected positional argument; pass it as --run RUN_ID"},
 		{[]string{"runs", "list", "extra"}, "unexpected positional argument; sparkwing runs list takes flags only (see sparkwing runs list --help)"},
@@ -298,5 +301,111 @@ func TestRunStatusesMatchStoredRunStates(t *testing.T) {
 	}
 	if !slices.Equal(RunStatuses(), want) {
 		t.Fatalf("RunStatuses() = %v, want %v", RunStatuses(), want)
+	}
+}
+
+func TestCommonGuessesSuggestTheRealCommandWithoutRunningIt(t *testing.T) {
+	registered := map[string]bool{}
+	for _, command := range Registry() {
+		registered[command.Path] = !command.Hidden
+	}
+	for _, tc := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"runs", "show", "--run", "r1"}, []string{"sparkwing runs status"}},
+		{[]string{"pipelines", "list"}, []string{"sparkwing pipeline list"}},
+		{[]string{"pipelines"}, []string{"sparkwing pipeline"}},
+		{[]string{"pipeline", "show", "--pipeline", "build"}, []string{"sparkwing pipeline describe"}},
+		{[]string{"secrets", "remove", "--secret", "X"}, []string{"sparkwing secrets delete"}},
+		{[]string{"secrets", "add", "--secret", "X"}, []string{"sparkwing secrets set"}},
+		{[]string{"profiles", "rm", "--profile", "p"}, []string{"sparkwing profiles delete"}},
+		{[]string{"schedules", "delete", "--schedule", "s"}, []string{"sparkwing schedules uninstall"}},
+		{[]string{"teams"}, []string{"sparkwing team"}},
+		{[]string{"teams", "settings"}, []string{"sparkwing team settings"}},
+		{[]string{"logout"}, []string{"sparkwing profiles delete"}},
+		{[]string{"tokens", "ls"}, []string{"sparkwing tokens list"}},
+	} {
+		_, err := Parse("sparkwing", tc.args)
+		if err == nil {
+			if !slices.Contains(tc.want, "") {
+				t.Errorf("%v ran instead of suggesting %v", tc.args, tc.want)
+			}
+			continue
+		}
+		var usage *UsageError
+		if !errors.As(err, &usage) {
+			t.Errorf("%v: %v is not a usage error", tc.args, err)
+			continue
+		}
+		suggested := ""
+		if _, rest, ok := strings.Cut(usage.Message, "did you mean "); ok {
+			suggested, _, _ = strings.Cut(rest, "?")
+		}
+		if !slices.Contains(tc.want, suggested) || !registered[suggested] {
+			t.Errorf("%v: suggested %q, want one of %v that is registered: %s", tc.args, suggested, tc.want, usage.Message)
+		}
+	}
+}
+
+func TestSameNamedFlagsKeepTheirOwnCommandsArity(t *testing.T) {
+	inv, err := Parse("sparkwing", []string{"pools", "allow", "--pool", "prod", "--repo", "acme/api", "--route", "-o", "json"})
+	if err != nil || !inv.Bool("route") || inv.Value("output") != "json" {
+		t.Fatalf("pools allow --route: %v %+v", err, inv.Flags)
+	}
+	inv, err = Parse("sparkwing", []string{"run", "build", "--route", "local", "-o", "json"})
+	if err != nil || inv.Value("route") != "local" || inv.Value("output") != "json" {
+		t.Fatalf("run --route: %v %+v", err, inv.Flags)
+	}
+}
+
+func TestRemoveSuggestsDeleteWithoutRunningIt(t *testing.T) {
+	for _, tc := range []struct {
+		args  []string
+		group string
+	}{
+		{[]string{"profiles", "remove", "--profile", "prod"}, "sparkwing profiles"},
+		{[]string{"repos", "remove"}, "sparkwing repos"},
+		{[]string{"runners", "remove", "--profile", "prod"}, "sparkwing runners"},
+		{[]string{"pipeline", "sparks", "remove", "--spark", "lib"}, "sparkwing pipeline sparks"},
+	} {
+		_, err := Parse("sparkwing", tc.args)
+		want := "unknown command; did you mean " + tc.group + " delete? Run " + tc.group + " --help"
+		var usage *UsageError
+		if !errors.As(err, &usage) || usage.Message != want {
+			t.Errorf("%v: error %v, want %q", tc.args, err, want)
+		}
+	}
+}
+
+func TestRunsLogsGrepPointsAtRunsGrep(t *testing.T) {
+	_, err := Parse("sparkwing", []string{"runs", "logs", "--run", "r1", "--grep", "fatal"})
+	want := "flag --grep is not accepted; search log text with sparkwing runs grep --grep PATTERN"
+	var usage *UsageError
+	if !errors.As(err, &usage) || usage.Message != want {
+		t.Fatalf("error %v, want %q", err, want)
+	}
+	if _, err := Parse("sparkwing", []string{"runs", "grep", "--run", "r1", "--grep", "fatal"}); err != nil {
+		t.Fatalf("runs grep --run: %v", err)
+	}
+}
+
+func TestParseRunProfileNeedsCloudOrBurstRoute(t *testing.T) {
+	for _, route := range []string{"cloud", "burst"} {
+		got, err := Parse("sparkwing", []string{"run", "build", "--route", route, "--profile", "work"})
+		if err != nil {
+			t.Fatalf("--route %s --profile: %v", route, err)
+		}
+		if got.Value("route") != route || got.Value("profile") != "work" {
+			t.Fatalf("--route %s: unexpected invocation: %#v", route, got)
+		}
+	}
+	for _, args := range [][]string{
+		{"run", "build", "--profile", "work"},
+		{"run", "build", "--route", "local", "--profile", "work"},
+	} {
+		if _, err := Parse("sparkwing", args); err == nil || !strings.Contains(err.Error(), "--profile requires --route cloud or --route burst") {
+			t.Fatalf("%q: err = %v", args, err)
+		}
 	}
 }

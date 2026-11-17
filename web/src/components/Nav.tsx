@@ -2,9 +2,9 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { type Approval, getPendingApprovals } from "@/lib/api";
-import { readCSRFCookie } from "@/lib/csrfCookie";
+import { useLogoutCSRFToken } from "@/lib/logoutCSRF";
 import { ensureLocalSignIn, localSignedIn, logOutLocal } from "@/lib/localSession";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 import TeamSwitcher from "@/components/TeamSwitcher";
@@ -126,11 +126,7 @@ export default function Nav() {
 }
 
 function LogoutControl() {
-  const csrfToken = useSyncExternalStore(
-    subscribeToLogoutConfig,
-    readLogoutCSRFToken,
-    emptyLogoutCSRFToken,
-  );
+  const csrfToken = useLogoutCSRFToken();
   if (!csrfToken) return null;
   return (
     <form method="POST" action="/logout">
@@ -173,22 +169,6 @@ function LocalLogoutControl() {
       )}
     </>
   );
-}
-
-function subscribeToLogoutConfig() {
-  return () => {};
-}
-
-function readLogoutCSRFToken() {
-  const configured = (
-    window as unknown as { __SPARKWING_REQUIRE_LOGIN__?: string }
-  ).__SPARKWING_REQUIRE_LOGIN__;
-  if (configured !== "true") return "";
-  return readCSRFCookie();
-}
-
-function emptyLogoutCSRFToken() {
-  return "";
 }
 
 function VersionPill() {

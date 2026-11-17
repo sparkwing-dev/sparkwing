@@ -24,15 +24,15 @@ and pin its pipeline source too. Set `candidate` to the absolute worktree path:
 candidate=/absolute/path/to/candidate
 git -C "$candidate" fetch origin main
 main_sha="$(git -C "$candidate" rev-parse --verify 'origin/main^{commit}')"
-sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-dry-run
-sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-stop-at verify --sw-allow-risk destructive,prod
-sparkwing run land -C "$candidate" --sw-route local --sw-pipeline-ref "$main_sha" --sw-allow-risk destructive,prod
+sparkwing run land -C "$candidate" --route local --pipeline-ref "$main_sha" --dry-run
+sparkwing run land -C "$candidate" --route local --pipeline-ref "$main_sha" --stop-at verify --allow-risk destructive,prod
+sparkwing run land -C "$candidate" --route local --pipeline-ref "$main_sha" --allow-risk destructive,prod
 ```
 
 Land refuses any other step bound before a job runs, provided the installed engine
 forwards the bounds into the plan's run context. A bound narrows only the job that
 holds it, so the land job would still push a tree whose skipped checks never ran.
-Only `--sw-stop-at verify`, which stops before the push, and `--sw-dry-run`
+Only `--stop-at verify`, which stops before the push, and `--dry-run`
 accept bounds. An engine that does not forward the bounds leaves them empty, and
 Land then plans a bounded run as unbounded, so pass no other bound.
 
@@ -41,7 +41,7 @@ change, the operator must also review its `land` entrypoint mapping and argument
 the pipeline-source pin selects code, while candidate aliases still apply.
 
 Lands run on owned hardware. Policy, gate, review and push use that machine.
-The land queue invokes it with `--sw-route local`.
+The land queue invokes it with `--route local`.
 
 ### Queue focused lands
 
@@ -79,10 +79,10 @@ resolved SHA, checkout and brief.
 The submitted command is:
 
 ```bash
-sparkwing run land -C <candidate> --sw-detached --sw-route local --sw-pipeline-ref <main-SHA> --sw-allow-risk destructive,prod -- --queued --queued-main <main-SHA> --brief 'Describe the goal to review'
+sparkwing run land -C <candidate> --detach --route local --pipeline-ref <main-SHA> --allow-risk destructive,prod -- --queued --queued-main <main-SHA> --brief 'Describe the goal to review'
 ```
 
-`--sw-pipeline-ref` compiles main's complete pipeline source and local module
+`--pipeline-ref` compiles main's complete pipeline source and local module
 dependencies. `WorkDir` remains the candidate checkout. The queued preconditions
 compare freshly fetched main to `--queued-main` before merging and again when
 capturing the gated HEAD, then refresh main again before the queued push. If main
@@ -546,7 +546,7 @@ CLI 287.20 s, controller 277.58 s and acceptance 191.44 s; package durations
 overlap. Its changelog-only affected phase took 1.08 s and selected no tests.
 
 Race tests remain a separate local or hosted lane, available with
-`sparkwing run gate --sw-only race-touched`. The broad shape selects five
+`sparkwing run gate --only race-touched`. The broad shape selects five
 packages for `-race -short`; store races remain at the release boundary.
 Their additional wall time was not measured here. The lane retains its
 70-minute execution ceiling and 52m30s package timeout.
@@ -603,7 +603,7 @@ a checkout without a reachable release tag before invoking the existing test.
 The policy job keeps its ten-minute cold-build deadline. Once it passes, the rest of
 the gate (the same jobs as `sparkwing run gate`) starts while review continues.
 Review is the same job as `sparkwing run review`, under `.review.yaml`. A focused
-policy/review run selects both with `--sw-only '*[wy]'` (the job names ending in
+policy/review run selects both with `--only '*[wy]'` (the job names ending in
 `w` or `y`). Selecting review
 alone includes preconditions but skips policy. The policy
 job collects every finding before it fails; the heavy `gate` job likewise lets
@@ -624,7 +624,9 @@ backlink lists.
 The gate selects its checks from the change scope (decision 96): vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
-`.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`.
+`.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`. A
+change that reaches only `docs/` Markdown runs just the SDK suite's type-check of
+the docs' TypeScript blocks and its generated-reference check.
 A docs, UI or process change runs its own tests (affected packages, frontend
 suites when `web/` changed, the docs mirror and source-policy sweeps) plus the
 review. `sparkwing run gate -- --full` keeps the broad verification. Pass
@@ -691,13 +693,19 @@ run. An unset `SPARKWING_HOME` or `$HOME/.sparkwing` is refused with
 fixed guidance even before secret discovery completes:
 
 ```bash
-SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run
-SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow-risk destructive,prod
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --dry-run
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --allow-risk destructive,prod
 ```
 
 The version defaults to a minor bump of the newest tag on origin; pass
 `-- --bump patch` for a patch release or `-- --version vX.Y.Z` to name it
-(pipeline flags follow `--`). The
+(pipeline flags follow `--`). A patch cut whose section carries a `(Breaking)`
+entry is refused before it commits, because VERSIONING.md promises breaking
+changes only in a minor release; cut the minor instead. An SDK `(Breaking)`
+entry (scope `sdk` or `typescript`) must link a migration guide section, in
+`[Unreleased]` and at the cut. Before cutting one, run `sparkwing pipeline
+upgrade` on a pipeline pinned to the previous SDK and confirm it makes the
+change the guide describes. The
 pipeline refuses `v1.0.0` and above. The dry run resolves the version, runs the
 read-only cut checks (version freshness, Go directives, SDK pins, changelog
 links, docs sidebar) and previews the changelog and guide roll; build, lint and the short
@@ -755,7 +763,7 @@ Once the tag is available through the Go module proxy, update main's release
 pins from an attached branch whose HEAD is past that tag:
 
 ```bash
-SPARKWING_HOME="$(mktemp -d)" sparkwing run pre-release --sw-start-at sparkwing-pin --sw-stop-at sparkwing-pin
+SPARKWING_HOME="$(mktemp -d)" sparkwing run pre-release --start-at sparkwing-pin --stop-at sparkwing-pin
 ```
 
 The step bumps `pkg/scaffold/version.go`, `.apidiff/pkg_scaffold.txt`,
@@ -767,6 +775,21 @@ module proxy can already serve the immutable tag. A skipped follow-up surfaces
 only at the next cut, whose `version-freshness` step refuses with "scaffold
 fallback pin ... is behind latest release"; the fix then is this same command
 and a land before the cut, which is how v0.69.0 found v0.68.7's missing pin.
+
+After hosted publication, check a first user's upgrade path with the published
+CLI. `sdk-upgrade-e2e` scaffolds a Go and a TypeScript pipeline in private
+homes, pins the newest listed SDK older than the scaffold's, runs, runs
+`sparkwing pipeline upgrade`, and runs again, against the published engines,
+the signed index and the public module and npm registries. It needs network
+access and stays off the land path. Without `--binary` it builds the
+checkout's CLI, which still selects published engines, so engine-side fixes
+show only once released. A Go upgrade is a verified no-op while one Go SDK is
+listed. On a shared Linux host it took 35-42 seconds of test time with warm
+caches.
+
+```bash
+SPARKWING_HOME="$(mktemp -d)" sparkwing run sdk-upgrade-e2e -- --binary "$(command -v sparkwing)"
+```
 
 The scaffold fallback refuses pins ahead of the local release tags unless
 the exact tag exists on origin. This also verifies hosted release fixtures
@@ -1101,6 +1124,13 @@ WARN or ERROR after both controller and launcher rollouts complete).
 Smoke status follows poll every second. NodeClaim sampling interrupts its wait
 when all followers finish, then takes a final sample before checking the claims
 and logs.
+After a passing smoke, production moves the runner's `cloud-prepull` tag to the candidate.
+Cloud job nodes pull that tag while they boot (kikd-infra `k8s/karpenter/ec2nodeclass.yaml`),
+so the first Job Pod of each run finds the runner already present. ECR exempts only this tag
+from the repository's immutability. A failure to move it warns in the job summary and leaves
+production deployed; nodes keep pre-pulling the previous runner until the next deploy moves it.
+Staging shares the node class and does not move the tag, so staging runs pull a new runner
+themselves until production deploys it.
 Recovered startup probe failures before readiness remain visible in pod logs but do not
 fail the smoke; any warning or error during the smoke still fails it. The QA teams need no installation and are not used for this repository-backed smoke. Staging summarizes its deployed and previous digests before emitting the gate record. Production emits its deployment record. Credentials come
 from the run's OIDC token through the `sparkwing-deploy` role in
@@ -1397,6 +1427,151 @@ sudo chown -R root:root /opt/sparkwing-deploy && sudo chmod -R go-w /opt/sparkwi
 ls -l /opt/sparkwing-deploy/bin && /opt/sparkwing-deploy/bin/go version
 ```
 
+### Cloud isolation conformance
+
+Run `cloud-isolation` against staging before each release that changes the
+launcher, the Job pod, the DinD sidecar, node classes or the network policy, and
+before a new paying team starts on Cloud. It attacks the execution plane from two
+dedicated conformance teams and fails on any breach:
+
+```bash
+sparkwing run cloud-isolation -- --database <staging database host>:5432 \
+  --vpc-resolver <staging VPC resolver address> \
+  --evidence ~/evidence/cloud-isolation/$(date +%F)
+```
+
+The pipeline attacks staging only. It refuses a controller URL or namespace
+that is not staging's, and before the first upload it checks that both team
+profiles point at the staging controller and authenticate as their own teams.
+Target discovery fails when the controller pods or services, cluster DNS,
+ingress pods or controller nodes yield nothing to probe. It also fails when any
+of their running pods uses its node's network or has no address, and when the
+database endpoint or the VPC resolver is missing. Both addresses are passed at
+run time, so neither is stored in this repository.
+
+The run uploads the `isolation-probe` fixture as each team, in three phases on
+three fresh nodes. Each phase transition, the last one included, passes only
+when all of these hold:
+
+- the run reported every result its plan owed, and none failed;
+- every peer it probed is still running;
+- placement is correct in every observation so far;
+- no evidence has gone missing.
+
+The first failure stops the sequence and cancels the runs it started, and the
+report is still written. The fixture's sources live in
+`.sparkwing/isolationprobe`. Each probe job does the following:
+
+- reaches for instance metadata over IPv4 and IPv6;
+- reaches for the controller's pods and services, cluster DNS and the database;
+- reaches for the kube API's private and public endpoints, and wherever one
+  answers, tries to create and rewrite pods with every credential it can find;
+- reaches for the other runs' nodes, kubelets, listeners and Docker ports, and
+  for its own node's ports and its own pod's Docker ports;
+- checks its mounts, devices, sockets, its user namespace and the peers' canary
+  files, searching the scratch volume except this pod's own paths;
+- reads a job output it depends on, and is refused two it does not;
+- repeats from a DinD container on Docker's bridge and from one holding every
+  privilege the sidecar grants, which also tries host kernel files, mounts,
+  device nodes, `NET_ADMIN` and the syscalls the DinD seccomp profile refuses.
+
+The probes stay non-destructive:
+
+- they connect and close;
+- they open kernel files without writing to them;
+- they answer an unexpected connection with reads and dry runs only, presenting
+  no credential beyond what the job itself can find;
+- each job is bounded at 20 minutes on Cloud's default two-core class, unless
+  the run raises the anchors' limit.
+
+The anchors must outlive every later run's probes. An anchor that ends first
+fails the run and names the peer. To give the anchors more time for one run,
+pass `--anchor-timeout`, which takes a Go duration from `20m` to `1h`. The
+report records the limit used.
+
+While the runs are live, the driver records each run's pods, the nodes they used,
+every pod seen on those nodes, their NodeClaims and each raw run status. It
+appends every observation to `cluster/observations.ndjson` and never replaces
+one. Each observation is judged on its own, so a wrong fence or an unsafe pod
+seen once stays a failure even if a later observation looks healthy. The
+launcher deletes a run's Jobs when the run ends, so placement comes only from
+these records.
+
+A tested node may hold the run's own Job pods, cluster-listed DaemonSet pods,
+and the launcher's inert capacity placeholder for that same run and team.
+Job and DaemonSet owners are matched by UID. A capacity pod must match its
+binding-derived name, team label, runner image and unprivileged sleep-only
+spec. The driver retains its complete raw spec and accepts only the expected
+capacity fields. Lifecycle hooks, probes, init/ephemeral containers,
+environment injection, security overrides and unknown execution fields all
+fail placement. Another team's or run's capacity pod still fails placement. If a Job
+starts between capture calls, the driver reads Jobs again to resolve the newly
+observed owner's UID and retains that capture.
+
+User namespaces bind the six standard character devices from devtmpfs.
+The mount audit accepts only their expected roots, destinations, character
+types and device numbers. The privileged DinD probe sees those same sidecar
+devices under `/host/dev`, because Docker resolves its read-only `/:/host`
+bind inside the sidecar. Standard masked proc files pass only when a bounded
+read reaches EOF without returning a byte and the file is the null character
+device (1:3), with mount root `/null`. Empty regular files do not qualify.
+A devtmpfs directory, an unexpected device or an actual host filesystem still
+fails the audit. The sidecar path exception requires the exact `/host/` prefix.
+
+Placement rests on one assumption, which the report header states. Pod metadata
+cannot be authenticated from inside the cluster. Anyone able to create or
+rewrite pods through the kube API could copy a real Job's or DaemonSet's UID
+into one, so the placement checks trust the owner references that cluster
+controllers write. The kube API grade tests that assumption from inside each
+hostile job.
+
+At every kube API endpoint the job can reach, the grade presents each of these
+identities in turn:
+
+- anonymous access;
+- a mounted token, or a token file the environment names;
+- a credential-named environment value;
+- a node role from instance metadata.
+
+With each identity it tries a dry-run pod create in the job namespace and in
+the controller namespace. It also tries a dry-run patch and update of the owner
+references and annotations of its own pod, each peer's pod and a controller
+pod. Both teams' jobs share the one job namespace, so trying it covers the other
+team's namespace as well. In the controller namespace it also lists secrets,
+reviews its own rules and submits a dry-run Job. Any authenticated caller may
+review its own rules, so any credential the API accepts fails the grade. A job
+must hold no cluster identity at all. Every attempt must be refused, and an
+endpoint the job cannot reach passes because the job cannot use it either.
+These fail the grade:
+
+- an allowed attempt;
+- an answer that does not prove a refusal;
+- a credential the probe cannot present, such as AWS keys or a node role,
+  which need signing it does not do.
+
+Placement is trusted only when every run reported every kube API probe its plan
+owed and all of them passed. Otherwise the report marks placement untrusted and
+the run fails C2.
+
+Every result the plan owed must be present, from one manifest shared by the
+probe and the driver. `REPORT.md` counts the verdicts by checklist item, lists
+each failure, and lists every check that was not probed. `results.ndjson` holds
+every result.
+
+It needs the following:
+
+- `sparkwing`, `kubectl`, `git` and Go on `PATH`;
+- read access through the kubeconfig contexts the repository configuration
+  names;
+- CLI profiles named `stg-iso-a` and `stg-iso-b`, holding run tokens for those
+  staging teams. The teams need Cloud credits, which only an operator console
+  grants, and no CLI command shows a team's balance.
+
+An operator-created team credential expires 30 days after the team is created,
+and every token minted from it expires with it. While that credential is still
+live, invite an owner who signs in to the staging console, so replacement run
+tokens can be minted after it lapses.
+
 ### Check tiers
 
 Current SDK verification runs the Go and TypeScript unit suites and the host
@@ -1500,7 +1675,7 @@ file. Other syntax and workflow checks remain active.
   The full acceptance suite includes `TestFeatureE2E`, which exercises placement
   deadlines, failed-only retries with outputs and artifacts, and child-run
   cancellation against isolated local controller processes. Run just these with
-  `sparkwing run feature-e2e --sw-route local`. Its `--scenario` and `--repeat`
+  `sparkwing run feature-e2e --route local`. Its `--scenario` and `--repeat`
   arguments select one scenario or repeat fresh environments. The
   [acceptance runbook](tests/acceptance/README.md#feature-scenarios-against-a-local-controller)
   names the real-time budgets, trust setting and runner-actor boundary.
@@ -1558,9 +1733,9 @@ file. Other syntax and workflow checks remain active.
   separate 70-minute execution deadlines for broad checks and touched-package
   race tests. Each gets 71 minutes with the dispatcher's drain margin, inside
   its own 80-minute hosted job. Hosted CI selects them with `sparkwing run gate
-  --sw-only gate -- --full` and `sparkwing run gate --sw-only race-touched`. Each job
+  --only gate -- --full` and `sparkwing run gate --only race-touched`. Each job
   owns a separate four-core runner, so race tests share no cores with the full
-  Go or PostgreSQL suite. `--sw-only` keeps a job's dependencies, so each lane
+  Go or PostgreSQL suite. `--only` keeps a job's dependencies, so each lane
   runs the `policy` job first; on a fresh runner its first compile of the
   checkers and the CLI is the cost. `sparkwing run gate` runs the policy job,
   then both jobs, locally. There
@@ -1614,7 +1789,7 @@ file. Other syntax and workflow checks remain active.
   A store schema change selects `internal/store` and its importers.
   Long integration bodies guarded by `testing.Short()` and the PostgreSQL
   suite run after deploy on our hardware with
-  `sparkwing run gate --sw-route local -- --full`, and remain in full nightly
+  `sparkwing run gate --route local -- --full`, and remain in full nightly
   and pre-release checks. The deploy scan trigger must invoke that command
   outside the land and deploy critical paths. A
   file outside every package runs the packages whose tests read it, from the
@@ -1729,7 +1904,7 @@ file. Other syntax and workflow checks remain active.
   ignored. `--race-store-part k/n` (pipeline input) computes the same
   assignment over `4n` shards on every runner and runs only part k's four;
   the default runs all four shards of one part. On normal pull requests and
-  pushes, hosted CI runs `--sw-start-at race-store --sw-stop-at race-store --
+  pushes, hosted CI runs `--start-at race-store --stop-at race-store --
   --race-store-part k/3` in three `race-store-k-of-3` lanes, each on its own
   four-core runner, and the pre-release lane passes `--race-store-part none`,
   which runs no shard. `TestCanonicalStoreRacePartsCoverEveryPartOnce` fails
@@ -2782,6 +2957,23 @@ file. Other syntax and workflow checks remain active.
   package-level guard remains enabled for all ordinary runs, even if a test
   handles and ignores the manager's error.
 
+- **Dedicated-user runner isolation:** `runners add --service-user` creates an
+  OS user, a system unit and a root-owned enrollment record, so its live proof
+  never runs on a workstation. Dispatch the manual
+  `.github/workflows/runner-isolation-proof.yaml` (`gh workflow run
+  runner-isolation-proof.yaml --ref main`) after changing the account, unit,
+  enrollment, pause or deletion paths. It runs `bin/runner-isolation-proof.sh`
+  on a discarded GitHub-hosted VM. Before any write the script requires
+  GitHub's root-owned runner-image record and the Actions `Runner.Worker` among
+  its ancestors, which no environment variable supplies. A self-hosted runner
+  built from GitHub's image would still pass, so never point the workflow at
+  self-hosted labels, and never run the script by hand. `--preflight` runs only
+  that check and writes nothing. The controller is built with a per-run license
+  key so `admin session` works without secrets. A personal service-user runner claims a real job that
+  reports its uid and what it could read, because shared runners take only
+  repository-proven work. The run prints PASS or FAIL per check and uploads
+  `runner-isolation-evidence-<run>-<attempt>`.
+
 - **Postgres conformance:** the store, backend, and orchestrator Postgres
   suites skip when `SPARKWING_TEST_PG_URL` is unset, and fail when it is
   set to a database they cannot reach. Start one with `docker run --rm -d
@@ -2886,9 +3078,18 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
   with the same release commit and tag. A conflict or repeated contention
   stops publication for manual recovery; it does not require freezing main.
   Failed cuts retain their worktrees at the paths printed in the logs.
+  The publication push passes `--no-verify` and logs that it skips the
+  checkout's pre-push hook: the cut already ran its gates, and the hook's
+  gate output never reaches the release log. Each git command in `push-tag`
+  logs before it runs and has its own deadline, five minutes for fetch,
+  ls-remote and push and two for local commands, so a hang fails naming the
+  command. A retry replaces a local tag that origin lacks when, after a fresh
+  fetch of every origin branch, no remote ref contains its commit, which is
+  what an interrupted cut leaves. It refuses any other existing local tag,
+  keeps the tag when that fetch fails, and never touches a tag on origin.
   Preview with
-  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run -- --commit SHA`,
-  then use `--sw-allow-risk destructive,prod` for publication. Within one controller, manual and weekly
+  `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --dry-run -- --commit SHA`,
+  then use `--allow-risk destructive,prod` for publication. Within one controller, manual and weekly
   releases share a release concurrency group. Release owners serialize cuts
   across isolated homes; lands use their own path.
   From the tag push on, `.github/workflows/release.yaml` resolves the tag,
@@ -2912,12 +3113,12 @@ conformance tests compile the TypeScript SDK. Local runs need the same install.
 `weekly-release` runs Monday at 09:00 America/Denver. It selects freshly
 fetched `origin/main` by default, or `--commit SHA`, and uses the same detached
 worktree cut and exact-source CI check as `release`. The inner cut pins its
-pipeline to the caller tooling commit with `--sw-pipeline-ref`, while jobs
+pipeline to the caller tooling commit with `--pipeline-ref`, while jobs
 operate on the selected source checkout. SDK verification executes from that
 current pipeline code, so an older source cannot supply older release tooling.
 The weekly run skips when the selected source has no `[Unreleased]` entries. Its default minor bump stays on v0.x.
 Release cuts are pre-approved. The scheduled entrypoint supplies the cut's
-`--sw-allow-risk destructive,prod` authorization. Main keeps accepting lands
+`--allow-risk destructive,prod` authorization. Main keeps accepting lands
 while the cut runs. Publication merges the prepared metadata into fresh main
 and atomically pushes that merge with the tag on the separate release commit.
 
@@ -2967,7 +3168,7 @@ Run the same path sooner, or preview the cut:
 SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release
 SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release -- --bump patch
 SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release -- --version v0.70.0
-SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release --sw-dry-run
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run weekly-release --dry-run
 ```
 
 `owned-sdk-main` runs daily at 08:00 America/Denver. It resolves green
@@ -2988,7 +3189,7 @@ and reports all failures. TypeScript repos keep their published SDK pins and
 can use `sparkwing pipeline upgrade` after a release.
 
 ```sh
-SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-main --sw-dry-run -- --repos-root "$HOME/code"
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-main --dry-run -- --repos-root "$HOME/code"
 SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run owned-sdk-main -- --repos-root "$HOME/code"
 ```
 
@@ -3028,7 +3229,7 @@ later invocation. New work can still arrive while it waits.
 Preview the handoff without building, installing or restarting anything:
 
 ```sh
-SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run desktop-update --sw-dry-run
+SPARKWING_HOME="$HOME/.local/state/sparkwing-delivery" sparkwing run desktop-update --dry-run
 ```
 
 Arm the declarations from the main checkout on a host with Git push access,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 
@@ -12,14 +13,18 @@ import (
 )
 
 type profileIndex struct {
-	Name       string `json:"name"`
-	Controller string `json:"controller"`
-	Token      string `json:"token"`
-	Default    bool   `json:"default"`
+	Name           string     `json:"name"`
+	Controller     string     `json:"controller"`
+	Token          string     `json:"token"`
+	AdminExpiresAt *time.Time `json:"admin_expires_at,omitempty"`
 }
 
 func profileRecord(p *namedProfile) profileIndex {
-	return profileIndex{Name: p.Name, Controller: p.ControllerURL(), Token: redactToken(p.ControllerToken()), Default: p.Default}
+	record := profileIndex{Name: p.Name, Controller: p.ControllerURL(), Token: redactToken(p.MemberToken())}
+	if p.liveAdminToken(time.Now()) != "" {
+		record.AdminExpiresAt = p.Controller.AdminExpiresAt
+	}
+	return record
 }
 
 func writeProfile(p *namedProfile, format string) error {
@@ -31,7 +36,11 @@ func writeProfile(p *namedProfile, format string) error {
 		_, err := fmt.Fprintln(os.Stdout, opsview.DisplayText(record.Name))
 		return err
 	}
-	_, err := fmt.Fprintf(os.Stdout, "name:       %s\ncontroller: %s\ntoken:      %s\ndefault:    %t\n", opsview.DisplayText(record.Name), opsview.DisplayText(record.Controller), opsview.DisplayText(record.Token), record.Default)
+	admin := "none"
+	if record.AdminExpiresAt != nil {
+		admin = "team.admin until " + record.AdminExpiresAt.Local().Format(time.RFC3339)
+	}
+	_, err := fmt.Fprintf(os.Stdout, "name:       %s\ncontroller: %s\ntoken:      %s\nadmin:      %s\n", opsview.DisplayText(record.Name), opsview.DisplayText(record.Controller), opsview.DisplayText(record.Token), admin)
 	return err
 }
 
@@ -56,9 +65,9 @@ func listProfiles(format string) error {
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tCONTROLLER\tTOKEN\tDEFAULT")
+	fmt.Fprintln(tw, "NAME\tCONTROLLER\tTOKEN")
 	for _, p := range index {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%t\n", opsview.DisplayText(p.Name), opsview.DisplayText(emptyDash(p.Controller)), opsview.DisplayText(p.Token), p.Default)
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", opsview.DisplayText(p.Name), opsview.DisplayText(emptyDash(p.Controller)), opsview.DisplayText(p.Token))
 	}
 	return tw.Flush()
 }

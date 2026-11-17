@@ -591,11 +591,12 @@ receives `401`. Clients branch on `error.code` and use `details.reason` for the
 specific refusal. Every boundary uses the same envelope:
 
 ```json
-{"error":{"code":"forbidden","message":"operation requires team.admin; ask a team owner for a credential with team.admin","details":{"reason":"missing_grant"}}}
+{"error":{"code":"forbidden","message":"operation requires team.admin; owners run sparkwing login --admin for an hour of administration, and other members ask a team owner","details":{"reason":"missing_grant"}}}
 ```
 
 Grant refusals name the required grants. Secret writes require `team.admin`,
-which the owner role holds. OIDC minting requires `oidc.mint` on an awarded
+which the owner role holds; an owner gets it from the CLI for an hour with
+`sparkwing login --admin`. OIDC minting requires `oidc.mint` on an awarded
 or delegated job credential. A team token cannot substitute for that job
 credential. These messages describe the operation's policy and include no
 resource identifiers. Foreign-team resources retain the same response as
@@ -991,6 +992,45 @@ Machine roots require a direct account sign-in session or deployment authority.
 Their grants are limited to `nodes.claim` and `triggers.claim`. The store checks
 these rules in the transaction that issues the root.
 
+### Deleting a team or account
+
+A team owner deletes a team from the dashboard, or with `sparkwing team delete
+--profile NAME --confirm SLUG`. `--confirm` must repeat the slug of the team the
+profile's credential belongs to. The command needs a profile token holding
+`team.admin`; tokens from `sparkwing login` never carry it, while one created
+with `sparkwing tokens create --allow-team-admin` from an administrator token
+does. Members without the owner role are refused.
+
+The request takes effect at once:
+
+- every team token is revoked, the requester's profile included;
+- members lose the team, and their sessions move to another team they belong to;
+- open invitations are withdrawn;
+- active runs are cancelled, and schedules stop.
+
+Within a few minutes the controller removes the team's runs, logs, artifacts,
+cache entries, secrets, subscriptions, runners and every other operational row,
+along with every stored object under the team's namespace. It sweeps once more
+75 minutes later for anything a finishing upload wrote in between. Credit,
+charge, checkout, refund and dispute records stay, linked to the team's slug,
+because accounting law requires them. The operator's audit log keeps its
+records of the team's events, such as run cancellations and deletions. The
+slug stays reserved and cannot be reused. `GET /api/v1/me/team-deletions` shows the requester each deletion's
+state.
+
+An owner cannot delete their only team: deleting it means deleting the account.
+Account deletion is an operator action. Ask the deployment's support contact,
+which the refusal names when the controller sets `--support-contact`. On
+Sparkwing Cloud that is support@sparkwing.dev. The
+operator calls `DELETE /api/v1/operator/accounts/{account}` from an operator
+console session. It removes the account's identities, sessions, memberships and
+tokens, and deletes every team the account was the only member of. It refuses
+an account that is the last owner of a team with other members until ownership
+moves or that team is deleted.
+
+Deleted data stays in backups for a bounded time; see
+[deleted data in backups](backup-restore.md#deleted-data-in-backups).
+
 ### Device sign-in
 
 `sparkwing login` and a personal `runners add` without
@@ -1024,7 +1064,8 @@ as issuing a member root does; a session opened from a token cannot approve.
 They allow 10 code entries per account per minute, and an unknown, expired or
 decided code is refused the same way. A member token carries the requested
 grants, or the approver's `runs.read`, `logs.read`, `runs.write`, `runs.control`
-and `approvals.write` where the role holds them; it never carries `team.admin`.
+and `approvals.write` where the role holds them; it never carries `team.admin`
+(see [Administration step-up](#administration-step-up)).
 It is the same token the console's Create CLI token issues: its parent is the
 approving session, it expires after 90 days, and logging that session out ends
 it. Browser approval enrolls personal runners only, because a code can be
@@ -1047,6 +1088,48 @@ writes `token.minted`.
 
 Only approve a request you started yourself in the last few minutes. A code
 someone sends you asks you to sign their machine in as you.
+
+### Administration step-up
+
+A device code can be phished, so `sparkwing login` never carries
+`team.admin`. Team owners get administration from the CLI with
+`sparkwing login --admin`, which steps up a profile that is already signed in:
+
+1. The CLI sends `POST /api/v1/auth/device/step-up` with `kind` `admin` and the
+   machine name, authenticated by the profile's member token. The controller
+   records that token's account and team in the request and returns the same
+   codes as a device sign-in. The public `POST /api/v1/auth/device` refuses kind
+   `admin`, and a direct browser session cannot start a step-up.
+2. The approval page shows the request with a red warning that names what
+   `team.admin` can do. Lookup and approval refuse a session of another
+   account, so a code someone sends you cannot be approved by you or anyone
+   else. Lookup and approval also refuse an account whose role lacks
+   `team.admin`, which only owners hold. Approval needs a browser sign-in from
+   the last 10 minutes and otherwise answers `reauth_required`; lookup reports
+   `sign_in_required` so the page offers to sign in again.
+3. Redemption issues two credentials under the approving session. One is a
+   `team.admin` member token that expires one hour after redemption and also
+   holds the grants of the token that started the step-up. The other is a
+   fresh member token with exactly those grants, expiring when the starting
+   token would have. The second replaces the terminal's member token, because
+   a fresh browser sign-in ends the earlier session and the tokens it approved,
+   and a step-up never widens the terminal's ordinary access or lifetime.
+
+The CLI saves the administration token as `controller.admin_token` with
+`controller.admin_expires_at`, beside the re-issued `controller.token`, and
+revokes the profile's previous tokens. The profile uses the administration
+token until it expires and then the member token. `sparkwing login`,
+`profiles add --force`, `profiles set` with a new token or controller, and
+`profiles delete` drop the administration token and revoke it at the
+controller that issued it, even when the command points the profile at a
+different controller. When one of them cannot confirm that revocation, it
+exits with an error that names the token and that controller, and either the
+`sparkwing tokens revoke` command that ends it or, when the profile no longer
+names that controller, its console's Machines page. `profiles delete` then
+keeps the profile; the others have already saved their change. `profiles
+delete --keep-token` leaves both tokens live. Demotion, removal,
+signing out of the approving browser session and revocation end it at once,
+as they do every member token.
 
 ### Linked sign-ins
 
@@ -1241,8 +1324,8 @@ whose repository was proven (an App delivery, an Actions push, a schedule, or
 code the controller fetched from GitHub) as the reader's proven repository, and
 that intake sealed as proof eligible: it set no run option outside an
 allow-list of options that only place, schedule or present a run, so no
-`--sw-only`, `--sw-start-at` or `--sw-stop-at`, no dry run, no debug and no
-`--sw-pause-before`, `--sw-pause-after` or `--sw-pause-on-failure` (a paused
+`--only`, `--start-at` or `--stop-at`, no dry run, no debug and no
+`--pause-before`, `--pause-after` or `--pause-on-failure` (a paused
 job can be attached to and edited), and any option added later also keeps it
 from counting (see [security](security.md)). The run must also have
 sealed no environment variables, because a submitted `GOFLAGS` or similar can

@@ -51,7 +51,7 @@ func readDescribeCache(ctx context.Context, sparkwingDir string) ([]runspec.Pipe
 		}
 		return doc.Presentation().Pipelines, nil
 	}
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
+	key, _, err := pipelineBinaryKey(ctx, sparkwingDir)
 	if err != nil {
 		return readDescribeFile(byRepoDescribePath(sparkwingDir)), nil
 	}

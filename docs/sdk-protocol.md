@@ -798,7 +798,7 @@ type SummaryRequest struct {
 
 ### type Trigger
 
-Trigger describes what started the run: Source is manual, push, schedule or webhook.
+Trigger describes what started the run: Source is local, trigger, github_app, schedule or child.
 
 ```
 type Trigger struct {

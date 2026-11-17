@@ -23,7 +23,7 @@ type riskBlockedError struct {
 }
 
 func (e *riskBlockedError) Error() string {
-	return fmt.Sprintf("step %q in pipeline %q requires --sw-allow-risk %s to confirm (or --sw-dry-run to preview).", e.StepID, e.Pipeline, strings.Join(e.MissingLabels, ","))
+	return fmt.Sprintf("step %q in pipeline %q requires --allow-risk %s to confirm (or --dry-run to preview).", e.StepID, e.Pipeline, strings.Join(e.MissingLabels, ","))
 }
 
 func risksIn(schema nodewire.PipelineDescription) []stepRiskFinding {

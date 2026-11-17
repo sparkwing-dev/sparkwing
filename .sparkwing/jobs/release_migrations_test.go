@@ -516,3 +516,57 @@ func TestMigrationIndexSummaryIsTheGuidesLeadSentence(t *testing.T) {
 		}
 	}
 }
+
+// VERSIONING.md promises breaking changes only in a minor release, so a patch cut with
+// a (Breaking) entry must stop before it tags.
+func TestReleaseCutRefusesABreakingEntryInAPatch(t *testing.T) {
+	changelog := `# Changelog
+
+## [v0.9.1] - 2026-03-04
+
+### Changed
+
+- **cache (Breaking):** ` + "`FETCH_INTERVAL`" + ` now defaults to ` + "`0`" + `, so a cache
+  started with no flags stops polling.
+`
+	dir := migrationRepo(t, changelog, freshUnreleasedGuide, migrationIndexFixture)
+	_, err := planMigrationRollIn(dir, changelog, "v0.9.1", "2026-03-04")
+	if err == nil || !strings.Contains(err.Error(), "v0.10.0") {
+		t.Fatalf("the cut accepted a (Breaking) entry in patch v0.9.1: %v", err)
+	}
+	fixed := strings.ReplaceAll(changelog, " (Breaking)", "")
+	if _, err := planMigrationRollIn(dir, fixed, "v0.9.1", "2026-03-04"); err != nil {
+		t.Fatalf("the cut refused a patch with no (Breaking) entry: %v", err)
+	}
+}
+
+// VERSIONING.md promises an SDK break never ships without a migration guide section, so the
+// cut must not roll the placeholder guide for one (reviewer repro).
+func TestReleaseCutRefusesAnSDKBreakWithoutAGuideSection(t *testing.T) {
+	changelog := "# Changelog\n\n## [v0.9.0] - 2026-03-04\n\n### Changed\n\n- **sdk (Breaking):** Removed the old SDK method.\n"
+	dir := migrationRepo(t, changelog, freshUnreleasedGuide, migrationIndexFixture)
+	if roll, err := planMigrationRollIn(dir, changelog, "v0.9.0", "2026-03-04"); err == nil || !strings.Contains(err.Error(), "missing-migration-link") {
+		t.Fatalf("the cut accepted an SDK break with no guide section: %v (guide %q)", err, roll.guideBody)
+	}
+}
+
+func TestChangelogLintRequiresAGuideLinkForUnreleasedSDKBreaksOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name, section, scope string
+		issue                bool
+	}{
+		{name: "unreleased sdk", section: "[Unreleased]", scope: "sdk", issue: true},
+		{name: "unreleased sdk and cli", section: "[Unreleased]", scope: "sdk + cli", issue: true},
+		{name: "unreleased typescript", section: "[Unreleased]", scope: "typescript", issue: true},
+		{name: "unreleased cli", section: "[Unreleased]", scope: "cli"},
+		{name: "released sdk", section: "[v0.8.0] - 2026-02-01", scope: "sdk"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changelog := "# Changelog\n\n## " + tc.section + "\n\n### Changed\n\n- **" + tc.scope + " (Breaking):** Removed the old method.\n"
+			issues := LintChangelog(changelog, nil)
+			if got := len(issues) > 0; got != tc.issue {
+				t.Fatalf("issues = %v, want issue %v", issues, tc.issue)
+			}
+		})
+	}
+}

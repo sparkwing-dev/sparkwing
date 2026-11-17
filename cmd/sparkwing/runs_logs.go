@@ -105,19 +105,21 @@ func parseRunLogs(inv clisurface.Invocation) (controllerwire.LogQuery, error) {
 	if err := q.Validate(); err != nil {
 		return q, logUsage(inv, err.Error())
 	}
-	if inv.Value("run") == "" {
+	searching := inv.Command.Path == "sparkwing runs grep"
+	switch {
+	case inv.Value("run") == "" && !searching:
+		return q, logUsage(inv, "pass --run <id> to read a run's logs, or search across runs with sparkwing runs grep --grep <pattern>; sparkwing runs list shows run IDs")
+	case inv.Value("run") == "":
 		if _, err := parseLogSearch(inv, time.Now()); err != nil {
 			return q, err
 		}
-		for _, name := range []string{"tail", "head", "lines", "tree", "events-only", "no-events", "follow"} {
-			if inv.Has(name) {
-				return q, logUsage(inv, "--"+name+" requires --run")
-			}
+	case searching:
+		if q.Grep == "" {
+			return q, logUsage(inv, "--grep requires a pattern")
 		}
-	} else {
-		for _, name := range []string{"pipeline", "status", "branch", "sha", "started-after", "started-before", "limit", "max-matches", "quiet"} {
+		for _, name := range []string{"pipeline", "status", "branch", "sha", "started-after", "started-before", "limit", "max-matches", "quiet", "cursor"} {
 			if inv.Has(name) {
-				return q, logUsage(inv, "--"+name+" searches across runs; pass --grep without --run")
+				return q, logUsage(inv, "--"+name+" searches across runs; drop --run to use it")
 			}
 		}
 	}
@@ -184,11 +186,16 @@ func observeRunLogs(ctx context.Context, inv clisurface.Invocation, reader contr
 			}
 		}
 		if !page.Truncated && (!inv.Bool("follow") || page.Complete) {
-			if err := writeUnloggedFailures(ctx, inv, runs, query.Job, out); err != nil {
-				return err
+			if inv.Command.Path != "sparkwing runs grep" {
+				if err := writeUnloggedFailures(ctx, inv, runs, query.Job, out); err != nil {
+					return err
+				}
 			}
 			if len(page.Incomplete) > 0 {
 				return fmt.Errorf("logs incomplete: %s", page.Incomplete[0].Reason)
+			}
+			if !page.Complete && inv.Command.Path == "sparkwing runs grep" {
+				return fmt.Errorf("logs incomplete: final log segments are still pending; search again after the run finishes")
 			}
 			if !page.Complete {
 				return fmt.Errorf("logs incomplete: final log segments are still pending; use --follow to wait for the remaining output")

@@ -83,7 +83,7 @@ func ancestors(t *testing.T, plan pipelineDocument, id string) map[string]bool {
 
 func TestReleasePreviewExampleUsesTheReservedRunFlag(t *testing.T) {
 	examples := (Release{}).Examples()
-	if got := examples[len(examples)-1].Command; got != `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run` {
+	if got := examples[len(examples)-1].Command; got != `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --dry-run` {
 		t.Fatalf("preview command = %q", got)
 	}
 }
@@ -245,7 +245,7 @@ func TestReleaseRecipesNameTheRiskFlagRunAccepts(t *testing.T) {
 	removed := regexp.MustCompile(`--sw-allow(\s|=)`)
 	for _, ex := range (Release{}).Examples() {
 		if removed.MatchString(ex.Command + " ") {
-			t.Errorf("release example %q names --sw-allow; use --sw-allow-risk", ex.Command)
+			t.Errorf("release example %q names --sw-allow; use --allow-risk", ex.Command)
 		}
 	}
 	root, err := filepath.Abs("../..")
@@ -257,12 +257,15 @@ func TestReleaseRecipesNameTheRiskFlagRunAccepts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if loc := removed.FindIndex(delivery); loc != nil {
-		t.Errorf("DELIVERY.md names --sw-allow at byte %d; use --sw-allow-risk", loc[0])
+		t.Errorf("DELIVERY.md names --sw-allow at byte %d; use --allow-risk", loc[0])
 	}
 }
 
 func TestPipelineExamplesPassPipelineFlagsAfterTheSeparator(t *testing.T) {
-	runFlags := map[string]bool{"-o": true, "--output": true, "-C": true, "--checkout": true, "-h": true, "--help": true, "--help-all": true, "--publish": true, "-v": true}
+	runFlags := map[string]bool{"-o": true, "--output": true, "-C": true, "--checkout": true, "-h": true, "--help": true, "--help-all": true, "-v": true}
+	for _, name := range []string{"publish", "route", "profile", "agent", "cache-from", "pause-before", "pause-after", "pause-on-failure", "ref", "pipeline-ref", "detach", "workers", "idempotency-key", "request-id", "verbose", "start-at", "stop-at", "only", "no-memo", "priority", "no-update", "no-bincache", "hash-all-files", "allow-unadmitted", "dry-run", "allow-risk", "index", "run-handle-file"} {
+		runFlags["--"+name] = true
+	}
 	command := regexp.MustCompile(`Command:\s*"((?:[^"\\]|\\.)*)"`)
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -286,7 +289,7 @@ func TestPipelineExamplesPassPipelineFlagsAfterTheSeparator(t *testing.T) {
 					break
 				}
 				flag, _, _ := strings.Cut(tok, "=")
-				if strings.HasPrefix(tok, "-") && !strings.HasPrefix(tok, "--sw-") && !runFlags[flag] {
+				if strings.HasPrefix(tok, "-") && !runFlags[flag] {
 					t.Errorf("%s: example %q passes %s before --", file, m[1], tok)
 				}
 			}

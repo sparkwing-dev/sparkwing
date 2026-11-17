@@ -303,7 +303,7 @@ func prepareRunnerEnrollmentArgs(args []string) (runnerEnrollment, *namedProfile
 }
 
 func prepareRunnerRemovalArgs(args []string) (runnerRemoval, *namedProfile, error) {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"runners", "remove"}, args...))
+	inv, err := clisurface.Parse("sparkwing", append([]string{"runners", "delete"}, args...))
 	if err != nil {
 		return runnerRemoval{}, nil, err
 	}

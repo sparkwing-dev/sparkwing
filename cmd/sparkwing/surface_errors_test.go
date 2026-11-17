@@ -165,7 +165,7 @@ func TestRevokedTokenRefusalExplainsSignInAndProfileReplacement(t *testing.T) {
 	}
 }
 
-func TestDefaultProfileRevokedTokenNamesItsReplacementCommand(t *testing.T) {
+func TestProfileRevokedTokenNamesItsReplacementCommand(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		if err := hosterr.WriteJSON(w, &apierr.Error{Code: hosterr.Unauthenticated, Message: "authority has ended"}); err != nil {
@@ -173,15 +173,15 @@ func TestDefaultProfileRevokedTokenNamesItsReplacementCommand(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	setProfileCmdFixture(t, fmt.Sprintf("profiles:\n  expired: {default: true, controller: {url: %s, token: revoked}}\n", server.URL))
-	failure := runSparkwing([]string{"runs", "list", "-o", "json"})
+	setProfileCmdFixture(t, fmt.Sprintf("profiles:\n  expired: {controller: {url: %s, token: revoked}}\n", server.URL))
+	failure := runSparkwing([]string{"runs", "list", "--profile", "expired", "-o", "json"})
 	if failure == nil {
 		t.Fatal("revoked token accepted")
 	}
 	var out bytes.Buffer
 	writeFailure(&out, failure)
 	if !strings.Contains(out.String(), "sparkwing profiles set --profile 'expired' --token-stdin") {
-		t.Fatalf("default-profile refusal: %s", &out)
+		t.Fatalf("profile refusal: %s", &out)
 	}
 }
 

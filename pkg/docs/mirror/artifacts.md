@@ -87,6 +87,14 @@ build := sparkwing.Job(plan, "build", func(ctx context.Context) error {
 }).Artifacts("dist/**")
 ```
 
+```ts
+const build = plan
+  .job("build", async (ctx) => {
+    await ctx.exec(["npm", "run", "build"]).run();
+  })
+  .artifacts("dist/**");
+```
+
 A consumer declares `Consumes(producer)`. That stages the producer's
 published files into the consumer's workspace before it runs, and
 implies `Needs(producer)` so the producer is ordered first:
@@ -95,6 +103,15 @@ implies `Needs(producer)` so the producer is ordered first:
 sparkwing.Job(plan, "deploy", func(ctx context.Context) error {
     return nil
 }).Consumes(build)
+```
+
+```ts
+const build = plan.job("build", () => undefined).artifacts("dist/**");
+plan
+  .job("deploy", async (ctx) => {
+    await ctx.exec(["./scripts/deploy.sh", "dist"]).run();
+  })
+  .consumes(build);
 ```
 
 By default staged files land at the paths the producer declared them
@@ -107,6 +124,11 @@ sparkwing.Job(plan, "archive", func(ctx context.Context) error {
 }).Consumes(build, sparkwing.Into("artifacts/build"))
 ```
 
+```ts
+const build = plan.job("build", () => undefined).artifacts("dist/**");
+plan.job("archive", () => undefined).consumes(build, { into: "artifacts/build" });
+```
+
 `Into` applies to the whole producer; per-file remapping is intentionally
 absent, since it would couple the consumer to the producer's filenames.
 
@@ -116,7 +138,7 @@ front rather than a silent no-op. When one consumer draws two producers
 whose staged paths overlap, the plan emits a lint warning and the
 last-staged producer wins at that path.
 
-Both modifiers exist at group scope too: `JobGroup.Outputs` declares the
+Both modifiers exist at group scope too: `JobGroup.Artifacts` declares the
 same globs on every member, and `JobGroup.Consumes` stages a producer
 into every member's workspace. See the
 [SDK reference](sdk-reference.md) for the full signatures.
@@ -167,7 +189,7 @@ pair `.Memo()` with `Artifacts`.
 ## Both execution modes
 
 Local runs store artifacts in their local blob store. Explicit
-`--sw-cache-from PROFILE` access reads authorized remote records without writing
+`--cache-from PROFILE` access reads authorized remote records without writing
 them. Staging checks blob and manifest
 digests and fails when cached bytes are missing or corrupt. A memo entry, or a
 coalesce leader, without a required artifact manifest, or whose manifest or

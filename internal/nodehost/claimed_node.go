@@ -94,6 +94,13 @@ func (h *ClaimedNodeHost) execute(ctx context.Context, input NodeInput, spec sou
 		return h.setupFailure(ctx, input, err)
 	}
 	options := h.Source
+	observe := options.Timing
+	options.Timing = func(ctx context.Context, timing source.Timing) {
+		if observe != nil {
+			observe(ctx, timing)
+		}
+		input.Preparation = append(input.Preparation, timing)
+	}
 	options.Base, err = capturedBase(ctx, options.Base, h.Snapshots, accepted.Request.Request.Env)
 	if err != nil {
 		return h.setupFailure(ctx, input, err)

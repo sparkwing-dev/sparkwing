@@ -10,6 +10,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/pkg/match"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -76,6 +77,8 @@ type ClaimRequest struct {
 	JobID              string                `json:"job_id,omitempty"`
 	// Kubernetes reports that the runner runs in a Kubernetes pod.
 	Kubernetes bool `json:"kubernetes,omitempty"`
+	// Wait is how long an empty claim may wait for work; it travels as [ClaimWaitHeader].
+	Wait time.Duration `json:"-"`
 }
 
 // ClaimedUnit carries the one-time private execution award over authenticated transport.
@@ -107,7 +110,9 @@ type ClaimedUnit struct {
 type ClaimResponse struct {
 	// PollAfter carries transport advice locally; it is not part of the JSON envelope.
 	PollAfter time.Duration `json:"-"`
-	Claim     *ClaimedUnit  `json:"claim,omitempty"`
+	// Held reports an empty answer that already waited for work; it travels as [ClaimHeldHeader].
+	Held  bool         `json:"-"`
+	Claim *ClaimedUnit `json:"claim,omitempty"`
 }
 
 // LauncherCapacityObservation reports demand without an execution placement.
@@ -350,23 +355,24 @@ type AttemptDetail struct {
 
 // RunDetail carries safe dashboard, local and remote status projections.
 type RunDetail struct {
-	Reason            string             `json:"reason,omitempty"`
-	ID                string             `json:"id"`
-	Number            int64              `json:"number"`
-	Team              string             `json:"team"`
-	Status            string             `json:"status"`
-	Failure           string             `json:"failure,omitempty"`
-	StateSeq          int64              `json:"state_seq"`
-	Inputs            runspec.Display    `json:"inputs"`
-	Jobs              []JobDetail        `json:"jobs"`
-	Attempts          []AttemptDetail    `json:"attempts"`
-	Steps             []StepDetail       `json:"steps,omitempty"`
-	Logs              []blob.LogSubject  `json:"logs"`
-	StartedAt         *time.Time         `json:"started_at,omitempty"`
-	FinishedAt        *time.Time         `json:"finished_at,omitempty"`
-	CancelRequestedAt *time.Time         `json:"cancel_requested_at,omitempty"`
-	Engine            *engineid.Identity `json:"engine,omitempty"`
-	Notices           []engineid.Notice  `json:"notices"`
+	Reason            string                    `json:"reason,omitempty"`
+	ID                string                    `json:"id"`
+	Number            int64                     `json:"number"`
+	Team              string                    `json:"team"`
+	Status            string                    `json:"status"`
+	Failure           string                    `json:"failure,omitempty"`
+	StateSeq          int64                     `json:"state_seq"`
+	Inputs            runspec.Display           `json:"inputs"`
+	Jobs              []JobDetail               `json:"jobs"`
+	Attempts          []AttemptDetail           `json:"attempts"`
+	Steps             []StepDetail              `json:"steps,omitempty"`
+	Logs              []blob.LogSubject         `json:"logs"`
+	OwnerClaims       []runstate.OwnerClaimTime `json:"owner_claims,omitempty"`
+	StartedAt         *time.Time                `json:"started_at,omitempty"`
+	FinishedAt        *time.Time                `json:"finished_at,omitempty"`
+	CancelRequestedAt *time.Time                `json:"cancel_requested_at,omitempty"`
+	Engine            *engineid.Identity        `json:"engine,omitempty"`
+	Notices           []engineid.Notice         `json:"notices"`
 	// Retry says how a retry run treats its source's jobs; a first run has none.
 	Retry *RetryDetail `json:"retry,omitempty"`
 }

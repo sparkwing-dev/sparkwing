@@ -2,10 +2,12 @@ package controllerwire
 
 import "time"
 
-// Device login kinds: a member CLI token, or a runner enrolled under the approver's authority.
+// Device login kinds: a member CLI token, a runner enrolled under the approver's authority, or a short-lived
+// administration token that an owner's signed-in terminal asks for through the step-up route.
 const (
 	DeviceLoginMember = "member"
 	DeviceLoginRunner = "runner"
+	DeviceLoginAdmin  = "admin"
 )
 
 // Device poll statuses that are not refusals; RFC 8628 names the same states.
@@ -47,11 +49,13 @@ type DeviceCodeRequest struct {
 	DeviceCode string `json:"device_code"`
 }
 
-// DeviceLoginPoll is a poll's answer. Credential is set once, when Status is approved.
+// DeviceLoginPoll is a poll's answer. Credential is set once, when Status is approved. An approved administration
+// request also returns Member, the terminal's member token re-issued under the approving session.
 type DeviceLoginPoll struct {
 	Status     string        `json:"status"`
 	Interval   int64         `json:"interval,omitempty"`
 	Credential *CreatedToken `json:"credential,omitempty"`
+	Member     *CreatedToken `json:"member,omitempty"`
 }
 
 // UserCodeRequest names a device login by the code the user typed.
@@ -72,6 +76,7 @@ type DeviceRunner struct {
 }
 
 // DeviceLoginLookup is what the approval page shows: the team the credential is minted in and its exact grants.
+// SignInRequired marks an administration request the session is too old to approve.
 type DeviceLoginLookup struct {
 	UserCode  string        `json:"user_code"`
 	Kind      string        `json:"kind"`
@@ -81,4 +86,6 @@ type DeviceLoginLookup struct {
 	Runner    *DeviceRunner `json:"runner,omitempty"`
 	CreatedAt time.Time     `json:"created_at"`
 	ExpiresAt time.Time     `json:"expires_at"`
+
+	SignInRequired bool `json:"sign_in_required,omitempty"`
 }

@@ -4,7 +4,7 @@ import "strings"
 
 // Risk marks a WorkStep as gated by the given operator-acknowledged
 // labels. The dispatcher refuses to run a pipeline containing such a
-// step unless every label is listed in --sw-allow (or --sw-dry-run
+// step unless every label is listed in --allow-risk (or --dry-run
 // bypasses every gate).
 //
 // Labels are author-defined kebab-case strings. Conventional ones

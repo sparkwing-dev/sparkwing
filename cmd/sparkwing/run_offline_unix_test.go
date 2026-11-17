@@ -149,7 +149,7 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a latest pin resolved with no network reachable:\n%s", trackingOut)
 	}
-	if !strings.Contains(trackingOut, "--sw-no-update") {
+	if !strings.Contains(trackingOut, "--no-update") {
 		t.Fatalf("the offline failure does not name the flag that skips resolution:\n%s", trackingOut)
 	}
 	if len(denier.since(tracking)) == 0 {
@@ -159,9 +159,9 @@ func TestRun_PinnedPipelineRunsWithTheNetworkDenied(t *testing.T) {
 	// safety: the manifest changed, so this run compiles instead of reusing the
 	// cached binary, and it must do so from the cache the first run filled.
 	skipped := denier.mark()
-	skippedOut, err := offlineRunCLI(cli, repoDir, denied, "run", "offline", "--sw-no-update")
+	skippedOut, err := offlineRunCLI(cli, repoDir, denied, "run", "offline", "--no-update")
 	if err != nil {
-		t.Fatalf("--sw-no-update did not carry a latest pin through an offline run: %v\n%s", err, skippedOut)
+		t.Fatalf("--no-update did not carry a latest pin through an offline run: %v\n%s", err, skippedOut)
 	}
 	if offlineBuildCount(t, toolPath) <= builds {
 		t.Fatalf("the offline compile did not happen, so it proves nothing about building without a proxy:\n%s", skippedOut)

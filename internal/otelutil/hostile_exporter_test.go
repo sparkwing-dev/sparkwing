@@ -3,6 +3,7 @@ package otelutil
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -14,11 +15,14 @@ import (
 	"time"
 )
 
+const invalidEndpoint = "http://SECRETUSER:SECRETPASS@[::1/SECRETPATH?token=SECRETQUERY"
+
 func TestTracesOnlyExporterFailuresNeverEchoEndpointSecrets(t *testing.T) {
 	if os.Getenv("SPARKWING_TEST_HOSTILE_EXPORTER_HELPER") == "1" {
 		telemetry, err := Init(context.Background(), Config{ServiceName: "sparkwing-runner", Version: "test", TracesOnly: true})
 		if err != nil {
-			t.Fatal(err)
+			fmt.Fprintln(os.Stderr, err)
+			return
 		}
 		ctx, root := StartOperation(context.Background(), "runner run-node")
 		_, child := StartOperation(ctx, "controller POST /api/v1/x")
@@ -51,7 +55,7 @@ func TestTracesOnlyExporterFailuresNeverEchoEndpointSecrets(t *testing.T) {
 	for name, endpoint := range map[string]string{
 		"refusing": strings.Replace(refusing.URL, "http://", "http://SECRETUSER:SECRETPASS@", 1) + "/SECRETPATH/v1/traces?token=SECRETQUERY",
 		"closed":   "http://SECRETUSER:SECRETPASS@" + closedAddr + "/SECRETPATH/v1/traces?token=SECRETQUERY",
-		"invalid":  "http://SECRETUSER:SECRETPASS@[::1/SECRETPATH?token=SECRETQUERY",
+		"invalid":  invalidEndpoint,
 	} {
 		t.Run(name, func(t *testing.T) {
 			command := exec.CommandContext(t.Context(), executable, "-test.run=^TestTracesOnlyExporterFailuresNeverEchoEndpointSecrets$")
@@ -68,6 +72,9 @@ func TestTracesOnlyExporterFailuresNeverEchoEndpointSecrets(t *testing.T) {
 				if bytes.Contains(output, []byte(secret)) {
 					t.Errorf("exporter failure leaked %s: %s", secret, output)
 				}
+			}
+			if refused := bytes.Contains(output, []byte("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is not a valid OTLP endpoint")); refused != (endpoint == invalidEndpoint) {
+				t.Errorf("refusal printed = %v for %s: %s", refused, name, output)
 			}
 		})
 	}

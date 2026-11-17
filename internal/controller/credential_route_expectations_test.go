@@ -254,6 +254,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"GET", "/api/v1/auth/session", "controller", "account", "browser_flow_csrf_nonce", nil},
 		{"POST", "/api/v1/auth/logout", "controller", "account", "browser_flow_csrf_nonce", nil},
 		{"POST", "/api/v1/auth/device", "controller", "none", "public", nil},
+		{"POST", "/api/v1/auth/device/step-up", "controller", "team", "capability", []string{"unbound_member_or_local|runs.read|none|credential"}},
 		{"POST", "/api/v1/auth/device/token", "controller", "none", "public", nil},
 		{"POST", "/api/v1/auth/device/cancel", "controller", "none", "public", nil},
 		{"POST", "/api/v1/auth/device/lookup", "controller", "team", "capability", []string{"account_session|runs.read|none|credential"}},

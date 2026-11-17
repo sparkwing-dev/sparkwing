@@ -512,7 +512,7 @@ func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return pipeline{}});
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-qm", "claim after controller restart")
 	marker := filepath.Join(home, "resumed-claim")
-	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "RESUMED_MARKER="+marker), binary, "run", "ci", "--sw-detached", "--sw-no-update", "-o", "json")
+	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "RESUMED_MARKER="+marker), binary, "run", "ci", "--detach", "--no-update", "-o", "json")
 	command.Dir = repo
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("submit recovery claim: %v: %s", err, output)
@@ -639,7 +639,7 @@ func main(){sw.Register("CI",func()sw.Pipeline[sw.NoInputs]{return parent{}});sw
 		t.Fatal("the awaiting owner needs the test's deadline")
 	}
 	await := "HOLD_AWAIT_TIMEOUT=" + time.Until(deadline).Round(time.Second).String()
-	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "HOLD_MARKER="+marker, await), binary, "run", "ci", "--sw-detached", "--sw-no-update", "-o", "json")
+	command := procenv.ControlCommandContext(ctx, append(os.Environ(), "HOLD_MARKER="+marker, await), binary, "run", "ci", "--detach", "--no-update", "-o", "json")
 	command.Dir = repo
 	var stderr bytes.Buffer
 	command.Stderr = &stderr

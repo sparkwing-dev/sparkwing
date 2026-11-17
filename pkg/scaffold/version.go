@@ -4,4 +4,4 @@ package scaffold
 
 // FallbackSDKVersion is the published Go SDK release pinned by new pipelines.
 // Engine releases retain this pin until a separately published SDK changes it.
-const FallbackSDKVersion = "v0.1.0"
+const FallbackSDKVersion = "v0.3.0"

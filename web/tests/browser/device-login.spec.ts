@@ -278,3 +278,98 @@ test("a runner request shows what the runner may do", async ({
   ).toBeVisible();
   await expect(page.getByText(/expires in 90 days/)).toHaveCount(0);
 });
+
+const adminRequest = {
+  ...memberRequest,
+  kind: "admin",
+  grants: [...memberRequest.grants, "team.admin"],
+};
+
+async function primaryButtonBox(
+  page: Page,
+  baseURL: string | undefined,
+  lookup: Record<string, unknown>,
+  name: string,
+) {
+  await mockController(page, { lookup: { status: 200, json: lookup } });
+  await openDevicePage(page, baseURL);
+  await page.getByLabel("Device code").fill("BCDF-GHJK");
+  await page.getByRole("button", { name: "Continue" }).click();
+  const button = page.getByRole("button", { name });
+  await expect(button).toBeVisible();
+  return button.boundingBox();
+}
+
+test("an administration request warns in red and names team.admin", async ({
+  page,
+  baseURL,
+}) => {
+  const seen = await mockController(page, {
+    lookup: { status: 200, json: adminRequest },
+  });
+  await openDevicePage(page, baseURL);
+  await page.getByLabel("Device code").fill("BCDF-GHJK");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Approve sign-in for korey-laptop?" }),
+  ).toBeVisible();
+  await expect(page.getByText(/full control of acme/)).toBeVisible();
+  await expect(page.getByText(/for 1 hour: read and change secrets/)).toBeVisible();
+  await expect(page.getByText(/Plus team\.admin, to administer the team, for 1 hour/)).toBeVisible();
+  await expect(page.getByText(/expires in 90 days unless revoked/)).toBeHidden();
+  await expect(page.getByText("If someone sent you this code, deny it.", { exact: false })).toBeHidden();
+  await expectAccessible(page);
+  await page.getByRole("button", { name: "Approve" }).click();
+  await expect(
+    page.getByText("Approved. Return to your terminal; it finishes signing in on its own."),
+  ).toBeVisible();
+  expect(seen.map((s) => s.path)).toEqual([
+    "/api/v1/auth/device/lookup",
+    "/api/v1/auth/device/approve",
+  ]);
+});
+
+test("a stale sign-in is asked to sign in again from the Approve slot", async ({
+  page,
+  baseURL,
+}) => {
+  await mockController(page, {
+    lookup: { status: 200, json: { ...adminRequest, sign_in_required: true } },
+  });
+  let loggedOut = "";
+  await page.route("**/logout", async (route) => {
+    loggedOut = route.request().postData() ?? "";
+    await route.fulfill({ status: 200, body: "signed out" });
+  });
+  await openDevicePage(page, baseURL);
+  await page.getByLabel("Device code").fill("BCDF-GHJK");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0);
+  await expect(page.getByText(/needs a sign-in from the last 10 minutes/)).toBeVisible();
+  await expectAccessible(page);
+  await page.getByRole("button", { name: "Sign in again" }).click();
+  await expect.poll(() => loggedOut).toBe("csrf_token=session-csrf");
+});
+
+for (const viewport of [
+  { name: "desktop", width: 1280, height: 1100 },
+  { name: "phone", width: 390, height: 1400 },
+]) {
+  test(`the primary button keeps its place across sign-in, administration and sign-in-again (${viewport.name})`, async ({
+    page,
+    baseURL,
+  }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    const shot = (view: string) =>
+      page.screenshot({ path: test.info().outputPath(`device-${viewport.name}-${view}.png`) });
+    const member = await primaryButtonBox(page, baseURL, memberRequest, "Approve");
+    await shot("member");
+    const admin = await primaryButtonBox(page, baseURL, adminRequest, "Approve");
+    await shot("admin");
+    const stale = await primaryButtonBox(page, baseURL, { ...adminRequest, sign_in_required: true }, "Sign in again");
+    await shot("admin-sign-in-again");
+    expect(member).not.toBeNull();
+    expect(admin).toEqual(member);
+    expect(stale).toEqual(member);
+  });
+}

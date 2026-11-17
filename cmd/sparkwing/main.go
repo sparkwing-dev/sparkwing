@@ -140,6 +140,9 @@ func exitCodeFor(err error) int {
 		}
 		return commandError.code
 	}
+	if isNotFound(err) {
+		return exitRefused
+	}
 	return 1
 }
 
@@ -250,10 +253,9 @@ func runSparkwing(args []string) (result error) {
 	}
 	pipelineHelp := inv.Command.Path == "sparkwing run" && inv.Pipeline != ""
 	if inv.Help() && !pipelineHelp || inv.Command.Path != "sparkwing version" && len(childCommands(inv.Command.Path)) > 0 {
-		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, invocationOutput(inv))
-	}
-	if err := applyConfiguredProfile(&inv); err != nil {
-		return err
+		help := surfaceHelp(inv.Command)
+		help.ShowAll = inv.Bool("help-all")
+		return writeCommandHelp(help, os.Stdout, invocationOutput(inv))
 	}
 
 	replayDirectory := ""
@@ -270,6 +272,24 @@ func runSparkwing(args []string) (result error) {
 	}
 	if inv.Command.Path == "sparkwing __sdk-install" {
 		return runSDKInstall(inv)
+	}
+	// safety: these run as root or as a runner account, so they skip the
+	// version notices and stamps that would write into that account's home.
+	switch inv.Command.Path {
+	case "sparkwing runners install-service":
+		return runRunnersInstallService(inv)
+	case "sparkwing runners uninstall-service":
+		return runRunnersUninstallService(inv)
+	case "sparkwing __runner-account-write":
+		return runRunnerAccountWrite(inv)
+	case "sparkwing __runner-account-read":
+		return runRunnerAccountRead(inv)
+	case "sparkwing __runner-account-pause":
+		return runRunnerAccountPause(inv)
+	case "sparkwing runners pause", "sparkwing runners resume":
+		if inv.Has("service-user") {
+			return setRunnerPaused(inv, inv.Command.Path == "sparkwing runners pause", os.Stdout)
+		}
 	}
 	cleanupStaleUpdate()
 	previousArgs, previousDirectory := toolchainReplayArgs, toolchainReplayDirectory
@@ -319,6 +339,8 @@ func runSparkwing(args []string) (result error) {
 		return runReviewCommand(context.Background(), inv, os.Stdout, resolveRunReview)
 	}
 	switch inv.Command.Path {
+	case "sparkwing team delete":
+		return runTeamDelete(context.Background(), inv)
 	case "sparkwing team settings show", "sparkwing team settings set":
 		return runTeamSettings(context.Background(), inv)
 	case "sparkwing run":
@@ -337,7 +359,7 @@ func runSparkwing(args []string) (result error) {
 		return runSparksList(inv)
 	case "sparkwing pipeline sparks add":
 		return runSparksAdd(inv)
-	case "sparkwing pipeline sparks remove":
+	case "sparkwing pipeline sparks delete":
 		return runSparksRemove(inv)
 	case "sparkwing pipeline sparks catalog":
 		return runSparksCatalog(inv)
@@ -357,7 +379,7 @@ func runSparkwing(args []string) (result error) {
 		return runReposList(inv)
 	case "sparkwing repos add":
 		return runXrepoAdd(inv)
-	case "sparkwing repos remove":
+	case "sparkwing repos delete":
 		return runXrepoRemove(inv)
 	case "sparkwing repos prune":
 		return runXrepoPrune(inv)
@@ -369,8 +391,12 @@ func runSparkwing(args []string) (result error) {
 		return runLogin(inv)
 	case "sparkwing runners add":
 		return runRunnersAdd(inv)
-	case "sparkwing runners remove":
+	case "sparkwing runners delete":
 		return runRunnersRemove(inv)
+	case "sparkwing runners pause":
+		return runRunnersPause(inv)
+	case "sparkwing runners resume":
+		return runRunnersResume(inv)
 	case "sparkwing completion":
 		return runCompletion(inv)
 	case "sparkwing runs logs", "sparkwing runs grep":

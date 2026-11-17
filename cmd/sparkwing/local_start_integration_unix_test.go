@@ -53,7 +53,7 @@ func TestRunStartsLocalControllerBeforeSubmitting(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, cli, "run", "example", "--sw-detached", "-o=json")
+	command := exec.CommandContext(ctx, cli, "run", "example", "--detach", "-o=json")
 	command.Dir = root
 	var stderr strings.Builder
 	command.Stderr = &stderr

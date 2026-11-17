@@ -185,10 +185,26 @@ func TestUpgradePlainReportsTargetVersion(t *testing.T) {
 	}
 }
 
+// A TypeScript pipeline type-checks only when it configures tsc; without a tsconfig, node
+// strips its types, so describe and plan are its whole verification.
 func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
-	for _, sdk := range []engineid.SDKKind{engineid.GoSDK, engineid.TypeScriptSDK} {
-		t.Run(string(sdk), func(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		sdk      engineid.SDKKind
+		tsconfig bool
+	}{
+		{name: "go", sdk: engineid.GoSDK},
+		{name: "typescript", sdk: engineid.TypeScriptSDK},
+		{name: "typescript with tsconfig", sdk: engineid.TypeScriptSDK, tsconfig: true},
+	} {
+		sdk := tc.sdk
+		t.Run(tc.name, func(t *testing.T) {
 			root := upgradeFixture(t, sdk)
+			if tc.tsconfig {
+				if err := os.WriteFile(filepath.Join(root, ".sparkwing", "tsconfig.json"), []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			selected := engine.Resolved{Executable: filepath.Join(root, "verified-engine"), Identity: engineid.Identity{Pin: engineid.Pin{SDK: sdk}}}
 			var catalog bytes.Buffer
 			if err := ndjson.Write(&catalog, []PipelineIndex{{Name: "first", Short: "Build and test", Entrypoint: ".sparkwing/main.go", Triggers: []string{"push"}}, {Name: "hidden"}}); err != nil {
@@ -227,22 +243,25 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 			}
 			wantNative := [][]string{{"go", "mod", "download"}, {"go", "build", "-mod=readonly", "-o", os.DevNull, "./..."}}
 			if sdk == engineid.TypeScriptSDK {
-				wantNative = [][]string{{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}}
+				wantNative = [][]string{}
+				if tc.tsconfig {
+					wantNative = [][]string{{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}}
+				}
 			}
 			if installs != 1 || len(commands) != len(wantNative)+5 {
 				t.Fatalf("commands: %v", commands)
 			}
 			if !reflect.DeepEqual(commands[:len(wantNative)], wantNative) {
-				t.Fatalf("dependency/type checks: %v", commands[:len(wantNative)])
+				t.Fatalf("dependency/type checks: %v", commands)
 			}
-			commands = commands[len(wantNative)-1:]
-			for _, command := range commands[1:] {
+			commands = commands[len(wantNative):]
+			for _, command := range commands {
 				if command[0] != selected.Executable || command[1] != "pipeline" || (command[2] != "list" && command[2] != "describe" && command[2] != "plan") {
 					t.Fatalf("unverified engine or body command: %v", command)
 				}
 			}
-			if !reflect.DeepEqual(commands[1][1:], []string{"pipeline", "list", "--all", "--output=json"}) {
-				t.Fatalf("hidden pipelines excluded: %v", commands[1])
+			if !reflect.DeepEqual(commands[0][1:], []string{"pipeline", "list", "--all", "--output=json"}) {
+				t.Fatalf("hidden pipelines excluded: %v", commands[0])
 			}
 		})
 	}

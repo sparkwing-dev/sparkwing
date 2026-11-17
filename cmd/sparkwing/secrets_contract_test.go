@@ -431,3 +431,22 @@ func TestSecretSetReportsActualMaskEligibility(t *testing.T) {
 		})
 	}
 }
+
+func TestSecretSetRefusesAnEmptyStdinOrFile(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{nil, {"--file", empty}} {
+		manager := secretManagerFake{write: func(input controllerwire.SecretWrite) (controllerwire.SecretWritten, error) {
+			t.Fatalf("stored an empty secret from %v: %+v", args, input)
+			return controllerwire.SecretWritten{}, nil
+		}}
+		inv := secretInvocation(t, append([]string{"set", "--secret", "DEPLOY_KEY"}, args...)...)
+		err := manageSecrets(t.Context(), inv, manager, strings.NewReader(""), io.Discard, io.Discard, true)
+		var usage *clisurface.UsageError
+		if !errors.As(err, &usage) || exitCodeFor(err) != int(clisurface.ExitUsage) || !strings.Contains(usage.Message, "--value ''") {
+			t.Fatalf("empty input %v = %v; want a usage refusal naming --value ''", args, err)
+		}
+	}
+}

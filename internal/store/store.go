@@ -70,7 +70,8 @@ const retrySourceManual = "manual"
 // underlying database is SQLite or Postgres depending on which
 // constructor opened it; dialect-aware methods branch on s.dialect.
 type Store struct {
-	metricCap          metricCapAllowance
+	metricCap metricCapAllowance
+
 	runCancellations   atomic.Pointer[runCancellationObserver]
 	creditMeteringOff  atomic.Bool
 	cloudStorage       atomic.Bool
@@ -101,6 +102,7 @@ type Store struct {
 	csrfKey            []byte
 	csrfCipher         SessionKeyCipher
 	githubCheckMu      sync.Mutex
+	commits            commitSignal
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -864,6 +866,42 @@ type NodeStep struct {
 	// sparkwing.Summary inside this step's body. Overwrite-on-write:
 	// only the last value is kept.
 	Summary string `json:"summary,omitempty"`
+}
+
+// ListDeclaredSteps returns each job's step IDs in the order its accepted declaration lists them, for planned
+// and generated jobs alike. A job whose declaration cannot be read is absent from the map.
+func (t *Tenant) ListDeclaredSteps(ctx context.Context, runID string) (_ map[string][]string, err error) {
+	rows, err := t.s.query(ctx, `SELECT node_id, spec_json FROM nodes WHERE team = ? AND run_id = ?`, string(t.team), runID)
+	if err != nil {
+		return nil, err
+	}
+	defer closeRowsInto(rows, &err)
+	out := map[string][]string{}
+	for rows.Next() {
+		var node string
+		var spec []byte
+		if err := rows.Scan(&node, &spec); err != nil {
+			return nil, err
+		}
+		var declared struct {
+			Steps []struct {
+				ID string `json:"id"`
+			} `json:"steps"`
+		}
+		// safety: an unreadable declaration only costs step positions, so it must not fail the caller's report.
+		if json.Unmarshal(spec, &declared) != nil {
+			continue
+		}
+		ids := make([]string, 0, len(declared.Steps))
+		for _, step := range declared.Steps {
+			ids = append(ids, step.ID)
+		}
+		out[node] = ids
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ListNodeSteps returns persisted step observations for a tenant run.

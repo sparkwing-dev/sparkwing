@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,15 +58,16 @@ func Run(ctx context.Context, input io.Reader, output, diagnostics io.Writer) er
 	}
 	var command []string
 	var cachedExecutable string
+	var cache *engine.SDKCache
 	if request.SDK == engineid.GoSDK {
-		command, cachedExecutable, err = installGoSDK(ctx, dir, request, pin, environment, diagnostics, masker)
+		command, cachedExecutable, cache, err = installGoSDK(ctx, dir, request, pin, environment, diagnostics, masker)
 	} else {
 		command, err = installTypeScriptSDK(ctx, dir, pin, environment, diagnostics, masker)
 	}
 	if err != nil {
 		return err
 	}
-	return json.NewEncoder(output).Encode(engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable})
+	return json.NewEncoder(output).Encode(engine.SDKCommand{Directory: dir, Command: command, CachedExecutable: cachedExecutable, Cache: cache})
 }
 
 // GoEnvironment applies the native SDK compiler settings used by installation and cache diagnostics.
@@ -93,20 +95,20 @@ func GoEnvironment(ctx context.Context, dir string, pin engineid.Pin, environmen
 	return environment, nil
 }
 
-func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, result error) {
+func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequest, pin engineid.Pin, environment procenv.Env, diagnostics io.Writer, masker *secrets.Masker) (command []string, cachedExecutable string, cache *engine.SDKCache, result error) {
 	if !filepath.IsAbs(request.ExecutableDirectory) {
-		return nil, "", errors.New("SDK installation requires an owned executable directory")
+		return nil, "", nil, errors.New("SDK installation requires an owned executable directory")
 	}
 	// safety: generated sparks overlays can predate an SDK upgrade. The native
 	// manifest owns the engine pin, while the overlay owns the sparks versions.
 	if overlay := bincache.EffectiveOverlay(dir, []string{"GOWORK=off"}); overlay != "" {
 		if err := refreshOverlayPin(overlay, pin.Version); err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
 	}
 	environment, err := GoEnvironment(ctx, dir, pin, environment)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	var buildDiagnostics bytes.Buffer
 	options := bincache.CompileOptions{Environment: slices.Collect(environment.Values()), Diagnostics: &buildDiagnostics, HashAllFiles: request.HashAllFiles}
@@ -120,7 +122,15 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	var lease *bincache.Lease
 	uncached := request.NoBincache
 	if !uncached {
-		lease, _, err = bincache.MaterializePipeline(ctx, dir, options)
+		var published bool
+		lease, published, err = bincache.MaterializePipeline(ctx, dir, options)
+		if err == nil {
+			zero := int64(0)
+			cache = &engine.SDKCache{Outcome: "hit", BytesFetched: &zero}
+			if published {
+				cache.Outcome = "compile"
+			}
+		}
 		if errors.Is(err, bincache.ErrUnstableInputs) {
 			fmt.Fprintln(&buildDiagnostics, "pipeline build inputs kept changing; building without the binary cache")
 			uncached, err = true, nil
@@ -128,6 +138,8 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	}
 	if uncached {
 		err = bincache.CompileUncachedPipeline(ctx, dir, path, options)
+		zero := int64(0)
+		cache = &engine.SDKCache{Outcome: "compile", BytesFetched: &zero}
 	} else {
 		if lease != nil {
 			defer func() { result = errors.Join(result, lease.Release()) }()
@@ -135,21 +147,21 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 	}
 	if output, ok := bincache.CompileOutput(err); ok {
 		_, writeErr := io.WriteString(diagnostics, masker.Mask(strings.TrimSuffix(buildDiagnostics.String(), string(output))))
-		return nil, "", errors.Join(compileRefusal(request.PipelineDir, masker.Mask(string(output))), writeErr)
+		return nil, "", nil, errors.Join(compileRefusal(request.PipelineDir, masker.Mask(string(output))), writeErr)
 	}
 	if err := installDiagnostic(diagnostics, masker, buildDiagnostics.Bytes(), err); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	body, err := selection.result(ctx, dir, environment)
 	if err != nil {
-		return nil, "", installDiagnostic(diagnostics, masker, body, err)
+		return nil, "", nil, installDiagnostic(diagnostics, masker, body, err)
 	}
 	var module struct {
 		Version string
 		Replace *struct{ Path, Version string }
 	}
 	if err := json.Unmarshal(body, &module); err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	replacement := ""
 	if module.Replace != nil {
@@ -159,16 +171,16 @@ func installGoSDK(ctx context.Context, dir string, request engine.SDKInstallRequ
 		}
 	}
 	if module.Version != pin.Version || replacement != pin.Replacement {
-		return nil, "", &apierr.Error{Code: hosterr.IntegrityFailure, Message: "Go dependency selection changed the SDK pin"}
+		return nil, "", nil, &apierr.Error{Code: hosterr.IntegrityFailure, Message: "Go dependency selection changed the SDK pin"}
 	}
 	if uncached {
-		return []string{path}, "", nil
+		return []string{path}, "", cache, nil
 	}
 	binary, err := lease.Install(path)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
-	return []string{binary.Path()}, lease.CachedPath(), nil
+	return []string{binary.Path()}, lease.CachedPath(), cache, nil
 }
 
 // perf: the SDK pin check's `go list -m` (150-300 ms) runs while the pipeline key is computed; the answer is
@@ -261,6 +273,12 @@ func installTypeScriptSDK(ctx context.Context, dir string, pin engineid.Pin, env
 		// safety: npm install reuses the tree, but only ci checks that every dependency is locked.
 		body, err := installTool(ctx, dir, environment, "npm", "ci", "--dry-run", "--ignore-scripts", "--no-audit", "--no-fund")
 		if err := installDiagnostic(diagnostics, masker, body, err); err != nil {
+			return nil, err
+		}
+		// bug: the dry run rewrites npm's hidden lockfile to the new lockfile without changing any
+		// package folder, and npm install trusts that record, so a moved pin kept the old SDK. Without
+		// the record npm reads the installed tree itself.
+		if err := os.Remove(filepath.Join(dir, "node_modules", ".package-lock.json")); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return nil, err
 		}
 		body, err = installTool(ctx, dir, environment, "npm", "install", "--no-save", "--no-audit", "--no-fund")

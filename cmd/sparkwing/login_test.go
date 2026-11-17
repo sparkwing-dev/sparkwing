@@ -30,15 +30,14 @@ type deviceLoginFixture struct {
 	handler       http.Handler
 	session, csrf string
 	console       deviceConsole
+	// hack: after a refused approval the fixture denies, as a person reading the refusal would.
+	refusals []int
 }
 
 func (f *deviceLoginFixture) run(t *testing.T, args ...string) error {
 	t.Helper()
 	inv, err := clisurface.Parse("sparkwing", args)
 	if err != nil {
-		return err
-	}
-	if err := applyConfiguredProfile(&inv); err != nil {
 		return err
 	}
 	if inv.Command.Path == "sparkwing login" {
@@ -48,6 +47,11 @@ func (f *deviceLoginFixture) run(t *testing.T, args ...string) error {
 }
 
 func newDeviceLoginFixture(t *testing.T, decision string) *deviceLoginFixture {
+	t.Helper()
+	return newDeviceLoginFixtureAs(t, decision, "editor")
+}
+
+func newDeviceLoginFixtureAs(t *testing.T, decision, role string) *deviceLoginFixture {
 	t.Helper()
 	cipher, err := secrets.NewCipher(make([]byte, secrets.KeySize))
 	if err != nil {
@@ -63,13 +67,11 @@ func newDeviceLoginFixture(t *testing.T, decision string) *deviceLoginFixture {
 	}
 	t.Cleanup(func() { _ = state.Close() })
 	teststore.SeedTeam(t, state, "device-test")
-	for _, query := range []string{
-		`INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`,
-		`INSERT INTO memberships(team,account_id,role,created_at) VALUES ('device-test','member','editor',1)`,
-	} {
-		if _, err := teststore.SQL(t, state).ExecContext(t.Context(), query); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `INSERT INTO accounts(id,email,created_at,updated_at) VALUES ('member','member@example.test',1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := teststore.SQL(t, state).ExecContext(t.Context(), `INSERT INTO memberships(team,account_id,role,created_at) VALUES ('device-test','member',?,1)`, role); err != nil {
+		t.Fatal(err)
 	}
 	f := &deviceLoginFixture{state: state, handler: server.Handler()}
 	f.session, f.csrf, _, err = state.AsOperator().CreateAccountSession(t.Context(), store.Account{ID: "member"}, "device-test", time.Hour)
@@ -97,7 +99,13 @@ func newDeviceLoginFixture(t *testing.T, decision string) *deviceLoginFixture {
 			return err
 		}
 		if status := f.browser(t, decision, code); status != http.StatusNoContent {
-			t.Errorf("browser %s answered %d", decision, status)
+			if decision != "approve" {
+				t.Errorf("browser %s answered %d", decision, status)
+			}
+			f.refusals = append(f.refusals, status)
+			if status := f.browser(t, "deny", code); status != http.StatusNoContent {
+				t.Errorf("browser deny after a refused approval answered %d", status)
+			}
 		}
 		return nil
 	}}
@@ -118,7 +126,7 @@ func (f *deviceLoginFixture) browser(t *testing.T, decision, code string) int {
 }
 
 func TestLoginSavesTheTokenTheBrowserApproved(t *testing.T) {
-	writeProfilesFixture(t, "profiles:\n  work:\n    controller: { url: https://controller.example }\n    default: true\n")
+	writeProfilesFixture(t, "profiles:\n  work:\n    controller: { url: https://controller.example }\n")
 	f := newDeviceLoginFixture(t, "approve")
 	var err error
 	out := captureStdout(t, func() {
@@ -132,7 +140,7 @@ func TestLoginSavesTheTokenTheBrowserApproved(t *testing.T) {
 		t.Fatal(err)
 	}
 	saved := profiles["work"]
-	if saved.Controller.URL != "https://controller.example" || saved.Controller.Token == nil || !saved.Default {
+	if saved.Controller.URL != "https://controller.example" || saved.Controller.Token == nil {
 		t.Fatalf("saved profile = %+v", saved)
 	}
 	if strings.Contains(out, *saved.Controller.Token) {
@@ -202,13 +210,13 @@ func TestBrowserApprovalRefusesScriptsAndSharedRunners(t *testing.T) {
 	}
 }
 
-func TestLoginWithControllerIgnoresTheSavedDefaultProfile(t *testing.T) {
-	writeProfilesFixture(t, "profiles:\n  work:\n    controller: { url: https://elsewhere.example }\n    default: true\n")
+func TestLoginWithControllerKeepsOtherProfiles(t *testing.T) {
+	writeProfilesFixture(t, "profiles:\n  work:\n    controller: { url: https://elsewhere.example }\n")
 	f := newDeviceLoginFixture(t, "approve")
 	var err error
 	captureStdout(t, func() { err = f.run(t, "login", "--controller", "https://controller.example", "--output", "json") })
 	if err != nil {
-		t.Fatalf("login beside a default profile: %v", err)
+		t.Fatalf("login beside another profile: %v", err)
 	}
 	profiles, _, err := loadProfiles()
 	if err != nil || profiles["work"].Controller.URL != "https://elsewhere.example" || profiles["controller-example"].Controller.Token == nil {

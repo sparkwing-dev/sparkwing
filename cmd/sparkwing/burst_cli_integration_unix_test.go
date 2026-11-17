@@ -69,7 +69,7 @@ func TestBurstPublicRunFallsBackLocallyWithRequesterSecrets(t *testing.T) {
 	t.Setenv("TOKEN", burstIntakeSecret)
 	config := filepath.Join(home, "config.yaml")
 	t.Setenv("SPARKWING_CONFIG", config)
-	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: swu_offline_fixture\nrun:\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint)
+	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: swu_offline_fixture\nrun:\n  routing:\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint)
 	if err := os.WriteFile(config, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestBurstPublicRunFallsBackLocallyWithRequesterSecrets(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	handlePath := filepath.Join(t.TempDir(), "run.json")
-	command := exec.CommandContext(ctx, cli, "run", "burst", "--sw-run-handle-file", handlePath, "-o=json")
+	command := exec.CommandContext(ctx, cli, "run", "burst", "--route", "burst", "--run-handle-file", handlePath, "-o=json")
 	command.Dir = repo
 	output, err := command.CombinedOutput()
 	if err != nil || !strings.Contains(string(output), "Cloud controller is unreachable; running locally.") || !strings.Contains(string(output), "burst-edited-ok secret=*** encoded=***") || !strings.Contains(string(output), "burst-cache-restored") || !strings.Contains(string(output), "burst-artifact-restored") || bytes.Contains(output, []byte(burstIntakeSecret)) || bytes.Contains(output, []byte("cache restore failed")) || bytes.Contains(output, []byte("cache save failed")) {
@@ -163,13 +163,9 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	t.Cleanup(server.Close)
 	config := filepath.Join(home, "config.yaml")
 	t.Setenv("SPARKWING_CONFIG", config)
-	writeConfig := func(route string) {
-		t.Helper()
-		if err := os.WriteFile(config, []byte(fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    route: %s\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint, bearer, route)), 0o600); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.WriteFile(config, []byte(fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  routing:\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint, bearer)), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	writeConfig("local")
 	offlineStopDaemon(t, home)
 	handleFile := filepath.Join(t.TempDir(), "local-run.json")
 	t.Cleanup(func() {
@@ -192,26 +188,24 @@ func burstPublicLocalProfile(t *testing.T, detached, cache bool) {
 	args := []string{"run", "burst", "--publish", "cloud", "-o=json"}
 	wantRuns := 1
 	if cache {
-		writeConfig("cloud")
-		invoke("run", "burst", "-o=json")
+		invoke("run", "burst", "--route", "burst", "-o=json")
 		burstVerifyDefaultCache(t, state, repo)
 		select {
 		case <-published:
 			t.Fatal("cache seed execution was observed as local publication")
 		default:
 		}
-		writeConfig("local")
 		source := strings.Replace(burstIntakePipeline, `if err := os.MkdirAll("modules", 0o700); err != nil { return err }`, `cached, err := os.ReadFile("modules/dependency")
         if err != nil || string(cached) != "cached dependency\n" { return errors.New("profile cache was not restored before the first step") }
         sw.Info(ctx, "burst-profile-cache-restored")
         if err := os.MkdirAll("modules", 0o700); err != nil { return err }`, 1)
 		writeSnapshotFile(t, repo, ".sparkwing/main.go", source, 0o600)
-		args = append(args, "--sw-cache-from", "cloud")
+		args = append(args, "--cache-from", "cloud")
 		wantRuns++
 	}
-	args = append(args, "--sw-run-handle-file", handleFile)
+	args = append(args, "--run-handle-file", handleFile)
 	if detached {
-		args = append(args, "--sw-detached")
+		args = append(args, "--detach")
 	}
 	publishing.Store(true)
 	output := invoke(args...)
@@ -383,7 +377,7 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 	server.Start()
 	t.Cleanup(server.Close)
 	config := filepath.Join(os.Getenv("SPARKWING_HOME"), "config.yaml")
-	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  submit_env_allow: [W9_APP_*]\n  routing:\n    route: cloud\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint, bearer)
+	contents := fmt.Sprintf("profiles:\n  cloud:\n    controller:\n      url: %q\n      token: %q\nrun:\n  submit_env_allow: [W9_APP_*]\n  routing:\n    profile: cloud\n    local_secrets: [TOKEN]\n    source_files: [declared.txt]\n", endpoint, bearer)
 	if contended {
 		contents += "    prefer: [{target: here}, {target: machines}]\n"
 	} else if personal {
@@ -424,7 +418,7 @@ func burstPublicRun(t *testing.T, personal, interrupt, contended bool) {
 		burstPublicHoldMachine(t, ctx, endpoint)
 	}
 	handleFile := filepath.Join(t.TempDir(), "run.json")
-	args := []string{"run", "burst", "--sw-run-handle-file", handleFile, "-o=json"}
+	args := []string{"run", "burst", "--route", "burst", "--run-handle-file", handleFile, "-o=json"}
 	var output []byte
 	if interrupt {
 		args = append(args, "--", "--block")

@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -123,10 +126,42 @@ func (c pipelineEngineSwitcher) run(ctx context.Context, dir string, sdk enginei
 	if os.SameFile(current, target) {
 		return ctx.Err()
 	}
+	if err := refuseRenamedRunFlags(selected.Identity.Version, args); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return c.execute(selected.Executable, args, environment)
+}
+
+// safety: engines before this release parse the run flags with a sw- prefix,
+// so a renamed flag handed to one is refused with advice that names the old flag.
+const runFlagNamesEngine = "v0.74.0"
+
+var renamedRunFlags = map[string]bool{
+	"route": true, "cache-from": true, "pause-before": true, "pause-after": true, "pause-on-failure": true,
+	"ref": true, "pipeline-ref": true, "detach": true, "workers": true, "idempotency-key": true,
+	"request-id": true, "verbose": true, "start-at": true, "stop-at": true, "only": true, "no-memo": true,
+	"priority": true, "no-update": true, "no-bincache": true, "hash-all-files": true,
+	"allow-unadmitted": true, "dry-run": true, "allow-risk": true, "index": true, "run-handle-file": true,
+}
+
+func refuseRenamedRunFlags(engineVersion string, args []string) error {
+	if !semver.IsValid(engineVersion) || semver.Compare(engineVersion, runFlagNamesEngine) >= 0 {
+		return nil
+	}
+	for _, arg := range args {
+		if arg == "--" {
+			return nil
+		}
+		name, ok := strings.CutPrefix(arg, "--")
+		if name, _, _ = strings.Cut(name, "="); ok && renamedRunFlags[name] {
+			return &apierr.Error{Code: apierr.InvalidArgs, Message: "run: this pipeline's SDK pin selects engine " + engineVersion +
+				", which predates --" + name + " and the other run flag names; run sparkwing pipeline upgrade, then run it again"}
+		}
+	}
+	return nil
 }
 
 func toolchainArgs() []string {

@@ -10,7 +10,7 @@ func TestXrepoReportsFlagErrors(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: 0.2s of real work; the fast class runs under -short")
 	}
-	for _, verb := range []string{"list", "add", "remove", "prune"} {
+	for _, verb := range []string{"list", "add", "delete", "prune"} {
 		t.Run(verb, func(t *testing.T) {
 			cmd := outputContractCommand(t, "repos", verb, "--bogus")
 			var stderr bytes.Buffer

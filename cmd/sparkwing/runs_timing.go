@@ -57,6 +57,7 @@ type timingSpan struct {
 }
 
 type runTiming struct {
+	Startup   []startupObservation
 	ID        string
 	Number    int64
 	Status    string
@@ -87,20 +88,21 @@ type percentiles struct {
 }
 
 type timingRunRecord struct {
-	Kind      string        `json:"kind"`
-	Number    int64         `json:"number"`
-	ID        string        `json:"id"`
-	Status    string        `json:"status"`
-	Rerun     bool          `json:"rerun"`
-	WallNS    time.Duration `json:"wall_ns"`
-	QueueNS   time.Duration `json:"queue_ns"`
-	AdmitNS   time.Duration `json:"admit_ns"`
-	Approval  time.Duration `json:"approval_ns"`
-	SetupNS   time.Duration `json:"setup_ns"`
-	RunningNS time.Duration `json:"running_ns"`
-	GapNS     time.Duration `json:"gap_ns"`
-	IdleNS    time.Duration `json:"idle_ns"`
-	ShiftNS   time.Duration `json:"step_clock_shift_ns"`
+	Startup   []startupObservation `json:"startup,omitempty"`
+	Kind      string               `json:"kind"`
+	Number    int64                `json:"number"`
+	ID        string               `json:"id"`
+	Status    string               `json:"status"`
+	Rerun     bool                 `json:"rerun"`
+	WallNS    time.Duration        `json:"wall_ns"`
+	QueueNS   time.Duration        `json:"queue_ns"`
+	AdmitNS   time.Duration        `json:"admit_ns"`
+	Approval  time.Duration        `json:"approval_ns"`
+	SetupNS   time.Duration        `json:"setup_ns"`
+	RunningNS time.Duration        `json:"running_ns"`
+	GapNS     time.Duration        `json:"gap_ns"`
+	IdleNS    time.Duration        `json:"idle_ns"`
+	ShiftNS   time.Duration        `json:"step_clock_shift_ns"`
 }
 
 type timingSummaryRecord struct {
@@ -228,7 +230,12 @@ func observeRunsTiming(ctx context.Context, inv clisurface.Invocation, runs cont
 		if err != nil {
 			return observationError(err)
 		}
-		timings = append(timings, measureRun(run, steps.Steps, events))
+		timing := measureRun(run, steps.Steps, events)
+		timing.Startup, err = readStartup(ctx, logs, run, events)
+		if err != nil {
+			return observationError(err)
+		}
+		timings = append(timings, timing)
 	}
 	rows := 20
 	if inv.Has("top") {
@@ -647,7 +654,7 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, rows in
 		for _, run := range timings {
 			p := run.Phases
 			if err := enc.Encode(timingRunRecord{
-				Kind: "run", Number: run.Number, ID: run.ID, Status: run.Status, Rerun: run.Rerun, WallNS: run.Wall,
+				Startup: run.Startup, Kind: "run", Number: run.Number, ID: run.ID, Status: run.Status, Rerun: run.Rerun, WallNS: run.Wall,
 				QueueNS: p[phaseQueue], AdmitNS: p[phaseAdmit], Approval: p[phaseApproval], SetupNS: p[phaseSetup], RunningNS: p[phaseRunning], GapNS: p[phaseGap], IdleNS: p[phaseIdle], ShiftNS: run.StepShift,
 			}); err != nil {
 				return err
@@ -683,6 +690,14 @@ func writeRunsTiming(out io.Writer, pipeline string, jobFilter []string, rows in
 		opsview.DisplayText(pipeline), summary.Runs, summary.Success, summary.Failed, summary.Cancelled, summary.Reruns, summary.RepeatedCommits)
 	if summary.Runs == 0 {
 		return nil
+	}
+	for _, run := range timings {
+		if len(run.Startup) > 0 {
+			fmt.Fprintf(out, "Run #%d (%s)\n", run.Number, opsview.DisplayText(run.ID))
+			if err := writeStartup(out, run.Startup); err != nil {
+				return err
+			}
+		}
 	}
 	pair := func(p percentiles) string { return fmtDur(p.P50) + " / " + fmtDur(p.P90) }
 	tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)

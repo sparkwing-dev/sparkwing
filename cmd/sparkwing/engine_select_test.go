@@ -396,3 +396,32 @@ func TestPipelineEngineSwitchAcceptsIndependentVersions(t *testing.T) {
 		t.Fatalf("independent engine: %v calls=%d", err, *calls)
 	}
 }
+
+func TestOlderEngineRefusesRenamedRunFlagsWithPipelineUpgrade(t *testing.T) {
+	for _, tc := range []struct {
+		version string
+		args    []string
+		refused bool
+	}{
+		{"v0.73.0", []string{"-C", "/repo", "run", "build", "--detach"}, true},
+		{"v0.73.0", []string{"run", "build", "--allow-risk=prod"}, true},
+		{"v0.72.8", []string{"run", "build", "--dry-run", "--", "--tag"}, true},
+		{"v0.73.0", []string{"run", "build", "-o", "json", "--", "--detach"}, false},
+		{"v0.73.0", []string{"run", "build", "--profile", "prod", "-v"}, false},
+		{"v0.74.0", []string{"run", "build", "--detach"}, false},
+	} {
+		command, selected, _, calls := engineSwitchFixture(t, engineid.GoSDK)
+		selected.Identity.Version = tc.version
+		command.resolve = func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error) {
+			return selected, nil
+		}
+		err := command.run(t.Context(), filepath.Dir(command.current), engineid.GoSDK, "local", tc.args, nil)
+		var refusal *apierr.Error
+		if refused := errors.As(err, &refusal); refused != tc.refused || tc.refused && (*calls != 0 || !strings.Contains(refusal.Message, "sparkwing pipeline upgrade") || !strings.Contains(refusal.Message, tc.version)) {
+			t.Fatalf("%s %q: err=%v calls=%d", tc.version, tc.args, err, *calls)
+		}
+		if !tc.refused && *calls != 1 {
+			t.Fatalf("%s %q: engine not executed: %v", tc.version, tc.args, err)
+		}
+	}
+}

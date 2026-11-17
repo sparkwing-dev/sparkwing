@@ -162,7 +162,7 @@ func (f *localFeatureController) submit(name string) string {
 	var receipt struct {
 		RunID string `json:"run_id"`
 	}
-	if err := json.Unmarshal(f.command("run", name, "--sw-detached", "--sw-no-update"), &receipt); err != nil || receipt.RunID == "" {
+	if err := json.Unmarshal(f.command("run", name, "--detach", "--no-update"), &receipt); err != nil || receipt.RunID == "" {
 		f.t.Fatalf("run receipt: %+v %v", receipt, err)
 	}
 	return receipt.RunID

@@ -62,7 +62,7 @@ func main(){sw.Register("ci",func() sw.Pipeline[sw.NoInputs]{return pipeline{}})
 		}
 	})
 	for _, test := range []struct{ flag, want string }{
-		{"", "build-policy-first"}, {"--sw-hash-all-files", "build-policy-second"}, {"--sw-no-bincache", "build-policy-third"},
+		{"", "build-policy-first"}, {"--hash-all-files", "build-policy-second"}, {"--no-bincache", "build-policy-third"},
 	} {
 		t.Run(test.flag, func(t *testing.T) {
 			writeSnapshotFile(t, repo, ".sparkwing/payload", test.want, 0o600)
@@ -148,7 +148,7 @@ func main(){sw.Register("ci",func() sw.Pipeline[sw.NoInputs]{return pipeline{}})
 			if description.Description.Help != test.want {
 				t.Fatalf("retained source compiled %q, want %q", description.Description.Help, test.want)
 			}
-			if test.flag == "--sw-no-bincache" {
+			if test.flag == "--no-bincache" {
 				info, err := buildinfo.ReadFile(entry.Command[0])
 				if err != nil {
 					t.Fatal(err)

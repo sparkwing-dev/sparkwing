@@ -2,12 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestBuiltinTemplatesRenderLintClean(t *testing.T) {
@@ -542,7 +545,7 @@ func TestPipelineNewTypeScriptRejectsPathNames(t *testing.T) {
 func TestPipelineNewTypeScriptUpdatesDeclaredEntry(t *testing.T) {
 	repo := t.TempDir()
 	t.Chdir(repo)
-	t.Setenv("PATH", t.TempDir())
+	fakeNPM(t, 0)
 	dir := filepath.Join(repo, ".sparkwing")
 	if err := os.MkdirAll(filepath.Join(dir, "src"), 0o755); err != nil {
 		t.Fatal(err)
@@ -570,6 +573,9 @@ func TestPipelineNewTypeScriptUpdatesDeclaredEntry(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "index.ts")); !os.IsNotExist(err) {
 		t.Fatalf("unexpected default entry: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(dir, "tsconfig.json")); !os.IsNotExist(err) {
+		t.Fatalf("scaffold added a tsconfig.json to an existing package: %v", err)
+	}
 }
 
 func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
@@ -585,7 +591,7 @@ func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
 	}
 	repo := t.TempDir()
 	t.Chdir(repo)
-	t.Setenv("PATH", t.TempDir())
+	fakeNPM(t, 0)
 	for _, name := range []string{"hello", "second"} {
 		var commandErr error
 		captureStdout(t, func() {
@@ -621,9 +627,101 @@ func TestPipelineNewTypeScriptBootstrapsAndAddsPipelines(t *testing.T) {
 		if err != nil || !strings.Contains(string(body), "Say hello") {
 			t.Fatalf("pipeline source: %s: %v", body, err)
 		}
+		assertTypeScriptDocsPointer(t, filename, string(body))
 	}
 	if _, err := os.Stat(filepath.Join(dir, "go.mod")); !os.IsNotExist(err) {
 		t.Fatalf("TypeScript scaffold wrote a Go module: %v", err)
+	}
+	assertTypeScriptCheckable(t, dir)
+}
+
+// safety: `pipeline upgrade` runs `tsc --noEmit` from the project's own dependencies,
+// so a bootstrapped project needs both a tsconfig and a locked compiler.
+func assertTypeScriptCheckable(t *testing.T, dir string) {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(dir, "tsconfig.json"))
+	if err != nil {
+		t.Fatalf("TypeScript scaffold wrote no tsconfig.json: %v", err)
+	}
+	var config struct {
+		CompilerOptions map[string]any `json:"compilerOptions"`
+		Include         []string       `json:"include"`
+	}
+	if err := json.Unmarshal(body, &config); err != nil {
+		t.Fatalf("tsconfig.json: %v", err)
+	}
+	for option, want := range map[string]any{"module": "NodeNext", "moduleResolution": "NodeNext", "strict": true, "noEmit": true, "allowImportingTsExtensions": true, "erasableSyntaxOnly": true} {
+		if config.CompilerOptions[option] != want {
+			t.Errorf("tsconfig %s = %v, want %v", option, config.CompilerOptions[option], want)
+		}
+	}
+	if !slices.Contains(config.Include, "**/*.ts") {
+		t.Errorf("tsconfig include %v misses the pipeline sources", config.Include)
+	}
+	manifest, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pkg struct {
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(manifest, &pkg); err != nil || pkg.DevDependencies["typescript"] == "" {
+		t.Fatalf("package.json declares no TypeScript compiler: %s: %v", manifest, err)
+	}
+}
+
+func TestPipelineNewTypeScriptKeepsExistingTSConfig(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	fakeNPM(t, 0)
+	dir := filepath.Join(repo, ".sparkwing")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const existing = `{"compilerOptions":{"strict":false}}`
+	if err := os.WriteFile(filepath.Join(dir, "tsconfig.json"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var commandErr error
+	captureStdout(t, func() {
+		commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "hello", "--template", "typescript", "-o", "json"})
+	})
+	if commandErr != nil {
+		t.Fatal(commandErr)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "tsconfig.json"))
+	if err != nil || string(body) != existing {
+		t.Fatalf("existing tsconfig.json changed: %q, %v", body, err)
+	}
+}
+
+func TestPipelineNewMergeQueueTypeScriptPointsAtTheTypeScriptDocs(t *testing.T) {
+	repo := t.TempDir()
+	t.Chdir(repo)
+	fakeNPM(t, 0)
+	var commandErr error
+	captureStdout(t, func() {
+		commandErr = runSparkwing([]string{"pipeline", "new", "--pipeline", "land", "--template", "merge-queue-typescript", "-o", "json"})
+	})
+	if commandErr != nil {
+		t.Fatal(commandErr)
+	}
+	body, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "jobs", "land.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertTypeScriptDocsPointer(t, "jobs/land.ts", string(body))
+}
+
+// safety: an agent reads the scaffold before any docs, so the first lines must
+// name where the TypeScript API is documented.
+func assertTypeScriptDocsPointer(t *testing.T, filename, body string) {
+	t.Helper()
+	head := strings.Join(strings.SplitN(body, "\n", 4)[:3], "\n")
+	for _, want := range []string{"sparkwing docs read --topic sdk", "sparkwing docs read --topic sdk-typescript-reference"} {
+		if !strings.Contains(head, want) {
+			t.Errorf("%s does not open with %q:\n%s", filename, want, head)
+		}
 	}
 }
 
@@ -646,5 +744,31 @@ func TestPipelineNewUnknownTemplateLeavesCheckoutUntouched(t *testing.T) {
 	_, cfg, err := projectconfig.Discover(repo)
 	if err != nil || cfg == nil || len(cfg.Pipelines) != 1 || cfg.Pipelines[0].Name != "bad" {
 		t.Fatalf("corrected template did not scaffold its pipeline: %+v, %v", cfg, err)
+	}
+}
+
+func TestBuiltinShapesRenderGofmtClean(t *testing.T) {
+	for _, shape := range builtinShapes {
+		rendered := renderBuiltinTemplate("sample-report", "", shape.src)
+		formatted, err := format.Source([]byte(rendered))
+		if err != nil {
+			t.Fatalf("%s: gofmt: %v", shape.Name, err)
+		}
+		if string(formatted) != rendered {
+			t.Errorf("%s is not gofmt-clean; gofmt writes:\n%s", shape.Name, formatted)
+		}
+	}
+}
+
+func TestBuiltinShapesNameOnlyRealRunContextFields(t *testing.T) {
+	field := regexp.MustCompile(`\brun\.([A-Z][A-Za-z]*)`)
+	runContext := reflect.TypeFor[sparkwing.RunContext]()
+	for _, shape := range builtinShapes {
+		rendered := renderBuiltinTemplate("sample", "", shape.src)
+		for _, m := range field.FindAllStringSubmatch(rendered, -1) {
+			if _, ok := runContext.FieldByName(m[1]); !ok {
+				t.Errorf("%s names run.%s, which RunContext does not have", shape.Name, m[1])
+			}
+		}
 	}
 }

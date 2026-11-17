@@ -83,7 +83,7 @@ plan.AdmissionClass(sparkwing.AdmissionInteractive)
 ```
 
 Higher-weight classes are considered more frequently, while aging raises older
-work until it overtakes newer arrivals. `Plan.Priority` and `--sw-priority`
+work until it overtakes newer arrivals. `Plan.Priority` and `--priority`
 remain explicit strict ordering overrides and are separate from workload class.
 
 Admission class is resolved into the sealed execution options. Local run and
@@ -118,7 +118,8 @@ sparkwing.Job(plan, "test", &Test{}).Cores(6)              // runs go test -p 6
 ```
 
 ```ts
-plan.job("test", test).cores(6);
+plan.job("preconditions", async (ctx) => { await ctx.exec(["git", "fetch"]).run(); }).cores(0.25); // mostly git and network waits
+plan.job("test", async (ctx) => { await ctx.exec(["npm", "test"]).run(); }).cores(6);
 ```
 
 A small request lets a job that mostly waits start beside running work. A

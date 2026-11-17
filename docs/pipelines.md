@@ -22,12 +22,11 @@ builds use public SDK pins.
 
 TypeScript pipelines use the same `pipeline list`, `pipeline describe`,
 `pipeline plan` and `run` commands. Start with the
-[TypeScript scaffold](getting-started.md#quick-start), including its
-npm lockfile setup. `pipeline plan` renders the resolved DAG without dispatching
+[TypeScript scaffold](getting-started.md#quick-start). `pipeline plan` renders the resolved DAG without dispatching
 jobs. `pipeline lint` checks Go source only, and reports that TypeScript lint is unsupported without failing. JSON output includes
 `status: "unsupported"` and a `notice`. The notice exits zero and does not
-certify TypeScript source as linted. The TypeScript scaffold prints the npm
-lockfile setup command before the first run (`setup_command` in JSON).
+certify TypeScript source as linted. The TypeScript scaffold writes
+`.sparkwing/package-lock.json` with npm, so the first run needs no other step.
 Local foreground runs, detached CLI runs and local schedules use the same
 TypeScript entry. See [TypeScript authoring](authoring-pipelines.md#typescript-authoring)
 for API patterns, validation differences and schedule proof/pinning limits.
@@ -118,7 +117,9 @@ pipelines:
 read your `sparkwing.yaml`, so it dispatches the pipelines a team
 subscribed to the repository through the [GitHub App](github-app.md). To require a checked-out branch before any step runs,
 add `guards: {when: [git:branch=main]}` with its literal name. For pull
-requests this compares the head branch, not the base branch.
+requests this compares the head branch, not the base branch. A local run
+compares the branch you have checked out, so a `sparkwing run` from `main`
+passes; add `where:controller` to keep the pipeline off developer machines.
 `git:branch=default` matches the repository's default branch, which a
 GitHub App trigger records and any other run reads from its checkout; a run
 that cannot resolve it is refused. Branch guards do not express path
@@ -343,6 +344,22 @@ images := sw.JobFanOut(plan, "image-builds", Images, func(img imageSpec) (string
 sw.Job(plan, "artifact", &Artifact{}).Needs(images)
 ```
 
+```ts
+const images = plan
+  .jobFanOut("image-builds", ["api", "web"], (name) => [
+    `build-${name}`,
+    async (ctx) => {
+      await ctx.exec(["docker", "build", "-t", name, name]).run();
+    },
+  ])
+  .retry(2);
+
+plan.job("artifact", () => undefined).needs(images);
+```
+
+TypeScript's `plan.jobFanOut(id, items, fn)` takes a callback that returns the
+member's job ID and body, and also receives the item's index.
+
 The chained `.Needs(...)` / `.Retry(...)` apply to every member; see
 *Group modifiers* below.
 
@@ -503,8 +520,9 @@ sources, and artifact packaging; gate external side effects with
 
 ## Secrets
 
-A pipeline declares its secrets with a `Secrets()` struct, each field
-required unless its `sw` tag ends in `,optional` (see
+A Go pipeline declares its secrets with a `Secrets()` struct, each field
+required unless its `sw` tag ends in `,optional`, and a TypeScript pipeline
+lists them in `definePipeline({ secrets: [...] })` (see
 [Declaring secrets](sdk.md#declaring-secrets)). The declaration is checked
 before the first node runs, so a run never fails halfway through a deploy
 for a secret it could have named at the start.
@@ -581,7 +599,7 @@ Resolution paths:
   from the authenticated principal.
 
 For a local run that must survive closing the submitting terminal, use
-`sparkwing run <pipeline> --sw-detached`. The resident consumer owns the
+`sparkwing run <pipeline> --detach`. The resident consumer owns the
 run while it waits for approval. The local controller checks approval deadlines
 every second. Cancelling the run removes its gate from the pending approval
 list. `sparkwing runs approvals list --run ID` still includes its request history.

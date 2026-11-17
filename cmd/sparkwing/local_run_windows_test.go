@@ -54,9 +54,9 @@ func main() { sw.Register("hello", func() sw.Pipeline[sw.NoInputs] { return hell
 			})
 			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 			defer cancel()
-			args := []string{"-C", repo, "run", "hello", "--sw-workers", "1", "--sw-no-update", "-o", "json"}
+			args := []string{"-C", repo, "run", "hello", "--workers", "1", "--no-update", "-o", "json"}
 			if mode == "standalone" {
-				args = append(args, "--sw-allow-unadmitted")
+				args = append(args, "--allow-unadmitted")
 			}
 			output, err := exec.CommandContext(ctx, cli, args...).CombinedOutput()
 			if err != nil {

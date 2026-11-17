@@ -36,14 +36,14 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "For an isolated preview, run HOME=\"$(mktemp -d)\" SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run. Select --commit SHA (default HEAD), require it on origin/main, and create a detached worktree. The selected source compiles and runs release-cut with a private SPARKWING_HOME. Successful exact-source CI replaces the broad build/lint/short suite under the pre-launch desktop-load waiver. Without that receipt, the manual cut runs those checks locally before publication. Published-version freshness, the verified TypeScript SDK publication decision, Go directives, coherent SDK pins, changelog links, docs sidebar, changelog/migration fragment collection and schema/wire checks still run. The SDK has independent sparkwing/v0.x.y tags selected by source digest. Changed SDK source runs module and Go/TS conformance tests, publishes first, and must resolve through the Go proxy before engine metadata preparation. Prepared notes consume their source and mirror fragments. After those gates pass, commit only the prepared release notes and pins, and tag that release commit. Merge the metadata into fresh main in a separate detached worktree, preserving newer unreleased notes, then atomically push the merge and immutable tag. Retry only publication when main advances. Neither the caller checkout nor the tag incorporates newer main code. A failed cut retains its worktree for inspection. The tag workflow builds, signs and publishes artifacts. Once a tag is published, fixes require a later patch tag. This pipeline requires an isolated SPARKWING_HOME rather than ~/.sparkwing."
+	return "For an isolated preview, run HOME=\"$(mktemp -d)\" SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --dry-run. Select --commit SHA (default HEAD), require it on origin/main, and create a detached worktree. The selected source compiles and runs release-cut with a private SPARKWING_HOME. Successful exact-source CI replaces the broad build/lint/short suite under the pre-launch desktop-load waiver. Without that receipt, the manual cut runs those checks locally before publication. Published-version freshness, the verified TypeScript SDK publication decision, Go directives, coherent SDK pins, changelog links, docs sidebar, changelog/migration fragment collection and schema/wire checks still run. The SDK has independent sparkwing/v0.x.y tags selected by source digest. Changed SDK source runs module and Go/TS conformance tests, publishes first, and must resolve through the Go proxy before engine metadata preparation. Prepared notes consume their source and mirror fragments. After those gates pass, commit only the prepared release notes and pins, and tag that release commit. Merge the metadata into fresh main in a separate detached worktree, preserving newer unreleased notes, then atomically push the merge and immutable tag. Retry only publication when main advances. Neither the caller checkout nor the tag incorporates newer main code. A failed cut retains its worktree for inspection. The tag workflow builds, signs and publishes artifacts. Once a tag is published, fixes require a later patch tag. This pipeline requires an isolated SPARKWING_HOME rather than ~/.sparkwing."
 }
 
 func (Release) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Auto-pick version by bumping latest origin tag", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod"},
-		{Comment: "Release an exact green commit", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow-risk destructive,prod -- --version v0.24.0 --commit SHA"},
-		{Comment: "Preview without pushing", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run"},
+		{Comment: "Auto-pick version by bumping latest origin tag", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --allow-risk destructive,prod"},
+		{Comment: "Release an exact green commit", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --allow-risk destructive,prod -- --version v0.24.0 --commit SHA"},
+		{Comment: "Preview without pushing", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --dry-run"},
 	}
 }
 
@@ -411,6 +411,11 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	if err := checkMigrationGuide(ctx, j.RepoDir, version); err != nil {
 		return fmt.Errorf("release migration-guide: %w", err)
 	}
+	if roll.needed {
+		if err := checkReleaseDocsGrammar(ctx, j.RepoDir); err != nil {
+			return fmt.Errorf("release docs-grammar: %w", err)
+		}
+	}
 	consumed, err := consumeReleaseFragments(j.RepoDir)
 	if err != nil {
 		return err
@@ -643,6 +648,14 @@ type pushTagJob struct {
 	Version sparkwing.Ref[string]
 	Commit  sparkwing.Ref[string]
 	RepoDir string
+	git     releaseGitRunner
+}
+
+func (j *pushTagJob) gitRunner() releaseGitRunner {
+	if j.git.deadline == nil {
+		return newReleaseGitRunner()
+	}
+	return j.git
 }
 
 func (j *pushTagJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -654,11 +667,12 @@ func (j *pushTagJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 func (j *pushTagJob) run(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	exists, err := tagExistsOnRemote(ctx, j.RepoDir, version)
+	g := j.gitRunner()
+	remote, err := g.git(ctx, j.RepoDir, "ls-remote", "--tags", "origin", "refs/tags/"+version)
 	if err != nil {
 		return fmt.Errorf("release: re-check remote tags: %w", err)
 	}
-	if exists {
+	if strings.TrimSpace(remote) != "" {
 		return fmt.Errorf("release: tag %s appeared on origin between validate and push (race); abort", version)
 	}
 	if j.Source == "" {
@@ -668,15 +682,23 @@ func (j *pushTagJob) run(ctx context.Context) error {
 	if commit == "" {
 		return errors.New("release: missing changelog commit; run commit-changelog before push-tag")
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "tag", "-a", version, commit, "-m", "Release "+version); err != nil {
+	stale, err := g.staleReleaseTag(ctx, j.RepoDir, version)
+	if err != nil {
+		return err
+	}
+	tag := []string{"tag", "-a", version, commit, "-m", "Release " + version}
+	if stale {
+		tag = []string{"tag", "-f", "-a", version, commit, "-m", "Release " + version}
+	}
+	if _, err := g.git(ctx, j.RepoDir, tag...); err != nil {
 		return fmt.Errorf("release: create tag: %w", err)
 	}
-	return publishRelease(ctx, j.RepoDir, j.Source, commit, version)
+	return publishRelease(ctx, g, j.RepoDir, j.Source, commit, version)
 }
 
 func (j *pushTagJob) dryRun(ctx context.Context) error {
 	version := j.Version.Get(ctx)
-	sparkwing.Info(ctx, "dry-run: would tag the detached changelog commit as %s, merge its metadata into fresh main, and atomically push main + tag", version)
+	sparkwing.Info(ctx, "dry-run: would tag the detached changelog commit as %s (replacing an unpushed local tag left by an interrupted cut), merge its metadata into fresh main, and atomically push main + tag with --no-verify, each git command bounded by a timeout", version)
 	return nil
 }
 

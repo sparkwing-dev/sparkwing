@@ -122,7 +122,7 @@ See [Self-hosted runners](self-hosting.md#add-workstation-capacity).
 
 A profile in `~/.config/sparkwing/config.yaml` selects a controller connection.
 Pass `--profile NAME` on the command that should reach Cloud. `sparkwing run`
-uses local state. Its `--sw-cache-from PROFILE` and `--publish PROFILE` options
+uses local state. Its `--cache-from PROFILE` and `--publish PROFILE` options
 opt into read-only remote cache access and publication separately. Pipeline
 binaries stay in the machine's local cache. There is no separate cache service.
 

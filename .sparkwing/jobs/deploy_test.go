@@ -291,7 +291,7 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 		{"staging", map[string]string{"stop-after": "staging"}, 2},
 		{"promote-proven", map[string]string{"promote-proven": "true"}, 3},
 	} {
-		for _, mode := range []string{"real", "dry-run", "sw-dry-run"} {
+		for _, mode := range []string{"real", "dry-run", "dry-run"} {
 			t.Run(shape.name+"/"+mode, func(t *testing.T) {
 				args := map[string]string{}
 				for key, value := range shape.args {
@@ -300,7 +300,7 @@ func TestDeployPlanRequiresDeployRunner(t *testing.T) {
 				if mode == "dry-run" {
 					args["dry-run"] = "true"
 				}
-				host := newTestHost(t, sparkwingtest.Options{Run: sparkwing.RunContext{DryRun: mode == "sw-dry-run"}})
+				host := newTestHost(t, sparkwingtest.Options{Run: sparkwing.RunContext{DryRun: mode == "dry-run"}})
 				plan, err := host.Plan(t.Context(), "Deploy", args)
 				if err != nil {
 					t.Fatal(err)
@@ -403,6 +403,18 @@ type fakeDeployRegistry struct {
 	published []PublishImagesArgs
 	retained  []imagePin
 	retainErr error
+	tagged    []string
+	tagErr    error
+}
+
+func (r *fakeDeployRegistry) tag(_ context.Context, _ string, pin imagePin, tag string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.tagErr != nil {
+		return r.tagErr
+	}
+	r.tagged = append(r.tagged, pin.Repository+":"+tag+" -> "+pin.Digest)
+	return nil
 }
 
 func (r *fakeDeployRegistry) retain(_ context.Context, _ string, pin imagePin) error {
@@ -980,6 +992,9 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if want := []string{images.Runner.Repository + ":cloud-prepull -> " + images.Runner.Digest}; !slices.Equal(f.registry.tagged, want) {
+		t.Fatalf("pre-pull tag moves = %q, want %q after production only", f.registry.tagged, want)
+	}
 	builds := 0
 	for _, call := range f.calls {
 		if strings.Contains(call, "go build -o") {
@@ -1250,6 +1265,32 @@ func TestDeployRollsBackFailedProductionSmoke(t *testing.T) {
 	}
 }
 
+func TestDeployMovesPrepullTagOnlyAfterPassingSmoke(t *testing.T) {
+	f := newFakeDeploy(t)
+	f.failRuns["run-deploy-smoke-production-smoke"] = true
+	if _, err := f.deployer(false).promote(t.Context(), f.candidate()); err == nil {
+		t.Fatal("a failed production smoke promoted")
+	}
+	if len(f.registry.tagged) != 0 {
+		t.Fatalf("a rolled-back deploy moved the pre-pull tag: %q", f.registry.tagged)
+	}
+
+	f = newFakeDeploy(t)
+	f.registry.tagErr = errors.New("tag is immutable")
+	rec, err := f.deployer(false).promote(t.Context(), f.candidate())
+	if err != nil {
+		t.Fatalf("a pre-pull tag failure failed a live production deploy: %v", err)
+	}
+	if got := f.pinsOnMain("sparkwing"); got.Launcher != f.candidate().Runner || len(rec.Changes) != 2 {
+		t.Fatalf("a pre-pull tag failure changed the deploy: %+v, %+v", got, rec)
+	}
+	if !slices.ContainsFunc(f.said, func(s string) bool {
+		return strings.HasPrefix(s, "WARNING: Cloud job nodes keep pre-pulling the previous runner") && strings.HasSuffix(s, "tag is immutable")
+	}) {
+		t.Fatalf("no pre-pull warning: %q", f.said)
+	}
+}
+
 func setDeployCandidateSchema(t *testing.T, f *fakeDeploy, schema int) {
 	t.Helper()
 	if schema == 34 {
@@ -1347,6 +1388,7 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 		"pin the production controller", "wait for Argo application sparkwing to be", "pin the production launcher",
 		"add CLI profile production-smoke ", "trigger deploy-smoke", "follow production smoke runs", "check each smoke run used one NodeClaim",
 		"on a failed production deploy or smoke, would renew the role session and revert",
+		"point " + testRegistry + "/sparkwing-runner:cloud-prepull at",
 	}
 	next := 0
 	for _, line := range f.said {

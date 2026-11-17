@@ -155,6 +155,29 @@ describe("device requests", () => {
     assert.deepEqual(JSON.parse(calls[0].body), { user_code: "BCDFGHJK" });
   });
 
+  it("reads an administration request and lists team.admin apart", async () => {
+    respond = () =>
+      json(200, {
+        kind: "admin",
+        machine: "laptop",
+        team: "acme",
+        grants: ["runs.read", "logs.read", "runs.write", "team.admin"],
+        sign_in_required: true,
+      });
+    const request = await lib.lookupDeviceRequest("BCDFGHJK");
+    assert.equal(request.kind, "admin");
+    assert.equal(request.sign_in_required, true);
+    assert.deepEqual(lib.listedGrants(request), ["runs.read", "logs.read", "runs.write"]);
+    assert.match(lib.grantText("team.admin"), /secrets/);
+  });
+
+  it("reads a member request as needing no fresh sign-in", async () => {
+    respond = () => json(200, { kind: "member", grants: ["runs.read", "team.admin"] });
+    const request = await lib.lookupDeviceRequest("BCDFGHJK");
+    assert.equal(request.sign_in_required, false);
+    assert.deepEqual(lib.listedGrants(request), ["runs.read", "team.admin"]);
+  });
+
   it("retains the exact allowed labels returned for approval", async () => {
     respond = () => json(200, { kind: "runner", runner: { name: "box", personal: true, allowed_labels: ["deploy-prod", "os=linux", "tool:terraform"] } });
     const request = await lib.lookupDeviceRequest("BCDFGHJK");

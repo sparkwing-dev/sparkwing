@@ -31,7 +31,7 @@ exits 4: stop polling.
 
 Native hosts also record structured `lease_keeper` diagnostics. Default CLI plain
 and pretty output and the dashboard's human log rendering hide these records.
-Use `sparkwing runs logs --run RUN --grep host_lease_keeper -o json` to read them
+Use `sparkwing runs grep --run RUN --grep host_lease_keeper -o json` to read them
 through the run's existing log permissions. No additional credential is granted.
 The persisted host-owned `host_lease_keeper: true` stamp identifies these records
 even when secret masking redacts the event name. The SDK protocol does not accept
@@ -639,6 +639,13 @@ to that endpoint:
 - **Traces** via `otlptracehttp` (run + HTTP spans).
 - **Logs** via `otlploghttp` (structured logs with trace correlation).
 
+Each endpoint variable that is set (`OTEL_EXPORTER_OTLP_ENDPOINT`,
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`) must
+be an `http://` or `https://` URL with a host. Otherwise the service or runner
+refuses to start, and the error names the variable but not its value, which
+can carry credentials. A malformed endpoint therefore never sends
+`OTEL_EXPORTER_OTLP_HEADERS` to the exporter's default `localhost:4318`.
+
 Metrics stay on the Prometheus `/metrics` endpoint. There is no
 in-cluster OTEL collector required; point the OTLP endpoint at whatever
 backend you run (e.g. Tempo for traces, Loki for logs).
@@ -925,6 +932,63 @@ backend composition require separate acceptance evidence.
 If `runs status` cannot find the selected run, run `sparkwing runs list` in the
 same profile and team, then retry with an ID from that list.
 
+## Run startup timing
+
+`runs status --run ID` and `runs timing --pipeline NAME` include recorded startup
+boundaries in pretty output and a `startup` array in JSON. The existing run wall
+buckets still begin at plan acceptance; startup observations can precede that
+boundary and do not add to those buckets. Plain timing output remains a list of
+job names.
+
+Each observation names its scope (`trigger`, `plan`, `eval`, or `node`), claim
+generation, and, when applicable, job, source generation, attempt and Pod UID.
+`at` is a milestone timestamp. Preparation spans also carry `started_at`,
+`duration_ms` and `success`. Compare boundaries within one claim and Pod;
+controller and runner clocks can differ, so a negative cross-clock interval is
+clock uncertainty, not negative work.
+
+Owner claim milestones use the original award capability's persisted issuance
+time, returned in run detail as `owner_claims[].awarded_at`. They are derived on
+reads, with no diagnostic write or work on the claim path. Lease settlement and
+bootstrap exchange do not change that original timestamp. Once expired awards
+are pruned by credential retention, those historical milestones are unknown.
+Cloud records retain Job creation, Job activation from `Job.Status.StartTime`,
+and Pod creation, so directly bound Pods can be diagnosed
+without inventing a scheduler timestamp. The Cloud launcher records
+`pod_scheduled` from the PodScheduled condition, `image_pull_started` and
+`image_pulled` from that Pod UID's run-node container events, and
+`container_started` from its running or terminated state. `image_pulled` can
+mean the image was already present. These timestamps describe the run-node
+container, including any preceding init-container wait. Missing Kubernetes
+events remain `null`; container start does not invent an image-pull timestamp.
+The launcher needs read access to Events in its job namespace. After container
+start, it tries Events at most three times, counting failures too. Missing
+image boundaries then remain unknown. A missing Job start time stays unknown
+even when an activation request annotation exists.
+
+Source preparation records checkout, engine selection, SDK installation,
+prepared-artifact restore/publication, describe and plan spans. Successful
+checkout adds `source_acquired`; successful installation adds `sdk_ready`.
+A verified prepared restore provides both milestones. Claimed native jobs retain
+their preparation spans until their attempt log exists, then write them before
+SDK execution. A claim that fails before creating an attempt has no attempt log.
+The CLI reads the first 128 lines of each source/attempt log for these receipts;
+older, pruned or incomplete logs can leave boundaries unknown. Failed diagnostic
+reads show `startup_unavailable` or `preparation_unavailable` while status
+remains available. Status follow
+refreshes them even when the run's state has not changed.
+
+SDK cache diagnostics use fixed outcomes: `hit` reuses an executable, `miss`
+finds no reusable prepared artifact, and `compile` builds a Go pipeline locally.
+`bytes_fetched` counts pipeline/prepared-artifact cache bytes, excluding Go
+module and npm dependency traffic. A local binary-cache hit or compile fetches
+zero executable-cache bytes; a prepared restore counts the transferred archive.
+Unknown byte counts are absent, rather than zero. TypeScript's npm cache outcome
+and dependency-tool network bytes are not measured. Installation runs inside the
+pipeline's selected engine; older selected engines omit cache diagnostics even
+when the controller and runner have been upgraded. Release and select an engine
+containing this instrumentation to measure its install-cache outcomes.
+
 ## Annotation request timing
 
 Native hosts trace annotation dispatch, its fresh parent-authentication checks,
@@ -946,8 +1010,8 @@ annotation starts its own trace and gets its own sampling decision; they record
 only a short `runner start` or `runner warm` startup span. `--help` starts no
 exporter and does not wait for a flush.
 Exporter failures report a fixed warning without endpoint values or response
-bodies, and OTel's internal logger is silenced, so a malformed endpoint is not
-echoed either. Flush cannot change the command's already-decided exit outcome.
+bodies, and OTel's internal logger is silenced. A malformed endpoint stops the
+command before it starts, as described under OTLP export. Flush cannot change the command's already-decided exit outcome.
 With neither trace endpoint configured, they start no exporter. This does not
 configure a CLI or wingd exporter or enable runner log export.
 

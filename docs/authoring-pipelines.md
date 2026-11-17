@@ -11,8 +11,8 @@ sparkwing pipeline new --pipeline land --template merge-queue
 sparkwing pipeline new --pipeline land --template merge-queue-typescript
 ```
 
-The TypeScript scaffold prints the npm lockfile setup command. Run it and
-commit the lockfile before planning or running the pipeline. Both templates
+The TypeScript scaffold writes `.sparkwing/package-lock.json` with npm; commit
+it with the pipeline. Both templates
 use Bash and Git on the local machine. Add `bin/check.sh` with your repository's
 required checks, including review if your policy requires it. A missing script
 fails the entry. Commit the pipeline and check script before submitting.
@@ -22,7 +22,7 @@ generated job if your repository uses another remote.
 Submit each clean, committed work branch from its own retained worktree:
 
 ```bash
-sparkwing run land --sw-detached --sw-route local --sw-allow-risk destructive,prod -- --brief 'Explain the change and its intended result'
+sparkwing run land --detach --route local --allow-risk destructive,prod -- --brief 'Explain the change and its intended result'
 sparkwing queue list --group plan:global:merge-queue
 sparkwing runs status --run <returned-run-id> --follow -o json
 sparkwing runs cancel --run <returned-run-id>
@@ -383,6 +383,18 @@ for _, member := range matrix.Members() {
 }
 ```
 
+```ts
+const matrix = plan.jobFanOut("matrix", ["22", "24"], (version) => [
+  `test-node${version}`,
+  async (ctx) => {
+    await ctx.bash('npx -y "node@$NODE_VERSION" --test').env("NODE_VERSION", version).run();
+  },
+]);
+for (const member of matrix.members) {
+  member.memo(() => memoKey("tests", member.id));
+}
+```
+
 A key callback returns `(MemoValue, error)`. Return errors when inputs
 cannot be read; return `sparkwing.NoMemo, nil` to bypass memoization.
 The executing host hashes the returned JSON value. Errors, panics, empty
@@ -423,7 +435,10 @@ named by the webhook URL without reading those fields.
 Use a pipeline guard when the policy depends on the branch Sparkwing checks
 out. `when: [git:branch=main]` blocks a run from any other checked-out
 branch before a step starts. The literal name matches the head branch; it does
-not match a pull request's base branch. `git:branch=default` matches the
+not match a pull request's base branch. A local `sparkwing run` records the
+branch you have checked out, so it passes this guard from `main` and is refused
+from any other branch. To keep a deploy off developer machines as well, add
+`where:controller`. `git:branch=default` matches the
 repository's default branch: a GitHub App trigger records it, and any other
 run reads origin's HEAD from its checkout, asking origin when the clone did
 not record it. A run whose default branch cannot be resolved is refused
@@ -484,11 +499,14 @@ finding makes the command a drop-in gate for a pre-push hook or a CI job.
 ## TypeScript authoring
 
 TypeScript uses the same catalog, controller and job graph as Go. Start with
-`--template typescript` and the npm setup command in the
+`--template typescript` in the
 [quick start](getting-started.md#quick-start). Node.js 22.18 or later and npm
 must be on PATH. Commit the exact SDK pin and native npm lockfile in
 `.sparkwing/`. Sparkwing installs dependencies with `npm ci` and runs the
 TypeScript entry through Node, rather than compiling a standalone executable.
+Node only strips types, so run `npm exec -- tsc` in `.sparkwing/` to type-check
+the project against the scaffold's `tsconfig.json`. `sparkwing pipeline upgrade`
+runs the same check before it applies a new SDK pin.
 
 ### Registration and dependencies
 
@@ -575,6 +593,11 @@ to bypass reuse. Key callbacks can reject when inputs cannot be read.
 `.cache(...)` restores dependency directories before the body runs. Memoized
 results and dependency caches serve different purposes.
 
+`plan.jobFanOut(id, items, fn)` declares one job per item and groups them, like
+Go's `JobFanOut`; `.needs(group)` waits for every member. The
+[Pipeline SDK](sdk.md) page pairs every Go example with its TypeScript form, and
+the [TypeScript API reference](sdk-typescript-reference.md) lists every export.
+
 Use `source.generate((generated, output, ctx) => { ... })` to declare jobs from
 a source job's recorded output. Apply `.requires(...)`, `.retry(...)`,
 `.memo(...)` and other modifiers to each job inside that callback. A dependent
@@ -595,7 +618,7 @@ validates declarations and graphs when they are submitted.
 
 ### Local runs, schedules and child runs
 
-`sparkwing run <name>` runs TypeScript locally. `--sw-detached` submits a local
+`sparkwing run <name>` runs TypeScript locally. `--detach` submits a local
 run that can continue after the CLI exits. Local schedules use the same
 pipeline entry. Consult [Schedules](schedules.md) for installation, proof and
 pinning behavior. TypeScript's Node-plus-script entry cannot use the standalone

@@ -14,8 +14,8 @@ execution location and pause. An explicit `"pause": null` means no active pause.
 A failed pause read is an error. Pause diagnostics are masked before the
 controller returns them.
 
-Local runs honor `--sw-pause-before JOB`, `--sw-pause-after JOB` and
-`--sw-pause-on-failure`. Inspect the persisted pause with `debug env`, then
+Local runs honor `--pause-before JOB`, `--pause-after JOB` and
+`--pause-on-failure`. Inspect the persisted pause with `debug env`, then
 release it with `debug resume`. A pause after failure preserves the job
 error and failed outcome.
 
@@ -36,7 +36,7 @@ uses your local `kubectl` credentials. `--namespace NAME` overrides the namespac
 Cloud jobs do not support shell attachment because Cloud admission refuses
 `exec` and `attach` connections. Use `debug env` and `runs logs` to inspect a
 Cloud job. To investigate a failure interactively, reproduce it locally with
-`--sw-pause-on-failure`.
+`--pause-on-failure`.
 
 Local processes and runners without a Kubernetes target also report that
 attachment is unavailable. Use `debug env` to inspect those jobs.

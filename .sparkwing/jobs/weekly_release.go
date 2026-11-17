@@ -147,14 +147,14 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 		}
 	}
 	// perf: reuse exact-source CI evidence to avoid a broad desktop suite; retain the release-specific guards.
-	args := []string{"run", "release-cut", "-C", checkout, "--sw-route", "local", "--sw-pipeline-ref", tools}
+	args := []string{"run", "release-cut", "-C", checkout, "--route", "local", "--pipeline-ref", tools}
 	if ciErr == nil {
-		args = append(args, "--sw-start-at", "version-freshness")
+		args = append(args, "--start-at", "version-freshness")
 	}
 	if dry {
-		args = append(args, "--sw-dry-run")
+		args = append(args, "--dry-run")
 	} else {
-		args = append(args, "--sw-allow-risk", "destructive,prod")
+		args = append(args, "--allow-risk", "destructive,prod")
 	}
 	args = append(args, "--", "--version", version, "--commit", head)
 	sparkwing.Info(ctx, "release source main@%s (%d unreleased entries)", head, entries)

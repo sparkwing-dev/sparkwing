@@ -35,6 +35,9 @@ func ValidateConfig(cfg Config) error {
 		if !validURL(p.Controller.URL) {
 			return Invalid("profiles."+name+".controller.url", "expected an HTTP or HTTPS controller URL without credentials")
 		}
+		if (p.Controller.AdminToken == nil) != (p.Controller.AdminExpiresAt == nil) {
+			return Invalid("profiles."+name+".controller.admin_token", "admin_token and admin_expires_at are set together by sparkwing login --admin")
+		}
 	}
 	if cfg.Runner != nil {
 		if err := validateRunner(*cfg.Runner); err != nil {

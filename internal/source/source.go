@@ -87,11 +87,12 @@ type Options struct {
 
 // Timing describes one host preparation stage without source or process diagnostics.
 type Timing struct {
-	Stage      string    `json:"stage"`
-	StartedAt  time.Time `json:"started_at"`
-	DurationMS int64     `json:"duration_ms"`
-	Success    bool      `json:"success"`
-	Reused     bool      `json:"reused,omitempty"`
+	Cache      *engine.SDKCache `json:"cache,omitempty"`
+	Stage      string           `json:"stage"`
+	StartedAt  time.Time        `json:"started_at"`
+	DurationMS int64            `json:"duration_ms"`
+	Success    bool             `json:"success"`
+	Reused     bool             `json:"reused,omitempty"`
 }
 
 // GitAccess selects whose credentials fetch remote source; hosts derive it from authenticated placement.
@@ -120,6 +121,7 @@ type Entry struct {
 	pipelineEntry     *Entry
 	checkoutDirectory string
 	releaseSDK        func() error
+	cacheBytesFetched int64
 }
 
 // CheckoutDirectory returns the acquired root that bounds checkout-derived file reads.

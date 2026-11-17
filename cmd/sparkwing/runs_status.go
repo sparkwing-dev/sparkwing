@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/clisurface"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
-	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type runStatusOptions struct {
@@ -92,15 +90,10 @@ func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader con
 		wait = waitStatusPoll
 	}
 	var previous *controllerwire.RunDetail
+	var previousStartup []startupObservation
 	for {
 		detail, err := reader.ReadRun(ctx, inv.Value("run"))
 		if err != nil {
-			var failure *apierr.Error
-			if errors.As(err, &failure) && failure.Code == apierr.NotFound && failure.Hint == "" {
-				refusal := *failure
-				refusal.Hint = "run sparkwing runs list to find an available run ID in the selected profile and team, then retry with --run ID"
-				return &refusal
-			}
 			return err
 		}
 		if detail.ID == "" || detail.Status == "" || previous != nil && previous.ID != detail.ID {
@@ -121,11 +114,19 @@ func observeRunStatus(ctx context.Context, inv clisurface.Invocation, reader con
 				})
 			}
 		}
-		if previous == nil || opts.view == "tree" || !reflect.DeepEqual(detail, *previous) {
-			if err := renderObservedRun(ctx, reader, out, detail, opts); err != nil {
+		var startup []startupObservation
+		if logs, ok := reader.(controllerwire.LogReader); ok && (opts.view == "summary" || opts.view == "timeline") {
+			startup, err = readStartup(ctx, logs, detail, nil)
+			if err != nil {
+				return err
+			}
+		}
+		if previous == nil || opts.view == "tree" || !reflect.DeepEqual(detail, *previous) || !reflect.DeepEqual(startup, previousStartup) {
+			if err := renderObservedRun(ctx, reader, out, detail, opts, startup); err != nil {
 				return err
 			}
 			previous = &detail
+			previousStartup = startup
 		}
 		if isTerminalRunStatus(detail.Status) {
 			if opts.exitZero {

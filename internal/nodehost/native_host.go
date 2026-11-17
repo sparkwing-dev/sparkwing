@@ -14,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
@@ -61,22 +62,7 @@ func NewNativeHost(config NativeHostConfig) (*OwnerHost, *ClaimedNodeHost, *Owne
 	config.Source.Base.Masker = config.Masks.masker
 	config.Source.BuildEnvironment = config.Masks.environment(config.Source.BuildEnvironment)
 	claimedSource := config.Source
-	observe := config.Source.Timing
-	config.Source.Timing = func(ctx context.Context, timing source.Timing) {
-		if observe != nil {
-			observe(ctx, timing)
-		}
-		attrs, err := json.Marshal(timing)
-		if err == nil {
-			err = config.PlanningLog(ctx, config.Masks.masker.Log(nodewire.FrameLog{
-				TS:    timing.StartedAt.Add(time.Duration(timing.DurationMS) * time.Millisecond).Format(time.RFC3339Nano),
-				Level: "info", Event: "preparation", Message: "source preparation", Attrs: attrs,
-			}))
-		}
-		if err != nil {
-			slog.WarnContext(ctx, "preparation timing could not be recorded", "stage", timing.Stage)
-		}
-	}
+	config.Source.Timing = preparationObserver(config.Source.Timing, config.Masks.masker, config.PlanningLog)
 	processes := config.Processes
 	processes.Masks = config.Masks
 	processes.Session.Environments.Masks = config.Masks
@@ -177,7 +163,7 @@ type ExecutionOperations struct {
 	Bind             func(context.Context, NodeInput) (ProcessGrant, error)
 	ChildContext     func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
 	PrepareArtifacts func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
-	PrepareCaches    func(context.Context, NodeInput, nodewire.JobSpec) (ExecutorFinalizer, error)
+	PrepareCaches    func(context.Context, NodeInput, nodewire.JobSpec, CacheReporter) (ExecutorFinalizer, error)
 	PublishOutput    func(context.Context, NodeInput, json.RawMessage) (*blob.RecordKey, error)
 	Annotate         func(context.Context, NodeInput, nodewire.AnnotationRequest) error
 	ReadFailure      func(context.Context, runspec.NodeRef, int64) (*nodewire.JobFailure, error)
@@ -187,4 +173,23 @@ type ExecutionOperations struct {
 type EvaluationOperations struct {
 	Bind         func(context.Context, EvaluationInput) (ProcessGrant, error)
 	ChildContext func(context.Context, time.Duration, time.Duration) (context.Context, context.CancelFunc, error)
+}
+
+// safety: timing attrs echo stage and cache fields, so every sink receives frames only after masking.
+func preparationObserver(observe func(context.Context, source.Timing), masker *secrets.Masker, log func(context.Context, nodewire.FrameLog) error) func(context.Context, source.Timing) {
+	return func(ctx context.Context, timing source.Timing) {
+		if observe != nil {
+			observe(ctx, timing)
+		}
+		if log == nil {
+			return
+		}
+		attrs, err := json.Marshal(timing)
+		if err == nil {
+			err = log(ctx, masker.Log(nodewire.FrameLog{TS: timing.StartedAt.Add(time.Duration(timing.DurationMS) * time.Millisecond).Format(time.RFC3339Nano), Level: "info", Event: "preparation", Message: "source preparation", Attrs: attrs}))
+		}
+		if err != nil {
+			slog.WarnContext(ctx, "preparation timing could not be recorded", "stage", timing.Stage)
+		}
+	}
 }

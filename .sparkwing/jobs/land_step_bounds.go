@@ -19,10 +19,10 @@ func refuseLandStepBounds(rc sparkwing.RunContext) error {
 	}
 	var flags []string
 	if rc.StartAt != "" {
-		flags = append(flags, "--sw-start-at "+rc.StartAt)
+		flags = append(flags, "--start-at "+rc.StartAt)
 	}
 	if rc.StopAt != "" {
-		flags = append(flags, "--sw-stop-at "+rc.StopAt)
+		flags = append(flags, "--stop-at "+rc.StopAt)
 	}
 	var skipped string
 	switch {
@@ -33,6 +33,6 @@ func refuseLandStepBounds(rc sparkwing.RunContext) error {
 	default:
 		skipped = "every check downstream of " + rc.StopAt
 	}
-	return fmt.Errorf("land: %s skips %s in its job, yet the land job would still push; a pushing Land runs every check. Run every check without pushing with --sw-stop-at %s, or preview with --sw-dry-run",
+	return fmt.Errorf("land: %s skips %s in its job, yet the land job would still push; a pushing Land runs every check. Run every check without pushing with --stop-at %s, or preview with --dry-run",
 		strings.Join(flags, " "), skipped, landCheckOnlyStop)
 }

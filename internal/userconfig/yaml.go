@@ -2,6 +2,7 @@ package userconfig
 
 import (
 	"bytes"
+	"encoding"
 	"errors"
 	"fmt"
 	"io"
@@ -87,6 +88,12 @@ func yamlSyntaxError(file string, raw []byte, err error) error {
 	return &FieldError{File: file, Key: "$", Line: line, Problem: problem}
 }
 
+// safety: a key a hard cut deleted fails the load and names its replacement, so an old file explains its own fix.
+var removedKeys = map[reflect.Type]map[string]string{
+	reflect.TypeFor[Profile]():    {"default": "pass --profile NAME on each command that should reach that controller"},
+	reflect.TypeFor[RunRouting](): {"route": "a bare sparkwing run stays local, and run.routing applies only to a run that passes --route burst"},
+}
+
 type yamlVisit struct {
 	node   *yaml.Node
 	typeOf reflect.Type
@@ -113,8 +120,10 @@ func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]b
 	if n.Tag == "!!null" {
 		return bad("explicit null is not allowed")
 	}
-	switch t.Kind() {
-	case reflect.Struct, reflect.Map:
+	// safety: a struct that reads itself from text, such as time.Time, is one scalar, not a mapping of fields.
+	scalar := reflect.PointerTo(t).Implements(reflect.TypeFor[encoding.TextUnmarshaler]())
+	switch {
+	case !scalar && (t.Kind() == reflect.Struct || t.Kind() == reflect.Map):
 		if n.Kind != yaml.MappingNode {
 			return bad("expected a mapping")
 		}
@@ -162,6 +171,9 @@ func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]b
 				ft = t.Elem()
 			} else {
 				ft = fields[k.Value]
+				if removal, ok := removedKeys[t][k.Value]; ok {
+					return &FieldError{Key: child, Line: k.Line, Problem: "was removed; " + removal + " (see `sparkwing docs migrations`)"}
+				}
 				if ft == nil {
 					return &FieldError{Key: child, Line: k.Line, Problem: "unknown key"}
 				}
@@ -170,7 +182,7 @@ func checkYAML(n *yaml.Node, t reflect.Type, key string, active map[*yaml.Node]b
 				return err
 			}
 		}
-	case reflect.Slice:
+	case t.Kind() == reflect.Slice:
 		if n.Kind != yaml.SequenceNode {
 			return bad("expected a sequence")
 		}

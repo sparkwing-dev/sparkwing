@@ -92,7 +92,7 @@ func checkMigrationGuide(ctx context.Context, repoDir, version string) error {
 		sparkwing.Info(ctx, "[%s] carries no (Breaking) entry, so the tag owes no migration guide", version)
 		return nil
 	}
-	if issues := lintSectionBreakingEntries(sec, migrationsFS(repoDir)); len(issues) > 0 {
+	if issues := lintSectionBreakingEntries(sec, migrationsFS(repoDir), false); len(issues) > 0 {
 		var b strings.Builder
 		for _, i := range issues {
 			b.WriteString(i.Format())
@@ -111,6 +111,16 @@ func checkMigrationGuide(ctx context.Context, repoDir, version string) error {
 	}
 	sparkwing.Info(ctx, "%d (Breaking) entries in [%s] link a section of %s/%s.md, and the index carries its row",
 		len(breaking), version, migrationsDirRel, version)
+	return nil
+}
+
+// safety: the cut writes the migration index row after release-cut-checks
+// judged the docs, so the grammar test reruns on the tree the tag will carry.
+func checkReleaseDocsGrammar(ctx context.Context, repoDir string) error {
+	if _, err := sparkwing.Bash(ctx, "go test ./internal/doccheck -run '^TestRepositoryCLIExamplesUseCurrentGrammar$' -count=1").
+		Dir(repoDir).Env("GOWORK", "auto").Run(); err != nil {
+		return fmt.Errorf("the generated migration notes invoke a command outside the current CLI grammar; fix the guide or its (Breaking) entries and rerun the cut: %w", err)
+	}
 	return nil
 }
 

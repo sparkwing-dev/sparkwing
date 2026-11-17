@@ -40,6 +40,7 @@ var nonPackageReaders = []struct {
 }{
 	{".github/", []string{".sparkwing/jobs"}},
 	{".github/workflows/release.yaml", []string{"cmd/sparkwing"}},
+	{".github/workflows/runner-isolation-proof.yaml", []string{"bin"}},
 	{"bin/", []string{".sparkwing/jobs"}},
 	{"docs/", []string{"internal/doccheck", "cmd/sparkwing"}},
 	{"docs/migrations/", []string{"internal/store"}},
@@ -849,17 +850,53 @@ func skipUnlessGoTouched(step string) sparkwing.SkipPredicate {
 	}
 }
 
-// perf: the TypeScript SDK suite judges sdk/typescript and the Go protocol it
-// conforms to, so a change touching neither leaves it to hosted CI.
+// perf: the TypeScript SDK suite judges sdk/typescript, the Go protocol it
+// conforms to and the TypeScript blocks in docs/, so a change touching none of
+// them leaves it to hosted CI.
 func skipTypeScriptSDKUnlessTouched(ctx context.Context) bool {
+	suite, why := typeScriptSuite(ctx)
+	if suite == typeScriptSuiteNone {
+		sparkwing.Info(ctx, "sdk-typescript: skipping, because the change touches no TypeScript SDK, Go source or docs page; hosted CI verifies main")
+		return true
+	}
+	sparkwing.Info(ctx, "sdk-typescript: running, because %s", why)
+	return false
+}
+
+const (
+	typeScriptSuiteNone = ""
+	typeScriptSuiteDocs = "docs"
+	typeScriptSuiteFull = "full"
+)
+
+// safety: an unjudgeable change runs the whole suite, so a broken scope can only widen it.
+func typeScriptSuite(ctx context.Context) (string, string) {
 	files, _, err := affectedChangeScope(ctx)
-	if err == nil {
-		for _, f := range files {
-			if strings.HasPrefix(f, "sdk/typescript/") {
-				sparkwing.Info(ctx, "sdk-typescript: running, because %s changed", f)
-				return false
-			}
+	if err != nil {
+		return typeScriptSuiteFull, fmt.Sprintf("the change could not be judged: %v", err)
+	}
+	goWhy, err := repoGoFilesChange(ctx, files, os.Getenv("GOFLAGS"))
+	if err != nil {
+		return typeScriptSuiteFull, fmt.Sprintf("the change could not be judged: %v", err)
+	}
+	return typeScriptSuiteFor(files, goWhy)
+}
+
+// perf: a docs-only change runs just the docs' TypeScript snippet and reference
+// checks, so a broken example cannot land unseen while docs edits stay cheap.
+func typeScriptSuiteFor(files []string, goWhy string) (string, string) {
+	for _, f := range files {
+		if strings.HasPrefix(f, "sdk/typescript/") {
+			return typeScriptSuiteFull, f + " changed"
 		}
 	}
-	return skipUnlessGoTouched("sdk-typescript")(ctx)
+	if goWhy != "" {
+		return typeScriptSuiteFull, goWhy
+	}
+	for _, f := range files {
+		if strings.HasPrefix(f, "docs/") && strings.HasSuffix(f, ".md") {
+			return typeScriptSuiteDocs, f + " changed, so only the docs' TypeScript blocks are checked"
+		}
+	}
+	return typeScriptSuiteNone, ""
 }

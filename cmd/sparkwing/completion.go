@@ -128,7 +128,7 @@ func runInternalCompleteFlags(w io.Writer, args []string) error {
 		if !ok {
 			continue
 		}
-		for _, f := range visibleFlagsForHelp(cmd, true) {
+		for _, f := range visibleFlagsForHelp(cmd, false) {
 			desc := requirementTag(f.Required, f.RequiredWhen, false) + f.Desc
 			desc = strings.ReplaceAll(desc, "\t", " ")
 			fmt.Fprintf(w, "--%s\t%s\n", f.Name, desc)

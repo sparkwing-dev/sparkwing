@@ -5,6 +5,13 @@ func Registry() []Command {
 	return []Command{
 		{Path: "sparkwing", Flags: []Flag{}},
 		{Path: "sparkwing __sdk-install", Hidden: true, Rules: []string{"Read engine.SDKInstallRequest from stdin, inherit the filtered install environment, write one engine.SDKCommand to stdout."}},
+		{Path: "sparkwing __runner-account-write", Hidden: true, Rules: []string{"Run as a dedicated runner account by runners install-service: write the runner enrollment JSON on stdin into this account's config and copy the runner into ~/.local/bin."}, Flags: []Flag{
+			{Name: "runner-binary", Argument: "PATH", Required: true, Meaning: "Staged sparkwing-runner to copy into this account's ~/.local/bin."},
+		}},
+		{Path: "sparkwing __runner-account-pause", Hidden: true, Rules: []string{"Run as a dedicated runner account by runners pause and resume --service-user: set or clear the pause beside the runner credential named in this account's config, and report the runner, paused and whether the state changed."}, Flags: []Flag{
+			{Name: "resume", Meaning: "Clear the pause instead of setting it."},
+		}},
+		{Path: "sparkwing __runner-account-read", Hidden: true, Rules: []string{"Run as a dedicated runner account by runners uninstall-service: report the runner name, controller and token prefix from this account's config."}},
 		{Path: "sparkwing __complete", Hidden: true, Flags: []Flag{
 			{Name: "kind", Argument: "KIND", Repeatable: true, CommaList: true},
 			{Name: "word", Argument: "VALUE", Meaning: "Command words to complete; empty selects the root."},
@@ -14,7 +21,7 @@ func Registry() []Command {
 			{Name: "dry-run"},
 		}},
 		{Path: "sparkwing cache", Flags: []Flag{}},
-		{Path: "sparkwing cache explain", Flags: []Flag{}},
+		{Path: "sparkwing cache explain", Rules: []string{"Explain the .sparkwing directory found from the working directory or -C DIR. Every pipeline in a repository shares one binary, so the command takes no pipeline name."}, Flags: []Flag{}},
 		{Path: "sparkwing cache info", Flags: []Flag{
 			{Name: "all-entries"},
 			{Name: "docs"},
@@ -126,6 +133,7 @@ func Registry() []Command {
 			{Name: "body", Requires: []string{"example"}},
 			{Name: "category", Argument: "CATEGORY"},
 			{Name: "cloud", Argument: "CLOUD"},
+			{Name: "language", Argument: "LANGUAGE"},
 		}},
 		{Path: "sparkwing info", Flags: []Flag{
 			{Name: "for-agent"},
@@ -226,7 +234,7 @@ func Registry() []Command {
 			{Name: "short", Argument: "TEXT"},
 		}},
 		{Path: "sparkwing pipeline plan", PipelineArgsAfterSeparator: true, Flags: []Flag{
-			{Name: "sw-dry-run"},
+			{Name: "dry-run"},
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "start-at", Argument: "STEP"},
 			{Name: "stop-at", Argument: "STEP"},
@@ -250,7 +258,7 @@ func Registry() []Command {
 		{Path: "sparkwing pipeline sparks list", Flags: []Flag{
 			{Name: "no-resolve"},
 		}},
-		{Path: "sparkwing pipeline sparks remove", Flags: []Flag{
+		{Path: "sparkwing pipeline sparks delete", Flags: []Flag{
 			{Name: "spark", Argument: "NAME", Required: true},
 		}},
 		{Path: "sparkwing pipeline sparks update", Flags: []Flag{}},
@@ -273,6 +281,10 @@ func Registry() []Command {
 		{Path: "sparkwing overflow", Flags: []Flag{}},
 		{Path: "sparkwing billing", Flags: []Flag{}},
 		{Path: "sparkwing team", Flags: []Flag{}},
+		{Path: "sparkwing team delete", Authority: teamCredential, Rules: []string{"Only a team owner deletes a team, and --confirm must repeat the slug of the team the profile's credential belongs to. The profile's token needs team.admin, which sparkwing login tokens never carry; a token created with --allow-team-admin from an administrator token has it, and the dashboard deletes a team without one. The controller refuses the owner's only team; deleting it means deleting the account, which the controller's support contact does on request. Deletion revokes every team token, including this profile's, ends members' sessions in the team, withdraws invitations and cancels active runs at once. Within minutes the controller removes the team's runs, logs, artifacts, cache, secrets, schedules, subscriptions and runners. Credit and payment records stay for accounting, and the slug stays reserved. JSON emits the deletion record; plain emits the slug."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+			{Name: "confirm", Argument: "SLUG", Required: true, Meaning: "The slug of the team to delete, repeated as confirmation"},
+		}},
 		{Path: "sparkwing team settings", Flags: []Flag{}},
 		{Path: "sparkwing team settings show", Authority: teamCredential, Rules: []string{"Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. The child-run ceiling defaults to 50 descendants per root, excluding retries. high_trust defaults to false; see team settings set. Plain prints the boolean, comma-separated ranking, child-run ceiling and high_trust."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
@@ -327,13 +339,14 @@ func Registry() []Command {
 			{Name: "profile", Argument: "PROFILE"},
 		}},
 		{Path: "sparkwing profiles", Flags: []Flag{}},
-		{Path: "sparkwing login", Rules: []string{"Sign this machine in through the browser and save a team member token in the profile. The command prints a code and the controller's /device page; open that page where you are signed in to the console, type the code, check the machine name, team and grants, and approve. Nothing is copied out of the browser.", "The token carries the grants --scope names, or by default your role's run and log grants: runs.read and logs.read, plus runs.write, runs.control and approvals.write for editors and owners. It never carries team.admin or more than you hold. It expires after 90 days and ends when the approving browser session signs out.", "The command needs stdin and stderr on a terminal, so a code never lands in a script's log. It defaults --team to the saved profile token's team when that token is still valid on the selected controller; without a known team, approval remains unrestricted. It prints the approving team before saving; --team makes the controller refuse an approver from another team and the CLI refuse a token for another. The code expires after 10 minutes, works once, and stops working when the command is interrupted. Denying it in the browser ends the command with an error. An existing profile for the same controller keeps its name and default flag and gets the new token; its previous member token is revoked. --force points an existing profile at a different controller.", "JSON and plain output match profiles show; the token is never printed."}, Flags: []Flag{
+		{Path: "sparkwing login", Rules: []string{"Sign this machine in through the browser and save a team member token in the profile. The command prints a code and the controller's /device page; open that page where you are signed in to the console, type the code, check the machine name, team and grants, and approve. Nothing is copied out of the browser.", "The token carries the grants --scope names, or by default your role's run and log grants: runs.read and logs.read, plus runs.write, runs.control and approvals.write for editors and owners. It never carries team.admin or more than you hold. It expires after 90 days and ends when the approving browser session signs out.", "--admin gives a signed-in profile an hour of team administration, for commands such as secrets set and team settings set. Run sparkwing login first. The request is sent with the profile's member token, so only the same account can approve it, only a team owner can, and only from a browser sign-in made in the last 10 minutes; otherwise the page asks you to sign in again. Approval saves a team.admin token that expires after one hour beside a re-issued member token with the same grants and expiry as the profile's current one, revoking the profile's previous tokens. The previous administration token is revoked at the controller that issued it, even when --force points the profile at another controller; if that cannot be confirmed, sparkwing login and login --admin save the new token and then exit with an error naming that controller and how to end the token. The profile uses the administration token until it expires and then the member token. profiles show reports admin_expires_at while it is live. --admin refuses --scope and --force.", "The command needs stdin and stderr on a terminal, so a code never lands in a script's log. It defaults --team to the saved profile token's team when that token is still valid on the selected controller; without a known team, approval remains unrestricted. It prints the approving team before saving; --team makes the controller refuse an approver from another team and the CLI refuse a token for another. The code expires after 10 minutes, works once, and stops working when the command is interrupted. Denying it in the browser ends the command with an error. An existing profile for the same controller keeps its name and gets the new token; its previous member token is revoked. --force points an existing profile at a different controller.", "JSON and plain output match profiles show; the token is never printed."}, Flags: []Flag{
 			{Name: "controller", Argument: "URL"},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "machine", Argument: "NAME"},
 			{Name: "team", Argument: "TEAM"},
 			{Name: "scope", Argument: "GRANT", Repeatable: true, CommaList: true, Values: []string{"runs.read", "logs.read", "runs.write", "runs.control", "approvals.write"}},
 			{Name: "force"},
+			{Name: "admin", Meaning: "Step a signed-in profile up to one hour of team administration; only a team owner can approve it"},
 		}},
 		{Path: "sparkwing profiles add", Flags: []Flag{
 			{Name: "controller", Argument: "URL", Required: true},
@@ -343,7 +356,7 @@ func Registry() []Command {
 			{Name: "no-probe"},
 		}},
 		{Path: "sparkwing profiles list", Flags: []Flag{}},
-		{Path: "sparkwing profiles remove", Flags: []Flag{
+		{Path: "sparkwing profiles delete", Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "keep-token"},
 		}},
@@ -351,7 +364,6 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME", Required: true},
 			{Name: "controller", Argument: "URL"},
 			{Name: "token-stdin"},
-			{Name: "default"},
 		}},
 		{Path: "sparkwing profiles show", Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
@@ -374,7 +386,7 @@ func Registry() []Command {
 			{Name: "pipelines"},
 		}},
 		{Path: "sparkwing repos prune", Flags: []Flag{}},
-		{Path: "sparkwing repos remove", Rules: []string{"--checkout is required; registry basename fallback is refused."}, Flags: []Flag{}},
+		{Path: "sparkwing repos delete", Rules: []string{"--checkout is required; registry basename fallback is refused."}, Flags: []Flag{}},
 		{Path: "sparkwing repos update", Rules: []string{"Apply by default; --dry-run previews. --all-repos requires --yes for bulk changes."}, Flags: []Flag{
 			{Name: "version", Argument: "TAG"},
 			{Name: "verify"},
@@ -384,46 +396,46 @@ func Registry() []Command {
 			{Name: "yes"},
 		}},
 		{Path: "sparkwing run", PipelineArgument: true, PipelineArgsAfterSeparator: true, Rules: []string{
-			"Runs locally by default through the local runner. Foreground commands observe persisted output; standalone and foreground publication keep their CLI host. --sw-route cloud --profile NAME sends planning and jobs directly to Cloud, including without a terminal. --sw-detached returns after intake; otherwise the CLI follows logs. Explicit Cloud routing never falls back locally. --profile requires --sw-route cloud. Repository local restrictions still apply.",
-			"### Burst and overflow\n\nSet route: cloud and profile: NAME in machine run.routing to opt in. Repository defaults.run and pipelines[].run may only restrict routing to local and declare secret names. Machine configuration authorizes untracked source_files. The CLI hosts the Cloud-owned run and streams its logs. Ctrl-C requests cancellation. The default preference is here for 5s, then your registered personal machines for 5s, then Cloud. Other team runners cannot claim burst jobs. Prefer entries accept target and a non-negative hold duration. A controller that is unreachable before intake falls back to a local run and reports it. Authorization failures and a lost intake response remain failures because an accepted run keeps one owner. See [local execution](local-execution.md#burst-and-overflow) for configuration and secret handling.",
+			"Runs locally by default through the local runner. Foreground commands observe persisted output; standalone and foreground publication keep their CLI host. --route cloud --profile NAME sends planning and jobs directly to Cloud, including without a terminal. --detach returns after intake; otherwise the CLI follows logs. Explicit Cloud routing never falls back locally. --route burst applies the machine run.routing preferences, overflow and fallback; a run without --route stays on this machine whatever run.routing says. --profile requires --route cloud or burst. Repository local restrictions still apply.",
+			"### Burst and overflow\n\nPass --route burst on a run to use machine run.routing, whose profile: NAME or --profile NAME selects the Cloud connection. Repository defaults.run and pipelines[].run may only restrict routing to local and declare secret names. Machine configuration authorizes untracked source_files. The CLI hosts the Cloud-owned run and streams its logs. Ctrl-C requests cancellation. The default preference is here for 5s, then your registered personal machines for 5s, then Cloud. Other team runners cannot claim burst jobs. Prefer entries accept target and a non-negative hold duration. A controller that is unreachable before intake falls back to a local run and reports it. Authorization failures and a lost intake response remain failures because an accepted run keeps one owner. See [local execution](local-execution.md#burst-and-overflow) for configuration and secret handling.",
 			"Publication is one-way run/results/logs with local provenance; a publication failure never changes the local run verdict.",
 			"--agent NAME records the coding agent that starts the run on your behalf, such as claude-code:land-agent, and --agent none records none. Without the flag, SPARKWING_AGENT applies, then a detected coding-agent environment (Claude Code, Codex, Gemini CLI). The label is sealed with the request, kept by retries and publication, and shown in run views; it never grants or limits authority.",
 			"Cache-from reads only authorized verified-default-branch memo/artifacts/depcache; no shared writes or remote binary fetch.",
 			"-o applies to foreground and detached runs, their help and their errors; it beats SPARKWING_LOG_FORMAT, then terminal detection.",
-			"--sw-only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --sw-start-at and --sw-stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names and ranges selecting no steps in a job fail before work starts. Bounds follow dependency paths, not declaration order; omit both to run parallel steps. --sw-only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry. Child pipelines resolve their own job and step selections because their jobs and steps have separate names.",
-			"--sw-allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI retires its supervised runner while the controller still answers, then joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.",
+			"--only keeps matching jobs and their dependencies. Other declared jobs are skipped. Recovery jobs and jobs added by generators retain their normal rules. --start-at and --stop-at select a window in each job containing the named steps. A job containing neither bound runs all its steps. Unknown step names and ranges selecting no steps in a job fail before work starts. Bounds follow dependency paths, not declaration order; omit both to run parallel steps. --only cannot be combined with either step bound. All three selections are sealed at intake and survive resume and retry. Child pipelines resolve their own job and step selections because their jobs and steps have separate names.",
+			"--allow-unadmitted selects standalone CI with an exclusive in-process local controller. Give it a private SPARKWING_HOME. Its admission queue and concurrency rules remain active; it does not join shared machine admission. The CLI retires its supervised runner while the controller still answers, then joins controller shutdown before returning. Detached runs and Cloud routing cannot use this mode.",
 		}, Flags: []Flag{
 			{Name: "publish", Argument: "PROFILE"},
-			{Name: "sw-route", Argument: "ROUTE", Values: []string{"local", "cloud"}, Meaning: "Select local execution or direct Cloud execution for this invocation."},
-			{Name: "profile", Argument: "NAME", Requires: []string{"sw-route"}, Meaning: "Cloud connection profile; requires --sw-route cloud."},
+			{Name: "route", Argument: "ROUTE", Values: []string{"local", "cloud", "burst"}, Meaning: "Leave this machine for one invocation: cloud runs directly on Cloud; burst applies machine run.routing preferences and overflow. Without it the run is local."},
+			{Name: "profile", Argument: "NAME", Requires: []string{"route"}, Meaning: "Cloud connection profile; requires --route cloud or burst."},
 			{Name: "agent", Argument: "NAME"},
-			{Name: "sw-cache-from", Argument: "PROFILE", AllowEmpty: true, Meaning: "Read the authorized remote cache; an empty value disables the machine default."},
-			{Name: "sw-pause-before", Argument: "JOB", Repeatable: true, CommaList: true},
-			{Name: "sw-pause-after", Argument: "JOB", Repeatable: true, CommaList: true},
-			{Name: "sw-pause-on-failure"},
-			{Name: "sw-ref", Argument: "REF", Conflicts: []string{"sw-pipeline-ref"}},
-			{Name: "sw-pipeline-ref", Argument: "REF", Conflicts: []string{"sw-ref"}},
-			{Name: "sw-detached", Conflicts: []string{"sw-workers"}, Meaning: "Submit work to the selected controller and return before it finishes."},
-			{Name: "sw-workers", Argument: "N", Minimum: 1, HasMinimum: true, Conflicts: []string{"sw-detached"}, Meaning: "Positive foreground worker count; refused for detached runs."},
-			{Name: "sw-idempotency-key", Argument: "KEY", Requires: []string{"sw-detached"}},
-			{Name: "sw-request-id", Argument: "ID", Requires: []string{"sw-detached"}},
-			{Name: "sw-verbose", Short: "v"},
-			{Name: "sw-start-at", Argument: "STEP"},
-			{Name: "sw-stop-at", Argument: "STEP"},
-			{Name: "sw-only", Argument: "GLOB"},
-			{Name: "sw-no-memo"},
-			{Name: "sw-priority", Argument: "VALUE"},
-			{Name: "sw-no-update"},
-			{Name: "sw-no-bincache"},
-			{Name: "sw-hash-all-files"},
-			{Name: "sw-allow-unadmitted"},
-			{Name: "sw-dry-run"},
-			{Name: "sw-allow-risk", Argument: "LABEL[,LABEL...]", Repeatable: true, CommaList: true},
-			{Name: "sw-index", Argument: "PATH"},
-			{Name: "sw-run-handle-file", Argument: "PATH"},
+			{Name: "cache-from", Argument: "PROFILE", AllowEmpty: true, Meaning: "Read the authorized remote cache; an empty value disables the machine default."},
+			{Name: "pause-before", Argument: "JOB", Repeatable: true, CommaList: true},
+			{Name: "pause-after", Argument: "JOB", Repeatable: true, CommaList: true},
+			{Name: "pause-on-failure"},
+			{Name: "ref", Argument: "REF", Conflicts: []string{"pipeline-ref"}},
+			{Name: "pipeline-ref", Argument: "REF", Conflicts: []string{"ref"}},
+			{Name: "detach", Conflicts: []string{"workers"}, Meaning: "Submit work to the selected controller and return before it finishes."},
+			{Name: "workers", Argument: "N", Minimum: 1, HasMinimum: true, Conflicts: []string{"detach"}, Meaning: "Positive foreground worker count; refused for detached runs."},
+			{Name: "idempotency-key", Argument: "KEY", Requires: []string{"detach"}},
+			{Name: "request-id", Argument: "ID", Requires: []string{"detach"}},
+			{Name: "verbose", Short: "v"},
+			{Name: "start-at", Argument: "STEP"},
+			{Name: "stop-at", Argument: "STEP"},
+			{Name: "only", Argument: "GLOB"},
+			{Name: "no-memo"},
+			{Name: "priority", Argument: "VALUE"},
+			{Name: "no-update"},
+			{Name: "no-bincache"},
+			{Name: "hash-all-files"},
+			{Name: "allow-unadmitted"},
+			{Name: "dry-run"},
+			{Name: "allow-risk", Argument: "LABEL[,LABEL...]", Repeatable: true, CommaList: true},
+			{Name: "index", Argument: "PATH"},
+			{Name: "run-handle-file", Argument: "PATH"},
 		}},
 		{Path: "sparkwing runners", Flags: []Flag{}},
-		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"Without --session-stdin a personal runner can be approved in the browser: the command needs stdin and stderr on a terminal, prints a code and the controller's /device page, and a signed-in account types the code there, checks the runner name, team and grants, and approves; the runner is enrolled under that account's authority and the command prints the team before writing config. --team makes the controller refuse an approver from another team. Shared runners, reserved pools, --trust, --platform and --launcher always need --session-stdin. Browser approval rejects allowed_labels. Set runner labels through --session-stdin enrollment: a team administrator sets them on shared runners, and a member may set them on a personal runner, where they route only that member's own manual runs. For headless setup, pipe sparkwing-controller admin session from the controller pod, run by an existing team administrator, to --session-stdin. Shared runner registration requires team administration. --personal registers capacity for only your runs. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Turning it off ends personal machines that members without administration enrolled, and turning it back on does not revive them. The session and its CSRF proof stay in memory. After fetching the session CSRF proof, the CLI attempts logout on enrollment success or failure. Use a dedicated session because logout ends it for every client. A token minted by sparkwing login ends when its approving browser session signs out, so supplying that same session invalidates the CLI token when logout succeeds. Copy the enrollment cookie from a separate private browser window. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a launcher holding a pool with a reserved secret takes only verified default-branch work, including unmodified admin-armed default-branch schedules. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools and pools holding reserved secrets require launcher credentials, including with --trust=any. --repos accepts repeatable, comma-separated patterns and is required for shared runners; a runner scoped by it takes only repository-proven work, so it is a trusted host whose jobs can produce a pass that sw.FromProvenRunAtCommit counts. On a developer's machine the trust boundary is the OS account the runner service runs as: any process running as that user can read the runner's credential and report a pass directly, and shares its HOME, Go configuration and build cache, Sparkwing home and PATH, so enroll a workstation this way only for people the team would let bypass the required gate check, or run the service under a dedicated OS user with its own HOME and SPARKWING_HOME. Such a runner also runs any pushed branch of its repositories as that user. Omit it for personal runners: they claim only their owner's asserted work and never repository-proven runs. A runner serving several repositories lets a job from one act as the runner and claim another repository's jobs in the team, with their secrets; scope --repos to one repository, or to repositories that trust each other, to isolate them. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners add", Authority: teamCredential, Rules: []string{"Without --session-stdin a personal runner can be approved in the browser: the command needs stdin and stderr on a terminal, prints a code and the controller's /device page, and a signed-in account types the code there, checks the runner name, team and grants, and approves; the runner is enrolled under that account's authority and the command prints the team before writing config. --team makes the controller refuse an approver from another team. Shared runners, reserved pools, --trust, --platform and --launcher always need --session-stdin. Browser approval rejects allowed_labels. Set runner labels through --session-stdin enrollment: a team administrator sets them on shared runners, and a member may set them on a personal runner, where they route only that member's own manual runs. For headless setup, pipe sparkwing-controller admin session from the controller pod, run by an existing team administrator, to --session-stdin. Shared runner registration requires team administration. --personal registers capacity for only your runs. Members may enroll personal machines when the team's members_can_add_machines setting is true (the default). When false, enrollment requires team administration. Turning it off ends personal machines that members without administration enrolled, and turning it back on does not revive them. The session and its CSRF proof stay in memory. After fetching the session CSRF proof, the CLI attempts logout on enrollment success or failure. Use a dedicated session because logout ends it for every client. A token minted by sparkwing login ends when its approving browser session signs out, so supplying that same session invalidates the CLI token when logout succeeds. Copy the enrollment cookie from a separate private browser window. --reserved-for requires team-admin runner registration support. --trust sets which runs a shared runner takes (verified-default or any); unset, a launcher holding a pool with a reserved secret takes only verified default-branch work, including unmodified admin-armed default-branch schedules. --launcher enrolls only claims.launch for a shared reserved pool and skips the persistent runner service. Verified-default pools and pools holding reserved secrets require launcher credentials, including with --trust=any. --repos accepts repeatable, comma-separated patterns and is required for shared runners; a runner scoped by it takes only repository-proven work, so it is a trusted host whose jobs can produce a pass that sw.FromProvenRunAtCommit counts. On a developer's machine the trust boundary is the OS account the runner service runs as: any process running as that user can read the runner's credential and report a pass directly, and shares its HOME, Go configuration and build cache, Sparkwing home and PATH, so enroll a workstation this way only for people the team would let bypass the required gate check, or enroll it with --service-user so the service runs under a dedicated OS user with its own HOME and SPARKWING_HOME. Such a runner also runs any pushed branch of its repositories as that user. A shared runner enrolled into an account whose home holds SSH keys, cloud credentials or browser profiles prints a warning naming them, and --repos patterns spanning several repositories print a warning that those repositories can claim each other's jobs and secrets. --service-user asks for sudo before minting, creates the OS user when it is absent (no password, no login shell, home under /var/lib/sparkwing on Linux or /private/var/sparkwing on macOS), writes the runner section and credential into that user's own config, and installs a systemd system service or launchd daemon running as it. It refuses root, your own account, members of root-equivalent groups, accounts whose home sits under /home, /Users or /root, and a new name an existing group already holds. Its runner does not share this machine's local admission, so --max-concurrent is the only cap on its load. Omit it for personal runners: they claim only their owner's asserted work and never repository-proven runs. A runner serving several repositories lets a job from one act as the runner and claim another repository's jobs in the team, with their secrets; scope --repos to one repository, or to repositories that trust each other, to isolate them. JSON reports personal scope, credential metadata and service state without the bearer. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "runner", Argument: "RUNNER", Required: true},
 			{Name: "personal", Meaning: "Offer this machine only to your runs, including Cloud overflow."},
 			{Name: "session-stdin", Meaning: "Read an independent account session from stdin without saving it. After fetching its CSRF proof, attempt logout on enrollment success or failure. Copy its cookie from a separate private browser window so logout does not invalidate your CLI login token."},
@@ -439,16 +451,33 @@ func Registry() []Command {
 			{Name: "platform", Argument: "PLATFORM", Values: []string{"kubernetes"}, Meaning: "Record a shared Kubernetes runner at admin enrollment; a runner in a pod stops at its first poll without it."},
 			{Name: "launcher", Meaning: "Enroll only claims.launch for a shared reserved pool and skip the persistent runner service."},
 			{Name: "team", Argument: "TEAM", Meaning: "With browser approval, accept an approval only from this team."},
+			{Name: "service-user", Argument: "USER", Conflicts: []string{"config", "no-service", "launcher", "platform"}, Meaning: "Run the runner under this dedicated, unprivileged OS user instead of your own account, so its jobs cannot read your home. Creates the user when absent and installs a system service running as it; asks for sudo before minting the credential."},
+		}},
+		{Path: "sparkwing runners install-service", Platforms: []string{"linux", "darwin"}, Rules: []string{"The privileged step of sparkwing runners add --service-user, which runs it through sudo with the enrollment as JSON on stdin. Requires root. Creates or reuses the OS user named by --service-user, writes the runner section and credential as that user into its own home, copies sparkwing-runner into its ~/.local/bin, records the runner name, controller and token prefix in a root-only directory beside the account homes, and installs a systemd system service (User=, ProtectHome=yes, NoNewPrivileges=yes, PrivateTmp=yes) or a launchd daemon (UserName) running as it. The service PATH leaves out entries under /home, /Users and /root. JSON reports the account, config path, service file and left-out PATH entries."}, Flags: []Flag{
+			{Name: "service-user", Argument: "USER", Required: true, Meaning: "Dedicated OS user the runner service runs as."},
+		}},
+		{Path: "sparkwing runners uninstall-service", Platforms: []string{"linux", "darwin"}, Rules: []string{"The privileged step of sparkwing runners delete --service-user, which runs it through sudo and then revokes the token it reports. Requires root. Stops and removes the system service of the OS user named by --service-user first, then reports the runner name, controller and token prefix from the root-owned enrollment record runners install-service wrote, falling back to that user's config, and keeps the record. When neither names the token, it says the service is stopped and how to find and revoke the token. The OS user and its home remain. JSON reports the account, home, runner, controller and token prefix. With --revoked, runners delete reports the token revoked, and the step deletes only that record."}, Flags: []Flag{
+			{Name: "service-user", Argument: "USER", Required: true, Meaning: "Dedicated OS user the runner service runs as."},
+			{Name: "revoked", Meaning: "The runner token is revoked: delete the enrollment record and nothing else."},
 		}},
 		{Path: "sparkwing runners list", Authority: teamCredential, Rules: []string{"Read the same runner details from the local controller or a selected profile. The local controller lists this machine as one local runner named after its host, with the runner.labels the daemon read at start and a last_seen of the read time. JSON retains granted identity, reservations, labels, capacity, active jobs and headroom. Plain emits names; quiet JSON emits name objects."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 			{Name: "quiet", Short: "q"},
 		}},
-		{Path: "sparkwing runners remove", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
+		{Path: "sparkwing runners pause", Rules: []string{"Pause the runner enrolled on this machine: it finishes held jobs and claims no new work, including planning, while it keeps polling so it stays online. The pause is a file beside the runner credential, local to this machine; runners list on this machine shows the runner paused, while other machines and the console see it idle. It survives a runner restart. With --service-user, pause the runner enrolled with runners add --service-user: sudo runs the step as that OS user against the config in its home. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
+			{Name: "config", Argument: "PATH"},
+			{Name: "service-user", Argument: "USER", Conflicts: []string{"config"}, Meaning: "Pause the runner enrolled with runners add --service-user, through sudo as that OS user."},
+		}},
+		{Path: "sparkwing runners resume", Rules: []string{"Resume the runner enrolled on this machine after runners pause; it claims work again on its next poll, without a restart. With --service-user, resume the runner enrolled with runners add --service-user through sudo, as runners pause does. JSON reports the runner, paused and whether the state changed. Plain emits the runner name."}, Flags: []Flag{
+			{Name: "config", Argument: "PATH"},
+			{Name: "service-user", Argument: "USER", Conflicts: []string{"config"}, Meaning: "Resume the runner enrolled with runners add --service-user, through sudo as that OS user."},
+		}},
+		{Path: "sparkwing runners delete", Authority: teamCredential, Rules: []string{"Require the enrolled controller, optional runner name and explicit runner credential kind before stopping the service and revoking. With --service-user, stop the system service through sudo, then check the controller and runner name it reports before revoking, and print how to delete the OS user. JSON retains confirmed revocation. Plain emits the runner name."}, Flags: []Flag{
 			{Name: "config", Argument: "PATH"},
 			{Name: "no-service"},
 			{Name: "profile", Argument: "NAME"},
 			{Name: "runner", Argument: "RUNNER"},
+			{Name: "service-user", Argument: "USER", Conflicts: []string{"config", "no-service"}, Meaning: "Remove the runner enrolled with runners add --service-user: stop its system service through sudo, then revoke its token."},
 		}},
 		{Path: "sparkwing runs", Flags: []Flag{}},
 		{Path: "sparkwing runs annotations", Flags: []Flag{}},
@@ -514,7 +543,9 @@ func Registry() []Command {
 		{Path: "sparkwing runs grep", Rules: []string{
 			"Search controller logs across matching runs. Filters apply before the run page limit. --max-matches limits matches per log subject, with zero meaning uncapped.",
 			"JSON emits matching records and a page record with next_cursor and truncated. Quiet JSON emits run_id records and sends continuation metadata to stderr. Plain emits matching lines, or run IDs with --quiet.",
+			"--run searches one run's logs and prints its matching records in the runs logs formats. The cross-run filters, --limit, --max-matches, --quiet and --cursor do not apply to it.",
 		}, Flags: []Flag{
+			{Name: "run", Argument: "RUN_ID"},
 			{Name: "job", Argument: "JOB"},
 			{Name: "grep", Argument: "PATTERN"},
 			{Name: "since", Argument: "DURATION"},
@@ -564,29 +595,19 @@ func Registry() []Command {
 		{Path: "sparkwing runs logs", Rules: []string{
 			"Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.",
 			"Every read consumes all available pages. Without --follow, a snapshot with pending final log segments reports logs incomplete and exits 3. --follow waits for new records until final log segments are complete. An interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.",
-			"JSON emits tagged log records. Plain emits log lines. Pretty starts each line with its job, leaves out scheduling events, and ends a failed run with each failed job's step and error and the commands to read its log and retry it. Use --grep without --run to search across runs with the same filters and pagination as runs grep.",
+			"JSON emits tagged log records. Plain emits log lines. Pretty starts each line with its job, leaves out scheduling events, and ends a failed run with each failed job's step and error and the commands to read its log and retry it. Search log text with runs grep.",
 		}, Flags: []Flag{
 			{Name: "run", Argument: "RUN_ID"},
 			{Name: "job", Argument: "JOB"},
 			{Name: "tail", Argument: "N"},
 			{Name: "head", Argument: "N"},
 			{Name: "lines", Argument: "A:B"},
-			{Name: "grep", Argument: "PATTERN"},
 			{Name: "since", Argument: "DURATION"},
 			{Name: "tree"},
 			{Name: "events-only", Conflicts: []string{"no-events"}},
 			{Name: "no-events", Conflicts: []string{"events-only"}},
 			{Name: "follow", Short: "f"},
 			{Name: "profile", Argument: "NAME"},
-			{Name: "pipeline", Argument: "NAME"},
-			{Name: "status", Argument: "STATUS"},
-			{Name: "branch", Argument: "BRANCH", Repeatable: true, CommaList: true},
-			{Name: "sha", Argument: "PREFIX"},
-			{Name: "started-after", Argument: "DATE"},
-			{Name: "started-before", Argument: "DATE"},
-			{Name: "limit", Argument: "N", Minimum: 1, HasMinimum: true},
-			{Name: "max-matches", Argument: "N"},
-			{Name: "quiet", Short: "q"},
 			{Name: "cursor", Argument: "CURSOR"},
 		}},
 		{Path: "sparkwing runs prune", Rules: []string{
@@ -725,7 +746,7 @@ func Registry() []Command {
 		{Path: "sparkwing secrets rotate", Rules: []string{"Retain rotated counts and skipped row names/pipelines. The previous key is still needed when any row was skipped. JSON includes the controller's replay marker."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets set", Rules: []string{"Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.", "If neither --value nor --file is supplied, read the value from stdin. Preserve empty values and trailing newlines. --variable stores an unmasked value.", "A pipeline secret belongs to one GitHub repository and one pipeline: --repo and --pipeline go together, and only runs whose code Sparkwing fetched from that repository through the team's GitHub App, or whose repository a GitHub Actions job proved, read it; uploaded, local and --runner here runs read only --shared secrets. --repo takes owner/name or a gh:<id> key. --shared stores a team-wide secret every pipeline of every repository in the team reads.", "Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. Saving a short secret prints one warning line on stderr. Read `sparkwing docs read --topic secrets` for the masking length rule. JSON returns metadata and replay without the value; plain emits the name."}, Flags: []Flag{
+		{Path: "sparkwing secrets set", Rules: []string{"Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.", "If neither --value nor --file is supplied, read the value from stdin. Preserve trailing newlines. Empty stdin or an empty --file is refused; --value '' stores an empty value. --variable stores an unmasked value.", "A pipeline secret belongs to one GitHub repository and one pipeline: --repo and --pipeline go together, and only runs whose code Sparkwing fetched from that repository through the team's GitHub App, or whose repository a GitHub Actions job proved, read it; uploaded, local and --runner here runs read only --shared secrets. --repo takes owner/name or a gh:<id> key. --shared stores a team-wide secret every pipeline of every repository in the team reads.", "Local unscoped writes are shared with local pipelines. Controller writes preserve explicit --pipeline or --shared selection. Saving a short secret prints one warning line on stderr. Read `sparkwing docs read --topic secrets` for the masking length rule. JSON returns metadata and replay without the value; plain emits the name."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "value", Argument: "VALUE", Conflicts: []string{"file"}},
 			{Name: "file", Argument: "PATH", Conflicts: []string{"value"}},

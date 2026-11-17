@@ -1,6 +1,6 @@
 "use client";
 
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import {
   Notice,
   Panel,
@@ -18,11 +18,13 @@ import {
   expiryText,
   formatDeviceCode,
   grantText,
+  listedGrants,
   lookupDeviceRequest,
   normalizeDeviceCode,
 } from "@/lib/deviceLogin";
 import { DeviceRunnerDetails } from "@/components/DeviceRunnerDetails";
 import { useCurrentTime } from "@/lib/useCurrentTime";
+import { useLogoutCSRFToken } from "@/lib/logoutCSRF";
 import { useTeamState } from "@/lib/useTeam";
 
 export default function DevicePage() {
@@ -173,6 +175,31 @@ function EnterCode({
   );
 }
 
+// One grid cell holds every variant of a slot and shows only the active one,
+// so the slot is as tall as its longest variant in every view and the buttons
+// below it stay put between the sign-in, administration and sign-in-again views.
+function Variants({
+  active,
+  variants,
+}: {
+  active: number;
+  variants: ReactNode[];
+}) {
+  return (
+    <div className="grid">
+      {variants.map((variant, i) => (
+        <div
+          key={i}
+          className={`[grid-area:1/1] ${i === active ? "" : "invisible"}`}
+          aria-hidden={i === active ? undefined : true}
+        >
+          {variant}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Confirm({
   request,
   code,
@@ -187,19 +214,65 @@ function Confirm({
   onStartOver: () => void;
 }) {
   const now = useCurrentTime(true, 15_000);
+  const logoutCSRF = useLogoutCSRFToken();
   const runner = request.kind === "runner" ? request.runner : undefined;
+  const admin = request.kind === "admin";
+  const signInAgain = admin && request.sign_in_required;
+  // Member and administration views share one layout; a runner keeps its own.
+  const variant = signInAgain ? 2 : admin ? 1 : 0;
   const heading = runner
     ? `Approve runner ${runner.name}?`
     : `Approve sign-in for ${request.machine}?`;
+  const notice = (
+    <>
+      Only approve a request you started yourself in a terminal in the last
+      few minutes. If someone sent you this code, deny it.
+    </>
+  );
+  const adminNotice = (
+    <>
+      This also gives your terminal <strong>full control of {request.team}</strong>{" "}
+      for 1 hour: read and change secrets, invite and remove members, change
+      settings and billing, and delete the team. Approve only if you just ran{" "}
+      <code>sparkwing login --admin</code> yourself.
+    </>
+  );
+  const noticeBox = (tone: "amber" | "red", body: ReactNode) => (
+    <div
+      className={`h-full rounded-[var(--radius-control)] border p-3 text-sm ${
+        tone === "red"
+          ? "border-red-500/50 bg-red-500/10 text-red-200"
+          : "border-amber-500/40 bg-amber-500/10 text-amber-200"
+      }`}
+    >
+      {body}
+    </div>
+  );
+  const memberNote =
+    "The token expires in 90 days unless revoked. It belongs to this browser sign-in, so signing out here revokes it too.";
+  const adminNote = (
+    <>
+      Plus <span className="font-mono text-xs">team.admin</span>, to administer
+      the team, for 1 hour. The terminal&apos;s run and log token is replaced
+      by one with the same grants and expiry. Both belong to this browser
+      sign-in, so signing out here revokes them.
+    </>
+  );
+  const signInNote =
+    "Approving administration needs a sign-in from the last 10 minutes. Sign in again, then open this page and enter the code again; the code stays valid until it expires.";
   return (
     <section aria-labelledby="device-confirm" className="space-y-4">
       <h2 id="device-confirm" className="text-lg font-bold">
         {heading}
       </h2>
-      <div className="rounded-[var(--radius-control)] border border-amber-500/40 bg-amber-500/10 text-amber-200 p-3 text-sm">
-        Only approve a request you started yourself in a terminal in the last
-        few minutes. If someone sent you this code, deny it.
-      </div>
+      {runner ? (
+        noticeBox("amber", notice)
+      ) : (
+        <Variants
+          active={admin ? 1 : 0}
+          variants={[noticeBox("amber", notice), noticeBox("red", adminNotice)]}
+        />
+      )}
       <Panel title="Request">
         <dl className="p-4 text-sm grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2">
           <dt className="text-[var(--muted)]">Code</dt>
@@ -225,7 +298,7 @@ function Confirm({
               : `A CLI token for ${request.team} with:`}
           </p>
           <ul className="list-disc pl-5 space-y-1">
-            {request.grants.map((grant) => (
+            {listedGrants(request).map((grant) => (
               <li key={grant}>
                 {grantText(grant)}{" "}
                 <span className="text-xs text-[var(--muted)] font-mono">
@@ -235,21 +308,38 @@ function Confirm({
             ))}
           </ul>
           {runner ? null : (
-            <p className="text-[var(--muted)]">
-              The token expires in 90 days unless revoked. It belongs to this
-              browser sign-in, so signing out here revokes it too.
-            </p>
+            <Variants
+              active={variant}
+              variants={[
+                <p key="member" className="text-[var(--muted)]">{memberNote}</p>,
+                <p key="admin" className="text-[var(--muted)]">{adminNote}</p>,
+                <p key="sign-in" role="alert" className="text-red-200">{signInNote}</p>,
+              ]}
+            />
           )}
         </div>
       </Panel>
+      {signInAgain ? (
+        <form id="device-sign-in-again" method="POST" action="/logout" className="hidden">
+          <input type="hidden" name="csrf_token" value={logoutCSRF} />
+        </form>
+      ) : null}
       <div className="flex items-center gap-3">
         <button
-          type="button"
+          type={signInAgain ? "submit" : "button"}
+          form={signInAgain ? "device-sign-in-again" : undefined}
           className={buttonClass}
-          disabled={busy}
-          onClick={() => onDecide(true)}
+          disabled={busy || (signInAgain && !logoutCSRF)}
+          onClick={signInAgain ? undefined : () => onDecide(true)}
         >
-          Approve
+          <span className="inline-grid">
+            <span className={`[grid-area:1/1] ${signInAgain ? "invisible" : ""}`} aria-hidden={signInAgain ? true : undefined}>
+              Approve
+            </span>
+            <span className={`[grid-area:1/1] ${signInAgain ? "" : "invisible"}`} aria-hidden={signInAgain ? undefined : true}>
+              Sign in again
+            </span>
+          </span>
         </button>
         <button
           type="button"
@@ -271,7 +361,6 @@ function Confirm({
     </section>
   );
 }
-
 
 function Done({
   approved,

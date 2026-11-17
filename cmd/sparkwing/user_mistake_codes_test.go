@@ -23,7 +23,7 @@ func TestUserMistakesAreNotReportedAsInternal(t *testing.T) {
 		{"run", "x"},
 		{"docs", "read", "--topic", "nosuch"},
 		{"profiles", "show", "--profile", "nosuch"},
-		{"profiles", "remove", "--profile", "nosuch"},
+		{"profiles", "delete", "--profile", "nosuch"},
 		{"profiles", "set", "--profile", "nosuch", "--controller", "https://ci.example.com"},
 		{"examples", "--example", "nosuch"},
 	} {

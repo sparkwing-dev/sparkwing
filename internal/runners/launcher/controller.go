@@ -139,7 +139,7 @@ func (c *ControllerControl) Sync(ctx context.Context, observations []CloudJobObs
 		if observation.Capacity == nil && (observation.NodeUID == "" || observation.ReservationID == "" && (observation.JobNamespace == "" || observation.JobUID == "") || observation.ReservationID != "" && (observation.JobNamespace != "" || observation.JobUID != "")) {
 			return nil, errors.New("Cloud observation requires its local Job or reservation identity")
 		}
-		observed := capability.LauncherObservation{Award: observation.Binding.LeaseRef(), Reservation: observation.ReservationID != "", Rejected: observation.Rejected}
+		observed := capability.LauncherObservation{Award: observation.Binding.LeaseRef(), Reservation: observation.ReservationID != "", Rejected: observation.Rejected, Startup: observation.Startup}
 		if err := observed.Validate(); err != nil {
 			return nil, err
 		}

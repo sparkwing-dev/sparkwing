@@ -500,6 +500,10 @@ components:
           type: boolean
         reservation:
           type: boolean
+        startup:
+          anyOf:
+            - $ref: '#/components/schemas/internal.capability.PodStartup'
+            - type: "null"
         waited_for_fresh_node:
           type: boolean
       required:
@@ -574,6 +578,50 @@ components:
         - metered
       type: object
       x-sparkwing-go-type: capability.Metadata
+    internal.capability.PodStartup:
+      additionalProperties: true
+      properties:
+        container_started_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        image_pull_started_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        image_pulled_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        job_activated_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        job_created_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        pod_created_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+        pod_uid:
+          type: string
+        scheduled_at:
+          anyOf:
+            - format: date-time
+              type: string
+            - type: "null"
+      required:
+        - pod_uid
+      type: object
+      x-sparkwing-go-type: capability.PodStartup
     internal.capability.PushScope:
       additionalProperties: true
       properties:
@@ -1598,6 +1646,8 @@ components:
           anyOf:
             - $ref: '#/components/schemas/internal.controllerwire.DeviceRunner'
             - type: "null"
+        sign_in_required:
+          type: boolean
         team:
           type: string
         user_code:
@@ -1621,6 +1671,10 @@ components:
             - type: "null"
         interval:
           type: integer
+        member:
+          anyOf:
+            - $ref: '#/components/schemas/internal.controllerwire.CreatedToken'
+            - type: "null"
         status:
           type: string
       required:
@@ -3500,6 +3554,12 @@ components:
             - type: "null"
         number:
           type: integer
+        owner_claims:
+          anyOf:
+            - items:
+                $ref: '#/components/schemas/internal.runstate.OwnerClaimTime'
+              type: array
+            - type: "null"
         reason:
           type: string
         retry:
@@ -6821,6 +6881,26 @@ components:
         - ManifestRecord
       type: object
       x-sparkwing-go-type: runstate.NodeRow
+    internal.runstate.OwnerClaimTime:
+      additionalProperties: true
+      properties:
+        awarded_at:
+          format: date-time
+          type: string
+        generation:
+          type: integer
+        job_id:
+          type: string
+        kind:
+          type: string
+        source_generation:
+          type: integer
+      required:
+        - kind
+        - generation
+        - awarded_at
+      type: object
+      x-sparkwing-go-type: runstate.OwnerClaimTime
     internal.runstate.OwnerExecution:
       additionalProperties: true
       properties:
@@ -7027,13 +7107,32 @@ components:
         - memory_bytes
       type: object
       x-sparkwing-go-type: match.Resources
+    pkg.wingwire.BudgetEnforcement:
+      additionalProperties: true
+      properties:
+        applied:
+          type: boolean
+        cpu_cores:
+          type: number
+        memory_bytes:
+          type: integer
+        nice:
+          type: integer
+        reason:
+          type: string
+      required:
+        - applied
+      type: object
+      x-sparkwing-go-type: wingwire.BudgetEnforcement
     pkg.wingwire.BudgetState:
       additionalProperties: true
       properties:
         cores:
           type: number
-        enforce:
-          type: boolean
+        enforcement:
+          anyOf:
+            - $ref: '#/components/schemas/pkg.wingwire.BudgetEnforcement'
+            - type: "null"
         ignore_external:
           type: boolean
         machine_cores:
@@ -8304,6 +8403,41 @@ paths:
             binding: none
             liveness: credential
         retry: safe
+  /api/v1/auth/device/step-up:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.StartDeviceLoginRequest'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.DeviceLoginStarted'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Start an owner's one-hour administration request from a signed-in terminal
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/auth/device/step-up
+        audience: controller
+        owner: team
+        authentication: capability
+        access:
+          - credential: unbound_member_or_local
+            grants:
+              - runs.read
+            binding: none
+            liveness: credential
+        retry: never
   /api/v1/auth/device/token:
     post:
       requestBody:

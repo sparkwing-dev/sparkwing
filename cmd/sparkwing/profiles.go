@@ -23,7 +23,7 @@ func runProfiles(inv clisurface.Invocation) error {
 	switch inv.Command.Path {
 	case "sparkwing profiles add":
 		return addProfile(inv, format)
-	case "sparkwing profiles remove":
+	case "sparkwing profiles delete":
 		return removeProfile(inv, format)
 	case "sparkwing profiles list":
 		return listProfiles(format)
@@ -66,32 +66,34 @@ func setProfile(inv clisurface.Invocation, format string) error {
 		}
 	}
 	var updated userconfig.Profile
+	var replaced *namedProfile
 	profiles = nil
 	err = userconfig.Update(path, userconfig.Profiles, "profiles", &profiles, func(bool) error {
 		p, ok := profiles[name]
 		if !ok {
 			return missingProfile(name, path, profiles)
 		}
+		replaced = &namedProfile{Name: name, Profile: p}
 		if inv.Has("controller") {
 			p.Controller.URL = base
 		}
 		if inv.Bool("token-stdin") {
 			p.Controller.Token = &token
 		}
-		if inv.Has("default") {
-			p.Default = inv.Bool("default")
-			if p.Default {
-				for other, connection := range profiles {
-					connection.Default = false
-					profiles[other] = connection
-				}
-			}
+		// safety: an administration token belongs to the sign-in it stepped up from, never to a replacement.
+		if inv.Has("controller") || inv.Bool("token-stdin") {
+			p.Controller.AdminToken, p.Controller.AdminExpiresAt = nil, nil
 		}
 		profiles[name], updated = p, p
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+	if updated.Controller.AdminToken == nil {
+		if err := revokeAdminToken(replaced, updated.Controller.URL); err != nil {
+			return fmt.Errorf("profiles set: saved profile %q, but %w", name, err)
+		}
 	}
 	return writeProfile(&namedProfile{Name: name, Profile: updated}, format)
 }

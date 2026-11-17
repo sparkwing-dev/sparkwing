@@ -118,6 +118,11 @@ func Parse(binary string, args []string) (Invocation, error) {
 				return inv, inv.invalid("%s", err)
 			}
 			f, known := flags[name]
+			// safety: commands reuse flag names with different arity (run --route takes a value,
+			// pools allow --route does not), so the command being parsed owns its definition.
+			if i := slices.IndexFunc(inv.Command.Flags, func(own Flag) bool { return own.Name == name }); i >= 0 {
+				f = inv.Command.Flags[i]
+			}
 			// safety: before the command word only global flags and --profile are read, so a
 			// leaf's valued flag (docs --version, runs logs --tail) cannot swallow the next word.
 			if known && groups[inv.Command.Path] && name != "profile" && !slices.ContainsFunc(append(GlobalFlags(), inv.Command.Flags...), func(own Flag) bool { return own.Name == name }) {
@@ -175,7 +180,47 @@ func Parse(binary string, args []string) (Invocation, error) {
 	return inv, nil
 }
 
+// safety: a synonym is only suggested, never run; the first candidate registered under the parent wins.
+var commandSynonyms = map[string][]string{
+	"show":         {"show", "status", "describe", "info", "get"},
+	"view":         {"show", "status", "describe", "info", "get"},
+	"get":          {"show", "status", "describe", "info"},
+	"status":       {"show", "status", "info"},
+	"describe":     {"describe", "show", "info"},
+	"info":         {"info", "show", "describe"},
+	"remove":       {"delete", "remove", "uninstall", "revoke", "disallow"},
+	"rm":           {"delete", "remove", "uninstall", "revoke", "disallow"},
+	"delete":       {"delete", "remove", "uninstall", "revoke", "disallow"},
+	"del":          {"delete", "remove", "uninstall", "revoke", "disallow"},
+	"ls":           {"list"},
+	"add":          {"add", "create", "set", "install"},
+	"new":          {"new", "create", "add", "set"},
+	"create":       {"create", "add", "new", "set"},
+	"pipelines":    {"pipeline"},
+	"teams":        {"team"},
+	"logout":       {"profiles delete"},
+	"secret":       {"secrets"},
+	"schedule":     {"schedules"},
+	"profile":      {"profiles"},
+	"token":        {"tokens"},
+	"runner":       {"runners"},
+	"pool":         {"pools"},
+	"repo":         {"repos"},
+	"subscription": {"subscriptions"},
+}
+
 func suggestCommand(commands []Command, parent, word, next string) string {
+	visible := func(path string) bool {
+		return slices.ContainsFunc(commands, func(c Command) bool { return c.Path == path && !c.Hidden })
+	}
+	for _, candidate := range commandSynonyms[strings.ToLower(word)] {
+		if path := parent + " " + candidate; visible(path) {
+			if next != "" && visible(path+" "+next) {
+				return path + " " + next
+			}
+			return path
+		}
+	}
 	var names, withNext []string
 	for _, command := range commands {
 		name, child := strings.CutPrefix(command.Path, parent+" ")
@@ -189,6 +234,9 @@ func suggestCommand(commands []Command, parent, word, next string) string {
 	}
 	slices.Sort(names)
 	slices.Sort(withNext)
+	if verb, ok := verbSynonyms[word]; ok && slices.Contains(names, verb) {
+		return parent + " " + verb
+	}
 	if suggestion := sparkwingruntime.SuggestClosest(word, withNext); suggestion != "" {
 		return parent + " " + suggestion
 	}
@@ -201,6 +249,9 @@ func suggestCommand(commands []Command, parent, word, next string) string {
 // safety: only a command that forwards pipeline arguments points at --; any
 // other names its own flags, so the hint never sends a user to a separator.
 func (i Invocation) flagHint(name string) string {
+	if moved := movedFlags[i.Command.Path+" --"+name]; moved != "" {
+		return "; " + moved
+	}
 	suggestion := ""
 	if closest := i.closestFlag(name); closest != "" {
 		suggestion = "; did you mean --" + closest + "?"
@@ -224,15 +275,17 @@ func (i Invocation) flagHint(name string) string {
 	return "; " + i.Command.Path + " takes " + strings.Join(names, ", ") + " (see --help)"
 }
 
-// hack: run's own flags carry the sw- prefix, so the bare spelling other
-// commands use (--dry-run) maps to its sw- form first.
+// hack: run and pipeline plan flags lost their sw- prefix, so an old spelling
+// such as --sw-detached is judged without it and suggests --detach.
 func (i Invocation) closestFlag(name string) string {
 	var names []string
 	for _, f := range append(GlobalFlags(), i.Command.Flags...) {
-		if f.Name == "sw-"+name {
-			return f.Name
-		}
 		names = append(names, f.Name)
+	}
+	if unprefixed, ok := strings.CutPrefix(name, "sw-"); ok {
+		if suggestion := sparkwingruntime.SuggestClosest(unprefixed, names); suggestion != "" {
+			return suggestion
+		}
 	}
 	return sparkwingruntime.SuggestClosest(name, names)
 }
@@ -270,8 +323,8 @@ func flagToken(arg string, shorts map[string]string) (name, value string, explic
 }
 
 func (i *Invocation) validate() error {
-	if !i.Help() && i.Command.Path == "sparkwing run" && i.Has("profile") && i.Value("sw-route") != "cloud" {
-		return i.invalid("--profile requires --sw-route cloud")
+	if route := i.Value("route"); !i.Help() && i.Command.Path == "sparkwing run" && i.Has("profile") && route != "cloud" && route != "burst" {
+		return i.invalid("--profile requires --route cloud or --route burst")
 	}
 	definitions := append(GlobalFlags(), i.Command.Flags...)
 	allowed := make(map[string]Flag, len(definitions))

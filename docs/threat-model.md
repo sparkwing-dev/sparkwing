@@ -106,6 +106,8 @@ proof. A rendered pod specification or label does not prove isolation.
 
 - Run the service under a dedicated OS account or isolated VM/container. Keep
   unrelated credentials and personal data outside its reach.
+  `sparkwing runners add --service-user` sets up the dedicated account; see
+  [shared runners](shared-runners.md).
 - Enroll only repositories whose accepted code may act as that account. Check
   repository restrictions and granted reservations separately from free labels.
 - Scope secrets to the pipelines and pools that need them. Code authorized to
@@ -114,6 +116,6 @@ proof. A rendered pod specification or label does not prove isolation.
   paths or outside the checkout.
 - Use machine admission and available OS resource enforcement to bound load.
   Observe missing headroom as unavailable data.
-- Remove a departed device with `sparkwing runners remove`. Revoke credentials
+- Remove a departed device with `sparkwing runners delete`. Revoke credentials
   through their issuing authority. Already issued signed URLs, GitHub credentials
   and OIDC tokens retain their own expiry.

@@ -55,7 +55,7 @@ func TestRepositoryCommandsUseCheckoutAndJSON(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(checkout, ".git"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for _, verb := range []string{"add", "remove"} {
+	for _, verb := range []string{"add", "delete"} {
 		var commandErr error
 		out := captureStdout(t, func() {
 			commandErr = runSparkwing([]string{"repos", verb, "--checkout", checkout})
@@ -70,7 +70,7 @@ func TestRepositoryCommandsUseCheckoutAndJSON(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if verb == "add" && (len(entries) != 1 || entries[0].Path != checkout) || verb == "remove" && len(entries) != 0 {
+		if verb == "add" && (len(entries) != 1 || entries[0].Path != checkout) || verb == "delete" && len(entries) != 0 {
 			t.Fatalf("%s registry: %+v", verb, entries)
 		}
 	}

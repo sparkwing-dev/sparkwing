@@ -38,8 +38,8 @@ func auxDocFiles(repoRoot string) []string {
 
 var pipelineFlagTagRE = regexp.MustCompile(`flag:"([a-z0-9][a-z0-9-]*)"`)
 
-// safety: run control is sw-prefixed, so a pipeline owns the whole unprefixed
-// flag namespace and a flag it declares is live however a banned pattern reads.
+// safety: pipeline arguments follow --, so a pipeline owns every flag name and
+// a flag it declares is live however a banned pattern reads.
 func pipelineOwnedFlags(files []string) map[string]bool {
 	owned := map[string]bool{}
 	for _, path := range files {

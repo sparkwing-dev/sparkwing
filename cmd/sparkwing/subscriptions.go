@@ -70,7 +70,7 @@ func manageSubscriptions(ctx context.Context, inv clisurface.Invocation, manager
 	case "sparkwing subscriptions show":
 		sub, err := manager.GetSubscription(ctx, inv.Value("subscription"))
 		if err != nil {
-			return subscriptionLookupError(inv.Value("subscription"), err)
+			return subscriptionLookupError(inv, err)
 		}
 		switch format {
 		case "json":
@@ -92,7 +92,7 @@ func manageSubscriptions(ctx context.Context, inv clisurface.Invocation, manager
 	case "sparkwing subscriptions rotate-secret":
 		result, err := manager.RotateSubscriptionSecret(ctx, inv.Value("subscription"))
 		if err != nil {
-			return subscriptionLookupError(inv.Value("subscription"), err)
+			return subscriptionLookupError(inv, err)
 		}
 		return writeSubscriptionSecret(out, errOut, format, result, false)
 	case "sparkwing subscriptions delete":
@@ -104,7 +104,7 @@ func manageSubscriptions(ctx context.Context, inv clisurface.Invocation, manager
 			return json.NewEncoder(out).Encode(result)
 		}
 		if !result.Deleted {
-			return subscriptionNotFound(result.ID)
+			return subscriptionNotFound(inv)
 		}
 		_, err = fmt.Fprintln(out, opsview.DisplayText(result.ID))
 		return err
@@ -112,19 +112,16 @@ func manageSubscriptions(ctx context.Context, inv clisurface.Invocation, manager
 	return &clisurface.UsageError{Path: inv.Command.Path, Message: "unknown subscriptions command"}
 }
 
-func subscriptionLookupError(id string, err error) error {
+func subscriptionLookupError(inv clisurface.Invocation, err error) error {
 	var failure *apierr.Error
 	if errors.As(err, &failure) && failure.Code == apierr.NotFound {
-		return subscriptionNotFound(id)
+		return subscriptionNotFound(inv)
 	}
 	return err
 }
 
-func subscriptionNotFound(id string) error {
-	return &apierr.Error{
-		Code: apierr.NotFound, Message: fmt.Sprintf("subscription %s was not found in this team", id),
-		Hint: "run `sparkwing subscriptions list` to see this team's subscription IDs",
-	}
+func subscriptionNotFound(inv clisurface.Invocation) error {
+	return notFoundRefusal(inv, &apierr.Error{Code: apierr.NotFound})
 }
 
 func writeSubscription(out io.Writer, sub controllerwire.Subscription) error {

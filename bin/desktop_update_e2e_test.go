@@ -229,7 +229,7 @@ func main(){sw.Register[struct{}]("Land",func()sw.Pipeline[struct{}]{return &Lan
 				}
 				return exists("idle-snapshot")
 			})
-			land := procenv.ControlCommandContext(ctx, environment, cli, "run", "land", "-C", repo, "--sw-detached", "--sw-no-update", "-o", "json")
+			land := procenv.ControlCommandContext(ctx, environment, cli, "run", "land", "-C", repo, "--detach", "--no-update", "-o", "json")
 			var landOutput, landError bytes.Buffer
 			land.Stdout, land.Stderr = &landOutput, &landError
 			if err := land.Start(); err != nil {

@@ -45,6 +45,13 @@ Print one pipeline's full metadata
 | `--secrets` | Print only the secrets the pipeline declares, each marked required or optional. |
 | `--show-withheld` | Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs. |
 
+### Examples
+
+```sh
+# Show a pipeline's jobs, arguments and triggers
+sparkwing pipeline describe --pipeline build
+```
+
 ## `sparkwing pipeline hooks`
 
 Install / uninstall git pre-commit + pre-push + post-commit hooks
@@ -134,6 +141,16 @@ Enumerate every pipeline with metadata
 | `--all` | Include entries that are hidden by default. |
 | `--search TEXT` | Text to match against record names and summaries; log text is not searched. |
 
+### Examples
+
+```sh
+# List this repository's pipelines
+sparkwing pipeline list
+
+# Find pipelines about deploys
+sparkwing pipeline list --search deploy
+```
+
 ## `sparkwing pipeline new`
 
 Scaffold a new Go or TypeScript pipeline
@@ -147,10 +164,17 @@ Scaffold a new Go or TypeScript pipeline
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--pipeline NAME` | Pipeline name. (required) |
-| `--template SHAPE` | Go shape to scaffold, minimal by default; merge-queue creates a serial landing pipeline. typescript and merge-queue-typescript create TypeScript pipelines and print the npm lockfile setup command. |
+| `--template SHAPE` | Go shape to scaffold, minimal by default; merge-queue creates a serial landing pipeline. typescript and merge-queue-typescript create TypeScript pipelines and write .sparkwing/package-lock.json with npm, which must be on PATH. |
 | `--on EVENT` | Trigger events to declare, comma separated, replacing the shape's default trigger; manual declares no trigger. |
 | `--hidden` | Mark the new pipeline hidden in sparkwing.yaml so pipeline list omits it unless --all is given. |
 | `--short TEXT` | One-line description to write into the generated pipeline source instead of a placeholder. |
+
+### Examples
+
+```sh
+# Add a pipeline to this repository
+sparkwing pipeline new --pipeline lint
+```
 
 ## `sparkwing pipeline plan`
 
@@ -164,7 +188,7 @@ Render the runtime-resolved DAG without dispatching any jobs
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
-| `--sw-dry-run` | Preview dry-run bodies as would_dry_run, safe steps as would_run, and steps without either as would_skip. SkipIf remains evaluated at run time. |
+| `--dry-run` | Preview dry-run bodies as would_dry_run, safe steps as would_run, and steps without either as would_skip. SkipIf remains evaluated at run time. |
 | `--pipeline NAME` | Pipeline name. (required) |
 | `--start-at STEP` | Preview the run as if it started at this step, marking steps that are neither this step nor downstream of it as skipped. |
 | `--stop-at STEP` | Preview the run as if it stopped after this step, marking steps that are neither this step nor upstream of it as skipped. |
@@ -180,7 +204,7 @@ Manage sparks libraries declared in .sparkwing/sparkwing.yaml
 - `inflate` -- Copy a spark library's source into this repo so you can edit it
 - `lint` -- Validate a spark.json library manifest
 - `list` -- Show declared sparks libraries and their resolved versions
-- `remove` -- Remove a library from the sparks: block
+- `delete` -- Remove a library from the sparks: block
 - `update` -- Re-resolve every declared library
 
 ### Flags
@@ -222,6 +246,20 @@ List the blocks a spark library offers
 | `--help-all` | Include uncommon flags in command help. |
 | `--library MODULE` | Full Go module path of the library whose blocks to list, sparks-core by default, at the version the project declares or latest. |
 | `--path DIR` | Path to select. |
+
+## `sparkwing pipeline sparks delete`
+
+Remove a library from the sparks: block
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--spark NAME` | Name or source module path of the library to remove from the project's spark list. (required) |
 
 ## `sparkwing pipeline sparks inflate`
 
@@ -266,20 +304,6 @@ Show declared sparks libraries and their resolved versions
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--no-resolve` | Show declared versions only, skipping the module lookup that resolves each to a concrete version. |
-
-## `sparkwing pipeline sparks remove`
-
-Remove a library from the sparks: block
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--spark NAME` | Name or source module path of the library to remove from the project's spark list. (required) |
 
 ## `sparkwing pipeline sparks update`
 
@@ -330,6 +354,16 @@ Against Sparkwing Cloud, a run without --runner executes on Cloud unless a repos
 | `--resume RUN` | Host an interrupted --runner here run again in this CLI, using the credential this machine saved and the run's original pipeline and arguments. |
 | `--ref REF` | Git revision of this checkout to run, resolved locally, HEAD by default. |
 | `--pipeline-ref REF` | Git revision to load the pipeline definitions from when it differs from the revision being run; it must match any source pin in the repository's configuration. |
+
+### Examples
+
+```sh
+# Run a pipeline on a controller
+sparkwing pipeline trigger deploy --profile prod
+
+# Return as soon as the controller accepts it
+sparkwing pipeline trigger deploy --profile prod --detach
+```
 
 ## `sparkwing pipeline upgrade`
 

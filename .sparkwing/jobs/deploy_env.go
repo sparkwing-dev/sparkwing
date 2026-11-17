@@ -27,6 +27,9 @@ type deployConfig struct {
 	RoleARN        string
 	GitopsURL      string
 	GitopsBranch   string
+	// perf: kikd-infra's sparkwing-jobs EC2NodeClass pulls this runner tag while a
+	// Cloud job node boots; terraform/ecr exempts it from tag immutability.
+	PrepullTag     string
 	ReferenceURL   string
 	ReferenceName  string
 	CommitName     string
@@ -111,6 +114,7 @@ func defaultDeployConfig() deployConfig {
 		RoleARN:        "arn:aws:iam::633280902600:role/sparkwing-deploy",
 		GitopsURL:      "git@github.com:sparkwing-dev/sparkwing-gitops.git",
 		GitopsBranch:   "main",
+		PrepullTag:     "cloud-prepull",
 		ReferenceURL:   "git@github.com:sparkwing-dev/sparkwing-ci-smoke.git",
 		ReferenceName:  "hello",
 		CommitName:     "Sparkwing deploy",

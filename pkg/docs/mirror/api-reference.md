@@ -256,6 +256,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/api/v1/data/objects/{key...}` | `controller` | `team` | `signed_object_url` | `safe` |  |
 | `PUT` | `/api/v1/log-segments/{key...}` | `controller` | `run` | `signed_object_url` | `exact_body` |  |
 | `POST` | `/api/v1/auth/device` | `controller` | `none` | `public` | `never` |  |
+| `POST` | `/api/v1/auth/device/step-up` | `controller` | `team` | `capability` | `never` | `unbound_member_or_local` / `runs.read` / `none` / `credential` |
 | `POST` | `/api/v1/auth/device/token` | `controller` | `none` | `public` | `never` |  |
 | `POST` | `/api/v1/auth/device/cancel` | `controller` | `none` | `public` | `safe` |  |
 | `POST` | `/api/v1/auth/device/lookup` | `controller` | `team` | `capability` | `safe` | `account_session` / `runs.read` / `none` / `credential` |

@@ -68,7 +68,7 @@ func burstLocalFallbackSecrets(t *testing.T, value string) {
 	t.Setenv("SPARKWING_CONFIG", config)
 	t.Setenv("TOKEN", value)
 	t.Setenv("BURST_ORDINARY", "retained")
-	if err := os.WriteFile(config, []byte("run:\n  routing:\n    route: cloud\n    profile: unreachable\n    local_secrets: [TOKEN]\n"), 0o600); err != nil {
+	if err := os.WriteFile(config, []byte("run:\n  routing:\n    profile: unreachable\n    local_secrets: [TOKEN]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	repo := burstIntakeRepository(t)
@@ -78,13 +78,13 @@ func burstLocalFallbackSecrets(t *testing.T, value string) {
 		t.Fatal(err)
 	}
 	captured := os.Environ()
-	route, err := loadRunRouting(filepath.Join(repo, ".sparkwing"), "burst", runFlags{})
+	route, err := loadRunRouting(filepath.Join(repo, ".sparkwing"), "burst", runFlags{route: "burst"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var request controllerwire.CreateRunRequest
 	var output bytes.Buffer
-	err = runRoutedCommand(t.Context(), "burst", runFlags{}, nil, route, &output, burstRunDependencies{
+	err = runRoutedCommand(t.Context(), "burst", runFlags{route: "burst"}, nil, route, &output, burstRunDependencies{
 		connect: func(context.Context, string) (client.EngineOptions, func(), error) {
 			return client.EngineOptions{}, nil, &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("unreachable")}
 		},
@@ -506,7 +506,7 @@ func TestBurstNativePreparationRetainsAdvertisedRunOptions(t *testing.T) {
 		want int
 	}{{"front", 1}, {"back", -1}} {
 		t.Run(tc.mode, func(t *testing.T) {
-			inv, err := clisurface.Parse("sparkwing", []string{"run", "burst", "--sw-no-bincache", "--sw-hash-all-files", "--sw-priority", tc.mode})
+			inv, err := clisurface.Parse("sparkwing", []string{"run", "burst", "--no-bincache", "--hash-all-files", "--priority", tc.mode})
 			if err != nil {
 				t.Fatal(err)
 			}

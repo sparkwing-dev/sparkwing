@@ -12,11 +12,11 @@ func TestParseRunFlags_Priority(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"space-separated", []string{"--sw-priority", "12"}, "12"},
-		{"equals-form", []string{"--sw-priority=12"}, "12"},
-		{"front", []string{"--sw-priority", "front"}, "front"},
-		{"back-equals-form", []string{"--sw-priority=back"}, "back"},
-		{"negative", []string{"--sw-priority", "-3"}, "-3"},
+		{"space-separated", []string{"--priority", "12"}, "12"},
+		{"equals-form", []string{"--priority=12"}, "12"},
+		{"front", []string{"--priority", "front"}, "front"},
+		{"back-equals-form", []string{"--priority=back"}, "back"},
+		{"negative", []string{"--priority", "-3"}, "-3"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -38,16 +38,16 @@ func TestParseRunFlags_Priority(t *testing.T) {
 // run would queue at the author's priority while reporting nothing.
 func TestParseRunFlags_PriorityIsNeverForwarded(t *testing.T) {
 	for _, args := range [][]string{
-		{"--sw-priority", "sideways"},
-		{"--sw-priority=sideways"},
-		{"--sw-priority"},
+		{"--priority", "sideways"},
+		{"--priority=sideways"},
+		{"--priority"},
 	} {
 		wf, pass := parseRunFlagsArgs(args)
 		if !wf.prioritySet && wf.parseErr == nil {
 			t.Errorf("%v: prioritySet = false", args)
 		}
-		if slices.Contains(pass, "--sw-priority") {
-			t.Errorf("%v: --sw-priority reached the pipeline args %v", args, pass)
+		if slices.Contains(pass, "--priority") {
+			t.Errorf("%v: --priority reached the pipeline args %v", args, pass)
 		}
 	}
 }
@@ -68,7 +68,7 @@ func TestValidatePriorityFlag(t *testing.T) {
 			t.Errorf("validatePriorityFlag(%q) = %q, want an error", in, got)
 			continue
 		}
-		for _, want := range []string{"--sw-priority", "front", "back"} {
+		for _, want := range []string{"--priority", "front", "back"} {
 			if !strings.Contains(err.Error(), want) {
 				t.Errorf("validatePriorityFlag(%q) error %q does not name %q", in, err, want)
 			}

@@ -20,7 +20,17 @@ sparkwing.Job(plan, "build", func(context.Context) error { return nil }).
     ), sparkwing.MemoTTL(7*24*time.Hour))
 ```
 
-The `sparkwing/inputs` helpers declare recipes in the plan. `Files` selects
+```ts
+plan
+  .job("build", () => undefined)
+  .memo(compose(files("**/*.ts", "package.json", "package-lock.json"), env("NODE_ENV"), constant("toolchain-v1")), {
+    ttlMs: 7 * 24 * 60 * 60_000,
+  });
+```
+
+The `sparkwing/inputs` helpers declare recipes in the plan; TypeScript imports
+the same recipes (`files`, `repoFiles`, `ignore`, `tree`, `env`, `parts`,
+`constant` and `compose`) from `@sparkwing/sdk`. `Files` selects
 tracked files, `RepoFiles` selects all tracked files with optional `Ignore`
 patterns, and `Tree` includes every regular file recursively, including untracked
 files, while skipping symlinks. Tree roots must be relative paths inside the
@@ -52,7 +62,7 @@ TypeScript provides `files`, `repoFiles`, `ignore`, `tree`, `env`, `parts`, `con
 A checkout without a remote repository identity uses a machine-local `local:`
 key. Local claims reuse memoized results and dependency caches within that
 repository and host scope. Remote-cache and publication profiles cannot read
-these records. `--sw-no-memo` executes the job body instead of reusing a memo.
+these records. `--no-memo` executes the job body instead of reusing a memo.
 
 `MemoTTL` accepts at most 30 days. Missing or corrupt cached bytes produce a miss.
 Lookup refusals fail the job. Publication requires committed success.
@@ -71,6 +81,17 @@ sparkwing.Job(plan, "deploy", func(context.Context) error { return nil }).
     })
 ```
 
+```ts
+const build = plan.job("build", () => ({ digest: "sha256:example" }));
+plan
+  .job("deploy", () => undefined)
+  .needs(build)
+  .memo(async (ctx) => memoKey("deploy", (await ctx.output(build))?.digest));
+```
+
+A TypeScript output read needs a declared edge, so the deploy job also names
+`build` in `.needs`.
+
 Choose stable key parts that distinguish different work. Each member of a group
 needs its own key when its inputs differ.
 
@@ -84,8 +105,8 @@ machine. Declare file results with
 
 ## Opting out per invocation
 
-Return `sparkwing.NoMemo, nil` from a key callback to bypass reuse for that job.
-`sparkwing run <pipeline> --sw-no-memo` bypasses memoization for the invocation.
+Return `sparkwing.NoMemo, nil` (TypeScript `noMemo`) from a key callback to bypass reuse for that job.
+`sparkwing run <pipeline> --no-memo` bypasses memoization for the invocation.
 Dependency directory caches remain a separate declaration.
 
 ## Dependency caches
@@ -105,6 +126,40 @@ sparkwing.Job(plan, "web-test", func(context.Context) error { return nil }).
 sparkwing.Job(plan, "gems", func(context.Context) error { return nil }).
     Cache(sparkwing.Dir("vendor/bundle", sparkwing.KeyFromFile("Gemfile.lock")))
 ```
+
+```ts
+plan
+  .job("test", async (ctx) => {
+    await ctx.exec(["go", "test", "./..."]).run();
+  })
+  .cache(goModules());
+
+plan.job("web-test", () => undefined).cache(npm());
+
+plan.job("gems", () => undefined).cache(dir("vendor/bundle", "Gemfile.lock"));
+```
+
+### Did the cache work?
+
+Each declared cache writes one line to the job log, and the same text as a job
+annotation, when the job's last attempt finishes. `runs status --run <id> -o json`
+lists them under `jobs[].annotations`. A line names the cache, adds its directory
+when that is a `Dir()` path inside the checkout, and masks the job's secrets. It
+never shows a resolved host directory or a path outside the checkout.
+
+| Line | Meaning |
+|---|---|
+| `hit (key K); restored` | A saved archive for this lockfile restored the directory. |
+| `miss (key K); saved N` | Nothing was saved for this lockfile yet; the successful job saved it. |
+| `miss (key K); nothing to save, ...` | The directory was still empty after the job, so there is nothing for the next run. Check the path. |
+| `miss (key K); not saved because the job did not succeed` | Only successful attempts save. |
+| `present on this host (key K); not restored or saved` | The directory already had content, so the host neither restored nor saved it. `Npm()` and `GoModules()` usually report this on a developer machine, whose `~/.npm` and `GOMODCACHE` persist between runs. |
+| `no key file (F) in the checkout; running uncached` | None of the files the cache keys on exists, so the job ran without the cache. |
+| `restore failed (key K); ran cold; ...` | A warning: the saved archive could not be restored, so the job ran cold. The rest of the line says whether it saved. |
+| `save failed` / `preparation failed` | A warning; the next run starts cold, or this one ran uncached. |
+
+`K` is the first 12 characters of the cache key, which changes when the lockfile
+changes.
 
 ### Directory helpers
 
@@ -235,7 +290,7 @@ compiled binary, instead of each building their own.
 **Files Go compiles or embeds always contribute to the key**, including files
 ignored by repository or global Git rules. Sparkwing asks Go for the dependency
 file list and checks it twice for changes. The broader module-tree hash excludes
-ignored files unless `sparkwing run --sw-hash-all-files` is set. That flag also
+ignored files unless `sparkwing run --hash-all-files` is set. That flag also
 hashes ignored files outside the selected build inputs.
 Go file overlays contribute their map and replacement contents, including files
 that exist only in the overlay, plus the module and workspace metadata Go reads. Automatic `default.pgo` profiles and profiles
@@ -257,7 +312,7 @@ Builds also pass `-ldflags "-s -w"`, which drops the symbol table and
 DWARF and takes roughly 30% off the binary and a third off its link
 time. Panic tracebacks and `runtime/debug.ReadBuildInfo` survive. A
 debugger still attaches, without variable names or line numbers, and a
-core dump cannot be symbolised. Pass `sparkwing run --sw-no-bincache` to
+core dump cannot be symbolised. Pass `sparkwing run --no-bincache` to
 run the pipeline from a temporary build with debug symbols when you need
 those.
 
@@ -320,6 +375,6 @@ Save `cache explain` output before changing build inputs, then compare it
 with the next explanation to see which digests changed.
 
 To skip the binary cache entirely for one invocation, pass
-`--sw-no-bincache`; sparkwing builds a temporary binary with debug
+`--no-bincache`; sparkwing builds a temporary binary with debug
 symbols, then runs it with your original environment. The Go toolchain floor
 adjustment applies only while building.
