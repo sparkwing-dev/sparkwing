@@ -7,7 +7,7 @@ import (
 )
 
 func TestDebugNamespaceBelongsOnlyToAttach(t *testing.T) {
-	for _, verb := range []string{"attach", "env", "resume"} {
+	for _, verb := range []string{"attach", "show", "resume"} {
 		inv, err := clisurface.Parse("sparkwing", []string{"debug", verb, "--run=r1", "--job=n1", "--namespace=ci"})
 		if verb == "attach" {
 			if err != nil || inv.Value("namespace") != "ci" {

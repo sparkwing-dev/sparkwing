@@ -257,7 +257,7 @@ func TestSourceAPIChecksUseWorkspaceWhenCallerDisablesIt(t *testing.T) {
 	t.Setenv("GOWORK", "off")
 	for name, check := range map[string]func(context.Context) error{
 		"api-spec":       checkAPISpec,
-		"api-snapshot":   checkAPISnapshot,
+		"api-snapshot":   checkTrackedAPISnapshot,
 		"release-source": preReleaseShell("go list -deps ./cmd/apidiff > /dev/null"),
 	} {
 		t.Run(name, func(t *testing.T) {

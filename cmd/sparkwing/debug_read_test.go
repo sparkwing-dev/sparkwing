@@ -55,11 +55,11 @@ func debugInvocation(t *testing.T, verb string, extra ...string) clisurface.Invo
 	return inv
 }
 
-func TestDebugEnvReadsSharedProjectionInEveryFormat(t *testing.T) {
+func TestDebugShowReadsSharedProjectionInEveryFormat(t *testing.T) {
 	for _, format := range []string{"json", "plain", "pretty"} {
 		t.Run(format, func(t *testing.T) {
 			fake := debugReaderFixture()
-			inv := debugInvocation(t, "env")
+			inv := debugInvocation(t, "show")
 			inv.Flags["output"] = []string{format}
 			var out bytes.Buffer
 			if err := observeDebug(t.Context(), inv, fake, &out, nil); err != nil {
@@ -84,7 +84,7 @@ func TestDebugEnvReadsSharedProjectionInEveryFormat(t *testing.T) {
 	}
 }
 
-func TestDebugEnvDoesNotHidePauseReadFailures(t *testing.T) {
+func TestDebugShowDoesNotHidePauseReadFailures(t *testing.T) {
 	denial := &apierr.Error{Code: hosterr.Forbidden, Message: "refused"}
 	for _, change := range []func(*debugReaderFake){
 		func(f *debugReaderFake) { f.jobErr = denial },
@@ -96,14 +96,14 @@ func TestDebugEnvDoesNotHidePauseReadFailures(t *testing.T) {
 		fake := debugReaderFixture()
 		change(fake)
 		var out bytes.Buffer
-		if err := observeDebug(t.Context(), debugInvocation(t, "env"), fake, &out, nil); err == nil || out.Len() != 0 {
+		if err := observeDebug(t.Context(), debugInvocation(t, "show"), fake, &out, nil); err == nil || out.Len() != 0 {
 			t.Fatalf("read failure became an observation: %v %s", err, out.String())
 		}
 	}
 	fake := debugReaderFixture()
 	fake.pause.Pause = nil
 	var out bytes.Buffer
-	if err := observeDebug(t.Context(), debugInvocation(t, "env"), fake, &out, nil); err != nil || !strings.Contains(out.String(), `"pause":null`) {
+	if err := observeDebug(t.Context(), debugInvocation(t, "show"), fake, &out, nil); err != nil || !strings.Contains(out.String(), `"pause":null`) {
 		t.Fatalf("explicit absence: %v %s", err, out.String())
 	}
 }
@@ -181,7 +181,7 @@ func TestDebugAttachRunningCloudJobExplainsInspectionAlternative(t *testing.T) {
 		return nil
 	})
 	var refusal *apierr.Error
-	if !errors.As(err, &refusal) || refusal.Code != hosterr.CapabilityUnsupported || !strings.Contains(refusal.Message, "Cloud jobs do not support shell attachment") || !strings.Contains(refusal.Hint, "sparkwing debug env") || !strings.Contains(refusal.Hint, "sparkwing runs logs") {
+	if !errors.As(err, &refusal) || refusal.Code != hosterr.CapabilityUnsupported || !strings.Contains(refusal.Message, "Cloud jobs do not support shell attachment") || !strings.Contains(refusal.Hint, "sparkwing debug show") || !strings.Contains(refusal.Hint, "sparkwing runs logs") {
 		t.Fatalf("running Cloud refusal lacks supported inspection alternatives: %v", err)
 	}
 	if out.Len() != 0 || len(fake.calls) != 1 {
@@ -195,7 +195,7 @@ func (w debugBrokenWriter) Write([]byte) (int, error) { return 0, w.err }
 
 func TestDebugReadCancellationAndOutputFailures(t *testing.T) {
 	failure := errors.New("writer stopped")
-	for _, verb := range []string{"env", "attach"} {
+	for _, verb := range []string{"show", "attach"} {
 		fake := debugReaderFixture()
 		inv := debugInvocation(t, verb)
 		err := observeDebug(t.Context(), inv, fake, debugBrokenWriter{failure}, func(context.Context, controllerwire.DebugExecution, io.Writer) error {

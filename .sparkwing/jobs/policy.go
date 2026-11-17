@@ -2,7 +2,11 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -50,13 +54,13 @@ var policySteps = []policyStep{
 	{"tracked-binaries", checkTrackedBinaries},
 	{"docs-mirror", checkDocsMirror},
 	{"docs-sidebar", checkDocsSidebar},
-	{"changelog-links", checkChangelogLinks},
-	{"comments", checkComments},
-	{"test-sleeps", checkTestSleeps},
+	{"changelog-links", checkTrackedChangelogLinks},
+	{"comments", trackedPolicyChecker("commentcheck", "Go file", existingGoFiles)},
+	{"test-sleeps", trackedPolicyChecker("sleepcheck", "test file", existingGoTestFiles)},
 	{"home-resolution", checkHomeResolution},
-	{"changelog", checkChangelogRequired},
+	{"changelog", preReleaseShell("bash bin/check-changelog.sh --tracked")},
 	{"api-spec", checkAPISpec},
-	{"api-snapshot", checkAPISnapshot},
+	{"api-snapshot", checkTrackedAPISnapshot},
 	{"cli-docs", checkCLIDocs},
 	{"markdownlint", runMarkdownlint},
 	{"config-reference", preReleaseShell("bash bin/gen-config-docs.sh --check")},
@@ -71,8 +75,80 @@ func checkCLIDocs(ctx context.Context) error {
 }
 
 func checkDocsSidebar(ctx context.Context) error {
-	if result, err := sparkwing.Bash(ctx, "go run ./internal/doccheck --sidebar docs").Env("GOWORK", "auto").Run(); err != nil {
-		return fmt.Errorf("docs sidebar differs from the docs tree; add each page to docs/_sidebar.json or its excluded list:\n%s%w", result.Stdout, err)
+	return withTrackedPolicyDocs(ctx, func(root string) error {
+		if result, err := sparkwing.Bash(ctx, "go run ./internal/doccheck --sidebar "+shellQuote(filepath.Join(root, "docs"))).Env("GOWORK", "auto").Run(); err != nil {
+			return fmt.Errorf("docs sidebar differs from the docs tree; add each page to docs/_sidebar.json or its excluded list:\n%s%w", result.Stdout, err)
+		}
+		return nil
+	})
+}
+
+func checkTrackedChangelogLinks(ctx context.Context) error {
+	err := withTrackedPolicyDocs(ctx, func(root string) error { return CheckChangelogLint(ctx, root) })
+	if err != nil {
+		return fmt.Errorf("a released changelog entry may be edited to repair a link: restore the document, or repoint at a github.com/sparkwing-dev/sparkwing/blob/<commit-or-tag>/ permalink that still carries it: %w", err)
 	}
 	return nil
+}
+
+func checkTrackedAPISnapshot(ctx context.Context) error {
+	err := withTrackedPolicyFiles(ctx, []string{".apidiff", "pkg", "sparkwing", "sparkwingtest", "go.mod", "go.sum"}, func(root string) error {
+		if _, err := sparkwing.Exec(ctx, "go", "run", filepath.Join(regexCheckRoot(), "cmd/apidiff/main.go"), "generated").Dir(root).Env("GOWORK", "off").Capture(); err != nil {
+			var execErr *sparkwing.ExecError
+			if errors.As(err, &execErr) {
+				diagnostic := *execErr
+				diagnostic.Stderr = strings.ReplaceAll(execErr.Stderr, root+string(os.PathSeparator), "")
+				return fmt.Errorf("API snapshot generation failed: %w", &diagnostic)
+			}
+			return fmt.Errorf("API snapshot generation failed: %w", err)
+		}
+		_, err := sparkwing.Exec(ctx, "diff", "-r", "-u", ".apidiff", "generated").Dir(root).Run()
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("the public API surface drifted from .apidiff/; record the change in CHANGELOG.md, then run `bash bin/regen-api-snapshot.sh` and stage .apidiff/: %w", err)
+	}
+	return nil
+}
+
+func withTrackedPolicyDocs(ctx context.Context, check func(string) error) error {
+	return withTrackedPolicyFiles(ctx, []string{"docs", "CHANGELOG.md"}, check)
+}
+
+func withTrackedPolicyFiles(ctx context.Context, paths []string, check func(string) error) (resultErr error) {
+	files, err := listNames(ctx, "ls-files -z -- "+shellQuoteAll(paths))
+	if err != nil {
+		return err
+	}
+	snapshot, err := os.MkdirTemp("", "sparkwing-policy-files-*")
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, os.RemoveAll(snapshot)) }()
+	for _, file := range files {
+		data, err := os.ReadFile(filepath.Join(regexCheckRoot(), file))
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(snapshot, file)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(target, data, 0o600); err != nil {
+			return err
+		}
+	}
+	return check(snapshot)
+}
+
+func trackedPolicyChecker(tool, noun string, keep func([]string) []string) func(context.Context) error {
+	return func(ctx context.Context) error {
+		command, scope, err := scopedCheckerCommand(ctx, tool, noun, keep, true)
+		if err != nil {
+			return err
+		}
+		sparkwing.Info(ctx, "tracked source only: %s", scope)
+		_, err = sparkwing.Bash(ctx, command).Env("GOWORK", "auto").Run()
+		return err
+	}
 }

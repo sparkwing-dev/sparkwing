@@ -2410,6 +2410,7 @@ test("manages local secrets without an account", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Secrets and variables", level: 1 }),
   ).toBeVisible();
+  await expect(page.getByText(/Use `sparkwing secrets show` on this machine to read a plain variable\./)).toBeVisible();
   const maskingNote = page.getByText(
     /Secret values shorter than 4 characters cannot be masked in logs\./,
   );

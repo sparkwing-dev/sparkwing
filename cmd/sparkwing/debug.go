@@ -16,7 +16,7 @@ func runDebug(inv clisurface.Invocation) error {
 		return runDebugResume(ctx, inv, os.Stdout, resolveDebugResumer)
 	case "sparkwing debug attach":
 		return runDebugRead(context.Background(), inv)
-	case "sparkwing debug env":
+	case "sparkwing debug show":
 		return runDebugRead(context.Background(), inv)
 	default:
 		PrintHelp(cmdDebug, os.Stderr)

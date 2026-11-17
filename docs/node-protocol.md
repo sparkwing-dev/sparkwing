@@ -124,7 +124,7 @@ retain their complete descriptions. The host refuses the failed pipeline with
 its sanitized cause before planning. It withholds describe output when any
 pipeline fails because that output may contain unclassified secrets. The
 refusal and the withheld-output notice name
-`sparkwing pipeline describe --pipeline <name> --show-withheld`, which prints the
+`sparkwing pipeline show --pipeline <name> --show-withheld`, which prints the
 withheld output and errors to the CLI's stderr, masked by registered values. The
 failed pipeline's own secret defaults are unknown and print unmasked.
 

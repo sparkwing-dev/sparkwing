@@ -136,7 +136,7 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 				}
 			} else {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.PlanFailed || failure.Message != "describe failed: plan_failed (details withheld: secrets not yet known); to see the details locally, run `sparkwing pipeline describe --pipeline "+input.Run.Pipeline+" --show-withheld`" || prepared.Plan != nil {
+				if !errors.As(err, &failure) || failure.Code != apierr.PlanFailed || failure.Message != "describe failed: plan_failed (details withheld: secrets not yet known); to see the details locally, run `sparkwing pipeline show --pipeline "+input.Run.Pipeline+" --show-withheld`" || prepared.Plan != nil {
 					t.Fatalf("broken pipeline did not withhold unclassified failure details: %+v: %v", prepared, err)
 				}
 			}
@@ -161,7 +161,7 @@ func TestWithheldPlanningOutputExplainsIncompleteDiscovery(t *testing.T) {
 		want string
 	}{
 		{apierr.IsolatedHomeRequired, `1 registered pipeline failed discovery (isolated_home_required), so its secret declarations are unknown; to see this output, retry with HOME="$(mktemp -d)" SPARKWING_HOME="$(mktemp -d)" before the sparkwing command`},
-		{apierr.PlanFailed, "1 registered pipeline failed discovery (plan_failed), so its secret declarations are unknown; to see this output and its errors, run `sparkwing pipeline describe --pipeline build --show-withheld`"},
+		{apierr.PlanFailed, "1 registered pipeline failed discovery (plan_failed), so its secret declarations are unknown; to see this output and its errors, run `sparkwing pipeline show --pipeline build --show-withheld`"},
 	} {
 		t.Run(string(tc.code), func(t *testing.T) {
 			p, input, fixture, _ := sdkPlanningFixture(t)
@@ -216,7 +216,7 @@ func TestShowWithheldPrintsMaskedDiscoveryFailuresOnlyWhenRequested(t *testing.T
 		output       = "describe progress"
 		secret       = "healthy-private-default-value"
 		localSecret  = "declared-local-secret-value"
-		revealedHint = "sparkwing pipeline describe --pipeline release --show-withheld"
+		revealedHint = "sparkwing pipeline show --pipeline release --show-withheld"
 	)
 	for _, tc := range []struct {
 		selected string
@@ -269,13 +269,13 @@ func TestShowWithheldPrintsMaskedDiscoveryFailuresOnlyWhenRequested(t *testing.T
 			if !tc.show && tc.selected == "release" && !strings.Contains(strings.Join(logs, "\n"), "1 registered pipeline failed discovery (plan_failed)") {
 				t.Fatalf("failed discovery notice lost its count and class: %s", all)
 			}
-			if !tc.show && strings.Count(all, "sparkwing pipeline describe --pipeline "+tc.selected+" --show-withheld") != 1 {
+			if !tc.show && strings.Count(all, "sparkwing pipeline show --pipeline "+tc.selected+" --show-withheld") != 1 {
 				t.Fatalf("selected pipeline's withheld remedy must appear exactly once: %s", all)
 			}
 			if !tc.show && strings.Count(all, "--show-withheld") != 1 {
 				t.Fatalf("withheld remedy appears %d times, want once: %s", strings.Count(all, "--show-withheld"), all)
 			}
-			if !tc.show && !strings.Contains(all, "sparkwing pipeline describe --pipeline "+tc.selected+" --show-withheld") {
+			if !tc.show && !strings.Contains(all, "sparkwing pipeline show --pipeline "+tc.selected+" --show-withheld") {
 				t.Fatalf("withheld output does not name the command that shows it: %s", all)
 			}
 			if tc.show && strings.Contains(all, revealedHint) {

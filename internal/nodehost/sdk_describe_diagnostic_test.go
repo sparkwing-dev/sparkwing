@@ -42,7 +42,7 @@ func FuzzSDKDescribeFailureWithholdsDetailsAndNamesClass(f *testing.F) {
 		}
 		_, err := p.Prepare(t.Context(), input, fixture.input)
 		var failure *apierr.Error
-		want := "describe failed: " + string(code) + " (details withheld: secrets not yet known); to see the details locally, run `sparkwing pipeline describe --pipeline build --show-withheld`"
+		want := "describe failed: " + string(code) + " (details withheld: secrets not yet known); to see the details locally, run `sparkwing pipeline show --pipeline build --show-withheld`"
 		if !errors.As(err, &failure) || failure.Code != code || failure.Message != want || len(failure.Details) != 0 {
 			t.Fatalf("describe diagnostic = %v; want %q (%s)", err, want, code)
 		}

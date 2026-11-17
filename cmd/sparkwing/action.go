@@ -168,19 +168,19 @@ func plural(n int) string {
 	return "es"
 }
 
-func runPipelineDescribe(inv clisurface.Invocation) error {
-	return runPipelineDescribeCommand(inv, withPipelineEntry)
+func runPipelineShow(inv clisurface.Invocation) error {
+	return runPipelineShowCommand(inv, withPipelineEntry)
 }
 
-func runPipelineDescribeCommand(inv clisurface.Invocation, withEntry func(string, func(context.Context, pipelineInspection, string) error) error) error {
+func runPipelineShowCommand(inv clisurface.Invocation, withEntry func(string, func(context.Context, pipelineInspection, string) error) error) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
 	format := inv.Output(color.IsInteractiveStdout())
 	pipelineName, secretsOnly, showWithheld := inv.Value("pipeline"), inv.Bool("secrets"), inv.Bool("show-withheld")
 	if pipelineName == "" {
-		PrintHelp(cmdPipelineDescribe, os.Stderr)
-		return errors.New("describe: --pipeline is required")
+		PrintHelp(cmdPipelineShow, os.Stderr)
+		return errors.New("pipeline show: --pipeline is required")
 	}
 	name := pipelineName
 	found := Pipeline{PipelinePresentation: runspec.PipelinePresentation{Name: name}}

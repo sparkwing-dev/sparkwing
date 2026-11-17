@@ -79,7 +79,7 @@ func (g *DeclarationGate) ShowWithheld() { g.shown = true }
 // ShowWithheldCommand is the local command that prints withheld planning
 // output and errors for pipeline on the invoker's terminal.
 func ShowWithheldCommand(pipeline string) string {
-	return "sparkwing pipeline describe --pipeline " + pipeline + " --show-withheld"
+	return "sparkwing pipeline show --pipeline " + pipeline + " --show-withheld"
 }
 
 // IncompleteReason explains, from host-classified codes only, why discovery is
@@ -265,7 +265,7 @@ func (g *DeclarationGate) Error(err error) error {
 		if errors.As(err, &canonical) && slices.ContainsFunc(hosterr.Codes, func(definition hosterr.Definition) bool { return definition.Code == canonical.Code }) {
 			code = canonical.Code
 		}
-		return &apierr.Error{Code: code, Message: "pipeline discovery failed (details withheld: secrets not yet known); to see the details locally, run `sparkwing pipeline describe --pipeline NAME --show-withheld` (replace NAME with your pipeline)"}
+		return &apierr.Error{Code: code, Message: "pipeline discovery failed (details withheld: secrets not yet known); to see the details locally, run `sparkwing pipeline show --pipeline NAME --show-withheld` (replace NAME with your pipeline)"}
 	}
 	if errors.As(err, &canonical) {
 		return g.masker.Error(canonical)
@@ -303,7 +303,7 @@ func (g *DeclarationGate) Presentation() DescribePresentation {
 			pipeline.Error = g.Error(source.Error).(*apierr.Error)
 		}
 		if !g.Complete() {
-			doc.Pipelines[i] = PipelinePresentation{Args: []nodewire.ArgumentDescription{}, Error: &apierr.Error{Code: apierr.SDKError, Message: "pipeline discovery incomplete (details withheld: secrets not yet known); to see the details locally, run `sparkwing pipeline describe --pipeline NAME --show-withheld` (replace NAME with your pipeline)"}}
+			doc.Pipelines[i] = PipelinePresentation{Args: []nodewire.ArgumentDescription{}, Error: &apierr.Error{Code: apierr.SDKError, Message: "pipeline discovery incomplete (details withheld: secrets not yet known); to see the details locally, run `sparkwing pipeline show --pipeline NAME --show-withheld` (replace NAME with your pipeline)"}}
 			continue
 		}
 		pipeline.Help, pipeline.Short = g.masker.Mask(source.Help), g.masker.Mask(source.Short)

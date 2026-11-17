@@ -132,7 +132,7 @@ func executeDaemonLifecycle(ctx context.Context, inv clisurface.Invocation, serv
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	if action == "status" || !status.Running && action != "stop" || action == "restart" && !inv.Bool("force") && status.Version == services.options.Version {
+	if action == "status" || !status.Running && action != "stop" || action == "restart" && status.Installed && !inv.Bool("force") && status.Version == services.options.Version {
 		return result, nil
 	}
 	if action == "restart" && services.options.Version == "" {

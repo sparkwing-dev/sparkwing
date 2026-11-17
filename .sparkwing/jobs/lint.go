@@ -13,7 +13,7 @@ func (Lint) ShortHelp() string {
 }
 
 func (Lint) Help() string {
-	return "Fast static checks across the public sparkwing module: gofmt compliance, go vet, the CHANGELOG-required gate (bin/check-changelog.sh), the CHANGELOG-style gate enforcing CHANGELOG-STYLE.md (dedupe sub-headings + breaking-entry migration links), and the API-surface drift gate (bin/check-api-snapshot.sh). It also runs shellcheck over every tracked script (bin/check-shell.sh), the installer report (bin/install-test.sh), the public installer's release-verification causals (bin/release-install-test.sh), the shell and changelog script-portability checks (bin/check-shell-test.sh, bin/check-changelog-test.sh), the agent-trial oracle's regression test (bin/agent-trial-oracle-test.sh), and markdownlint over the markdown tree. shellcheck, markdownlint-cli2, and jq must be on PATH. See VERSIONING.md."
+	return "Fast static checks across the public sparkwing module: gofmt compliance, go vet, the CHANGELOG-required gate (bin/check-changelog.sh), the CHANGELOG-style gate enforcing CHANGELOG-STYLE.md (dedupe sub-headings + breaking-entry migration links), and the tracked API-surface drift gate. It also runs shellcheck over every tracked script (bin/check-shell.sh), the installer report (bin/install-test.sh), the public installer's release-verification causals (bin/release-install-test.sh), the shell and changelog script-portability checks (bin/check-shell-test.sh, bin/check-changelog-test.sh), the agent-trial oracle's regression test (bin/agent-trial-oracle-test.sh), and markdownlint over the markdown tree. shellcheck, markdownlint-cli2, and jq must be on PATH. See VERSIONING.md."
 }
 
 func (Lint) Examples() []sparkwing.Example {
@@ -47,12 +47,12 @@ func (p *Lint) run(ctx context.Context) error {
 	}
 	sparkwing.Info(ctx, "changelog gate portability: clean")
 
-	if err := CheckChangelogLint(ctx, sparkwing.WorkDir()); err != nil {
+	if err := checkTrackedChangelogLinks(ctx); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "changelog style gate: clean")
 
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Env("GOWORK", "auto").Run(); err != nil {
+	if err := checkTrackedAPISnapshot(ctx); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "api snapshot gate: ok")

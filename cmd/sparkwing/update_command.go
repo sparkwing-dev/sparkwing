@@ -39,7 +39,10 @@ func runUpdate(inv clisurface.Invocation) error {
 
 func resolveUpdateUnits(ctx context.Context) (wingd.ManagedUnitManager, error) {
 	services, err := resolveLocalServices(ctx)
-	return services.units, err
+	if err != nil {
+		return nil, err
+	}
+	return updateLocalUnits{ManagedUnitManager: services.units, services: services}, nil
 }
 
 func (c updateCommand) run(ctx context.Context, inv clisurface.Invocation) error {

@@ -77,7 +77,7 @@ func TestEveryHelpExampleNamesARealCommand(t *testing.T) {
 }
 
 func TestCommonCommandsHaveDescriptionsAndExamples(t *testing.T) {
-	paths := []string{"runs", "pipeline", "pipeline new", "pipeline list", "pipeline upgrade", "pipeline describe", "pipeline plan", "pipeline trigger", "secrets", "daemon", "runners", "login", "profiles", "cache", "docs", "examples"}
+	paths := []string{"runs", "pipeline", "pipeline new", "pipeline list", "pipeline upgrade", "pipeline show", "pipeline plan", "pipeline trigger", "secrets", "daemon", "runners", "login", "profiles", "cache", "docs", "examples"}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
 			command := surfaceCommand("sparkwing " + path)
