@@ -363,7 +363,9 @@ func (l *Launcher) placeWaiting(ctx context.Context) error {
 func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched bool, err error) {
 	started := time.Now()
 	prepared, stop, expires, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
-	l.recordStartupStage(ctx, award.Binding, "launcher_preparation", started, err == nil)
+	if !errors.Is(err, ErrNoDedicatedNode) && !errors.Is(err, errCapacityUnconfigured) {
+		l.recordStartupStage(ctx, award.Binding, "launcher_preparation", started, err == nil)
+	}
 	if err != nil {
 		return true, err
 	}
@@ -388,7 +390,6 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 			r, err = BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
 		}
 	}
-	l.recordStartupStage(ctx, award.Binding, "launcher_reservation", started, err == nil)
 	if errors.Is(err, errCapacityUnconfigured) {
 		l.wait(award)
 		return true, l.awaitCapacity(ctx, *award)
@@ -410,11 +411,12 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 		}
 		return true, err
 	}
+	l.recordStartupStage(ctx, award.Binding, "launcher_reservation", started, err == nil)
 	if err != nil {
 		return true, err
 	}
 	started = time.Now()
-	releaseErr := l.releaseCapacity(ctx, award.Binding)
+	capacityStarted, releaseErr := l.releaseCapacityWithStart(ctx, award.Binding)
 	l.recordStartupStage(ctx, award.Binding, "launcher_capacity_release", started, releaseErr == nil)
 	if err := releaseErr; err != nil {
 		return true, errors.Join(err, l.Boundary.Release(ctx, r.Reservation))
@@ -439,6 +441,10 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 		delete(created.Annotations, bootstrapAnnotation)
 		return true, errors.Join(err, l.teardown(ctx, created, r.Reservation))
 	}
+	if !capacityStarted.IsZero() {
+		l.recordStartupStage(ctx, award.Binding, "launcher_capacity_observed", capacityStarted, true)
+	}
+
 	r.BootstrapSecret.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: created.Name, UID: created.UID, Controller: ptr(true), BlockOwnerDeletion: ptr(true)}}
 	secret, err := l.Kube.CoreV1().Secrets(l.Config.Namespace).Create(ctx, r.BootstrapSecret, metav1.CreateOptions{})
 	if err != nil {
