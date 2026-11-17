@@ -68,21 +68,99 @@ class BudgetProbeTest(unittest.TestCase):
                         burner.wait.assert_called_once()
             return json.loads(output.read_text())
 
-    def test_runner_manager_receives_the_build_cache_before_home_changes(self):
-        script = Path(__file__).with_name('runner-budget-proof.sh').read_text()
-        setup = script[script.index("\nGOCACHE="):script.index("\nfor case_name in enforce control;")]
+    def test_both_runner_cases_reuse_the_build_cache(self):
         with tempfile.TemporaryDirectory() as directory:
-            capture = Path(directory) / 'manager-argv'
-            shell = r'''
-set -euo pipefail
-go() { printf '/build cache/%s\n' "$2"; }
-systemctl() { printf '%s\n' "$@" > "$1_CAPTURE"; }
-'''
-            shell = shell.replace('"$1_CAPTURE"', '"' + str(capture) + '"')
-            result = probe.subprocess.run(['bash', '-c', shell + setup], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(capture.read_text().splitlines(),
-                             ['--user', 'set-environment', 'GOCACHE=/build cache/GOCACHE', 'GOPATH=/build cache/GOPATH'])
+            root = Path(directory)
+            shims = root / 'shims'
+            shims.mkdir()
+            capture = root / 'capture'
+            capture.mkdir()
+            shim = shims / 'shim'
+            shim.write_text('''#!/usr/bin/python3
+import json
+import os
+from pathlib import Path
+import sys
+
+name = Path(sys.argv[0]).name
+args = sys.argv[1:]
+capture = Path(os.environ['BUDGET_TEST_CAPTURE'])
+if name == 'bash':
+    assert Path(args[0]).name == 'runner-isolation-proof.sh' and args[1:] == ['--preflight']
+    print('fixture: hosted VM preflight accepted')
+elif name == 'go':
+    if args == ['version']:
+        print('fixture Go')
+    elif args[:1] == ['env']:
+        print(os.environ[args[1]])
+    else:
+        assert 'build' in args
+        (capture / 'build.json').write_text(json.dumps({key: os.environ[key] for key in ('GOCACHE', 'GOPATH')}))
+        target = Path(args[args.index('-o') + 1])
+        target.write_bytes(Path(__file__).read_bytes())
+        target.chmod(0o700)
+elif name == 'systemctl':
+    if args[:2] == ['--user', 'set-environment']:
+        (capture / 'manager.json').write_text(json.dumps(dict(item.split('=', 1) for item in args[2:])))
+    else:
+        assert args in [['--version'], ['--user', 'show-environment']] or args[:2] == ['--user', 'show']
+        print('fixture manager')
+elif name == 'sudo':
+    assert args[:2] == ['-n', 'loginctl'] or args[:2] == ['-n', 'systemctl']
+elif name == 'loginctl':
+    assert args[0] == 'show-user'
+    print('Linger=yes')
+elif name == 'git':
+    if 'rev-parse' in args:
+        print('0123456789abcdef0123456789abcdef01234567')
+    else:
+        assert any(verb in args for verb in ('init', 'add', 'commit'))
+elif name == 'sparkwing':
+    if args[:1] == ['run']:
+        case = Path(os.environ['SPARKWING_HOME']).parent.name
+        manager = json.loads((capture / 'manager.json').read_text())
+        (capture / (case + '.json')).write_text(json.dumps(dict(
+            environment={key: os.environ[key] for key in ('HOME', 'GOCACHE', 'GOPATH')}, manager=manager)))
+        cores = 2 if case == 'enforce' else 4
+        group = '/sparkwing-runner-proof.service'
+        result = dict(unit='sparkwing-runner-proof.service', cgroup=group,
+                      burners=list(range(6)), burner_cgroups={str(pid): group for pid in range(6)},
+                      cores=cores, seconds=20, nice=10 if case == 'enforce' else 0,
+                      cpu_max='200000 100000' if case == 'enforce' else 'max',
+                      before=dict(usage_usec=1000), after=dict(usage_usec=1000 + cores * 20e6))
+        (Path(os.environ['BUDGET_TEST_EVIDENCE']) / (case + '.json')).write_text(json.dumps(result))
+    else:
+        assert args == ['queue', 'list', '-o', 'json'] or args == ['daemon', 'stop']
+else:
+    raise AssertionError('unexpected shim: ' + name)
+''')
+            shim.chmod(0o700)
+            for name in ('bash', 'go', 'systemctl', 'sudo', 'loginctl', 'git'):
+                (shims / name).symlink_to(shim)
+            expected = {'GOCACHE': str(root / 'build cache'), 'GOPATH': str(root / 'go path')}
+            evidence = root / 'evidence'
+            environment = dict(probe.os.environ, **expected,
+                               PATH=str(shims) + probe.os.pathsep + probe.os.environ['PATH'],
+                               HOME=str(root / 'home'), SPARKWING_HOME=str(root / 'state'),
+                               XDG_CONFIG_HOME=str(root / 'config'), XDG_DATA_HOME=str(root / 'data'),
+                               XDG_CACHE_HOME=str(root / 'cache'), XDG_STATE_HOME=str(root / 'state'),
+                               XDG_RUNTIME_DIR=str(root / 'runtime'),
+                               DBUS_SESSION_BUS_ADDRESS='unix:path=' + str(root / 'no-bus'),
+                               RUNNER_TEMP=str(root / 'runner temp'),
+                               BUDGET_TEST_CAPTURE=str(capture), BUDGET_TEST_EVIDENCE=str(evidence),
+                               GITHUB_STEP_SUMMARY=str(root / 'summary'))
+            script = Path(__file__).with_name('runner-budget-proof.sh')
+            result = probe.subprocess.run(['/bin/bash', str(script), str(evidence)],
+                                          env=environment, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('RESULT: PASS', (evidence / 'verdict.txt').read_text())
+            self.assertEqual(json.loads((capture / 'build.json').read_text()), expected)
+            for case in ('enforce', 'control'):
+                with self.subTest(case=case):
+                    received = json.loads((capture / (case + '.json')).read_text())
+                    self.assertEqual(received['manager'], expected)
+                    self.assertNotEqual(received['environment'].pop('HOME'), environment['HOME'])
+                    self.assertEqual(received['environment'], expected)
 
     def test_each_burner_must_share_the_measured_cgroup(self):
         for pid in range(6):
