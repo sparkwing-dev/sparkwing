@@ -114,6 +114,16 @@ func checkMigrationGuide(ctx context.Context, repoDir, version string) error {
 	return nil
 }
 
+// safety: the cut writes the migration index row after release-cut-checks
+// judged the docs, so the grammar test reruns on the tree the tag will carry.
+func checkReleaseDocsGrammar(ctx context.Context, repoDir string) error {
+	if _, err := sparkwing.Bash(ctx, "go test ./internal/doccheck -run '^TestRepositoryCLIExamplesUseCurrentGrammar$' -count=1").
+		Dir(repoDir).Env("GOWORK", "auto").Run(); err != nil {
+		return fmt.Errorf("the generated migration notes invoke a command outside the current CLI grammar; fix the guide or its (Breaking) entries and rerun the cut: %w", err)
+	}
+	return nil
+}
+
 func requireVerifiableVersion(version string) error {
 	if version == "" {
 		return fmt.Errorf("release-verify: --version is required (e.g. --version v0.50.4)")

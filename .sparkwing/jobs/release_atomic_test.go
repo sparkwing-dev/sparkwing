@@ -15,7 +15,13 @@ import (
 func atomicReleaseRepo(t *testing.T, body string) string {
 	t.Helper()
 	repo := migrationRepo(t, body, twoBreakingGuide, migrationIndexFixture)
-	for _, dir := range []string{"pkg/scaffold", ".apidiff", ".sparkwing", kubernetesE2EPipelineModuleRel, "bin"} {
+	seedAtomicRelease(t, repo)
+	return repo
+}
+
+func seedAtomicRelease(t *testing.T, repo string) {
+	t.Helper()
+	for _, dir := range []string{"pkg/scaffold", ".apidiff", ".sparkwing", kubernetesE2EPipelineModuleRel, "bin", "internal/doccheck"} {
 		if err := os.MkdirAll(filepath.Join(repo, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -33,6 +39,7 @@ func atomicReleaseRepo(t *testing.T, body string) string {
 		writeFile(t, filepath.Join(repo, module, "main.go"), "package main\nimport _ \""+sdkModulePath+"\"\nfunc main() {}\n")
 	}
 	writeFile(t, filepath.Join(repo, "bin/regen-api-snapshot.sh"), "mkdir -p \"$1\"\ncp pkg/scaffold/version.go \"$1/pkg_scaffold.txt\"\n")
+	writeFile(t, filepath.Join(repo, "internal/doccheck/cliverbs_test.go"), fixtureDocsGrammarTest)
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "config", "user.name", "Test")
 	gitRun(t, repo, "config", "user.email", "test@example.invalid")
@@ -40,7 +47,47 @@ func atomicReleaseRepo(t *testing.T, body string) string {
 	gitRun(t, repo, "config", "core.hooksPath", "/dev/null")
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "seed")
-	return repo
+}
+
+// fixtureDocsGrammarTest stands in for the repository's grammar test with the
+// rule a generated index row broke: pipeline new needs --pipeline.
+const fixtureDocsGrammarTest = `package doccheck
+
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+func TestRepositoryCLIExamplesUseCurrentGrammar(t *testing.T) {
+	index, err := os.ReadFile("../../docs/migrations/README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(string(index), "\n") {
+		if strings.Contains(line, "sparkwing pipeline new") && !strings.Contains(line, "--pipeline") {
+			t.Fatalf("outside the grammar: %s", line)
+		}
+	}
+}
+`
+
+func TestReleasePreparationRefusesAGeneratedIndexRowOutsideTheGrammar(t *testing.T) {
+	guide := strings.Replace(twoBreakingGuide, "Two breaking changes, both mechanical.", "Scaffold with `sparkwing pipeline new --template typescript` before upgrading.", 1)
+	repo := migrationRepo(t, twoBreakingChangelog, guide, migrationIndexFixture)
+	seedAtomicRelease(t, repo)
+	before := gitRun(t, repo, "rev-parse", "HEAD")
+	ctx := newTestHost(t, sparkwingtest.Options{Outputs: map[string]json.RawMessage{"version": json.RawMessage(`"v0.9.0"`)}}).Context(t.Context())
+	err := (&prepareChangelogJob{RepoDir: repo, Version: sparkwing.Ref[string]{JobID: "version"}}).run(ctx)
+	if err == nil || !strings.Contains(err.Error(), "docs-grammar") || !strings.Contains(err.Error(), "--template typescript") {
+		t.Fatalf("preparation accepted a generated row outside the grammar: %v", err)
+	}
+	if got := gitRun(t, repo, "rev-parse", "HEAD"); got != before {
+		t.Fatal("refused preparation committed a change")
+	}
+	if staged := gitRun(t, repo, "diff", "--cached", "--name-only"); strings.TrimSpace(staged) != "" {
+		t.Fatalf("refused preparation staged %s", staged)
+	}
 }
 
 func TestReleaseGateFailureAfterPreparationLeavesHEADUnchanged(t *testing.T) {

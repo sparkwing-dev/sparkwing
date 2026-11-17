@@ -411,6 +411,11 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	if err := checkMigrationGuide(ctx, j.RepoDir, version); err != nil {
 		return fmt.Errorf("release migration-guide: %w", err)
 	}
+	if roll.needed {
+		if err := checkReleaseDocsGrammar(ctx, j.RepoDir); err != nil {
+			return fmt.Errorf("release docs-grammar: %w", err)
+		}
+	}
 	consumed, err := consumeReleaseFragments(j.RepoDir)
 	if err != nil {
 		return err
