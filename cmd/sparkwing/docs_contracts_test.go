@@ -1202,7 +1202,7 @@ func TestEnginePinDocsKeepControllerOwnership(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, contract := range []string{"invoking CLI starts the", "before", "pinned engine", "store", "Standalone CI"} {
+		for _, contract := range []string{"invoking CLI starts the", "before", "pinned engine", "store", "Standalone CI", "--route burst", "local controller before engine"} {
 			if !strings.Contains(body, contract) {
 				t.Errorf("%s omits controller handoff contract %q", topic, contract)
 			}

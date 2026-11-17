@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -76,6 +78,14 @@ func TestPinnedEngineColdStartKeepsNewerStoreController(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", home)
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(home, "secrets.key"))
 	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path="+filepath.Join(home, "no-bus"))
+	cloud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"code":"unavailable","message":"Cloud is unavailable"}}`))
+	}))
+	t.Cleanup(cloud.Close)
+	if err := os.WriteFile(filepath.Join(home, "missing.yaml"), []byte("profiles:\n  offline:\n    controller: {url: "+cloud.URL+", token: swu_test}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	state, err := store.Open(filepath.Join(home, "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -97,30 +107,52 @@ func main(){sw.Register("hello",func()sw.Pipeline[sw.NoInputs]{return hello{}});
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-qm", "pipeline fixture")
 	t.Chdir(repo)
-	inv, err := clisurface.Parse("sparkwing", []string{"run", "hello", "-o", "plain"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	completed := errors.New("engine process completed")
-	err = dispatchRunWithEngine(inv, func(_ string, beforeExec func() error) error {
-		if err := beforeExec(); err != nil {
-			return err
-		}
-		command := procenv.ControlCommandContext(t.Context(), os.Environ(), engine, "run", "hello", "-o", "plain")
-		command.Dir = repo
-		output, err := command.CombinedOutput()
-		if err != nil {
-			t.Fatalf("schema %d engine failed against schema %d store: %v\n%s", oldSchema, store.ExpectedSchemaVersion(), err, output)
-		}
-		status, err := wingdclient.QueryLocalController(t.Context(), home)
-		if err != nil || !status.Running {
-			t.Fatalf("installed controller did not remain ready: %+v %v", status, err)
-		}
-		t.Logf("older engine run succeeded: %s", output)
-		return completed
-	})
-	if !errors.Is(err, completed) {
-		t.Fatal(err)
+	for _, route := range []string{"local", "burst"} {
+		t.Run(route, func(t *testing.T) {
+			offlineStopDaemon(t, home)
+			if err := wingdclient.Stop(t.Context(), wingdclient.Options{Home: home, RetireRunner: true}); err != nil && !errors.Is(err, wingdclient.ErrNoDaemon) {
+				t.Fatal(err)
+			}
+			if _, err := wingdclient.QueryLocalController(t.Context(), home); !errors.Is(err, wingdclient.ErrNoDaemon) {
+				t.Fatalf("controller was not cold: %v", err)
+			}
+			args := []string{"run", "hello", "--route", route, "-o", "plain"}
+			if route == "burst" {
+				args = append(args, "--profile", "offline")
+			}
+			inv, err := clisurface.Parse("sparkwing", args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			completed := errors.New("engine process completed")
+			err = dispatchRunWithEngine(inv, func(_ string, beforeExec func() error) error {
+				if err := beforeExec(); err != nil {
+					return err
+				}
+				started, startErr := wingdclient.QueryLocalController(t.Context(), home)
+				if startErr != nil || !started.Running || started.PID <= 0 {
+					t.Fatalf("invoking controller was not ready before handoff: %+v %v", started, startErr)
+				}
+				command := procenv.ControlCommandContext(t.Context(), os.Environ(), engine, args...)
+				command.Dir = repo
+				output, err := command.CombinedOutput()
+				if err != nil {
+					t.Fatalf("schema %d engine failed against schema %d store: %v\n%s", oldSchema, store.ExpectedSchemaVersion(), err, output)
+				}
+				if route == "burst" && !strings.Contains(string(output), "Cloud controller is unreachable; running locally.") {
+					t.Fatalf("burst did not exercise local fallback: %s", output)
+				}
+				status, err := wingdclient.QueryLocalController(t.Context(), home)
+				if err != nil || !status.Running {
+					t.Fatalf("installed controller did not remain ready: %+v %v", status, err)
+				}
+				t.Logf("older engine run succeeded: %s", output)
+				return completed
+			})
+			if !errors.Is(err, completed) {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -157,6 +189,7 @@ func TestEngineHandoffRefusesNewerStoreBeforeDelegation(t *testing.T) {
 		shared bool
 	}{
 		{"local", nil, true},
+		{"burst", []string{"--route", "burst", "--profile", "prod"}, true},
 		{"standalone", []string{"--allow-unadmitted"}, false},
 		{"cloud", []string{"--route", "cloud", "--profile", "prod"}, false},
 	} {
@@ -175,6 +208,11 @@ func TestEngineHandoffRefusesNewerStoreBeforeDelegation(t *testing.T) {
 			if tc.shared {
 				if err == nil || !strings.Contains(err.Error(), "newer than this binary") {
 					t.Fatalf("unsupported store reached engine: %v", err)
+				}
+				message := err.Error()
+				upgrade, backup := strings.Index(message, "upgrade the installed CLI (`sparkwing update`)"), strings.Index(message, "backup restore loses newer runs")
+				if upgrade < 0 || backup < upgrade {
+					t.Fatalf("refusal does not lead with the upgrade remedy before data-loss advice: %s", message)
 				}
 			} else if !errors.Is(err, completed) {
 				t.Fatalf("isolated placement opened shared store: %v", err)

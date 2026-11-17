@@ -8,6 +8,9 @@ On a cold shared local start, the invoking CLI starts the controller before
 handing the pipeline to its pinned engine. This keeps store ownership with the
 installed CLI across SDK pins and daemon stops. The installed CLI must support
 the store's schema; an incompatible CLI refuses before handing off the run.
+A `--route burst` run starts the invoking CLI's local controller before engine
+handoff even when Cloud accepts the run, because it may fall back to local
+execution if Cloud is unreachable.
 Standalone CI keeps its controller in process under the selected engine.
 
 Intake and hosts derive plan placement from the sealed request. Local runs,

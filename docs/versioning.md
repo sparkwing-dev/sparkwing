@@ -102,6 +102,9 @@ and must support its schema. An older pipeline pin therefore keeps its engine
 while using the installed CLI's controller after an upgrade or `daemon stop`.
 A CLI that cannot open the store refuses before delegation, even when the pin
 selects a newer engine. Upgrade the installed CLI to match the store.
+A `--route burst` run starts the invoking CLI's local controller before engine
+handoff even when Cloud accepts the run, because it may fall back to local
+execution if Cloud is unreachable.
 Standalone CI uses its selected engine's in-process controller and a private home.
 
 Engines come from the official GitHub Releases assets. Verification uses the

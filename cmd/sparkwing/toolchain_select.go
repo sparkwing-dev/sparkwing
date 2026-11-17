@@ -28,6 +28,13 @@ var (
 
 var (
 	readEnginePin    = engine.ReadPin
+	resolveEnginePin = func(ctx context.Context, pin engineid.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
+		resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, LocalOnly: true})
+		if err != nil {
+			return engine.Resolved{}, err
+		}
+		return resolver.Resolve(ctx, pin, target)
+	}
 	enginePinVersion = func(pin engineid.Pin) (string, error) {
 		return engine.CachedEngineVersion(context.Background(), pin)
 	}
@@ -68,13 +75,7 @@ func switchToolchain(dir string, beforeExec func() error) error {
 			}
 			return replayToolchain(binary, args, environment)
 		}, diagnostics: os.Stderr,
-		resolve: func(ctx context.Context, pin engineid.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
-			resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, LocalOnly: true})
-			if err != nil {
-				return engine.Resolved{}, err
-			}
-			return resolver.Resolve(ctx, pin, target)
-		},
+		resolve: resolveEnginePin,
 	}
 	return command.run(ctx, dir, sdk, os.Getenv(toolchainModeEnv), toolchainArgs(), os.Environ())
 }

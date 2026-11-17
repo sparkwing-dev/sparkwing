@@ -205,7 +205,7 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 		if err := errors.Join(code.Close(), selection.execution.Close()); err != nil {
 			return err
 		}
-		if flags.allowUnadmitted || route.Route != nil && *route.Route != "local" {
+		if flags.allowUnadmitted || route.Route != nil && *route.Route != "local" && flags.route != "burst" {
 			return nil
 		}
 		// bug: the pipeline engine may predate the shared store's schema.
