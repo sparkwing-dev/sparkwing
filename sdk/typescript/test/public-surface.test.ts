@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 import {
   git, docker, services, definePipeline, Git, gitFromTree, InputError, VerifyError, StepError, NoProjectError, workDir,
   Plan, Job, Step, ConcurrencyGroup, startup, constant, repoFiles, ignore, refTo, refToLastRun,
@@ -24,16 +25,17 @@ import { fakeContext } from "./helper-context.ts";
 test("public gitFromTree preserves host facts and reports helper errors", async () => {
   const { ctx } = fakeContext(() => { throw new Error("SDK spawned a command"); });
   const calls: string[] = [];
+  const directory = resolve("/repo");
   const facts: GitInfo = { repo: "owner/project", commit: "a".repeat(40), branch: "feature", defaultBranch: "main", repoURL: "https://github.com/owner/project.git" };
   const values: Record<string, string> = { "git.CurrentSHA": facts.commit, "git.CurrentBranch": facts.branch, "git.DefaultBranch": "main", "git.RemoteOriginURL": facts.repoURL! };
   registerHelpers(ctx, { async helper(operation: string, args: readonly unknown[]) {
-    assert.deepEqual(args, ["/repo"]);
+    assert.deepEqual(args, [directory]);
     calls.push(operation);
     return values[operation];
   } } as unknown as HostServices);
   const git = await gitFromTree(ctx, "/repo");
   assert.ok(git instanceof Git);
-  assert.equal(git.workDir(), "/repo");
+  assert.equal(git.workDir(), directory);
   assert.equal(git.repo, facts.repo);
   assert.equal(git.commit, facts.commit);
   assert.equal(git.branch, facts.branch);
