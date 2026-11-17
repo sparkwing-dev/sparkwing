@@ -69,6 +69,39 @@ func TestLauncherCoalescesPodWatchReplay(t *testing.T) {
 	}
 }
 
+func TestLauncherReconnectsImmediatelyAfterCleanWatchTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, _, control := fixture()
+		control.award = nil
+		l.Poll = 5 * time.Second
+		first, second := watch.NewRaceFreeFake(), watch.NewRaceFreeFake()
+		var watches atomic.Int32
+		kube.PrependWatchReactor("pods", func(ktesting.Action) (bool, watch.Interface, error) {
+			if watches.Add(1) == 1 {
+				return true, first, nil
+			}
+			return true, second, nil
+		})
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- l.Run(ctx) }()
+		defer func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+		}()
+		synctest.Wait()
+		time.Sleep(podWatchTimeout)
+		synctest.Wait()
+		first.Stop()
+		synctest.Wait()
+		if got := watches.Load(); got != 2 {
+			t.Fatalf("watches after clean timeout=%d, want immediate reconnect", got)
+		}
+	})
+}
+
 type watchLogBuffer struct {
 	mu   sync.Mutex
 	text strings.Builder

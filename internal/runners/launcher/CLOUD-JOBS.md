@@ -427,8 +427,10 @@ and defaults to five seconds. Cloud launcher claims wait for the controller
 commit that makes work claimable. Only one claim waits at a time, while
 reconciliation, renewal and teardown continue. A delivered award without poll advice starts another
 claim after placement, and a held empty response starts another claim at once.
-Up to eight ready awards launch between safety passes without an intervening
-full reconciliation. Each launch still revalidates its own preparation and
+Up to eight ready awards launch or request fresh capacity between safety passes
+without an intervening full reconciliation. A successful capacity request keeps
+the burst moving while its award waits for a node. Provisioning failures retain
+the claim cooldown. Each launch still revalidates its own preparation and
 activation. After eight awards, the next claim waits for the configured poll.
 Claim responses cannot postpone the safety reconciliation deadline.
 A controller without held-claim support keeps the polling fallback.
@@ -440,8 +442,9 @@ Each connection first lists at most one matching Pod to obtain the collection's
 resource version, then starts the watch from that version. A full safety sample
 follows the connection, and later changes remain in the watch. This avoids an
 initial replay of every existing Pod, including on unbuffered watch streams.
-Queued Pod events still share one reconciliation pass. The safety poll recovers missed events. A failed or closed
-watch reconnects no sooner than the next poll. A failure streak warns once with
+Queued Pod events still share one reconciliation pass. The safety poll recovers
+missed events. A clean watch timeout reconnects immediately. A failed watch or
+an early close reconnects no sooner than the next poll. A failure streak warns once with
 the namespace, resource and verb. A forbidden watch names the missing permission.
 A healthy event or a full poll interval with a live watch resets the streak. Held same-run successors also retain the
 one-second teardown check and its 30-second bound.
