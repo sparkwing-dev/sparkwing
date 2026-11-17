@@ -101,6 +101,7 @@ type Store struct {
 	csrfKeyMu          sync.Mutex
 	csrfKey            []byte
 	csrfCipher         SessionKeyCipher
+	auditDigests       OIDCAuditDigester
 	githubCheckMu      sync.Mutex
 	commits            commitSignal
 }
@@ -1334,7 +1335,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: fresh stores get this baseline whole; an older store upgrades only through schemaUpgrades.
-const expectedSchemaVersion = 39
+const expectedSchemaVersion = 40
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

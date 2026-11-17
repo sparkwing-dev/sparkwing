@@ -486,3 +486,17 @@ sparkwing: store schema version 39 baseline digest "<recorded-digest>" differs f
 sparkwing: store schema version 39 baseline digest "<missing>" differs from this binary's "<binary-digest>"; back up the store and use a binary matching it; this build cannot upgrade it; preserve secrets, configured identities and automation before any reset, and review billing records separately; to start fresh, point the server at an empty database and start again
 ```
 <!-- END GENERATED SCHEMA ERRORS -->
+
+### OIDC audit privacy after restore
+
+Restore schema-39-or-older databases with a schema-40-or-newer controller and the
+external secrets keyring. The controller scrubs historical raw OIDC audience and
+subject fields before serving. A completed schema-40 backup already holds keyed
+digests. Preserve retired external keys separately if candidate matching must
+remain possible for its audit horizon. Key rotation does not rewrite audit rows.
+
+The schema upgrade's SQLite `.bak` copy predates the scrub and contains raw
+values. WAL, PostgreSQL dead tuples, older snapshots and replicas may also retain
+raw bytes. Retire these copies under the deployment's retention policy. Logical
+scrubbing does not promise physical erasure of every storage copy. See
+[audit investigation](oidc.md#audit-investigation) for the matching and key-access limits.

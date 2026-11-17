@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -24,6 +25,7 @@ type Policies struct {
 	RunEnvironment SessionKeyCipher
 	LocalSecrets   SessionKeyCipher
 	ResultBlobs    BlobManifestReader
+	AuditDigests   OIDCAuditDigester
 }
 
 // WithPolicies assembles dependencies that need the store being opened. The
@@ -33,6 +35,9 @@ func WithPolicies(factory func(*Store) (Policies, error)) Option {
 }
 
 func (s *Store) configurePolicies(policies Policies) {
+	if policies.AuditDigests != nil {
+		s.auditDigests = policies.AuditDigests
+	}
 	if policies.Intake != nil {
 		s.intakePolicy = policies.Intake
 	}
@@ -81,6 +86,9 @@ func (s *Store) configurePolicyOptions(opts []Option) error {
 			}
 			s.configurePolicies(policies)
 		}
+	}
+	if s.auditDigests != nil {
+		return s.reconcileOIDCAudit(context.Background())
 	}
 	return nil
 }

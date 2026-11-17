@@ -139,7 +139,7 @@ func Schema38NeutralForTest(t testing.TB) string {
 // DropRunEventSchemaForTest returns a store to the schema 38 tables.
 func DropRunEventSchemaForTest(t testing.TB, st *Store) {
 	t.Helper()
-	for _, table := range []string{"run_event_deliveries", "run_event_subscriptions"} {
+	for _, table := range []string{"audit_privacy_migrations", "run_event_deliveries", "run_event_subscriptions"} {
 		if _, err := st.DB().ExecContext(t.Context(), `DROP TABLE `+table); err != nil {
 			t.Fatal(err)
 		}
@@ -169,4 +169,40 @@ func PrepareSchema36ForTest(t testing.TB, st *Store) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// ExerciseOIDCScrubGuardForTest checks the temporary guard inside a rolled-back migration transaction.
+func ExerciseOIDCScrubGuardForTest(t testing.TB, s *Store, check func(func(string, ...any) error)) {
+	t.Helper()
+	tx, err := s.beginTx(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rollbackOrLog(tx)
+	if _, err := tx.execContext(context.Background(), `UPDATE audit_privacy_migrations SET completed=0 WHERE version=1`); err != nil {
+		t.Fatal(err)
+	}
+	keyID, _, err := s.oidcAuditDigest("", "audience", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.prepareOIDCScrub(context.Background(), tx, keyID); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceAuditUpdateGuard(context.Background(), tx, oidcScrubAllowance(s.dialect)); err != nil {
+		t.Fatal(err)
+	}
+	check(func(query string, args ...any) error {
+		if _, err := tx.execContext(context.Background(), `SAVEPOINT probe`); err != nil {
+			t.Fatal(err)
+		}
+		_, err := tx.execContext(context.Background(), query, args...)
+		if _, rollbackErr := tx.execContext(context.Background(), `ROLLBACK TO SAVEPOINT probe`); rollbackErr != nil {
+			t.Fatal(rollbackErr)
+		}
+		if _, releaseErr := tx.execContext(context.Background(), `RELEASE SAVEPOINT probe`); releaseErr != nil {
+			t.Fatal(releaseErr)
+		}
+		return err
+	})
 }

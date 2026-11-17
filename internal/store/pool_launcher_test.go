@@ -155,6 +155,7 @@ func poolPinFixtureOn(t *testing.T, reserved []string, secrets ...string) poolPi
 	ctx := t.Context()
 	tenant, input, now := intakeFixture(t)
 	s := tenant.s
+	s.auditDigests = fixtureSecretCipher(t)
 	input.Request.Dispatch = ""
 	input.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"pool=deploy"}}}
 	input.Request.Git.Repository.Display = "https://github.com/acme/repo"

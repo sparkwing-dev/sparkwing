@@ -3,11 +3,13 @@ package controller
 import (
 	"context"
 	"crypto"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -23,13 +25,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/oidcissuer"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
-	e, _, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	auditMaterial := make([]byte, secrets.KeySize)
+	auditCipher, err := secrets.NewCipher(auditMaterial)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _, root := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim}, store.WithPolicies(func(*store.Store) (store.Policies, error) { return store.Policies{AuditDigests: auditCipher}, nil }))
 	tenant, err := e.Store.ForTeam(t.Context(), "a")
 	if err != nil {
 		t.Fatal(err)
@@ -60,9 +68,10 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT lease_expires_at FROM nodes WHERE team='a' AND run_id='run' AND node_id='job'`).Scan(&lease); err != nil {
 		t.Fatal(err)
 	}
-	issued := map[string]bool{}
+	issued := map[string]string{}
+	audience := "person@example.test"
 	property := func(forged [8]byte) bool {
-		response := engineClaimHTTP(t, handler, award.Claim.Capability, "POST", fmt.Sprintf("/api/v1/runs/run/oidc-token?team=%x&repository=%x&runner_kind=service", forged, forged), `{"audience":"vault"}`, http.StatusOK)
+		response := engineClaimHTTP(t, handler, award.Claim.Capability, "POST", fmt.Sprintf("/api/v1/runs/run/oidc-token?team=%x&repository=%x&runner_kind=service", forged, forged), `{"audience":"`+audience+`"}`, http.StatusOK)
 		var token OIDCTokenResponse
 		if err := json.Unmarshal(response.Body.Bytes(), &token); err != nil {
 			t.Log(err)
@@ -89,7 +98,7 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 			return false
 		}
 		if id, ok := claims["jti"].(string); ok {
-			issued[id] = true
+			issued[id], _ = claims["sub"].(string)
 		}
 		return claims["team"] == "a" && claims["pipeline"] == "ci" && claims["trigger"] == "manual" && claims["runner_kind"] == "runner" && claims["runner_environment"] == "persistent" && strings.Contains(claims["sub"].(string), ":runner:runner:runner_environment:persistent:ref:") && claims["repository"] == nil && claims["sha"] == nil && claims["ref"] == nil && claims["repository_id"] == nil && !token.ExpiresAt.After(time.Unix(0, lease))
 	}
@@ -101,9 +110,21 @@ func TestNativeOIDCMintCommittedIdentityProperty(t *testing.T) {
 		t.Fatalf("OIDC audit rows = %d, %v", len(minted), err)
 	}
 	for _, event := range minted {
+		if event.Attrs["audience"] != nil || event.Attrs["subject"] != nil {
+			t.Fatalf("raw audience or subject entered audit: %+v", event)
+		}
+		derive := hmac.New(sha256.New, auditMaterial)
+		derive.Write([]byte("sparkwing oidc audit key v1"))
+		auditKey := derive.Sum(nil)
+		keyID := sha256.Sum256(auditKey)
+		digest := func(field, value string) string {
+			mac := hmac.New(sha256.New, auditKey)
+			mac.Write([]byte("sparkwing oidc audit v1\x00" + field + "\x00" + value))
+			return hex.EncodeToString(mac.Sum(nil))
+		}
 		id, _ := event.Attrs["token_id"].(string)
-		subject, _ := event.Attrs["subject"].(string)
-		if event.RunID != "run" || event.Account != "" || event.Attrs["audience"] != "vault" || event.Attrs["node_digest"] == nil || !issued[id] || !strings.HasPrefix(subject, "team:a:") || event.Attrs["expires_at"] == nil || len(event.Attrs) != 5 {
+		subject := issued[id]
+		if event.RunID != "run" || event.Account != "" || event.Attrs["digest_key_id"] != hex.EncodeToString(keyID[:]) || event.Attrs["audience_digest"] != digest("audience", audience) || event.Attrs["subject_digest"] != digest("subject", subject) || event.Attrs["node_digest"] == nil || subject == "" || event.Attrs["expires_at"] == nil || len(event.Attrs) != 6 {
 			t.Fatalf("OIDC audit row = %+v", event)
 		}
 	}
