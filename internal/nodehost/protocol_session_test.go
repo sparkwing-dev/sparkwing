@@ -319,6 +319,23 @@ func TestProtocolSessionCloseRevokesAndJoinsBeforeCleanup(t *testing.T) {
 	}
 }
 
+func TestProtocolSessionCloseAcceptsOwnedTermination(t *testing.T) {
+	ready := make(chan struct{})
+	session := protocolTestSession(t, "wait_for_termination", func(cfg *ProtocolSessionConfig) {
+		cfg.grace = time.Millisecond
+		cfg.Log = func(_ context.Context, log nodewire.FrameLog) error {
+			if log.Message == "ready" {
+				close(ready)
+			}
+			return nil
+		}
+	})
+	<-ready
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProtocolSessionValidationStopsUnsentRequests(t *testing.T) {
 	sentinel := errors.New("contract rejected request")
 	session := protocolTestSession(t, "normal", func(cfg *ProtocolSessionConfig) {
@@ -394,6 +411,18 @@ func TestProtocolSessionChild(t *testing.T) {
 	reply := func(request nodewire.Request, result any) {
 		data, _ := json.Marshal(result)
 		send(nodewire.Reply{ID: request.ID, OK: true, Result: data})
+	}
+	if mode == "wait_for_termination" {
+		reader, writer, err := os.Pipe()
+		if err != nil {
+			os.Exit(5)
+		}
+		defer reader.Close()
+		defer writer.Close()
+		send(nodewire.FrameLog{Message: "ready", Level: "info"})
+		var buffer [1]byte
+		_, _ = reader.Read(buffer[:])
+		return
 	}
 	var held []nodewire.Request
 	var cleanup *nodewire.Request

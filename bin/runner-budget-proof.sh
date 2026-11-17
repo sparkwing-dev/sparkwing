@@ -50,14 +50,18 @@ VERSION="v0.0.0-dev+$(git -C "$REPO" rev-parse --short=12 HEAD)"
 go -C "$REPO" build -trimpath -ldflags "-X main.Version=$VERSION" -o "$WORK/bin/sparkwing" ./cmd/sparkwing
 sha256sum "$WORK/bin/sparkwing" >"$EVIDENCE/binary.sha256"
 
+# Both cases and their supervised runners reuse the candidate build's cache.
+GOCACHE=$(go env GOCACHE)
+GOPATH=$(go env GOPATH)
+export GOCACHE GOPATH
+systemctl --user set-environment "GOCACHE=$GOCACHE" "GOPATH=$GOPATH"
+
 for case_name in enforce control; do
   CASE="$WORK/$case_name"
   mkdir -p "$CASE/home" "$CASE/state" "$CASE/repo/.sparkwing"
   export HOME="$CASE/home" SPARKWING_HOME="$CASE/state" SPARKWING_CONFIG="$CASE/config.yaml"
   export SPARKWING_SECRETS_KEY_FILE="$CASE/secrets.key"
   export XDG_CONFIG_HOME="$CASE/home/.config" XDG_CACHE_HOME="$CASE/home/.cache"
-  # setup-go's toolchain must remain usable after HOME changes.
-  export GOCACHE="$WORK/go-cache" GOPATH="$WORK/go-path"
   printf 'dashboard: {address: "127.0.0.1:0"}\n' >"$SPARKWING_CONFIG"
   if [[ $case_name == enforce ]]; then printf 'admission: {budget: "2,enforce"}\n' >>"$SPARKWING_CONFIG"; fi
   chmod 0600 "$SPARKWING_CONFIG"

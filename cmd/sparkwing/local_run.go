@@ -78,7 +78,7 @@ func resolveLocalRunRuntime(ctx context.Context, options localRunOptions) (local
 			return publishLocalProfile(ctx, home, transport, profile, run)
 		},
 		follow: func(ctx context.Context, run, format string, out io.Writer, hosted <-chan struct{}) error {
-			return followControllerRunLogs(ctx, transport, run, format, out, localFollowWait(hosted))
+			return followControllerRunLogs(ctx, transport, run, format, out, localFollowWait(hosted), options.verbose)
 		},
 		ensureController: func(ctx context.Context) error {
 			if options.standalone {

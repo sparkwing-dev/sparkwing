@@ -223,7 +223,7 @@ func TestLocalQueueCachePreflightFailurePrecedesIntake(t *testing.T) {
 	}
 }
 
-func TestLocalRunEnsuresControllerAfterPreparationBeforeIntake(t *testing.T) {
+func TestLocalRunWaitsForControllerBeforeIntake(t *testing.T) {
 	for _, failed := range []bool{false, true} {
 		t.Run(fmt.Sprint(failed), func(t *testing.T) {
 			var calls []string
@@ -233,7 +233,6 @@ func TestLocalRunEnsuresControllerAfterPreparationBeforeIntake(t *testing.T) {
 			deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
 				runtime, err := resolve(ctx, options)
 				runtime.ensureController = func(context.Context) error {
-					calls = append(calls, "ensure")
 					if failed {
 						return failure
 					}
@@ -242,9 +241,9 @@ func TestLocalRunEnsuresControllerAfterPreparationBeforeIntake(t *testing.T) {
 				return runtime, err
 			}
 			err := runLocalCommand(t.Context(), "ci", runFlags{detached: true}, []string{"--password", "private-value"}, io.Discard, deps)
-			want := []string{"resolve", "prepare", "ensure", "create", "close"}
+			want := []string{"resolve", "prepare", "create", "close"}
 			if failed {
-				want = []string{"resolve", "prepare", "ensure", "close"}
+				want = []string{"resolve", "prepare", "close"}
 				if !errors.Is(err, failure) {
 					t.Fatalf("startup failure: %v", err)
 				}
