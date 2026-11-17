@@ -1,14 +1,12 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"go/ast"
 	"go/constant"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -36,37 +34,33 @@ func checkSourceHints(repoRoot string) bool {
 	fset := token.NewFileSet()
 	packages := map[string][]*ast.File{}
 	var directories []string
-	for _, dir := range []string{"cmd", "internal", "pkg"} {
-		// #nosec G703 -- a build-time tool reading paths the operator names
-		err := filepath.WalkDir(filepath.Join(repoRoot, dir), func(path string, d fs.DirEntry, werr error) error {
-			if errors.Is(werr, fs.ErrNotExist) {
-				return nil
-			}
-			if werr != nil {
-				return werr
-			}
-			// hack: doccheck holds retired spellings as banned patterns.
-			if d.IsDir() && (d.Name() == "testdata" || d.Name() == "doccheck") {
-				return filepath.SkipDir
-			}
-			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				return nil
-			}
-			file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-			if err != nil {
-				return err
-			}
-			directory := filepath.Dir(path)
-			if _, exists := packages[directory]; !exists {
-				directories = append(directories, directory)
-			}
-			packages[directory] = append(packages[directory], file)
-			return nil
-		})
+	paths, err := trackedProductionGoFiles(repoRoot, "cmd", "internal", "pkg")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "doccheck/source-hints:", err)
+		return false
+	}
+	for _, path := range paths {
+		rel, err := filepath.Rel(repoRoot, path)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "doccheck/source-hints:", err)
 			return false
 		}
+		// hack: doccheck holds retired spellings as banned patterns.
+		if slices.ContainsFunc(strings.Split(filepath.ToSlash(filepath.Dir(rel)), "/"), func(part string) bool {
+			return part == "testdata" || part == "doccheck"
+		}) {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "doccheck/source-hints:", err)
+			return false
+		}
+		directory := filepath.Dir(path)
+		if _, exists := packages[directory]; !exists {
+			directories = append(directories, directory)
+		}
+		packages[directory] = append(packages[directory], file)
 	}
 	for _, directory := range directories {
 		files := packages[directory]

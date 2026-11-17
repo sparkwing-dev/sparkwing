@@ -42,12 +42,19 @@ fi
 
 if [ "$check" -eq 1 ]; then
   cd "$REPO_ROOT"
+  git rev-parse --is-inside-work-tree >/dev/null
   drift=""
-  if [ ! -d "pkg/docs/mirror" ]; then
-    drift="pkg/docs/mirror/ is missing (the mirror has never been generated)"
-  else
-    drift="$(diff -rq docs pkg/docs/mirror || true)"
-  fi
+  while IFS= read -r -d '' file; do
+    case "$file" in
+      docs/*) relative="${file#docs/}"; counterpart="pkg/docs/mirror/$relative" ;;
+      pkg/docs/mirror/*) relative="${file#pkg/docs/mirror/}"; counterpart="docs/$relative" ;;
+      *) continue ;;
+    esac
+    if ! git ls-files --error-unmatch -- ":(literal)$counterpart" >/dev/null 2>&1 ||
+       ! cmp -s "docs/$relative" "pkg/docs/mirror/$relative"; then
+      drift+="docs/$relative and pkg/docs/mirror/$relative differ"$'\n'
+    fi
+  done < <(git ls-files -z -- docs pkg/docs/mirror)
   if ! cmp -s CHANGELOG.md pkg/docs/changelog.md; then
     changelog_drift="CHANGELOG.md and pkg/docs/changelog.md differ"
     if [ -n "$drift" ]; then

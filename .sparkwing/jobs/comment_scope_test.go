@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,4 +143,30 @@ func unsetForTest(t *testing.T, name string) {
 		}
 		_ = os.Unsetenv(name)
 	})
+}
+
+func TestTrackedCheckerCommandParsesFlagsBeforeRoot(t *testing.T) {
+	for _, staged := range []bool{false, true} {
+		t.Run(map[bool]string{false: "range", true: "staged"}[staged], func(t *testing.T) {
+			root := commentFixtureRepo(t)
+			if staged {
+				writeGoFile(t, filepath.Join(root, "pending.go"), "package fixture\n")
+				gitAddAll(t, root)
+			}
+			command, scope, err := scopedCheckerCommand(newTestContext(t), "commentcheck", "Go file", existingGoFiles, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parser := flag.NewFlagSet("checker", flag.ContinueOnError)
+			tracked := parser.Bool("tracked", false, "")
+			parser.Bool("staged", false, "")
+			parser.String("base", "", "")
+			if err := parser.Parse(strings.Fields(command)[3:]); err != nil {
+				t.Fatal(err)
+			}
+			if !*tracked || parser.NArg() != 1 || parser.Arg(0) != "." || strings.Contains(scope, "untracked") {
+				t.Fatalf("checker parsed tracked=%v root=%q scope=%q", *tracked, parser.Args(), scope)
+			}
+		})
+	}
 }

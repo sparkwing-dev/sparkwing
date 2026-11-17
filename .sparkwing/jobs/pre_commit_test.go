@@ -271,6 +271,7 @@ func TestWholeTreeFormattersHandleLiteralFileNames(t *testing.T) {
 			root := gateFixtureRepo(t)
 			file := filepath.Join(root, "-file with spaces.go")
 			writeGoFile(t, file, "package main\nfunc  Bad( )  int { return 3 }\n")
+			gitAddAll(t, root)
 			err := check(newTestContext(t))
 			if err == nil || !strings.Contains(err.Error(), "-file with spaces.go") || !strings.Contains(err.Error(), "files need formatting") {
 				t.Fatalf("formatter = %v, want literal unformatted filename", err)

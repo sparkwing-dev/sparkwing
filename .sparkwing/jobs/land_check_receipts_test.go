@@ -262,13 +262,15 @@ func TestQueuedLandCompleteReceiptsAuthorizeOnlyTheMergedOwner(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := newLandRemote(t)
+	writeAPISnapshotFixture(t, r.dev, "")
+	r.git(r.dev, "add", "cmd/apidiff/main.go", ".apidiff")
 	r.commit(r.dev, map[string]string{
 		"AGENTS.md": "# Fixture\n", ".review.yaml": string(policy),
 		"go.mod":                 "module fixture\n\ngo 1.26.0\n",
 		".sparkwing/go.mod":      "module fixture-pipelines\n\ngo 1.26.0\n",
 		".sparkwing/jobs.go":     "package pipelines\nfunc Jobs() {}\n",
 		"internal/sound.go":      "package internal\nfunc Sound() int {return 1}\n",
-		"bin/check-changelog.sh": "exit 0\n", "bin/check-api-spec.sh": "exit 0\n", "bin/check-api-snapshot.sh": "exit 0\n",
+		"bin/check-changelog.sh": "exit 0\n", "bin/check-api-spec.sh": "exit 0\n",
 	}, "base")
 	r.git(r.dev, "push", "--quiet", "origin", "HEAD:main")
 	r.git(r.other, "pull", "--quiet", "--ff-only")
