@@ -270,7 +270,7 @@ func TestQueuedLandCompleteReceiptsAuthorizeOnlyTheMergedOwner(t *testing.T) {
 		".sparkwing/go.mod":      "module fixture-pipelines\n\ngo 1.26.0\n",
 		".sparkwing/jobs.go":     "package pipelines\nfunc Jobs() {}\n",
 		"internal/sound.go":      "package internal\nfunc Sound() int {return 1}\n",
-		"bin/check-changelog.sh": "exit 0\n", "bin/check-api-spec.sh": "exit 0\n", "bin/check-api-snapshot.sh": "exit 0\n",
+		"bin/check-changelog.sh": "exit 0\n", "bin/check-api-spec.sh": "exit 0\n",
 	}, "base")
 	r.git(r.dev, "push", "--quiet", "origin", "HEAD:main")
 	r.git(r.other, "pull", "--quiet", "--ff-only")

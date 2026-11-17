@@ -283,7 +283,7 @@ func TestCloudCapacityFailureThroughController(t *testing.T) {
 				t.Fatalf("missing requested and available sizes: %s", logs.String())
 			}
 			for _, level := range []string{"INFO", "WARN", "ERROR"} {
-				if strings.Contains(logs.String(), "level="+level) != (level == failure.level) {
+				if strings.Contains(withoutStartupTimings(logs.String()), "level="+level) != (level == failure.level) {
 					t.Fatalf("capacity failure must log only at %s: %s", failure.level, logs.String())
 				}
 			}

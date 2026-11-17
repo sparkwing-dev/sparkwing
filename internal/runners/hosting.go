@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
@@ -102,7 +104,11 @@ func (h Hosting) bind(ctx context.Context, unit, original controllerwire.Claimed
 	if err != nil {
 		return nodehost.NativeServices{}, HostInputs{}, err
 	}
+	started := time.Now()
 	beat, err := controller.Renew(ctx, unit.UnitID, controllerwire.RenewalRequest{})
+	if unit.CloudResources != nil {
+		slog.InfoContext(ctx, "Cloud startup", "stage", "bootstrap_renewal", "duration_ms", time.Since(started).Milliseconds(), "success", err == nil)
+	}
 	if err != nil {
 		return nodehost.NativeServices{}, HostInputs{}, err
 	}

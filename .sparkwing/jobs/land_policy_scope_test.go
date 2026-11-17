@@ -17,10 +17,6 @@ func TestLandAPISnapshotPathsIgnoreScratchAndRejectTrackedDrift(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build real API snapshot tool: %s: %v", out, err)
 	}
-	script, err := os.ReadFile(filepath.Join(source, "bin/check-api-snapshot.sh"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	root := publishedSDKFixture(t)
 	mod, err := os.ReadFile(filepath.Join(root, "go.mod"))
 	if err != nil {
@@ -28,7 +24,8 @@ func TestLandAPISnapshotPathsIgnoreScratchAndRejectTrackedDrift(t *testing.T) {
 	}
 	writeGoFile(t, filepath.Join(root, "go.mod"), strings.Replace(string(mod), "module fixture", "module github.com/sparkwing-dev/sparkwing", 1))
 	writeGoFile(t, filepath.Join(root, "cmd/apidiff/main.go"), fmt.Sprintf("package main\nimport (\"os\";\"os/exec\")\nfunc main(){c:=exec.Command(%q,os.Args[1:]...);c.Stdout=os.Stdout;c.Stderr=os.Stderr;if c.Run()!=nil{os.Exit(1)}}\n", tool))
-	writeGoFile(t, filepath.Join(root, "bin/check-api-snapshot.sh"), string(script))
+	// safety: the land paths must not shell out to the removed worktree-walking checker.
+	writeGoFile(t, filepath.Join(root, "bin/check-api-snapshot.sh"), "echo bin/check-api-snapshot.sh must not run >&2; exit 1\n")
 	for _, name := range []string{"changelog", "api-spec"} {
 		writeGoFile(t, filepath.Join(root, "bin/check-"+name+".sh"), "exit 0\n")
 	}

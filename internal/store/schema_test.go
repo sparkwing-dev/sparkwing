@@ -131,10 +131,13 @@ func TestOpenRefusesAStoreFromAnotherBaseline(t *testing.T) {
 	if err == nil {
 		t.Fatal("Open accepted a store recording schema version 100")
 	}
-	for _, want := range []string{"newer than this binary", "start a binary matching the store", "restore a backup matching this binary"} {
+	for _, want := range []string{"newer than this binary", "upgrade the installed CLI (`sparkwing update`)", "restore a backup matching this binary"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Open error %q does not say %q", err, want)
 		}
+	}
+	if !strings.HasPrefix(err.Error(), "sparkwing: upgrade the installed CLI (`sparkwing update`)") || strings.Index(err.Error(), "backup restore loses newer runs") < strings.Index(err.Error(), "newer than this binary") {
+		t.Fatalf("refusal does not lead with upgrade advice and label backup data loss: %v", err)
 	}
 	for _, unsafe := range []string{"delete ", "drop the database", "predates"} {
 		if strings.Contains(err.Error(), unsafe) {

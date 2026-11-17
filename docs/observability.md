@@ -991,6 +991,42 @@ pipeline's selected engine; older selected engines omit cache diagnostics even
 when the controller and runner have been upgraded. Release and select an engine
 containing this instrumentation to measure its install-cache outcomes.
 
+Cloud runner process logs also emit `Cloud startup` records with fixed `stage`,
+`duration_ms` and `success` fields. These records are emitted as each operation
+returns, including failures, and contain no error bodies, credentials or URLs.
+They are process logs, not durable startup receipts in `runs status`.
+
+| Stage | Timed boundary |
+| --- | --- |
+| `bootstrap_docker` | Workload wait for Docker readiness, through its existing timeout |
+| `bootstrap_seed_barrier` | Join of the concurrent Go seed copy after Docker readiness |
+| `bootstrap_exchange` | Bootstrap credential exchange RPC |
+| `bootstrap_renewal` | Initial authenticated renewal RPC before native service binding |
+| `launcher_preparation` | Preparation acknowledgement and initial keeper readiness |
+| `launcher_reservation` | Job construction and node reservation, including an existing predecessor-retirement retry |
+| `launcher_capacity_observed` | Capacity container's reported start to successful Job creation and admission validation |
+| `launcher_capacity_release` | Capacity Pod lookup and deletion request |
+| `launcher_job_create` | Suspended Job creation request |
+
+Docker readiness and seed copying still overlap. The seed barrier measures only
+the remaining wait, not total copy time. A failed seed copy still starts cold.
+Exchange and renewal success describe the RPC result, before subsequent binding
+or cancellation checks. Launcher preparation and reservation omit expected
+capacity/predecessor wait results. Successful preparation can still repeat while
+an award waits. Launcher records carry run, unit and claim generation;
+bootstrap records do not, and are told apart by the Pod whose log carries them.
+`launcher_capacity_observed` is emitted from launch only after Job creation and
+admission validation succeed, when the existing capacity Pod read provided a
+running container with a known start time. Abandonment and failed Job creation
+emit no capacity observation. The interval includes polling, reservation,
+capacity release and Job creation, and overlaps the local operation spans. Its
+Kubernetes-to-launcher clock interval is clamped at zero if negative. Kubernetes
+reports the container start in whole seconds, so this interval can read up to
+about 1 s long. The other
+durations use process-local monotonic time. Capacity release measures the API
+request, not kubelet teardown. Job creation ends before Secret publication and
+activation. Do not add overlapping stages or infer absent boundaries as zero.
+
 ## Annotation request timing
 
 Native hosts trace annotation dispatch, its fresh parent-authentication checks,

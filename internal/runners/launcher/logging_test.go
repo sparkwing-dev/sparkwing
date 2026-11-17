@@ -157,8 +157,19 @@ func TestLauncherKeepsWaitingPlacementRateLimitAtWarn(t *testing.T) {
 		if err := l.Run(ctx); err != nil {
 			t.Fatal(err)
 		}
-		if strings.Contains(logs.String(), "level=INFO") || !strings.Contains(logs.String(), "level=WARN") || base.claims != 0 {
+		if strings.Contains(withoutStartupTimings(logs.String()), "level=INFO") || !strings.Contains(logs.String(), "level=WARN") || base.claims != 0 {
 			t.Fatalf("claims=%d logs=%s", base.claims, logs.String())
 		}
 	})
+}
+
+func withoutStartupTimings(logs string) string {
+	var operations []string
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, `level=INFO msg="Cloud startup" stage=launcher_`) {
+			continue
+		}
+		operations = append(operations, line)
+	}
+	return strings.Join(operations, "\n")
 }
