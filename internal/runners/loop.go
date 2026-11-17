@@ -515,7 +515,16 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 				request.Wait = l.lifecycleWait(controllerwire.MaxClaimWait, idleSince, true)
 			}
 			go func() {
-				response, err := l.Controller.Claim(claims, request)
+				var response controllerwire.ClaimResponse
+				// safety: a parent cancel closes its own done channel before its children's,
+				// so checking only claims would let one claim slip out during shutdown.
+				err := ctx.Err()
+				if err == nil {
+					err = claims.Err()
+				}
+				if err == nil {
+					response, err = l.Controller.Claim(claims, request)
+				}
 				done <- claimOutcome{response: response, err: err, kinds: request.Kinds, workSlot: workSlot, ownerSlot: ownerSlot}
 			}()
 		}

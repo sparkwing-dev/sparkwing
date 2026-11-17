@@ -510,6 +510,22 @@ runs the same check before it applies a new SDK pin. New scaffolds pin Node 22
 `@types/node` declarations and enable Node types, so imports such as `node:fs`
 and `node:path` and globals such as `process` type-check.
 
+
+Older TypeScript scaffolds may lack Node declarations. If `pipeline upgrade`
+reports TS2307 or TS2591 for imports such as `node:fs`, install the declarations:
+
+```bash
+npm --prefix .sparkwing install --save-dev --save-exact @types/node@22
+```
+
+In `.sparkwing/tsconfig.json`, add `"node"` to `compilerOptions.types` (create
+`"types": ["node"]` if absent). Keep any existing type entries. Run
+`npm --prefix .sparkwing exec -- tsc --noEmit --project .sparkwing/tsconfig.json`,
+then retry
+`sparkwing pipeline upgrade`. Commit `package.json`, `package-lock.json` and
+`tsconfig.json` under `.sparkwing/`. Upgrading the SDK pin does not add these
+project settings.
+
 ### Registration and dependencies
 
 `definePipeline` registers an implementation. Import its module from the

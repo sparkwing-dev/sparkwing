@@ -36,6 +36,12 @@ def measure(output, mode):
     try:
         for _ in range(6):
             burners.append(subprocess.Popen(['yes'], stdout=subprocess.DEVNULL))
+        burner_cgroups = {
+            str(p.pid): next(line[3:] for line in Path(f'/proc/{p.pid}/cgroup').read_text().splitlines()
+                             if line.startswith('0::'))
+            for p in burners
+        }
+        assert all(value == relative for value in burner_cgroups.values()), 'burner outside measured cgroup'
         before, start = stat(), time.monotonic_ns()
         time.sleep(20)
         end, after = time.monotonic_ns(), stat()
@@ -44,7 +50,7 @@ def measure(output, mode):
         result = dict(unit=unit, cgroup=relative, pid=os.getpid(), nice=os.getpriority(os.PRIO_PROCESS, 0),
                       cpu_max=read_cpu_max(group, mode), before=before, after=after,
                       seconds=seconds, cores=(after['usage_usec'] - before['usage_usec']) / seconds / 1e6,
-                      burners=[p.pid for p in burners])
+                      burners=[p.pid for p in burners], burner_cgroups=burner_cgroups)
         Path(output).write_text(json.dumps(result, indent=2) + '\n')
         print(json.dumps(result))
     finally:
@@ -61,6 +67,7 @@ def judge(enforced, control):
         measured = (row['after']['usage_usec'] - row['before']['usage_usec']) / row['seconds'] / 1e6
         assert math.isclose(measured, row['cores']), 'CPU result disagrees with raw counters'
         assert len(row['burners']) == 6 and len(set(row['burners'])) == 6, 'expected six burners'
+        assert row['burner_cgroups'] == {str(pid): row['cgroup'] for pid in row['burners']}, 'burner cgroup evidence disagrees'
         assert row['unit'].startswith('sparkwing-runner-') and row['unit'].endswith('.service'), 'not a local runner'
     quota, period = enforced['cpu_max'].split()
     assert quota != 'max' and int(quota) / int(period) == 2, 'kernel quota is not two cores'
