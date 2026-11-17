@@ -91,13 +91,12 @@ func TestRunHoldsClaimWithoutBlockingReconciliation(t *testing.T) {
 				l.Poll = 5 * time.Second
 				unit := wireAward(capability.UnitNode)
 				ready := make(chan struct{})
-				calls := 0
+				var calls atomic.Int32
 				var wait time.Duration
 				wire := launcherWireFake{
 					claim: func(ctx context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-						calls++
-						wait = request.Wait
-						if calls == 1 {
+						if calls.Add(1) == 1 {
+							wait = request.Wait
 							select {
 							case <-ready:
 								return controllerwire.ClaimResponse{Claim: &unit, PollAfter: advice}, nil
@@ -161,19 +160,19 @@ func TestRunHoldsClaimWithoutBlockingReconciliation(t *testing.T) {
 					t.Fatalf("ready signal waited %s", elapsed)
 				}
 				if advice > 0 {
-					if calls != 1 {
-						t.Fatalf("award bypassed controller advice: %d claims", calls)
+					if calls.Load() != 1 {
+						t.Fatalf("award bypassed controller advice: %d claims", calls.Load())
 					}
 					time.Sleep(advice - time.Nanosecond)
 					synctest.Wait()
-					if calls != 1 {
-						t.Fatalf("claimed before advice expired: %d claims", calls)
+					if calls.Load() != 1 {
+						t.Fatalf("claimed before advice expired: %d claims", calls.Load())
 					}
 					time.Sleep(time.Nanosecond)
 					synctest.Wait()
 				}
-				if calls != 2 {
-					t.Fatalf("next held claim not started: %d claims", calls)
+				if calls.Load() != 2 {
+					t.Fatalf("next held claim not started: %d claims", calls.Load())
 				}
 			})
 		})
