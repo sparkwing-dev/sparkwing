@@ -616,3 +616,49 @@ func TestRunFollowDiagnosticsRequireVerboseOrSearch(t *testing.T) {
 		}
 	}
 }
+
+func TestLocalRunVerboseReachesLogWriter(t *testing.T) {
+	for _, verbose := range []bool{false, true} {
+		name := "default"
+		if verbose {
+			name = "verbose"
+		}
+		t.Run(name, func(t *testing.T) {
+			page := controllerwire.LogPage{Complete: true, Records: []controllerwire.LogRecord{
+				jobLogRecord("local-run", `{"event":"lease_keeper","host_lease_keeper":true}`),
+				jobLogRecord("local-run", `{"event":"log","msg":"hello user"}`),
+				{RunID: "local-run", Event: "job_succeeded", JobID: "build"},
+			}}
+			body, err := json.Marshal(page)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transport := client.EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: logRoundTrip(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
+			})}}
+			var calls []string
+			deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+			resolve := deps.resolve
+			deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+				runtime, err := resolve(ctx, options)
+				runtime.follow = func(ctx context.Context, run, format string, out io.Writer, _ <-chan struct{}) error {
+					return followControllerRunLogs(ctx, transport, run, format, out, nil, options.verbose)
+				}
+				return runtime, err
+			}
+			arguments := []string{"-o=json"}
+			if verbose {
+				arguments = append(arguments, "--verbose")
+			}
+			arguments = append(arguments, "--", "--password", "private-value")
+			flags, args := parseRunFlagsArgs(arguments)
+			var out bytes.Buffer
+			if err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(out.String(), "lease_keeper") != verbose || !strings.Contains(out.String(), "hello user") || !strings.Contains(out.String(), "job_succeeded") {
+				t.Fatalf("verbose=%v output=%s", verbose, &out)
+			}
+		})
+	}
+}

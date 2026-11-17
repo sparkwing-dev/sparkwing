@@ -322,29 +322,36 @@ test("group execution policy reaches every member without losing tool selectors"
   const source = plan.job("source", () => undefined);
   const a = plan.job("a", () => undefined),
     b = plan.job("b", () => undefined);
+  const upstream = plan.job("upstream", () => undefined);
   const gen = source.generate(() => undefined);
   const group = plan.groupJobs("group", a, b);
+  const predicate = () => false;
+  const before = () => {};
+  const verify = () => {};
+  const after = () => {};
+  const memo = () => "key";
   group
-    .needs(source)
+    .needs(upstream)
     .needsIfPresent("absent")
     .needsGenerated(gen)
+    .retry(2, { backoffMs: 37 })
     .timeout(0)
     .noProgressTimeout(0)
     .cores(2)
-    .skipIf(() => false, { budgetMs: 0 })
-    .beforeRun(() => {})
-    .verify(() => {})
-    .afterRun(() => {})
-    .memo(() => "key", { ttlMs: 0 })
+    .skipIf(predicate, { budgetMs: 0 })
+    .beforeRun(before)
+    .verify(verify)
+    .afterRun(after)
+    .memo(memo, { ttlMs: 0 })
     .cache(npm())
     .artifacts("out/*")
-    .consumes(source)
-    .concurrency(new ConcurrencyGroup("cap"))
+    .consumes(source, { into: "inputs" })
+    .concurrency(new ConcurrencyGroup("cap"), 2)
     .prefers("os=linux")
     .inline()
     .continueOnError()
     .env("CI", "true", startup());
-  const [first, second] = plan.toDoc().jobs.slice(1);
+  const [first, second] = plan.toDoc().jobs.filter(job => job.id === "a" || job.id === "b");
   assert.ok(first && second);
   const { id: _firstID, closures: firstClosures, ...firstFields } = first;
   const { id: _secondID, closures: secondClosures, ...secondFields } = second;
@@ -354,6 +361,32 @@ test("group execution policy reaches every member without losing tool selectors"
   assert.equal(first.timeout_ms, 0);
   assert.equal(first.skip_if_budget_ms, 0);
   assert.equal(first.cores, 2);
+  for (const member of [a, b]) {
+    const spec = member.toSpec();
+    assert.deepEqual(spec.deps, ["upstream", "source"]);
+    assert.deepEqual(spec.deps_if_present, ["absent"]);
+    assert.deepEqual(spec.needs_generated, [gen.id]);
+    assert.equal(spec.no_progress_timeout_ms, 0);
+    assert.deepEqual(spec.retry, { attempts: 2, backoff_ms: 37 });
+    assert.deepEqual(spec.memo, { ttl_ms: 0 });
+    assert.deepEqual(spec.caches, [{ name: "npm", resolver: "npm", key_files: ["package-lock.json"] }]);
+    assert.deepEqual(spec.artifacts, ["out/*"]);
+    assert.deepEqual(spec.consumes, [{ producer: "source", into: "inputs" }]);
+    assert.deepEqual(spec.concurrency, [{ group: "cap", cost: 2 }]);
+    assert.deepEqual(spec.prefers, ["os=linux"]);
+    assert.equal(spec.continue_on_error, true);
+    assert.deepEqual(spec.env, { CI: { value: "true", startup: true } });
+    assert.deepEqual(spec.closures, {
+      skip_if: [member.id + "/skip_if/0"], before_run: [member.id + "/before_run/0"],
+      verify: member.id + "/verify/0", after_run: [member.id + "/after_run/0"], memo_key: member.id + "/memo_key/0",
+    });
+    const callbacks = member.closures();
+    for (const [kind, fn] of [["skip_if", predicate], ["before_run", before], ["verify", verify], ["after_run", after], ["memo_key", memo]] as const) {
+      const closure = callbacks.find(closure => closure.kind === kind);
+      assert.ok(closure && closure.kind !== "generate");
+      assert.equal(closure.fn, fn);
+    }
+  }
 });
 
 test("sealed declarations reject predicate mutations while accepting fresh expansion code", async () => {

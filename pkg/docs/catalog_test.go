@@ -75,3 +75,14 @@ func BenchmarkList(b *testing.B) {
 		List()
 	}
 }
+
+func TestSearchAliasesStayLocalToTheirDeclaration(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{"# Example\n\n<!-- search-aliases: alternate name, shorthand -->\n", "alternate name, shorthand "},
+		{"# Another document\n\nNo aliases here.", ""},
+	} {
+		if _, got := searchText(tc.body); got != tc.want {
+			t.Errorf("searchText(%q) = %q, want %q", tc.body, got, tc.want)
+		}
+	}
+}

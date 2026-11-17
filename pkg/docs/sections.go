@@ -241,7 +241,9 @@ const (
 const minToken = 2
 
 // SearchSections returns the sections matching every token in query,
-// best first.
+// best first. A section may declare alternate search terms in a single-line
+// HTML comment: <!-- search-aliases: alternate phrase, abbreviation -->.
+// Aliases rank like heading words and apply only to that section.
 //
 // A heading hit outranks a body hit: someone searching "ApprovalConfig"
 // wants the section that defines it, not the six that mention it in
@@ -266,8 +268,9 @@ func SearchSections(query string) []Section {
 			continue
 		}
 		for _, s := range secs {
-			hay := strings.ToLower(s.Body)
-			head := strings.ToLower(s.Heading + " " + s.Slug)
+			text, aliases := searchText(s.Body)
+			hay := strings.ToLower(text)
+			head := strings.ToLower(s.Heading + " " + s.Slug + " " + aliases)
 
 			crumb := strings.ToLower(s.Breadcrumb)
 			score, all := 0, true
