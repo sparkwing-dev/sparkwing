@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"net"
 	"net/http"
 	"os"
@@ -15,6 +14,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 )
 
 func TestPrivateControllerIdleExitAndNextClient(t *testing.T) {
@@ -57,7 +58,7 @@ func TestPrivateControllerIdleExitAndNextClient(t *testing.T) {
 }
 
 func TestPrivateControllerBusyResetsIdleBound(t *testing.T) {
-	for _, kind := range []string{"run", "queue", "held", "dashboard", "cli", "legacy"} {
+	for _, kind := range []string{"run", "queue", "held", "dashboard", "cli", "admission"} {
 		t.Run(kind, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f := &runtimeControllerFixture{}
@@ -68,7 +69,7 @@ func TestPrivateControllerBusyResetsIdleBound(t *testing.T) {
 				}
 				d := r.run.daemon
 				activity := LocalActivity{}
-				legacy := &conn{}
+				participant := &conn{}
 				d.mu.Lock()
 				switch kind {
 				case "run":
@@ -81,8 +82,8 @@ func TestPrivateControllerBusyResetsIdleBound(t *testing.T) {
 					d.dashboardConns = 1
 				case "cli":
 					d.idleClients = map[net.Conn]idleClient{nil: {}}
-				case "legacy":
-					d.conns[legacy] = struct{}{}
+				case "admission":
+					d.conns[participant] = struct{}{}
 				}
 				d.mu.Unlock()
 				if err := d.setLocalActivity(activity); err != nil {
@@ -96,7 +97,7 @@ func TestPrivateControllerBusyResetsIdleBound(t *testing.T) {
 				d.mu.Lock()
 				d.dashboardConns = 0
 				d.idleClients = nil
-				delete(d.conns, legacy)
+				delete(d.conns, participant)
 				d.mu.Unlock()
 				if err := d.setLocalActivity(LocalActivity{}); err != nil {
 					t.Fatal(err)
