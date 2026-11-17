@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -82,7 +83,9 @@ func runLocalRunnerCommand(inv clisurface.Invocation) error {
 			if err != nil {
 				return false
 			}
-			_ = conn.Close()
+			if err := conn.Close(); err != nil {
+				slog.Warn("close the controller probe", "err", err)
+			}
 			return true
 		}, probe.C, localRunnerOrphanAfter)
 	}()
@@ -102,9 +105,7 @@ const (
 	localRunnerOrphanAfter = 10 * time.Minute
 )
 
-// awaitControllerGone returns an error once the controller of home has been
-// unreachable on every probe for orphanAfter, or at once when home is gone.
-// It returns nil when ctx ends first.
+// safety: a deleted home can never get its controller back, so it ends the wait at once.
 func awaitControllerGone(ctx context.Context, home string, reachable func(context.Context) bool, ticks <-chan time.Time, orphanAfter time.Duration) error {
 	var since time.Time
 	for {
