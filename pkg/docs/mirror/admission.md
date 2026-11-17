@@ -125,8 +125,10 @@ plan.job("test", async (ctx) => { await ctx.exec(["npm", "test"]).run(); }).core
 ```
 
 `Cores()` reserves admission capacity and is not an OS limit on the job.
-Under `enforce`, jobs share the runner-wide cap, so one job can use more than
-its declared cores while capacity is idle.
+When the machine budget ends in
+[`enforce`](local-execution.md#capping-sparkwings-share-of-the-machine), which
+caps the local runner on a systemd Linux host, jobs share that runner-wide cap,
+so one job can use more than its declared cores while capacity is idle.
 
 A small request lets a job that mostly waits start beside running work. A
 larger request reserves more capacity in queue order, at the cost of fewer
