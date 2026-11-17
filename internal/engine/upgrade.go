@@ -111,7 +111,7 @@ func (r *Resolver) Upgrade(ctx context.Context, request UpgradeRequest, verifier
 		return result, nil
 	}
 	if verifier == nil {
-		return result, invalid("upgrade verification is required", "Supply the dependency, build and describe/plan verifier.")
+		return result, invalid("upgrade verification is required", "Supply the dependency, build, pipeline detail and plan verifier.")
 	}
 	unverified := verifier.Verify(ctx, stage, resolved)
 	if unverified != nil && !errors.Is(unverified, ErrPipelineIncompatible) {

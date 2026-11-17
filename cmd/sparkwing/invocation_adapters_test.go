@@ -33,8 +33,8 @@ func runUpdateArgs(args []string) error { return runSparkwing(append([]string{"u
 
 func runJobsArgs(args []string) error { return runSparkwing(append([]string{"runs"}, args...)) }
 
-func runCacheInfoArgs(args []string) error {
-	return runSparkwing(append([]string{"cache", "info"}, args...))
+func runCacheStatusArgs(args []string) error {
+	return runSparkwing(append([]string{"cache", "status"}, args...))
 }
 
 func runCachePruneArgs(args []string) error {
@@ -89,8 +89,8 @@ func runXrepoAddArgs(args []string) error {
 	return runSparkwing(append([]string{"repos", "add"}, args...))
 }
 
-func runPipelineDescribeArgs(args []string) error {
-	return runSparkwing(append([]string{"pipeline", "describe"}, args...))
+func runPipelineShowArgs(args []string) error {
+	return runSparkwing(append([]string{"pipeline", "show"}, args...))
 }
 
 func dispatchRunArgs(args []string) error { return runSparkwing(append([]string{"run"}, args...)) }

@@ -355,7 +355,7 @@ func TestClearCache_HandlesMissingDir(t *testing.T) {
 	}
 }
 
-func TestCacheInfo_CountsByCategory(t *testing.T) {
+func TestCacheStatus_CountsByCategory(t *testing.T) {
 	c := &WebClient{CacheDir: t.TempDir()}
 	writeFile := func(rel string) {
 		p := filepath.Join(c.CacheDir, rel)

@@ -71,7 +71,7 @@ when a sibling fails discovery, with planning output withheld. The withheld
 notice names how many pipelines failed and their error codes, never their names,
 and gives the isolated-home retry when that refusal is the only failure.
 Otherwise the notice and the withheld error name
-`sparkwing pipeline describe --pipeline <name> --show-withheld`. That command
+`sparkwing pipeline show --pipeline <name> --show-withheld`. That command
 describes in the CLI process and writes the withheld output and errors to its
 stderr, never to run logs or the describe cache, masked by the values registered
 so far. A failed pipeline's own secret defaults are unknown, so that command,

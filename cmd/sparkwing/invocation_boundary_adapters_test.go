@@ -230,12 +230,12 @@ func (c updateCommand) runArgs(ctx context.Context, args []string) error {
 	return c.run(ctx, inv)
 }
 
-func runPipelineDescribeCommandArgs(args []string, withEntry func(string, func(context.Context, pipelineentry.Command, string) error) error) error {
-	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "describe"}, args...))
+func runPipelineShowCommandArgs(args []string, withEntry func(string, func(context.Context, pipelineentry.Command, string) error) error) error {
+	inv, err := clisurface.Parse("sparkwing", append([]string{"pipeline", "show"}, args...))
 	if err != nil {
 		return err
 	}
-	return runPipelineDescribeCommand(inv, func(name string, inspect func(context.Context, pipelineInspection, string) error) error {
+	return runPipelineShowCommand(inv, func(name string, inspect func(context.Context, pipelineInspection, string) error) error {
 		return withEntry(name, func(ctx context.Context, command pipelineentry.Command, directory string) error {
 			entry, err := inspectionCommand(command, directory, name)
 			if err != nil {

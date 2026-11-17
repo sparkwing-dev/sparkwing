@@ -11,7 +11,7 @@ Interactive debugging for pipeline runs
 ### Subcommands
 
 - `attach` -- Attach to a running Kubernetes target (Cloud jobs unsupported)
-- `env` -- Inspect public job, executor and pause diagnostics
+- `show` -- Inspect public job, executor and pause diagnostics
 - `resume` -- Resume a paused job
 
 ### Flags
@@ -42,31 +42,6 @@ Attach a shell to a running job's Kubernetes target. Cloud jobs do not support s
 | `--namespace NAME` | Kubernetes namespace to pass to kubectl exec, overriding the namespace recorded for the job's pod. |
 | `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
-## `sparkwing debug env`
-
-Inspect public job, executor and pause diagnostics
-
-Show a job's public execution details and current pause state.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--run ID` | Run ID or per-team run number. (required) |
-| `--job JOB` | Job within the selected run. (required) |
-| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
-
-### Examples
-
-```sh
-# Inspect one job's public diagnostics
-sparkwing debug env --run RUN_ID --job build
-```
-
 ## `sparkwing debug resume`
 
 Resume a paused job
@@ -90,4 +65,29 @@ Resume a paused job in the selected run.
 ```sh
 # Resume a paused job
 sparkwing debug resume --run RUN_ID --job build
+```
+
+## `sparkwing debug show`
+
+Inspect public job, executor and pause diagnostics
+
+Show a job's public execution details and current pause state.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--run ID` | Run ID or per-team run number. (required) |
+| `--job JOB` | Job within the selected run. (required) |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+
+### Examples
+
+```sh
+# Inspect one job's public diagnostics
+sparkwing debug show --run RUN_ID --job build
 ```

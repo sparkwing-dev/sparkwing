@@ -28,6 +28,9 @@ adds capacity from your own machines to Cloud.
 Coming from GitHub Actions? [Migrate from GitHub Actions](migrate-from-github-actions.md)
 maps each workflow feature to its Sparkwing equivalent, and
 [known limitations](known-limitations.md) lists what has none yet.
+If search does not find the guide, list matching topics with
+`sparkwing docs list --search github`, then read
+`sparkwing docs read --topic migrate-from-github-actions`.
 
 ## Install
 
@@ -224,7 +227,7 @@ sparkwing pipeline new --pipeline hello --template typescript
 git add .sparkwing
 git commit -m "Add TypeScript pipeline"
 sparkwing pipeline list
-sparkwing pipeline describe --pipeline hello
+sparkwing pipeline show --pipeline hello
 sparkwing pipeline plan --pipeline hello
 sparkwing run hello
 ```

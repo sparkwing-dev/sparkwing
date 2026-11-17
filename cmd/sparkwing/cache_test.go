@@ -132,14 +132,14 @@ func decodeCachePayload(t *testing.T, raw string) map[string]any {
 	return payload
 }
 
-func TestCacheInfoJSONReportsManagedBytes(t *testing.T) {
+func TestCacheStatusJSONReportsManagedBytes(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	lease := seedCommandCacheEntry(t, "active")
 	defer func() { _ = lease.Release() }()
 	var runErr error
-	out := captureStdout(t, func() { runErr = runCacheInfoArgs([]string{"-o", "json"}) })
+	out := captureStdout(t, func() { runErr = runCacheStatusArgs([]string{"-o", "json"}) })
 	if runErr != nil {
-		t.Fatalf("cache info: %v", runErr)
+		t.Fatalf("cache status: %v", runErr)
 	}
 	payload := decodeCachePayload(t, out)
 	if payload["total_bytes"] != float64(6+65) || payload["entries"] != float64(1) {

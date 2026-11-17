@@ -189,7 +189,7 @@ Committed-source preflight checks that origin's remote-tracking refs contain bot
 selected commits. Another remote cannot satisfy it. Inspection acquires the exact
 pipeline commit through `source.Acquire`, carrying the captured process base,
 repository identity and acquisition location. The selected engine runs its
-`pipeline describe` command in the acquired directory. The returned alias and
+`pipeline show` command in the acquired directory. The returned alias and
 entrypoint must match the captured pair before its argument metadata is accepted.
 Acquisition resources close after success, failure or cancellation. Policy notices
 pass through the existing masked writer after environment registration, and a
@@ -874,7 +874,7 @@ Only explicit null means no active pause. Read errors, missing fields, malformed
 times and mismatched identities fail. Additive unknown fields remain readable
 and are discarded when the public projection is serialized.
 
-`debug env` reads both messages through the same HTTP/api.sock client. It resolves
+`debug show` reads both messages through the same HTTP/api.sock client. It resolves
 a team number once and uses the stable run ID for the second read. It emits the
 public job/execution/pause projection in JSON and propagates failed pause reads.
 The two reads are observations rather than an atomic snapshot. They confer no

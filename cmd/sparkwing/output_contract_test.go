@@ -98,7 +98,7 @@ func TestOutputContractPipeRoutes(t *testing.T) {
 		{"pipeline", "list", "--help"},
 		{"completion", "--shell", "bash"},
 		{"__complete", "--kind", "verbs", "--word="},
-		{"cache", "info"},
+		{"cache", "status"},
 		{"daemon", "status"},
 		{"queue"},
 	} {

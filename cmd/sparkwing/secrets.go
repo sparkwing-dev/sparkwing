@@ -120,7 +120,7 @@ func manageSecrets(ctx context.Context, inv clisurface.Invocation, manager contr
 		}
 		_, err = fmt.Fprintf(out, "secret %q set (repo: %s, pipeline: %s, masked=%t, only-on: %s)\n", result.Secret.Name, opsview.DisplayText(dashIfEmpty(result.Secret.Repo)), opsview.DisplayText(secretScope(result.Secret)), result.Secret.Masked, opsview.DisplayText(dashIfEmpty(result.Secret.OnlyOn)))
 		return err
-	case "sparkwing secrets get":
+	case "sparkwing secrets show":
 		result, err := manager.ReadSecret(ctx, selector)
 		if err != nil {
 			return err

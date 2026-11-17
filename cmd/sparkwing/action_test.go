@@ -91,7 +91,7 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 	}
 }
 
-func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
+func TestPipelineShow_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 	catalog := []Pipeline{
 		{PipelinePresentation: runspec.PipelinePresentation{Name: "cluster-up"}},
 		{PipelinePresentation: runspec.PipelinePresentation{Name: "cluster-down"}},
@@ -120,7 +120,7 @@ func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 	}
 }
 
-func TestPipelineDescribe_FarTypoNoSuggestion(t *testing.T) {
+func TestPipelineShow_FarTypoNoSuggestion(t *testing.T) {
 	catalog := []Pipeline{
 		{PipelinePresentation: runspec.PipelinePresentation{Name: "cluster-up"}},
 		{PipelinePresentation: runspec.PipelinePresentation{Name: "hello"}},

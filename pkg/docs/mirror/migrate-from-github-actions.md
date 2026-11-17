@@ -1,15 +1,13 @@
 # GitHub Actions migration: migrate your workflows
 
+<!-- search-aliases: gha, runs-on, convert workflow, github actions yaml -->
+
 Migrating from GitHub Actions starts with a working pipeline. This guide maps each part of a GitHub Actions workflow to its Sparkwing equivalent, with the workflow YAML first and
 then the same thing in Go and TypeScript. Each row is marked:
 
 - **Works today**: a direct equivalent exists.
 - **Works differently**: you can do it, but the shape differs from GitHub Actions.
 - **Not yet**: no equivalent. The linked [known limitations](known-limitations.md) entry gives the workaround.
-
-If search does not find the guide, list matching topics with
-`sparkwing docs list --search github`, then read
-`sparkwing docs read --topic migrate-from-github-actions`.
 
 The gentlest start is to keep your workflow and call Sparkwing from it: a GitHub Actions job runs
 `sparkwing run ci` on the runner it already has. [Running inside an existing CI job](ci-embedded.md#quick-start-github-actions)

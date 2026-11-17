@@ -316,7 +316,7 @@ func TestCommonGuessesSuggestTheRealCommandWithoutRunningIt(t *testing.T) {
 		{[]string{"runs", "show", "--run", "r1"}, []string{"sparkwing runs status"}},
 		{[]string{"pipelines", "list"}, []string{"sparkwing pipeline list"}},
 		{[]string{"pipelines"}, []string{"sparkwing pipeline"}},
-		{[]string{"pipeline", "show", "--pipeline", "build"}, []string{"sparkwing pipeline describe"}},
+		{[]string{"pipeline", "describe", "--pipeline", "build"}, []string{"sparkwing pipeline show"}},
 		{[]string{"secrets", "remove", "--secret", "X"}, []string{"sparkwing secrets delete"}},
 		{[]string{"secrets", "add", "--secret", "X"}, []string{"sparkwing secrets set"}},
 		{[]string{"profiles", "rm", "--profile", "p"}, []string{"sparkwing profiles delete"}},
