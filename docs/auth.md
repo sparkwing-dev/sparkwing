@@ -1036,7 +1036,7 @@ An operator holding the external key and a candidate can still confirm a match.
 This retained evidence is pseudonymous, so deletion does not promise that it
 cannot be linked to a known candidate. See [audit investigation](oidc.md#audit-investigation).
 
-Deleted data stays in backups for a bounded time; see
+Deleted data can remain in backups until their retention policies retire them; see
 [deleted data in backups](backup-restore.md#deleted-data-in-backups).
 
 ### Device sign-in
