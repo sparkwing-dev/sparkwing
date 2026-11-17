@@ -261,7 +261,10 @@ build. A runner roll starts a successor and stops new claims on the old instance
 The old runner keeps its held jobs, uploads and terminal acknowledgements until
 they finish. A healthy drain has no kill deadline. Controller replacement does
 not cancel these runner processes. Existing execution leases still apply during
-an outage. An idle local runner's claim waits at the controller, which answers
+an outage. A runner exits on its own when its state home is deleted, or when no
+controller has answered on the home's socket for 10 minutes, so a private home
+whose controller died leaves no runner behind; the next `sparkwing` command
+starts a fresh controller and runner. An idle local runner's claim waits at the controller, which answers
 as soon as a commit makes work claimable, or empty after 10 s. The runner then
 claims again at once, so a run submitted to an idle runner starts within
 milliseconds of intake. An idle machine sends one claim and records the runner
