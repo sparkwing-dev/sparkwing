@@ -18,9 +18,10 @@ import (
 )
 
 type claimHoldFixture struct {
-	e   *engineFixture
-	h   http.Handler
-	raw string
+	e     *engineFixture
+	h     http.Handler
+	raw   string
+	owner capability.Authorized
 }
 
 // safety: the run's trigger is held elsewhere and its one job is not ready yet,
@@ -28,7 +29,7 @@ type claimHoldFixture struct {
 func newClaimHoldFixture(t *testing.T, wake func(*store.Store) ClaimWake) claimHoldFixture {
 	t.Helper()
 	e, _ := engineRuntimeStore(t)
-	engineRuntimeClaim(t, e, capability.UnitTrigger)
+	owner := engineRuntimeClaim(t, e, capability.UnitTrigger)
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('a','run','job','pending',?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	engineAcceptedFixturePlan(t, e, "a", "run")
 	e.VersionPolicy = engineVersionPolicy(&engineVersionFake{})
@@ -37,7 +38,7 @@ func newClaimHoldFixture(t *testing.T, wake func(*store.Store) ClaimWake) claimH
 		e.ClaimWake = wake(e.Store)
 	}
 	raw := engineHTTPRoot(t, e, "a", "root", []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
-	return claimHoldFixture{e: e, h: e.Server.WithEngineController(e.EngineController).Handler(), raw: raw}
+	return claimHoldFixture{e: e, h: e.Server.WithEngineController(e.EngineController).Handler(), raw: raw, owner: owner}
 }
 
 func (f claimHoldFixture) claim(ctx context.Context, path string, wait time.Duration) <-chan *httptest.ResponseRecorder {

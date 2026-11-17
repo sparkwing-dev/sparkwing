@@ -19,6 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
+const cloudClaimSearchInterval = 250 * time.Millisecond
+
 // RunnerAdmissionPolicy checks server-owned software policy before a new award.
 // Renewals do not call it because an existing runner must remain able to drain.
 type RunnerAdmissionPolicy interface {
@@ -110,8 +112,12 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
+	wake := s.ClaimWake
+	if wake == nil && capability.CloudLauncher(c) {
+		wake = s.launcherWake
+	}
 	var held time.Time
-	if s.ClaimWake != nil && target == nil && body.Wait > 0 {
+	if wake != nil && target == nil && body.Wait > 0 {
 		held = time.Now().Add(min(body.Wait, controllerwire.MaxClaimWait))
 	}
 	var claim store.UnitClaim
@@ -120,14 +126,14 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 		searched := time.Now()
 		if !held.IsZero() {
 			// safety: taken before the search, so a commit racing it still wakes the hold.
-			committed = s.ClaimWake.NextCommit()
+			committed = wake.NextCommit()
 		}
 		claim, err = s.authority.ClaimUnit(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch, Kubernetes: body.Kubernetes})
 		if target != nil || !errors.Is(err, store.ErrNotFound) {
 			break
 		}
 		if !held.IsZero() {
-			again, err := s.awaitClaimable(ctx, committed, held, store.Team(principal.Capability.Team), searched)
+			again, err := s.awaitClaimable(ctx, wake, committed, held, store.Team(principal.Capability.Team), searched, capability.CloudLauncher(c))
 			if err != nil {
 				return controllerwire.ClaimResponse{}, err
 			}
@@ -154,7 +160,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 
 // perf: reports whether to search again, which only a commit or a lapsing
 // group wait can make worthwhile; false once the hold reaches until or the claimant leaves.
-func (s *EngineController) awaitClaimable(ctx context.Context, committed <-chan struct{}, until time.Time, team store.Team, searched time.Time) (bool, error) {
+func (s *EngineController) awaitClaimable(ctx context.Context, wake ClaimWake, committed <-chan struct{}, until time.Time, team store.Team, searched time.Time, cloud bool) (bool, error) {
 	wait := time.Until(until)
 	if wait <= 0 {
 		return false, nil
@@ -162,7 +168,7 @@ func (s *EngineController) awaitClaimable(ctx context.Context, committed <-chan 
 	// safety: the search settles a group wait that has run out. One that lapsed
 	// by the time the search began was already seen, so only a later lapse wakes
 	// the hold, at once if it passed while the search ran.
-	lapse, timed, err := s.ClaimWake.NextGroupWaitDeadline(ctx, team, searched)
+	lapse, timed, err := wake.NextGroupWaitDeadline(ctx, team, searched)
 	if err != nil {
 		return false, err
 	}
@@ -173,7 +179,20 @@ func (s *EngineController) awaitClaimable(ctx context.Context, committed <-chan 
 	defer timer.Stop()
 	select {
 	case <-committed:
-		return true, nil
+		if !cloud {
+			return true, nil
+		}
+		delay := min(max(time.Until(searched.Add(cloudClaimSearchInterval)), 0), max(time.Until(until), 0))
+		if timed {
+			delay = min(delay, max(time.Until(lapse), 0))
+		}
+		timer.Reset(delay)
+		select {
+		case <-timer.C:
+			return time.Now().Before(until), nil
+		case <-ctx.Done():
+			return false, nil
+		}
 	case <-timer.C:
 		return time.Now().Before(until), nil
 	case <-ctx.Done():

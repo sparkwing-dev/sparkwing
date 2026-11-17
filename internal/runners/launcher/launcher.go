@@ -20,6 +20,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -122,6 +123,8 @@ func (l *Launcher) validate() error {
 // safety: a wide fan-out cannot hold the loop away from renewals and teardown.
 const maxClaimsPerCycle = 8
 
+const podWatchTimeout = 5 * time.Minute
+
 func (l *Launcher) claimPoll() time.Duration {
 	if l.Poll <= 0 {
 		return 5 * time.Second
@@ -139,31 +142,113 @@ func (l *Launcher) Run(ctx context.Context) error {
 	if err := l.verifyAdmission(ctx); err != nil {
 		return err
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	poll := l.claimPoll()
+	claims := claimWait{launcher: l, context: ctx}
+	defer claims.stop(cancel)
+	var pods watch.Interface
+	var changes <-chan watch.Event
+	var reconnect, watchStarted time.Time
+	watchWarned := false
+	defer func() {
+		if pods != nil {
+			pods.Stop()
+		}
+	}()
 	logger := l.logger()
+	warnWatch := func(err error, verb string) {
+		if watchWarned || shutdownFault(ctx, err) == nil {
+			return
+		}
+		message := "Cloud Pod watch unavailable; polling continues"
+		if apierrors.IsForbidden(err) {
+			message += "; grant " + verb + " on pods in the job namespace"
+		}
+		logger.Warn(message, "namespace", l.Config.Namespace, "resource", "pods", "verb", verb, "error", err)
+		watchWarned = true
+	}
+	observeWatch := func(event watch.Event, ok bool) {
+		if ok && event.Type != watch.Error {
+			watchWarned = false
+			return
+		}
+		if event.Type == watch.Error {
+			warnWatch(apierrors.FromObject(event.Object), "watch")
+		} else if ctx.Err() == nil && time.Since(watchStarted) < podWatchTimeout {
+			warnWatch(errors.New("pod watch closed before its timeout"), "watch")
+		}
+		pods.Stop()
+		pods, changes = nil, nil
+		reconnect = time.Now().Add(poll)
+	}
 	var retiring sync.WaitGroup
-	defer retiring.Wait()
+	defer func() { cancel(); retiring.Wait() }()
 	retiring.Go(func() { l.retireLoop(ctx) })
 	var cooldown time.Time
 	var pollAfter time.Duration
 	firstClaim := true
+	reconcile := true
+	var synced error
+	nextReconcile := time.Now()
+	claimed := 0
 	for ctx.Err() == nil {
-		if err := l.reportWarmPools(ctx); err != nil {
-			if shutdownFault(ctx, err) == nil {
+		reconcile = reconcile || !time.Now().Before(nextReconcile)
+		if pods == nil && !time.Now().Before(reconnect) {
+			options := metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher, Limit: 1}
+			// perf: one row supplies the collection revision without replaying every Pod.
+			snapshot, err := l.Kube.CoreV1().Pods(l.Config.Namespace).List(ctx, options)
+			verb := "list"
+			if err == nil {
+				verb = "watch"
+				options.Limit = 0
+				options.ResourceVersion = snapshot.ResourceVersion
+				options.TimeoutSeconds = ptr(int64(podWatchTimeout / time.Second))
+				watchStarted = time.Now()
+				pods, err = l.Kube.CoreV1().Pods(l.Config.Namespace).Watch(ctx, options)
+			}
+			if err != nil {
+				warnWatch(err, verb)
+				reconnect = time.Now().Add(poll)
+			} else {
+				changes = pods.ResultChan()
+				reconcile = true
+			}
+		}
+		if reconcile {
+		drainWatch:
+			for {
+				select {
+				case event, ok := <-changes:
+					observeWatch(event, ok)
+				case <-ctx.Done():
+					return nil
+				default:
+					break drainWatch
+				}
+			}
+			if pods != nil && time.Since(watchStarted) >= poll {
+				watchWarned = false
+			}
+			claimed = 0
+			nextReconcile = time.Now().Add(poll)
+			if err := l.reportWarmPools(ctx); err != nil {
+				if shutdownFault(ctx, err) == nil {
+					return nil
+				}
+				if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
+					logger.Info("warm capacity observation deferred; the next complete sample replaces it", "error", err)
+				} else {
+					logger.Warn("warm capacity observation failed", "error", err)
+				}
+			}
+			if ctx.Err() != nil {
 				return nil
 			}
-			if err == controllerclient.ErrResponseNotObject { //nolint:errorlint // Joined faults must remain WARN.
-				logger.Info("warm capacity observation deferred; the next complete sample replaces it", "error", err)
-			} else {
-				logger.Warn("warm capacity observation failed", "error", err)
+			synced = l.syncActive(ctx)
+			if synced != nil && shutdownFault(ctx, synced) == nil {
+				return nil
 			}
-		}
-		if ctx.Err() != nil {
-			return nil
-		}
-		synced := l.syncActive(ctx)
-		if synced != nil && shutdownFault(ctx, synced) == nil {
-			return nil
 		}
 		if blocking(synced) != nil {
 			logger.Warn("launcher reconciliation failed", failureAttrs(synced)...)
@@ -174,22 +259,40 @@ func (l *Launcher) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
+		claimImmediately := false
 		if blocking(synced) == nil {
 			// safety: held awards without a Job or capacity Pod renew only here, so claim backoff must not skip them.
-			err := l.placeWaiting(ctx)
+			var err error
+			if reconcile {
+				err = l.placeWaiting(ctx)
+			}
 			startupRateLimit := false
 			if err == nil && ctx.Err() == nil && !time.Now().Before(cooldown) {
 				var launched bool
 				var suggestedPoll time.Duration
-				launched, suggestedPoll, err = l.claimReady(ctx)
-				// safety: an award can fail during placement; only failed claim responses retain the old advice.
-				if err == nil || launched {
-					pollAfter = suggestedPoll
+				var completed, immediate bool
+				launched, suggestedPoll, immediate, completed, err = claims.step(ctx, poll)
+				if completed {
+					if launched {
+						claimed++
+					}
+					if claimed >= maxClaimsPerCycle {
+						immediate = false
+					}
+					// safety: an award can fail during placement; only failed claim responses retain the old advice.
+					if err == nil || launched {
+						pollAfter = suggestedPoll
+					}
+					// safety: admission precedes the response, so request latency cannot shorten the server's interval.
+					interval := max(poll, pollAfter)
+					if immediate && err == nil {
+						interval = 0
+					}
+					cooldown = later(cooldown, claims.completedAt.Add(interval))
+					startupRateLimit = firstClaim && !launched && claimRateLimited(err)
+					firstClaim = false
+					claimImmediately = immediate && err == nil
 				}
-				// safety: admission precedes the response, so request latency cannot shorten the server's interval.
-				cooldown = time.Now().Add(max(poll, pollAfter))
-				startupRateLimit = firstClaim && !launched && claimRateLimited(err)
-				firstClaim = false
 			}
 			if err != nil {
 				fault := shutdownFault(ctx, err)
@@ -207,7 +310,10 @@ func (l *Launcher) Run(ctx context.Context) error {
 				cooldown = later(cooldown, time.Now().Add(retryWait(err, 0)))
 			}
 		}
-		wait := poll
+		if claimImmediately {
+			claims.start(ctx, poll)
+		}
+		wait := min(poll, max(time.Until(nextReconcile), 0))
 		if blocking(synced) == nil {
 			for _, award := range l.waitingAwards() {
 				// perf: container exit should release a held successor before the next claim poll.
@@ -224,7 +330,16 @@ func (l *Launcher) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			timer.Stop()
 			return nil
+		case result := <-claims.pending:
+			timer.Stop()
+			claims.result, claims.pending = &result, nil
+			reconcile = false
+		case event, ok := <-changes:
+			timer.Stop()
+			observeWatch(event, ok)
+			reconcile = true
 		case <-timer.C:
+			reconcile = true
 		}
 	}
 	return nil

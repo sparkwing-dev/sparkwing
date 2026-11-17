@@ -421,17 +421,30 @@ Transport failures never trigger a second claim in the adapter.
 `sparkwing-runner launch` uses the shared runner grammar. Both `--image` and
 `--docker-image` require digest-pinned operator images. Namespace defaults to
 `sparkwing-jobs`. Deadlines come from the award rather than a launcher flag.
-`sparkwing-runner launch --poll <duration>` sets the interval between claim and
-reconciliation cycles. Each cycle claims until the controller answers with no
-award, up to eight awards, so jobs that become ready together launch in the
-same cycle; the bound keeps one fan-out from holding the loop away from
-renewals and teardown. The duration must be positive. Omitting it keeps the
-runtime's configured interval, which defaults to five seconds. While a held
-same-run successor waits for predecessor teardown, reconciliation and placement
-recheck at most one second apart (or the shorter configured poll). New claims
-retain their configured interval and controller backoff. The faster checks stop
-when placement succeeds or the existing 30-second teardown wait expires; fresh
-capacity waits keep the configured poll.
+`sparkwing-runner launch --poll <duration>` sets the safety reconciliation
+interval and bounds each held controller claim. The duration must be positive
+and defaults to five seconds. Cloud launcher claims wait for the controller
+commit that makes work claimable. Only one claim waits at a time, while
+reconciliation, renewal and teardown continue. A delivered award without poll advice starts another
+claim after placement, and a held empty response starts another claim at once.
+Up to eight ready awards launch between safety passes without an intervening
+full reconciliation. Each launch still revalidates its own preparation and
+activation. After eight awards, the next claim waits for the configured poll.
+Claim responses cannot postpone the safety reconciliation deadline.
+A controller without held-claim support keeps the polling fallback.
+
+A watch on launcher-managed Pods in the job namespace wakes reconciliation
+when capacity starts or predecessor containers exit. Events only request a
+fresh pass through the same reservation, award, UID and admission checks.
+Each connection first lists at most one matching Pod to obtain the collection's
+resource version, then starts the watch from that version. A full safety sample
+follows the connection, and later changes remain in the watch. This avoids an
+initial replay of every existing Pod, including on unbuffered watch streams.
+Queued Pod events still share one reconciliation pass. The safety poll recovers missed events. A failed or closed
+watch reconnects no sooner than the next poll. A failure streak warns once with
+the namespace, resource and verb. A forbidden watch names the missing permission.
+A healthy event or a full poll interval with a live watch resets the streak. Held same-run successors also retain the
+one-second teardown check and its 30-second bound.
 `--idle-grace <duration>` sets how long a used node may sit unreserved before
 retirement. It defaults to 60 seconds and must be at least the claim poll plus
 the 30-second retirement interval, so a ready successor is claimed and reserves
@@ -613,8 +626,9 @@ through the handoff and fresh-capacity fallback at 30 seconds.
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
 normal runs and retries, including launcher restarts.
 
-The claim loop waits at least its configured poll interval or the controller's
-`PollAfter`, whichever is longer, after the claim response and placement finish.
+An unheld empty response, explicit poll advice or claim failure waits at least the configured poll
+interval or the controller's `PollAfter`, whichever is longer, after response
+completion. A placement failure starts that interval after placement finishes.
 Advice is capped at the wire protocol's eight-second maximum. Variable request
 latency therefore cannot compress the interval between controller admissions.
 An errored claim retains the last valid advice because the controller may have
@@ -623,6 +637,24 @@ or clears that advice, including when its award encounters a placement failure.
 Reconciliation and held-award renewal continue during claim cooldown, and their
 failures cannot shorten it. `TestLauncherClaimPollTiming` guards the timing,
 advice bounds and reconciliation through a temporary failure with a fake clock.
+`TestCapacityWakePublishesBeforePollAndPollRecoversMissedWake` and
+`TestRunHoldsClaimWithoutBlockingReconciliation` guard wake latency, recovery
+and independent reconciliation. The controller's
+`TestCloudLauncherClaimWakesOnCommitAndRecoversMissedSignal` guards the actual
+real readiness commit wake and a missed signal at the bounded rescan.
+Cloud commit notifications coalesce behind a 250 ms minimum gap between searches;
+readiness after an idle gap wakes at once. The initial search, hold deadline,
+group-wait deadline and cancellation keep their existing boundaries. Local
+controller holds retain immediate commit wakes.
+`TestCloudLauncherHeldSearchCoalescesCommits` bounds 49 unrelated writes at 100 ms
+intervals to at most 20 searches in a five-second hold.
+`TestLauncherLaunchesWorkReadyTogetherInOneCycle` guards the production adapter's
+API-call count. `TestLauncherCoalescesPodWatchReplay`,
+`TestLauncherWarnsOncePerPodWatchFailureStreak` and
+`TestLauncherHeldRepliesKeepSafetyReconciliationOnSchedule` guard burst load,
+visible fallback and safety scheduling.
+`TestLauncherWatchStartsFromFreshSnapshotAfterExpiration` guards versioned
+watch startup and a fresh snapshot after a resource-version expiration.
 
 Poll advice is process-local. The first claim after launcher startup logs a
 controller rate-limit reply at INFO,

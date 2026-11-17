@@ -46,43 +46,63 @@ func NewControllerControl(client LauncherController, demand controllerwire.Claim
 // Claim delivers a bootstrap once; uncertain transport delivery recovers through lease expiry.
 // Its second result is the controller's poll floor, capped at the supported idle interval.
 func (c *ControllerControl) Claim(ctx context.Context, namespace string, excludedTeamLabels []string) (*CloudJobAward, time.Duration, error) {
+	result := c.claim(ctx, namespace, excludedTeamLabels, 0)
+	return result.award, result.pollAfter, result.err
+}
+
+func (c *ControllerControl) waitClaim(ctx context.Context, namespace string, excluded []string, wait time.Duration) claimResult {
+	return c.claim(ctx, namespace, excluded, wait)
+}
+
+func (c *ControllerControl) claim(ctx context.Context, namespace string, excludedTeamLabels []string, wait time.Duration) (result claimResult) {
 	if err := context.Cause(ctx); err != nil {
-		return nil, 0, err
+		result.err = err
+		return result
 	}
 	demand := c.demand
 	demand.Kinds, demand.Labels = slices.Clone(demand.Kinds), slices.Clone(demand.Labels)
+	demand.Wait = wait
 	demand.JobNamespace = namespace
 	demand.ExcludedTeamLabels = slices.Clone(excludedTeamLabels)
 	response, err := c.client.Claim(ctx, demand)
-	pollAfter := min(max(response.PollAfter, 0), controllerwire.MaxHonoredIdleClaimPoll)
+	result.pollAfter = min(max(response.PollAfter, 0), controllerwire.MaxHonoredIdleClaimPoll)
+	result.immediate = response.Held || response.Claim != nil && result.pollAfter == 0
 	if err != nil || response.Claim == nil {
-		return nil, pollAfter, err
+		result.err = err
+		return result
 	}
 	unit := *response.Claim
 	binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
 	if err != nil {
-		return nil, pollAfter, err
+		result.err = err
+		return result
 	}
 	if !slices.Contains(c.demand.Kinds, unit.Unit) || unit.Capability == "" {
-		return nil, pollAfter, errors.New("controller returned an unexpected launcher award")
+		result.err = errors.New("controller returned an unexpected launcher award")
+		return result
 	}
 	resources := unit.CloudResources
 	if resources == nil {
-		return nil, pollAfter, errors.New("cloud award is missing its committed allocation")
+		result.err = errors.New("cloud award is missing its committed allocation")
+		return result
 	}
 	award := &CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Bootstrap: []byte(unit.Capability), Engine: unit.Engine, CPUCores: resources.Cores, Memory: resources.MemoryBytes, UpsizeEnabled: unit.CloudUpsizeEnabled}
 	if err := validateAward(*award); err != nil {
-		return nil, pollAfter, err
+		result.err = err
+		return result
 	}
 	award.Source, err = cloudSource(unit)
 	if err != nil {
-		return nil, pollAfter, err
+		result.err = err
+		return result
 	}
 	captured, err := captureAward(*award)
 	if err != nil {
-		return nil, pollAfter, err
+		result.err = err
+		return result
 	}
-	return &captured, pollAfter, nil
+	result.award = &captured
+	return result
 }
 
 func cloudSource(unit controllerwire.ClaimedUnit) (source.Spec, error) {

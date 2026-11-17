@@ -11,7 +11,7 @@ import (
 )
 
 type commitSignal struct {
-	// perf: a store nobody waits on, such as Cloud's, skips write detection and the mutex.
+	// perf: stores that never wait on commits skip write detection and the mutex.
 	tracking atomic.Bool
 	mu       sync.Mutex
 	next     chan struct{}
