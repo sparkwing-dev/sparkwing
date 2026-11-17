@@ -176,7 +176,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 		if event.Type == watch.Error {
 			warnWatch(apierrors.FromObject(event.Object))
 		} else if ctx.Err() == nil && time.Since(watchStarted) < podWatchTimeout {
-			warnWatch(errors.New("Pod watch closed before its timeout"))
+			warnWatch(errors.New("pod watch closed before its timeout"))
 		}
 		pods.Stop()
 		pods, changes = nil, nil
