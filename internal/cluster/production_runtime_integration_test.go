@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -306,75 +307,119 @@ func productionAwardNode(unit controllerwire.ClaimedUnit, principal capability.P
 }
 
 func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
-	for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
-		t.Run(string(kind), func(t *testing.T) {
-			_, unit := productionNativeAward(t, capability.UnitNode)
-			unit.Unit = kind
-			unit.CloudResources = &match.Resources{Cores: 1, MemoryBytes: 1 << 30}
-			expires := time.Now().Add(time.Hour)
-			unit.ParentCapabilityExpiry = &expires
-			binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), ParentCapabilityExpiry: expires}
-			if kind == capability.UnitPlan {
-				unit.Purpose, unit.JobID, unit.Binding.Kind, unit.Binding.NodeID = capability.PurposePlan, "", capability.BindingRun, ""
-				unit.Accepted, unit.Engine = nil, nil
-				binding.Kind, binding.NodeID = launcher.CloudPlan, ""
-			} else if kind == capability.UnitEval {
-				unit.Purpose, unit.SourceGeneration = capability.PurposeEval, unit.Binding.Generation
-				unit.Binding.Expansion = &capability.LeaseRef{Kind: kind, ID: unit.UnitID, Holder: "eval-holder", Generation: 2}
-				binding.Kind, binding.Holder, binding.Generation = launcher.CloudEval, "eval-holder", 2
-				binding.SourceNodeID, binding.SourceGeneration = runspec.NodeID(unit.JobID), runspec.ClaimGeneration(unit.SourceGeneration)
-			}
-			var spec source.Spec
-			var err error
-			if kind == capability.UnitPlan {
-				spec, err = source.ForRequest(unit.Request)
-			} else {
-				spec, err = source.ForExecution(unit.Accepted.Spec)
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			award := launcher.CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Engine: unit.Engine, Source: spec, Bootstrap: []byte(productionTestBearer("bootstrap")), CPUCores: 1, Memory: 1 << 30}
-			boundary := errors.New("awarded unit renewal boundary")
-			exchanges, renewals := 0, 0
-			previousTransport := http.DefaultTransport
-			http.DefaultTransport = productionTransport(func(r *http.Request) (*http.Response, error) {
-				switch r.Method + " " + r.URL.Path {
-				case "POST /api/v1/claims/exchange":
-					exchanges++
-					if r.Header.Get("Authorization") != "Bearer "+string(award.Bootstrap) {
-						t.Fatal("exchange did not use the bootstrap")
+	for _, failStage := range []string{"bootstrap_exchange", "bootstrap_renewal"} {
+		t.Run(failStage, func(t *testing.T) {
+			for _, kind := range []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode} {
+				t.Run(string(kind), func(t *testing.T) {
+					var logs bytes.Buffer
+					previousLogger := slog.Default()
+					slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+					t.Cleanup(func() { slog.SetDefault(previousLogger) })
+					_, unit := productionNativeAward(t, capability.UnitNode)
+					unit.Unit = kind
+					unit.CloudResources = &match.Resources{Cores: 1, MemoryBytes: 1 << 30}
+					expires := time.Now().Add(time.Hour)
+					unit.ParentCapabilityExpiry = &expires
+					binding := launcher.CloudJobBinding{Kind: launcher.CloudWork, UnitID: unit.UnitID, Team: unit.Request.Request.Team, RunID: runspec.RunID(unit.RunID), NodeID: runspec.NodeID(unit.JobID), Holder: unit.Binding.Holder, Generation: runspec.ClaimGeneration(unit.Binding.Generation), ParentCapabilityExpiry: expires}
+					if kind == capability.UnitPlan {
+						unit.Purpose, unit.JobID, unit.Binding.Kind, unit.Binding.NodeID = capability.PurposePlan, "", capability.BindingRun, ""
+						unit.Accepted, unit.Engine = nil, nil
+						binding.Kind, binding.NodeID = launcher.CloudPlan, ""
+					} else if kind == capability.UnitEval {
+						unit.Purpose, unit.SourceGeneration = capability.PurposeEval, unit.Binding.Generation
+						unit.Binding.Expansion = &capability.LeaseRef{Kind: kind, ID: unit.UnitID, Holder: "eval-holder", Generation: 2}
+						binding.Kind, binding.Holder, binding.Generation = launcher.CloudEval, "eval-holder", 2
+						binding.SourceNodeID, binding.SourceGeneration = runspec.NodeID(unit.JobID), runspec.ClaimGeneration(unit.SourceGeneration)
 					}
-					body, err := json.Marshal(controllerwire.ExchangeResponse{Claim: unit})
-					return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
-				case "POST /api/v1/claims/unit/heartbeat":
-					renewals++
-					if r.Header.Get("Authorization") != "Bearer "+unit.Capability {
-						t.Fatal("renewal did not use the exchanged award")
+					var spec source.Spec
+					var err error
+					if kind == capability.UnitPlan {
+						spec, err = source.ForRequest(unit.Request)
+					} else {
+						spec, err = source.ForExecution(unit.Accepted.Spec)
 					}
-					return nil, boundary
-				default:
-					t.Fatalf("unexpected Cloud request: %s %s", r.Method, r.URL)
-					return nil, boundary
-				}
-			})
-			t.Cleanup(func() { http.DefaultTransport = previousTransport })
-			directory := t.TempDir()
-			metadata, err := json.Marshal(award)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for name, data := range map[string][]byte{"award.json": metadata, "bootstrap": award.Bootstrap} {
-				if err := os.WriteFile(filepath.Join(directory, name), data, 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			args := []string{"--controller=https://controller.invalid", "--run=run", fmt.Sprintf("--generation=%d", binding.Generation), "--bootstrap-file=" + filepath.Join(directory, "bootstrap"), "--module-cache=" + filepath.Join(directory, "modules")}
-			if unit.JobID != "" {
-				args = append(args, "--job="+unit.JobID)
-			}
-			if err := productionRuntime("v1.2.3").Bootstrap.Run(t.Context(), "run-node", args); !errors.Is(err, boundary) || exchanges != 1 || renewals != 1 {
-				t.Fatalf("production %s stopped before awarded renewal: exchanges=%d renewals=%d error=%v", kind, exchanges, renewals, err)
+					if err != nil {
+						t.Fatal(err)
+					}
+					award := launcher.CloudJobAward{LeaseExpiresAt: unit.LeaseExpiresAt, Binding: binding, Engine: unit.Engine, Source: spec, Bootstrap: []byte(productionTestBearer("bootstrap")), CPUCores: 1, Memory: 1 << 30}
+					boundary := errors.New("awarded unit renewal boundary")
+					exchanges, renewals := 0, 0
+					previousTransport := http.DefaultTransport
+					http.DefaultTransport = productionTransport(func(r *http.Request) (*http.Response, error) {
+						switch r.Method + " " + r.URL.Path {
+						case "POST /api/v1/claims/exchange":
+							exchanges++
+							if r.Header.Get("Authorization") != "Bearer "+string(award.Bootstrap) {
+								t.Fatal("exchange did not use the bootstrap")
+							}
+							if failStage == "bootstrap_exchange" {
+								return nil, boundary
+							}
+							body, err := json.Marshal(controllerwire.ExchangeResponse{Claim: unit})
+							return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(bytes.NewReader(body))}, err
+						case "POST /api/v1/claims/unit/heartbeat":
+							renewals++
+							if r.Header.Get("Authorization") != "Bearer "+unit.Capability {
+								t.Fatal("renewal did not use the exchanged award")
+							}
+							return nil, boundary
+						default:
+							t.Fatalf("unexpected Cloud request: %s %s", r.Method, r.URL)
+							return nil, boundary
+						}
+					})
+					t.Cleanup(func() { http.DefaultTransport = previousTransport })
+					directory := t.TempDir()
+					metadata, err := json.Marshal(award)
+					if err != nil {
+						t.Fatal(err)
+					}
+					for name, data := range map[string][]byte{"award.json": metadata, "bootstrap": award.Bootstrap} {
+						if err := os.WriteFile(filepath.Join(directory, name), data, 0o600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					args := []string{"--controller=https://controller.invalid", "--run=run", fmt.Sprintf("--generation=%d", binding.Generation), "--bootstrap-file=" + filepath.Join(directory, "bootstrap"), "--module-cache=" + filepath.Join(directory, "modules")}
+					if unit.JobID != "" {
+						args = append(args, "--job="+unit.JobID)
+					}
+					if err := productionRuntime("v1.2.3").Bootstrap.Run(t.Context(), "run-node", args); !errors.Is(err, boundary) || exchanges != 1 || renewals != map[string]int{"bootstrap_exchange": 0, "bootstrap_renewal": 1}[failStage] {
+						t.Fatalf("production %s stopped before awarded renewal: exchanges=%d renewals=%d error=%v", kind, exchanges, renewals, err)
+					}
+					want := []string{"bootstrap_docker", "bootstrap_seed_barrier", "bootstrap_exchange"}
+					if failStage == "bootstrap_renewal" {
+						want = append(want, "bootstrap_renewal")
+					}
+					var stages []string
+					for _, line := range bytes.Split(bytes.TrimSpace(logs.Bytes()), []byte("\n")) {
+						if len(line) == 0 {
+							continue
+						}
+						var record map[string]any
+						if err := json.Unmarshal(line, &record); err != nil {
+							t.Fatal(err)
+						}
+						stage, ok := record["stage"].(string)
+						if !ok {
+							continue
+						}
+						stages = append(stages, stage)
+						if duration, ok := record["duration_ms"].(float64); !ok || duration < 0 {
+							t.Fatalf("missing duration: %s", line)
+						}
+						if record["success"] != (stage != failStage) {
+							t.Fatalf("wrong result: %s", line)
+						}
+					}
+					if !slices.Equal(stages, want) {
+						t.Fatalf("stages=%v want=%v logs=%s", stages, want, logs.String())
+					}
+					for _, secret := range []string{string(award.Bootstrap), unit.Capability, "controller.invalid", boundary.Error()} {
+						if strings.Contains(logs.String(), secret) {
+							t.Fatalf("startup logs contain private value %q", secret)
+						}
+					}
+				})
 			}
 		})
 	}

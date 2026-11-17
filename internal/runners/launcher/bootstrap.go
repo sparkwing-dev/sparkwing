@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"strings"
@@ -64,7 +65,9 @@ func (h BootstrapHost) Run(ctx context.Context, award CloudJobAward) (result err
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
+	started := time.Now()
 	response, err := controller.Exchange(ctx)
+	slog.InfoContext(ctx, "Cloud startup", "stage", "bootstrap_exchange", "duration_ms", time.Since(started).Milliseconds(), "success", err == nil)
 	if err != nil {
 		return err
 	}

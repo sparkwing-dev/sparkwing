@@ -361,7 +361,9 @@ func (l *Launcher) placeWaiting(ctx context.Context) error {
 }
 
 func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched bool, err error) {
+	started := time.Now()
 	prepared, stop, expires, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
+	l.recordStartupStage(ctx, award.Binding, "launcher_preparation", started, err == nil)
 	if err != nil {
 		return true, err
 	}
@@ -375,6 +377,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	}()
 	current := *award
 	current.LeaseExpiresAt = expires
+	started = time.Now()
 	r, err := BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
 	// perf: the controller can end a same-run predecessor after this pass's reconciliation.
 	// Its live Job would hide the handoff, and the demand it prompted would leave Karpenter a
@@ -385,6 +388,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 			r, err = BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
 		}
 	}
+	l.recordStartupStage(ctx, award.Binding, "launcher_reservation", started, err == nil)
 	if errors.Is(err, errCapacityUnconfigured) {
 		l.wait(award)
 		return true, l.awaitCapacity(ctx, *award)
@@ -409,12 +413,17 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	if err != nil {
 		return true, err
 	}
-	if err := l.releaseCapacity(ctx, award.Binding); err != nil {
+	started = time.Now()
+	releaseErr := l.releaseCapacity(ctx, award.Binding)
+	l.recordStartupStage(ctx, award.Binding, "launcher_capacity_release", started, releaseErr == nil)
+	if err := releaseErr; err != nil {
 		return true, errors.Join(err, l.Boundary.Release(ctx, r.Reservation))
 	}
 	// safety: a suspended Job persists teardown ownership before any Secret exists or code can execute.
 	r.Job.Spec.Suspend = ptr(true)
+	started = time.Now()
 	created, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Create(ctx, r.Job, metav1.CreateOptions{})
+	l.recordStartupStage(ctx, award.Binding, "launcher_job_create", started, err == nil)
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			return true, fmt.Errorf("Job already exists: %w", err)

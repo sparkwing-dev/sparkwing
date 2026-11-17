@@ -413,6 +413,12 @@ func (l *Launcher) releaseCapacity(ctx context.Context, b CloudJobBinding) error
 	if err != nil {
 		return err
 	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.Name == "capacity" && status.State.Running != nil && !status.State.Running.StartedAt.IsZero() {
+			l.recordStartupStage(ctx, b, "launcher_capacity_observed", status.State.Running.StartedAt.Time, true)
+			break
+		}
+	}
 	return l.deleteCapacityPod(ctx, pod)
 }
 
