@@ -7,7 +7,39 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
+
+func TestSelfDeletePreviewExplainsStaleSignInAndArchive(t *testing.T) {
+	f := newDeletionFixture(t)
+	u := f.user("reauth", "reauth@example.test")
+	var plan struct {
+		SignInRequired bool   `json:"sign_in_required"`
+		ArchiveNotice  string `json:"archive_notice"`
+	}
+	if code := f.call("GET", "/api/v1/me/deletion", u.auth, nil, &plan); code != http.StatusOK || plan.SignInRequired {
+		t.Fatalf("fresh preview=%d %+v", code, plan)
+	}
+	var expected string
+	for _, entry := range docs.List() {
+		if entry.Slug == "account-deletion-retention" {
+			expected = entry.Summary
+		}
+	}
+	if expected == "" || plan.ArchiveNotice != expected {
+		t.Fatalf("preview omitted documentation-owned archive notice: %+v", plan)
+	}
+	f.advance(11 * time.Minute)
+	if code := f.call("DELETE", "/api/v1/me", u.auth, map[string]any{"confirm_account_id": u.id, "confirm_teams": []string{u.team}}, nil); code != http.StatusForbidden {
+		t.Fatalf("stale deletion=%d", code)
+	}
+	if code := f.call("GET", "/api/v1/me/deletion", u.auth, nil, &plan); code != http.StatusOK || !plan.SignInRequired {
+		t.Fatalf("stale preview=%d %+v", code, plan)
+	}
+	if code := f.call("GET", "/api/v1/me", u.auth, nil, nil); code != http.StatusOK {
+		t.Fatalf("stale refusal removed account: %d", code)
+	}
+}
 
 func TestSelfDeleteConfirmsEverySoleMemberTeamAndRevokesAccount(t *testing.T) {
 	f := newDeletionFixture(t)

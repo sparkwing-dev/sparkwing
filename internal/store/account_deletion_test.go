@@ -1,12 +1,52 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
+
+func TestOwnAccountDeletionRequiresRecentSignIn(t *testing.T) {
+	for _, age := range []time.Duration{10 * time.Minute, 10*time.Minute + time.Nanosecond} {
+		t.Run(age.String(), func(t *testing.T) {
+			s, a, raw, now := accountMutationFixture(t)
+			plan, err := s.AsOperator().PreviewAccountDeletion(t.Context(), a)
+			if err != nil {
+				t.Fatal(err)
+			}
+			*now = now.Add(age)
+			_, err = s.AsOperator().DeleteOwnAccount(t.Context(), a, plan.AccountID, []string{string(plan.Teams[0])})
+			if age == 10*time.Minute {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			var refusal *apierr.Error
+			if !errors.As(err, &refusal) || refusal.Details["reason"] != apierr.Reason("reauth_required") {
+				t.Fatalf("stale sign-in deletion = %v, want reauth_required", err)
+			}
+			if _, err := s.AsOperator().LookupSession(t.Context(), raw); err != nil {
+				t.Fatalf("stale refusal revoked session: %v", err)
+			}
+			if _, err := s.AsOperator().Account(t.Context(), plan.AccountID); err != nil {
+				t.Fatalf("stale refusal removed account: %v", err)
+			}
+		})
+	}
+}
+
+func TestOwnAccountDeletionNamesMissingConfirmationList(t *testing.T) {
+	s, a, _, _ := accountMutationFixture(t)
+	_, err := s.AsOperator().DeleteOwnAccount(t.Context(), a, a.Principal.Capability.Subject.ID, nil)
+	if err == nil || !strings.Contains(err.Error(), "confirm_teams is required") {
+		t.Fatalf("missing list = %v", err)
+	}
+}
 
 func TestOwnAccountDeletionRechecksScopeAndRevokesAllSessions(t *testing.T) {
 	s, a, raw, _ := accountMutationFixture(t)

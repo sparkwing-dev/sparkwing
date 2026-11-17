@@ -71,6 +71,7 @@
         "shared-runners",
         "credentials",
         "auth",
+        "account-deletion-retention",
         "oidc",
         "limits",
         "billing",

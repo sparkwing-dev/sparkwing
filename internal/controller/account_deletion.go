@@ -8,8 +8,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
+
+const accountDeletionCredentialNotice = "Runner and CI tokens you created in shared teams are revoked too, which can stop those integrations. Arrange replacements before deleting."
 
 func (s *Server) handleAccountDeletionPreview(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	writer, err := s.accountWriter()
@@ -28,7 +31,17 @@ func (s *Server) handleAccountDeletionPreview(w http.ResponseWriter, r *http.Req
 	for _, team := range plan.BlockedTeams {
 		blocked = append(blocked, string(team.Slug))
 	}
-	writeJSON(w, http.StatusOK, controllerwire.AccountDeletionPreview{AccountID: plan.AccountID, Teams: teams, BlockedTeams: blocked})
+	var archiveNotice string
+	for _, entry := range docs.List() {
+		if entry.Slug == "account-deletion-retention" {
+			archiveNotice = entry.Summary
+			break
+		}
+	}
+	if archiveNotice == "" {
+		return errors.New("embedded account deletion retention notice is unavailable")
+	}
+	writeJSON(w, http.StatusOK, controllerwire.AccountDeletionPreview{AccountID: plan.AccountID, Teams: teams, BlockedTeams: blocked, SignInRequired: plan.SignInRequired, ArchiveNotice: archiveNotice, CredentialNotice: accountDeletionCredentialNotice})
 	return nil
 }
 

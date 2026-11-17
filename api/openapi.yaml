@@ -729,12 +729,18 @@ components:
       properties:
         account_id:
           type: string
+        archive_notice:
+          type: string
         blocked_teams:
           anyOf:
             - items:
                 type: string
               type: array
             - type: "null"
+        credential_notice:
+          type: string
+        sign_in_required:
+          type: boolean
         teams:
           anyOf:
             - items:
@@ -745,6 +751,9 @@ components:
         - account_id
         - teams
         - blocked_teams
+        - sign_in_required
+        - archive_notice
+        - credential_notice
       type: object
       x-sparkwing-go-type: controllerwire.AccountDeletionPreview
     internal.controllerwire.AccountDeletionRequest:

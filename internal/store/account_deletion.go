@@ -4,15 +4,17 @@ import (
 	"context"
 	"slices"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // AccountDeletionPreview lists the teams deleted with the account and those blocking deletion.
 type AccountDeletionPreview struct {
-	AccountID    string
-	Teams        []Team
-	BlockedTeams []TeamInfo
+	AccountID      string
+	SignInRequired bool
+	Teams          []Team
+	BlockedTeams   []TeamInfo
 }
 
 func ownAccountDeletionSessionTx(ctx context.Context, tx *storeTx, a capability.Authorized) (capability.Principal, error) {
@@ -35,7 +37,8 @@ func (o *Operator) PreviewAccountDeletion(ctx context.Context, a capability.Auth
 			return err
 		}
 		sole, blocked, err := tx.operator.ownedTeamsTx(ctx, tx, p.Capability.Subject.ID)
-		result = AccountDeletionPreview{AccountID: p.Capability.Subject.ID, Teams: sole, BlockedTeams: blocked}
+		now := tx.now(ctx)
+		result = AccountDeletionPreview{AccountID: p.Capability.Subject.ID, Teams: sole, BlockedTeams: blocked, SignInRequired: now.Before(p.Capability.IssuedAt) || now.Sub(p.Capability.IssuedAt) > IdentityChangeSignInWindow}
 		return err
 	})
 	if err != nil {
@@ -52,6 +55,10 @@ func (o *Operator) DeleteOwnAccount(ctx context.Context, a capability.Authorized
 		if err != nil {
 			return err
 		}
+		now := tx.now(ctx)
+		if now.Before(p.Capability.IssuedAt) || now.Sub(p.Capability.IssuedAt) > IdentityChangeSignInWindow {
+			return hosterr.Authorization(hosterr.ReasonReauthRequired, "sign out and sign in again before deleting your account, then retry within 10 minutes with the new session")
+		}
 		if confirm == "" || confirm != p.Capability.Subject.ID {
 			return &apierr.Error{Code: apierr.BadRequest, Message: "confirm_account_id must match your account ID"}
 		}
@@ -62,6 +69,10 @@ func (o *Operator) DeleteOwnAccount(ctx context.Context, a capability.Authorized
 		if len(blocked) > 0 {
 			return &LastOwnerError{Teams: blocked}
 		}
+		if len(sole) > 0 && len(teams) == 0 {
+			return &apierr.Error{Code: apierr.BadRequest, Message: "confirm_teams is required: confirm every team listed in the deletion preview"}
+		}
+		slices.Sort(sole)
 		confirmed := slices.Clone(teams)
 		slices.Sort(confirmed)
 		if len(confirmed) != len(sole) {

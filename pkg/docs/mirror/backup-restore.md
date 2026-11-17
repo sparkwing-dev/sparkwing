@@ -333,6 +333,16 @@ audit identifiers have the explicit exceptions described in
 [Deleting a team or account](auth.md#deleting-a-team-or-account).
 
 On Sparkwing Cloud, RDS automated backups retain a seven-day recovery window.
+That is not an every-copy deletion deadline. Accounts which existed on or before
+2026-10-02 may remain in encrypted operator archives. The SQLite pre-cutover
+archive uploaded on 2026-09-15 has a 365-day current-object lifecycle plus
+30 days for noncurrent versions, ending around 2027-10-15. S3 expiry is
+asynchronous. The rule filters only the SQLite prefix. The PostgreSQL
+controller and billing archives uploaded on 2026-10-02 have no scheduled
+expiry and remain until the operator sets a pending retention decision.
+Accounts created after 2026-10-02 are not in any of these archives. Deletion
+does not scrub the archives.
+See [Account deletion retention](account-deletion-retention.md).
 Cloud run-data buckets are unversioned, so a successful object purge leaves no
 noncurrent object versions. Manual RDS snapshots do not expire and must not be
 created for customer data under the seven-day deletion promise. A restore must

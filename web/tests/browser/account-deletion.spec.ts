@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test } from "./fixtures";
 import { onboardingFixture } from "./onboarding-fixture";
 
@@ -85,4 +87,41 @@ test("long team slugs stay inside the mobile confirmation panel", async ({ page 
   expect(await team.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
   await page.getByRole("button", { name: "Delete account permanently" }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("ui-long-team-mobile.png"), fullPage: true });
+});
+
+test("a stale preview requests reauthentication and shows the archive notice", async ({ page }, testInfo) => {
+  await onboardingFixture(page);
+  const archiveNotice = readFileSync(resolve(__dirname, "../../../docs/account-deletion-retention.md"), "utf8").split("\n\n")[1];
+  await page.route("**/api/v1/me/team-deletions", route => route.fulfill({ json: { deletions: [], truncated: false, next_cursor: "" } }));
+  await page.route("**/api/v1/me/deletion", route => route.fulfill({ json: { account_id: "u1", teams: ["personal"], blocked_teams: [], sign_in_required: true, archive_notice: archiveNotice, credential_notice: "Runner and CI tokens you created in shared teams are revoked too." } }));
+  let signedOut = false;
+  await page.route("**/api/v1/auth/logout", async route => { signedOut = true; await route.fulfill({ status: 204 }); });
+  await page.goto("/account");
+  await page.getByRole("button", { name: "Review account deletion" }).click();
+  const signIn = page.getByRole("button", { name: "Sign in again", exact: true });
+  await expect(signIn).toBeFocused();
+  await expect(page.getByText(archiveNotice, { exact: false })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Retention details" })).toHaveAttribute("href", "https://sparkwing.dev/docs/account-deletion-retention");
+  await expect(page.getByRole("button", { name: "Delete account permanently" })).toHaveCount(0);
+  await signIn.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("reauth-wide.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("reauth-mobile.png"), fullPage: true });
+  await signIn.click();
+  await expect(page).toHaveURL(/\/login\?next=%2Faccount$/);
+  expect(signedOut).toBe(true);
+});
+
+test("freshness expiring after preview removes the destructive form", async ({ page }) => {
+  await onboardingFixture(page);
+  await page.route("**/api/v1/me/team-deletions", route => route.fulfill({ json: { deletions: [], truncated: false, next_cursor: "" } }));
+  await page.route("**/api/v1/me/deletion", route => route.fulfill({ json: { account_id: "u1", teams: [], blocked_teams: [], sign_in_required: false, archive_notice: "Archive notice from documentation" } }));
+  await page.route("**/api/v1/me", route => route.request().method() === "DELETE" ? route.fulfill({ status: 403, json: { error: { code: "forbidden", message: "sign in again", details: { reason: "reauth_required" } } } }) : route.fallback());
+  await page.goto("/account");
+  await page.getByRole("button", { name: "Review account deletion" }).click();
+  await page.getByLabel("Type your account ID to confirm:", { exact: false }).fill("u1");
+  await page.getByRole("button", { name: "Delete account permanently" }).click();
+  await expect(page.getByRole("button", { name: "Sign in again", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Delete account permanently" })).toHaveCount(0);
 });

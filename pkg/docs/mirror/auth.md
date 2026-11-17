@@ -571,7 +571,7 @@ Its public work queue is `/api/v1/runners/claim`.
 
 Operational deployment credentials carry `operator.limits`,
 `operator.object_store` or `operator.tokens` for their selected operations.
-Trust changes, grants, freezes and account deletion require an
+Trust changes, grants, freezes and operator account deletion require an
 operator-console session. Those powers do not follow from a deployment token.
 Use the dashboard's `/operator` page for trust, free-credit grants, holds and
 the signup waitlist. The retired `sparkwing-ops teams trust`, `credits grant`,
@@ -1021,25 +1021,35 @@ state.
 An owner cannot delete their only team through team deletion. Delete the account
 from **Your account > Delete account**, or use `sparkwing account delete
 --profile NAME --session-stdin`. The profile selects the controller, and stdin
-supplies an existing direct account session, as with runner enrollment. A
+supplies a direct account session signed in within the last 10 minutes. An old
+session can read the preview, but cannot confirm deletion. Sign out and sign in
+again when prompted, then supply the new session. A
 profile token cannot delete an account. Prefer the dashboard to avoid copying a
 session. The preview lists every team where you are the only member. Their runs
 and operational data go with them. Type the account ID to confirm in the
 dashboard. In the CLI, first read the preview, then repeat the account ID with
 `--confirm ACCOUNT_ID` and each listed team with `--confirm-team SLUG`.
 
-`GET /api/v1/me/deletion` returns `account_id`, `teams` and `blocked_teams`.
+`GET /api/v1/me/deletion` returns `account_id`, `teams`, `blocked_teams`,
+`sign_in_required`, the shared-token `credential_notice`, and the documentation-owned
+`archive_notice`.
 `DELETE /api/v1/me` requires `confirm_account_id` and `confirm_teams`. The
 transaction rechecks the exact team list and refuses a stale confirmation.
 It removes your identities, sessions and memberships and revokes every token
 you hold or created, including descendants. Other browser and CLI sessions
-stop working immediately. Sole-member teams close immediately and enter the
+stop working immediately. This includes runner and CI tokens you created in
+shared teams, even though those teams remain. Another member should replace
+those credentials before deletion to avoid breaking runners or integrations.
+Sole-member teams close immediately and enter the
 same retrying cleanup as team deletion. If you are the sole owner of a team
 with other members, transfer ownership or delete that team first. Accounts
 without a team, including waitlisted accounts, can delete themselves too.
 
 Shared-team runs, logs, artifacts and other team-owned history remain for the
-remaining members. Actor fields are relabeled as a deleted user. User-supplied
+remaining members. Selected execution actor fields, such as
+`runs.created_principal`, are relabeled as a deleted user. Other creator and
+financial references retain the opaque account ID.
+[Account deletion retention](account-deletion-retention.md) names those columns. User-supplied
 content, including logs and artifacts, may still contain personal information.
 That content follows the team's retention policy and is excluded from account
 identity erasure. Financial records remain for accounting. Audit identifiers
@@ -1051,15 +1061,20 @@ other personal text. Account deletion preserves these append-only rows until
 audit retention expires. It does not scrub those strings. Do not put personal
 information or credentials in an OIDC audience.
 
-The Cloud deletion promise covers live account identity and the operational
-data of deleted teams, plus expiry of their automated backup copies within
-seven days. Live account identity and authority disappear in the request
-transaction. Team data normally disappears within minutes, with a final sweep
-75 minutes later for finishing uploads. Failed purges retry and remain visible
-to the operator; a failed purge is not completed erasure. Shared-team history,
-financial records, reserved team slugs and audit identifiers are the explicit
-exceptions above. Self-hosted operators own their backup and object-version
-retention and must configure and verify it before making the same promise.
+Cloud live account identity and authority disappear in the request transaction.
+Team data normally disappears within minutes, with a final sweep 75 minutes
+later for finishing uploads. Failed purges retry and are not completed erasure.
+RDS automated backups have a seven-day recovery window, but not every copy
+expires within seven days. Accounts which existed on or before 2026-10-02 may
+remain in encrypted operator archives. The SQLite pre-cutover archive from
+2026-09-15 follows a 365-day lifecycle plus 30 days for noncurrent versions,
+ending around 2027-10-15 with asynchronous S3 expiry. PostgreSQL controller and
+billing archives from 2026-10-02 have no scheduled expiry. Their retention
+awaits an operator decision. Accounts created after 2026-10-02 are not in any
+of these archives. See [Account deletion retention](account-deletion-retention.md).
+Shared-team history, retained creator IDs, financial records, reserved team
+slugs and audit history are the other exceptions above. Self-hosted operators
+own their backup and object-version retention and must verify their own policy.
 See [deleted data in backups](backup-restore.md#deleted-data-in-backups).
 
 Operators retain `DELETE /api/v1/operator/accounts/{account}` for support

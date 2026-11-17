@@ -192,12 +192,15 @@ func (c *Console) ConsoleDeleteTeam(ctx context.Context, a capability.Authorized
 
 // ConsoleDeleteAccount resolves the selected account and erases it in the authorized transaction.
 func (c *Console) ConsoleDeleteAccount(ctx context.Context, a capability.Authorized) (AccountDeletion, error) {
-	return consoleWrite(ctx, c, a, func(tx *storeTx, _ auditActor) (AccountDeletion, error) {
+	return consoleWrite(ctx, c, a, func(tx *storeTx, actor auditActor) (AccountDeletion, error) {
 		account, err := accountTx(ctx, tx, a.Target.AccountID)
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, ErrNotFound) {
 			account, err = accountByEmailTx(ctx, tx, a.Target.AccountID)
 		}
 		if err != nil {
+			return AccountDeletion{}, err
+		}
+		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Actor: actor}, auditAccountDeletion{AccountID: account.ID}); err != nil {
 			return AccountDeletion{}, err
 		}
 		return tx.operator.deleteAccountTx(ctx, tx, account.ID, tx.now(ctx))
