@@ -695,6 +695,7 @@ var commandSections = map[string]string{
 	"sparkwing debug":         "Local",
 	"sparkwing repos":         "Local",
 	"sparkwing queue":         "Local",
+	"sparkwing account":       "Cloud",
 	"sparkwing login":         "Cloud",
 	"sparkwing profiles":      "Cloud",
 	"sparkwing runners":       "Cloud",
