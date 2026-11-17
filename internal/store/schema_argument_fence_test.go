@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"encoding/json"
 	"maps"
 	"testing"
 
@@ -25,6 +26,13 @@ func TestSchema40UpgradesLegacyArgumentRowsInEachDialect(t *testing.T) {
 			}
 			args := map[string]string{"sealed_arguments": "legacy-token", "body": "", "argument_document_version": "1"}
 			if _, _, err := tenant.ArmCronSchedule(t.Context(), store.CronSchedule{ID: "legacy", RepoPath: "/repo", Pipeline: "build", Cron: "* * * * *", TZ: "UTC", Args: args}); err != nil {
+				t.Fatal(err)
+			}
+			legacy, err := json.Marshal(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.DB().ExecContext(t.Context(), storetest.Rebind(s, `UPDATE cron_schedules SET args=? WHERE team=? AND id='legacy'`), string(legacy), store.DefaultTeam); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := s.DB().ExecContext(t.Context(), `UPDATE sparkwing_schema_version SET version=39,baseline_digest='bd376ce39b5fdee54f286dd73111f3644264b8cc4cb864a887cd589436eae19b'`); err != nil {
