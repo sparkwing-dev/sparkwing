@@ -56,8 +56,10 @@ func TestRunnerBudgetProofVerdict(t *testing.T) {
 				body, err := json.Marshal(map[string]any{
 					"cores": cores, "seconds": 20, "cpu_max": quota, "nice": nice,
 					"unit": "sparkwing-runner-proof.service", "burners": []int{1, 2, 3, 4, 5, 6},
-					"before": map[string]int{"usage_usec": 1000},
-					"after":  map[string]float64{"usage_usec": 1000 + cores*20*1e6},
+					"cgroup":         "/sparkwing-runner-proof.service",
+					"burner_cgroups": map[string]string{"1": "/sparkwing-runner-proof.service", "2": "/sparkwing-runner-proof.service", "3": "/sparkwing-runner-proof.service", "4": "/sparkwing-runner-proof.service", "5": "/sparkwing-runner-proof.service", "6": "/sparkwing-runner-proof.service"},
+					"before":         map[string]int{"usage_usec": 1000},
+					"after":          map[string]float64{"usage_usec": 1000 + cores*20*1e6},
 				})
 				if err != nil {
 					t.Fatal(err)

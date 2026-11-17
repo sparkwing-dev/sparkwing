@@ -18,11 +18,13 @@ globals_ = probe.measure.__globals__
 def row(cores, quota, nice):
     return dict(cores=cores, seconds=20, cpu_max=quota, nice=nice,
                 unit='sparkwing-runner-proof.service', burners=list(range(6)),
+                cgroup='/sparkwing-runner-proof.service',
+                burner_cgroups={str(pid): '/sparkwing-runner-proof.service' for pid in range(6)},
                 before=dict(usage_usec=1000), after=dict(usage_usec=1000 + cores * 20e6))
 
 
 class BudgetProbeTest(unittest.TestCase):
-    def measured(self, mode, quota=None):
+    def measured(self, mode, quota=None, foreign_pid=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             group = root / 'cgroup' / 'sparkwing-runner-proof.service'
@@ -31,12 +33,19 @@ class BudgetProbeTest(unittest.TestCase):
             (group / 'cpu.stat').write_text('usage_usec 1000\n')
             if quota is not None:
                 (group / 'cpu.max').write_text(quota)
+            for pid in range(6):
+                membership = root / f'pid-{pid}'
+                membership.write_text('0::/foreign.service\n' if pid == foreign_pid else
+                                      '0::/sparkwing-runner-proof.service\n')
             output = root / 'result.json'
             burners = [mock.Mock(pid=pid) for pid in range(6)]
             for burner in burners:
                 burner.poll.return_value = None
 
             def path(value):
+                for pid in range(6):
+                    if str(value) == f'/proc/{pid}/cgroup':
+                        return root / f'pid-{pid}'
                 return {'/proc/self/cgroup': root / 'membership',
                         '/sys/fs/cgroup': root / 'cgroup'}.get(str(value), Path(value))
 
@@ -58,6 +67,27 @@ class BudgetProbeTest(unittest.TestCase):
                         burner.terminate.assert_called_once()
                         burner.wait.assert_called_once()
             return json.loads(output.read_text())
+
+    def test_runner_manager_receives_the_build_cache_before_home_changes(self):
+        script = Path(__file__).with_name('runner-budget-proof.sh').read_text()
+        setup = script[script.index("\nGOCACHE="):script.index("\nfor case_name in enforce control;")]
+        with tempfile.TemporaryDirectory() as directory:
+            capture = Path(directory) / 'manager-argv'
+            shell = r'''
+set -euo pipefail
+go() { printf '/build cache/%s\n' "$2"; }
+systemctl() { printf '%s\n' "$@" > "$1_CAPTURE"; }
+'''
+            shell = shell.replace('"$1_CAPTURE"', '"' + str(capture) + '"')
+            result = probe.subprocess.run(['bash', '-c', shell + setup], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(capture.read_text().splitlines(),
+                             ['--user', 'set-environment', 'GOCACHE=/build cache/GOCACHE', 'GOPATH=/build cache/GOPATH'])
+
+    def test_each_burner_must_share_the_measured_cgroup(self):
+        for pid in range(6):
+            with self.subTest(pid=pid), self.assertRaisesRegex(AssertionError, 'burner.*cgroup'):
+                self.measured('enforce', '200000 100000', foreign_pid=pid)
 
     def test_control_without_cpu_max_measures_usage_and_passes_verdict(self):
         control = self.measured('control')
@@ -92,6 +122,8 @@ class BudgetProbeTest(unittest.TestCase):
             ('extra burner', 0, 'burners', list(range(7)), 'six burners'),
             ('extra duplicate burner', 1, 'burners', [0, 1, 2, 3, 4, 5, 5], 'six burners'),
             ('duplicate burner', 1, 'burners', [0, 1, 2, 3, 4, 4], 'six burners'),
+            ('missing burner evidence', 0, 'burner_cgroups', {}, 'burner cgroup evidence'),
+            ('foreign burner evidence', 1, 'burner_cgroups', {'0': '/other'}, 'burner cgroup evidence'),
             ('wrong unit prefix', 0, 'unit', 'other-proof.service', 'local runner'),
             ('wrong unit suffix', 1, 'unit', 'sparkwing-runner-proof.scope', 'local runner'),
         ]
