@@ -315,3 +315,18 @@ func TestWhenIsASearchableGuardKeyword(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrationGuideSearchAliases(t *testing.T) {
+	for _, query := range []string{"gha", "runs-on", "convert workflow", "github actions yaml"} {
+		t.Run(query, func(t *testing.T) {
+			sections := docs.SearchSections(query)
+			if len(sections) == 0 || sections[0].Slug != "migrate-from-github-actions" {
+				t.Errorf("SearchSections(%q) did not rank the migration guide first", query)
+			}
+			topics := docs.Search(query)
+			if len(topics) == 0 || topics[0].Slug != "migrate-from-github-actions" {
+				t.Errorf("Search(%q) did not rank the migration guide first", query)
+			}
+		})
+	}
+}

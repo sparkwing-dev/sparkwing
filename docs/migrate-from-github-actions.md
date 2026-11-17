@@ -1,5 +1,7 @@
 # Migrate from GitHub Actions
 
+<!-- search-aliases: gha, runs-on, convert workflow, github actions yaml -->
+
 This guide maps each part of a GitHub Actions workflow to its Sparkwing equivalent, with the workflow YAML first and
 then the same thing in Go and TypeScript. Each row is marked:
 
