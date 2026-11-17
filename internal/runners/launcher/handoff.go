@@ -29,7 +29,7 @@ func (b *KubernetesBoundary) predecessorTeardown(ctx context.Context, node corev
 		return false, err
 	}
 	recorded, reservation, err := jobOwnership(*job)
-	matches := err == nil && reservation == held && sameBinding(recorded, binding)
+	matches := err == nil && sameReservationFence(reservation, held) && sameBinding(recorded, binding)
 	// perf: work can be awarded before Kubernetes observes the planning Job's exit.
 	planHandoff := binding.Kind == CloudPlan && successor.Kind != CloudPlan
 	if !matches || job.Annotations[rejectedAnnotation] != "" || !slices.Contains(job.Finalizers, cleanupFinalizer) {

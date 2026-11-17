@@ -137,7 +137,46 @@ func TestConsumedCapacityStartupTiming(t *testing.T) {
 				if err != nil || wantFailure && len(jobs.(*batchv1.JobList).Items) != 0 {
 					t.Fatalf("failed teardown/publication left Job: %v %v", jobs, err)
 				}
+				if outcome == "job_failure" {
+					node, err := kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+					if err != nil || reservationEvidence(node) {
+						t.Fatalf("failed publication retained its consumed-capacity reservation: %v %v", node, err)
+					}
+				}
 			})
+		})
+	}
+}
+
+func TestConsumedCapacityTimingPreservesReservationFence(t *testing.T) {
+	for _, retire := range []bool{false, true} {
+		t.Run(map[bool]string{false: "release", true: "retire"}[retire], func(t *testing.T) {
+			l, kube, boundary, control := capacityLauncherFixture(t)
+			pod, err := capacityPod(l.Config, demandFor(*control.award))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pod.Spec.NodeName, pod.UID = "node", "capacity-uid"
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "capacity", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.Now()}}}}
+			if err := kube.Tracker().Add(pod); err != nil {
+				t.Fatal(err)
+			}
+			r, err := boundary.Reserve(t.Context(), control.award.Binding, jobName(control.award.Binding), CloudPlacement{RequestedClass: "2"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := r
+			changed.Award.Generation++
+			finish := boundary.Release
+			if retire {
+				finish = boundary.Retire
+			}
+			if err := finish(t.Context(), changed); err == nil {
+				t.Fatal("changed award fence permitted teardown")
+			}
+			if err := finish(t.Context(), r); err != nil {
+				t.Fatalf("consumed-capacity timestamp prevented fenced teardown: %v", err)
+			}
 		})
 	}
 }

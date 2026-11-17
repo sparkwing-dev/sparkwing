@@ -87,6 +87,13 @@ type CloudNodeReservation struct {
 	WaitedForFreshNode                              bool
 }
 
+func sameReservationFence(a, b CloudNodeReservation) bool {
+	// safety: startup timing is not persisted with the ownership fence.
+	a.capacityStarted = time.Time{}
+	b.capacityStarted = time.Time{}
+	return a == b
+}
+
 type CloudPlacement struct {
 	teardownWaitExpired bool
 	RequestedClass      string
