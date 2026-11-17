@@ -71,3 +71,18 @@ test("failed deletion retains the form and requires a fresh confirmation", async
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(review).toBeFocused();
 });
+
+test("long team slugs stay inside the mobile confirmation panel", async ({ page }, testInfo) => {
+  await onboardingFixture(page);
+  const slug = "a".repeat(63);
+  await page.route("**/api/v1/me/team-deletions", route => route.fulfill({ json: { deletions: [], truncated: false, next_cursor: "" } }));
+  await page.route("**/api/v1/me/deletion", route => route.fulfill({ json: { account_id: "u1", teams: [slug], blocked_teams: [] } }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/account");
+  await page.getByRole("button", { name: "Review account deletion" }).click();
+  const team = page.getByText(slug, { exact: true });
+  await expect(team).toBeVisible();
+  expect(await team.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await page.getByRole("button", { name: "Delete account permanently" }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("ui-long-team-mobile.png"), fullPage: true });
+});

@@ -55,8 +55,8 @@ export default function AccountDeletion() {
       <button ref={opener} type="button" disabled={busy} onClick={preview} className={`${quietButtonClass} min-h-11 px-3`}>Review account deletion</button>
       {plan && <div className="space-y-3">
         <p>These teams and their runs and data will be deleted:</p>
-        {plan.teams.length ? <ul className="list-disc pl-5">{plan.teams.map(team => <li key={team} className="font-mono">{team}</li>)}</ul> : <p>No teams will be deleted.</p>}
-        {plan.blocked_teams.length > 0 ? <p role="alert">Transfer ownership to another member or delete these teams first: {plan.blocked_teams.join(", ")}.</p> : <>
+        {plan.teams.length ? <ul className="list-disc pl-5">{plan.teams.map(team => <li key={team} className="font-mono break-all">{team}</li>)}</ul> : <p>No teams will be deleted.</p>}
+        {plan.blocked_teams.length > 0 ? <p role="alert" className="break-all">Transfer ownership to another member or delete these teams first: {plan.blocked_teams.join(", ")}.</p> : <>
           <label className="block" htmlFor="delete-account-confirm">Type your account ID to confirm: <span className="font-mono">{plan.account_id}</span></label>
           <input ref={input} id="delete-account-confirm" autoComplete="off" value={confirmation} disabled={busy} onChange={e => setConfirmation(e.target.value)} className={`${inputClass} w-full font-mono`} />
           <div className="flex gap-4">
