@@ -264,7 +264,9 @@ Request tokens with `sparkwing.OIDCToken(ctx, "vault")` and log in with `vault w
 
 OIDC minting and historical reconciliation require the deployment secrets keyring
 in addition to the RSA token signing key. A PostgreSQL controller configured
-without a secrets key refuses OIDC issuance and pending privacy reconciliation.
+without a secrets key refuses OIDC issuance. If historical OIDC rows need
+scrubbing, it also refuses startup until the key is configured. Empty history
+completes without a key and does not block keyless startup.
 
 The `oidc.minted` audit attributes contain `audience_digest`, `subject_digest`,
 `digest_key_id`, `node_digest`, `token_id` and `expires_at`. The first two replace
@@ -314,7 +316,10 @@ matching for those rows is lost. Secrets re-encryption does not re-key audits.
 Digests are pseudonymous retained security records. An operator holding the key
 can confirm a candidate after account deletion. Access to both a database dump
 and the external secrets keys also permits candidate testing. Protect and back
-up the keys separately from the database.
+up the keys separately from the database. SQLite's default generated
+`secrets.key` sits beside `state.db`, and local mode keeps it in the Sparkwing
+home. A home or volume backup can therefore contain both the database and key.
+Treat that backup as holding both, because it permits candidate matching.
 
 Schema 40 installs a one-time privacy reconciliation for historical rows. The
 controller completes it after loading the secrets keyring and before serving.
@@ -324,6 +329,10 @@ Its temporary append-only exception permits only the exact computed replacements
 while that migration is pending. It commits the scrub, receipt and completion
 marker together. A failure leaves the history and guards unchanged for retry.
 A malformed historical payload refuses startup rather than preserving it silently.
+A zero-row receipt omits `digest_key_id` because no digest key was needed.
+After completion, every configured startup refuses any OIDC audit row with a
+top-level raw `audience` or `subject` key. This detects older writers that kept
+running after the upgrade. Stop older controllers before upgrading.
 See the [migration guide](migrations/_unreleased.md#upgrade-the-store-in-place-to-schema-baseline-40).
 
 Logical database rows lose raw identity text. Old backups, SQLite pre-upgrade

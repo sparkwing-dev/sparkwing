@@ -8,6 +8,14 @@ policy configuration scrubs historical OIDC audit rows before HTTP serving.
 A keyless diagnostic store open can upgrade the schema but leaves reconciliation
 pending. Use configured controller startup to finish it.
 
+If historical raw `oidc.minted` rows need scrubbing, startup requires the
+external secrets keyring. A PostgreSQL controller without a `secrets-key` credential cannot
+start with that history until the key is configured. With no OIDC history,
+startup completes the migration without a key and writes a zero-row receipt
+that omits `digest_key_id`. Keyless PostgreSQL startup remains supported in that
+case. OIDC token issuance itself requires a secrets key, even when history is
+empty, because every new mint must have keyed audit digests.
+
 Before, `oidc.minted` attributes stored raw `audience` and `subject`. After, they
 store `audience_digest`, `subject_digest` and `digest_key_id`. Update audit
 consumers to compare both the key ID and the field's HMAC-SHA-256 digest.
@@ -21,6 +29,10 @@ remain refused. The transaction restores the unconditional update guard before
 writing its `audit.oidc_scrubbed` receipt and marking completion. A failure rolls
 all these changes back. Retry startup with the keyring available. A malformed
 historical payload requires operator investigation before startup can finish.
+Every configured startup also checks a completed migration for top-level raw
+`audience` or `subject` keys. It refuses startup with a value-free error if an
+older controller wrote raw rows after completion. Stop every older controller
+before upgrading. This check does not re-open the append-only exception.
 
 Rotation writes new rows with the new key ID. It never rewrites older digests.
 Retain retired keys in restricted external escrow if those rows must remain

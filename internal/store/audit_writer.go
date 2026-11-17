@@ -250,7 +250,7 @@ type auditSecretRelease struct {
 
 type auditOIDCScrub struct {
 	Rows    int64  `json:"rows"`
-	KeyID   string `json:"digest_key_id"`
+	KeyID   string `json:"digest_key_id,omitempty"`
 	Version int    `json:"version"`
 }
 
@@ -449,7 +449,7 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 	case auditOIDCScrub:
 		actorAllowed = c.Actor.system == auditController
 		ev.Kind, ev.SubjectID = "audit.oidc_scrubbed", "oidc-v1"
-		valid = p.Rows >= 0 && p.Version == 1 && len(p.KeyID) == 64
+		valid = p.Version == 1 && (p.Rows == 0 && p.KeyID == "" || p.Rows > 0 && len(p.KeyID) == 64)
 	case auditOIDCMint:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "oidc.minted", p.Node.String(), p.RunID, true
 		valid = p.Audience != (auditDigest{}) && p.Subject != (auditDigest{}) && len(p.KeyID) == 64 && p.TokenID != "" && p.ExpiresAt > 0

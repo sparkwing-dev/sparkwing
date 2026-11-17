@@ -39,14 +39,22 @@ func (op *Operator) reconcileOIDCAudit(ctx context.Context) error {
 		return err
 	}
 	if done == 1 {
-		return nil
+		return op.checkOIDCAuditPrivacy(ctx)
 	}
-	// safety: lazy local key creation queries the store, so resolve it before holding the write transaction.
-	keyID, _, err := s.oidcAuditDigest("", "audience", "")
-	if err != nil {
+	var haveRows bool
+	if err := s.queryRow(ctx, `SELECT EXISTS(SELECT 1 FROM audit_events WHERE kind='oidc.minted')`).Scan(&haveRows); err != nil {
 		return err
 	}
-	return s.inTx(ctx, func(tx *storeTx) error {
+	var keyID string
+	if haveRows {
+		// safety: lazy local key creation queries the store, so resolve it before holding the write transaction.
+		var err error
+		keyID, _, err = s.oidcAuditDigest("", "audience", "")
+		if err != nil {
+			return err
+		}
+	}
+	err := s.inTx(ctx, func(tx *storeTx) error {
 		if tx.dialect == DialectPostgres {
 			if _, err := tx.execContext(ctx, migrateAdvisoryLock); err != nil {
 				return err
@@ -74,21 +82,30 @@ func (op *Operator) reconcileOIDCAudit(ctx context.Context) error {
 				return err
 			}
 		}
-		count, err := op.prepareOIDCScrub(ctx, tx, keyID)
-		if err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM audit_events WHERE kind='oidc.minted')`).Scan(&haveRows); err != nil {
 			return err
 		}
-		if err := replaceAuditUpdateGuard(ctx, tx, oidcScrubAllowance(tx.dialect)); err != nil {
-			return err
-		}
-		if _, err := tx.execContext(ctx, `UPDATE audit_events SET attrs=(SELECT new_attrs FROM oidc_audit_scrub_rows WHERE id=audit_events.id) WHERE id IN (SELECT id FROM oidc_audit_scrub_rows)`); err != nil {
-			return fmt.Errorf("scrub OIDC audit: %w", err)
-		}
-		if err := replaceAuditUpdateGuard(ctx, tx, ""); err != nil {
-			return err
-		}
-		if _, err := tx.execContext(ctx, `DROP TABLE oidc_audit_scrub_rows`); err != nil {
-			return err
+		var count int64
+		if haveRows {
+			if keyID == "" {
+				return errors.New("OIDC audit privacy migration requires the external secrets keyring when OIDC history exists")
+			}
+			count, err = op.prepareOIDCScrub(ctx, tx, keyID)
+			if err != nil {
+				return err
+			}
+			if err := replaceAuditUpdateGuard(ctx, tx, oidcScrubAllowance(tx.dialect)); err != nil {
+				return err
+			}
+			if _, err := tx.execContext(ctx, `UPDATE audit_events SET attrs=(SELECT new_attrs FROM oidc_audit_scrub_rows WHERE id=audit_events.id) WHERE id IN (SELECT id FROM oidc_audit_scrub_rows)`); err != nil {
+				return fmt.Errorf("scrub OIDC audit: %w", err)
+			}
+			if err := replaceAuditUpdateGuard(ctx, tx, ""); err != nil {
+				return err
+			}
+			if _, err := tx.execContext(ctx, `DROP TABLE oidc_audit_scrub_rows`); err != nil {
+				return err
+			}
 		}
 		if err := tx.operator.recordAudit(ctx, tx, auditContext{Actor: auditActor{system: auditController}}, auditOIDCScrub{Rows: count, KeyID: keyID, Version: 1}); err != nil {
 			return err
@@ -96,6 +113,25 @@ func (op *Operator) reconcileOIDCAudit(ctx context.Context) error {
 		_, err = tx.execContext(ctx, `UPDATE audit_privacy_migrations SET completed=1 WHERE version=1 AND completed=0`)
 		return err
 	})
+	if err != nil {
+		return err
+	}
+	return op.checkOIDCAuditPrivacy(ctx)
+}
+
+func (op *Operator) checkOIDCAuditPrivacy(ctx context.Context) error {
+	fields := `json_type(attrs,'$.audience') IS NOT NULL OR json_type(attrs,'$.subject') IS NOT NULL`
+	if op.s.dialect == DialectPostgres {
+		fields = `jsonb_typeof(CAST(attrs AS JSONB))='object' AND (jsonb_exists(CAST(attrs AS JSONB),'audience') OR jsonb_exists(CAST(attrs AS JSONB),'subject'))`
+	}
+	var raw bool
+	if err := op.s.queryRow(ctx, `SELECT EXISTS(SELECT 1 FROM audit_events WHERE kind='oidc.minted' AND (`+fields+`))`).Scan(&raw); err != nil {
+		return errors.New("OIDC audit privacy check failed; investigate the retained audit payloads before startup")
+	}
+	if raw {
+		return errors.New("raw OIDC audit identity exists after privacy reconciliation; stop older controllers and investigate before startup")
+	}
+	return nil
 }
 
 func (op *Operator) prepareOIDCScrub(ctx context.Context, tx *storeTx, keyID string) (int64, error) {
