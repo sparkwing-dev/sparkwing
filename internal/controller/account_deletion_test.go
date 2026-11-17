@@ -30,8 +30,10 @@ func TestSelfDeletePreviewExplainsStaleSignInAndArchive(t *testing.T) {
 	if expected == "" || plan.ArchiveNotice != expected {
 		t.Fatalf("preview omitted documentation-owned archive notice: %+v", plan)
 	}
-	if !strings.Contains(plan.ArchiveNotice, "35 days after creation") {
-		t.Fatalf("preview omitted PostgreSQL archive expiry: %+v", plan)
+	for _, phrase := range []string{"within about 70 days of being taken", "they expire after 35 days", "S3 permanently deletes the old version up to 35 days later", "from the date the rule was applied"} {
+		if !strings.Contains(plan.ArchiveNotice, phrase) {
+			t.Fatalf("preview omitted archive removal disclosure %q: %s", phrase, plan.ArchiveNotice)
+		}
 	}
 	f.advance(11 * time.Minute)
 	if code := f.call("DELETE", "/api/v1/me", u.auth, map[string]any{"confirm_account_id": u.id, "confirm_teams": []string{u.team}}, nil); code != http.StatusForbidden {

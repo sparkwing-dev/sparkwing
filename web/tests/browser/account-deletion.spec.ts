@@ -101,6 +101,8 @@ test("a stale preview requests reauthentication and shows the archive notice", a
   const signIn = page.getByRole("button", { name: "Sign in again", exact: true });
   await expect(signIn).toBeFocused();
   await expect(page.getByText(archiveNotice, { exact: false })).toBeVisible();
+  await expect(page.getByText(/within about 70 days of being taken/)).toHaveCount(1);
+  await expect(page.getByText(/35 days/)).toHaveCount(1);
   await expect(page.getByRole("link", { name: "Retention details" })).toHaveAttribute("href", "https://sparkwing.dev/docs/account-deletion-retention");
   await expect(page.getByRole("button", { name: "Delete account permanently" })).toHaveCount(0);
   await signIn.scrollIntoViewIfNeeded();

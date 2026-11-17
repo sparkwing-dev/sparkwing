@@ -1,6 +1,6 @@
 # Account deletion retention
 
-On Sparkwing Cloud, PostgreSQL archive dumps expire 35 days after creation under an S3 lifecycle rule. Noncurrent PostgreSQL versions expire 35 days after becoming noncurrent. Accounts which existed on or before 2026-10-02 may remain in encrypted operator archives until expiry. The SQLite pre-cutover archive from 2026-09-15 follows its existing 365-day lifecycle plus 30 days for noncurrent versions, ending around 2027-10-15. Accounts created after 2026-10-02 are not in any of these archives.
+On Sparkwing Cloud, PostgreSQL archive copies are removed within about 70 days of being taken: they expire after 35 days, then S3 permanently deletes the old version up to 35 days later. For dumps taken before the rule took effect, count from the date the rule was applied. S3 rounds expiry up to midnight UTC and deletes asynchronously, so these timings are approximate. The SQLite pre-cutover archive from 2026-09-15 follows its existing 365-day lifecycle plus 30 days for noncurrent versions, ending around 2027-10-15. Accounts created after 2026-10-02 are not in the 2026-09-15 or 2026-10-02 archives.
 
 The PostgreSQL rule covers the `postgres/` prefix, including the controller and
 billing dumps from 2026-10-02. The SQLite rule covers `sqlite/`. S3 rounds expiry

@@ -9,9 +9,13 @@
   on Sparkwing Cloud. Accounts which existed on or before 2026-10-02 may remain
   in encrypted operator archives. The SQLite archive from
   2026-09-15 follows a 365-day lifecycle plus 30 noncurrent days, ending around
-  2027-10-15. PostgreSQL archive dumps expire 35 days after creation under an S3
-  lifecycle rule. Noncurrent versions expire 35 days after becoming noncurrent. S3 expiry
-  is asynchronous. Accounts created after 2026-10-02 are not in these archives.
+  2027-10-15. PostgreSQL archive copies are removed within about 70 days of being
+  taken:
+  they expire after 35 days, then S3 permanently deletes the old version up to
+  35 days later. For dumps taken before the rule took effect, count from the
+  date the rule was applied. S3 rounds expiry up to midnight UTC and deletes
+  asynchronously, so these timings are approximate. Accounts created after
+  2026-10-02 are not in the 2026-09-15 or 2026-10-02 archives.
 
 ### Fixed
 

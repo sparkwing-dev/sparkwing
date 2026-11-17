@@ -1070,12 +1070,15 @@ expires within seven days. Accounts which existed on or before 2026-10-02 may
 remain in encrypted operator archives. The SQLite pre-cutover archive from
 2026-09-15 follows a 365-day lifecycle plus 30 days for noncurrent versions,
 ending around 2027-10-15 with asynchronous S3 expiry. PostgreSQL controller and
-billing archive dumps expire 35 days after creation under an S3 lifecycle rule
-covering `postgres/`. Noncurrent PostgreSQL versions expire 35 days after
-becoming noncurrent. Current-object expiry adds a delete marker; the
-noncurrent-version rule later removes the retained bytes. S3 expiry is
-asynchronous. Accounts created after 2026-10-02 are not in any of these
-archives. See [Account deletion retention](account-deletion-retention.md).
+billing archive copies under `postgres/` are removed
+within about 70 days of being taken. They expire after 35 days, then S3
+permanently deletes the old version up to 35 days later. Dumps taken before the
+rule took effect follow it from the date it was applied. Dumps already older
+than 35 days become eligible for expiry then, and their stored bytes are removed
+up to 35 days later. S3 rounds expiry up to midnight UTC and deletes
+asynchronously, so these timings are approximate. Accounts created after
+2026-10-02 are not in the 2026-09-15 or 2026-10-02 archives. See [Account
+deletion retention](account-deletion-retention.md).
 Shared-team history, retained creator IDs, financial records, reserved team
 slugs and audit history are the other exceptions above. Self-hosted operators
 own their backup and object-version retention and must verify their own policy.

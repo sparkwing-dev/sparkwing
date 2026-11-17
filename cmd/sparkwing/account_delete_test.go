@@ -83,8 +83,10 @@ func TestAccountDeleteCLIThroughAuthenticatedController(t *testing.T) {
 	if !strings.Contains(preview.String(), "device-test") {
 		t.Fatal("preview omitted sole-member team")
 	}
-	if !strings.Contains(preview.String(), "35 days after creation") {
-		t.Fatalf("preview omitted PostgreSQL archive expiry: %s", preview.String())
+	for _, phrase := range []string{"within about 70 days of being taken", "they expire after 35 days", "S3 permanently deletes the old version up to 35 days later", "from the date the rule was applied"} {
+		if !strings.Contains(preview.String(), phrase) {
+			t.Fatalf("preview omitted archive removal disclosure %q: %s", phrase, preview.String())
+		}
 	}
 	inv, err = clisurface.Parse("sparkwing", []string{"account", "delete", "--profile", "cloud", "--session-stdin", "--confirm", "member", "--confirm-team", "device-test", "-o", "json"})
 	if err != nil {
@@ -165,7 +167,7 @@ func TestAccountDeletePreviewWarnsAboutSharedCredentials(t *testing.T) {
 	if err := runAccountDeleteCommand(t.Context(), inv, &out, f); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Runner and CI tokens", "shared teams", "archive notice from docs", "account-deletion-retention"} {
+	for _, text := range []string{"Runner and CI tokens", "shared teams", "archive notice from docs", "account-deletion-retention", `relabeled as "deleted user"`} {
 		if !strings.Contains(out.String(), text) {
 			t.Fatalf("preview omitted %q: %s", text, out.String())
 		}

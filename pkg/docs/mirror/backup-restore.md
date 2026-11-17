@@ -340,13 +340,15 @@ That is not an every-copy deletion deadline. Accounts which existed on or before
 archive uploaded on 2026-09-15 has a 365-day current-object lifecycle plus
 30 days for noncurrent versions, ending around 2027-10-15. S3 expiry is
 asynchronous. That rule filters `sqlite/`. PostgreSQL controller and billing
-archive dumps, including those uploaded on 2026-10-02, expire 35 days after
-creation under a separate S3 lifecycle rule covering `postgres/`. Noncurrent
-PostgreSQL versions expire 35 days after becoming noncurrent. Current-object
-expiry adds a delete marker; the noncurrent-version rule later removes the
-retained bytes.
-Accounts created after 2026-10-02 are not in any of these archives. Deletion
-does not scrub the archives.
+archive copies under `postgres/` are removed
+within about 70 days of being taken. They expire after 35 days, then S3
+permanently deletes the old version up to 35 days later. Dumps taken before the
+rule took effect follow it from the date it was applied. Dumps already older
+than 35 days, including the 2026-10-02 dumps, become eligible for expiry then.
+Their stored bytes are removed up to 35 days later. S3 rounds expiry up to
+midnight UTC and deletes asynchronously, so these timings are approximate.
+Accounts created after 2026-10-02 are not in the 2026-09-15 or 2026-10-02
+archives. Account deletion does not scrub the archives.
 See [Account deletion retention](account-deletion-retention.md).
 Cloud run-data buckets are unversioned, so a successful object purge leaves no
 noncurrent object versions. Manual RDS snapshots do not expire and must not be
