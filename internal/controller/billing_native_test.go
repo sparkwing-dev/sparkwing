@@ -56,7 +56,7 @@ func billingNativeServer(t *testing.T) (*serverFixture, string, string) {
 func TestBillingModelProductionPages(t *testing.T) {
 	s, session, csrf := billingNativeServer(t)
 	calls := 0
-	s.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+	s.checkout.http.Transport = pairedBillingPageTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -96,7 +96,7 @@ func TestLargerPaymentRequestReachesOperatorQueueAtHighStanding(t *testing.T) {
 	s, session, _ := billingNativeServer(t)
 	s.WithOperatorAccounts([]string{"owner"})
 	engineSQL(t, s.store, `UPDATE teams SET billing_trust='granted' WHERE name='a'`)
-	s.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+	s.checkout.http.Transport = pairedBillingPageTransport(func(r *http.Request) (*http.Response, error) {
 		t.Fatalf("oversized payment reached Checkout: %s", r.URL)
 		return nil, nil
 	})
@@ -172,7 +172,7 @@ func TestBillingModelProductionCardPrepayAndRefill(t *testing.T) {
 	s.WithPayments(verifier, s.store.AsOperator()).WithPaymentDeployment("Staging.Sparkwing.dev")
 	counts := map[string]int{}
 	var refillID string
-	s.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+	s.checkout.http.Transport = pairedBillingPageTransport(func(r *http.Request) (*http.Response, error) {
 		counts[r.URL.Path]++
 		var in map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -319,7 +319,7 @@ func TestBillingModelProductionPageFailureKeepsReservation(t *testing.T) {
 			s, session, csrf := billingNativeServer(t)
 			calls := 0
 			var key string
-			s.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+			s.checkout.http.Transport = pairedBillingPageTransport(func(r *http.Request) (*http.Response, error) {
 				calls++
 				var in struct {
 					Key string `json:"key"`

@@ -55,7 +55,7 @@ func TestRefillPassChargesInOneCallAndOnlyTheWebhookGrants(t *testing.T) {
 	e, tenant := refillFixture(t)
 	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
 	var bodies []map[string]any
-	worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+	worker.checkout.http.Transport = pairedBillingPageTransport(func(r *http.Request) (*http.Response, error) {
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
@@ -107,7 +107,7 @@ func TestALostRefillAnswerIsRetriedUnderTheSameKey(t *testing.T) {
 			e, tenant := refillFixture(t)
 			worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
 			var bodies []string
-			worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+			worker.checkout.http.Transport = pairedBillingPageTransport(func(r *http.Request) (*http.Response, error) {
 				body, err := io.ReadAll(r.Body)
 				if err != nil {
 					t.Fatal(err)
@@ -170,7 +170,7 @@ func TestARefusedRefillStopsRefillsAndNotifiesTheOwners(t *testing.T) {
 			worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential").WithMailer(mail)
 			worker.logger = logger
 			var sent []refillRequest
-			worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+			worker.checkout.http.Transport = pairedBillingPageTransport(func(r *http.Request) (*http.Response, error) {
 				var body refillRequest
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Fatal(err)
@@ -228,7 +228,7 @@ func TestAnUnansweredRefillBacksOffThenFailsForGood(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	worker.checkout.now = func() time.Time { return now }
 	calls := 0
-	worker.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+	worker.checkout.http.Transport = pairedBillingPageTransport(func(*http.Request) (*http.Response, error) {
 		calls++
 		if calls%2 == 0 {
 			return nil, errors.New("connection refused")
@@ -278,7 +278,7 @@ func TestAMisconfiguredCheckoutServiceIsRetriedAndAlertsOnce(t *testing.T) {
 			now := time.Unix(1_800_000_000, 0)
 			worker.checkout.now = func() time.Time { return now }
 			calls := 0
-			worker.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+			worker.checkout.http.Transport = pairedBillingPageTransport(func(*http.Request) (*http.Response, error) {
 				calls++
 				return refillReply(status, `{"error":"misconfigured"}`), nil
 			})
@@ -310,12 +310,12 @@ func TestAMisconfiguredCheckoutServiceIsRetriedAndAlertsOnce(t *testing.T) {
 func TestOnlyTheBillingWorkerClearsTheMisconfigurationAlert(t *testing.T) {
 	e, _ := refillFixture(t)
 	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
-	worker.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+	worker.checkout.http.Transport = pairedBillingPageTransport(func(*http.Request) (*http.Response, error) {
 		return refillReply(http.StatusOK, `{}`), nil
 	})
 	worker.checkout.misconfigured = true
 	var out map[string]any
-	if err := worker.checkout.post(t.Context(), "/internal/portal", map[string]any{}, &out); err != nil || !worker.checkout.misconfigured {
+	if err := worker.checkout.post(t.Context(), worker.checkoutPairing(), "/internal/portal", map[string]any{}, &out); err != nil || !worker.checkout.misconfigured {
 		t.Fatalf("an HTTP request changed the worker's alert state: %v", err)
 	}
 	worker.alertCheckoutMisconfigured(errCheckoutRefused)
@@ -342,7 +342,7 @@ func TestARefillIsAuthorizedImmediatelyBeforeItsOwnCall(t *testing.T) {
 			engineSQL(t, e.Store, `INSERT INTO teams(name,created_at,updated_at,card_customer,card_added_at,refill_enabled,refill_threshold_cents,refill_amount_cents) VALUES ('b',1,1,'cus_b',1,1,1000,2000)`)
 			worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
 			var teams []string
-			worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+			worker.checkout.http.Transport = pairedBillingPageTransport(func(r *http.Request) (*http.Response, error) {
 				var body refillRequest
 				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 					t.Fatal(err)
@@ -366,7 +366,7 @@ func TestARefillIsAuthorizedImmediatelyBeforeItsOwnCall(t *testing.T) {
 func TestAChargedAnswerKeepsAWithdrawnRefillInTheLimits(t *testing.T) {
 	e, tenant := refillFixture(t)
 	worker := NewDeployment(e.Store, deploymenttest.Team(t), nil).WithBillingCheckout("https://checkout.test", "credential")
-	worker.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+	worker.checkout.http.Transport = pairedBillingPageTransport(func(*http.Request) (*http.Response, error) {
 		return refillReply(http.StatusOK, `{"payment_intent":"pi_answered","status":"succeeded"}`), nil
 	})
 	worker.refillPass(t.Context())

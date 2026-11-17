@@ -28,6 +28,8 @@ const typeScriptSDKVersion = "0.74.0"
 // the compiler beside the SDK rather than relying on whatever tsc is on PATH.
 const typeScriptCompilerVersion = "5.9.3"
 
+const typeScriptNodeTypesVersion = "22.20.5"
+
 // safety: Node runs the pipeline by stripping types, so the config only type-checks: erasable
 // syntax, explicit .ts imports, and NodeNext resolution of the SDK package.
 const typeScriptConfig = `{
@@ -41,7 +43,7 @@ const typeScriptConfig = `{
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "types": []
+    "types": ["node"]
   },
   "include": ["**/*.ts"]
 }
@@ -82,7 +84,7 @@ func scaffoldTypeScriptPipeline(cwd string, inv clisurface.Invocation, mode stri
 	manifestPath := filepath.Join(dir, "package.json")
 	manifest, err := os.ReadFile(manifestPath)
 	if errors.Is(err, os.ErrNotExist) {
-		manifest = []byte(fmt.Sprintf("{\n  \"private\": true,\n  \"type\": \"module\",\n  \"main\": \"index.ts\",\n  \"dependencies\": {\"@sparkwing/sdk\": %s},\n  \"devDependencies\": {\"typescript\": %s}\n}\n", strconv.Quote(typeScriptSDKVersion), strconv.Quote(typeScriptCompilerVersion)))
+		manifest = []byte(fmt.Sprintf("{\n  \"private\": true,\n  \"type\": \"module\",\n  \"main\": \"index.ts\",\n  \"dependencies\": {\"@sparkwing/sdk\": %s},\n  \"devDependencies\": {\"@types/node\": %s, \"typescript\": %s}\n}\n", strconv.Quote(typeScriptSDKVersion), strconv.Quote(typeScriptNodeTypesVersion), strconv.Quote(typeScriptCompilerVersion)))
 		if err := os.WriteFile(manifestPath, manifest, 0o644); err != nil {
 			return err
 		}
