@@ -9,10 +9,6 @@ then the same thing in Go and TypeScript. Each row is marked:
 - **Works differently**: you can do it, but the shape differs from GitHub Actions.
 - **Not yet**: no equivalent. The linked [known limitations](known-limitations.md) entry gives the workaround.
 
-If search does not find the guide, list matching topics with
-`sparkwing docs list --search github`, then read
-`sparkwing docs read --topic migrate-from-github-actions`.
-
 The gentlest start is to keep your workflow and call Sparkwing from it: a GitHub Actions job runs
 `sparkwing run ci` on the runner it already has. [Running inside an existing CI job](ci-embedded.md#quick-start-github-actions)
 gives a ready workflow. Move triggers, secrets and runners over once the pipeline itself works.
