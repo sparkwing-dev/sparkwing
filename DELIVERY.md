@@ -562,7 +562,7 @@ The `preconditions` job refuses a dirty checkout, a detached HEAD, `main`
 itself, a CHANGELOG.md that repeats a `###` heading within a release, and a
 branch whose merge with a freshly fetched `origin/main`
 conflicts, and names the command that fixes each; a branch behind main that
-merges cleanly goes ahead. The gate's `policy` job runs next, alongside review: gofmt,
+merges cleanly goes ahead. The gate's `policy` job runs next, alongside review: gofmt over tracked Go files,
 the formatters, changed-package Windows test compilation, em dashes, tracker IDs, comments, test sleeps, tracked
 binaries, home resolution, the docs mirror, changelog lint and links, the
 required changelog entry, the docs sidebar, the OpenAPI and API-snapshot checks and the
@@ -606,7 +606,11 @@ Review is the same job as `sparkwing run review`, under `.review.yaml`. A focuse
 policy/review run selects both with `--only '*[wy]'` (the job names ending in
 `w` or `y`). Selecting review
 alone includes preconditions but skips policy. The policy
-job collects every finding before it fails; the heavy `gate` job likewise lets
+job judges tracked files only, so ignored and untracked scratch does not change
+its verdict. Markdownlint retains its root and docs scope. Comments and test
+sleep checks retain their changed-line scope. The hook tiers still inspect
+untracked Go files in range mode. The policy job collects every finding before
+it fails. The heavy `gate` job likewise lets
 every heavy step report. Every change is reviewed, docs and
 comment changes included; the review job never skips by size or path. A diff
 whose every file matches `.review.yaml`'s `docs_only` paths (`docs/`, any

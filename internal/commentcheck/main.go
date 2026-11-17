@@ -34,7 +34,7 @@ type unreadable struct {
 	err  error
 }
 
-const usageText = `usage: commentcheck [-staged | -base ref] [-allow-no-diff] <root>
+const usageText = `usage: commentcheck [-staged | -base ref] [-allow-no-diff] [-tracked] <root>
 
 <root> is one directory to walk, normally the repository root; commentcheck
 takes no list of files. It skips vendor, testdata, node_modules, .git and
@@ -61,6 +61,7 @@ func usage() {
 }
 
 func main() {
+	tracked := flag.Bool("tracked", false, "only read tracked source files")
 	staged := flag.Bool("staged", false, "only report comments in the staged diff (the pre-commit gate)")
 	base := flag.String("base", "", "only report comments added vs the fork point from this git ref")
 	allowNoDiff := flag.Bool("allow-no-diff", false, "pass instead of failing when the diff cannot be computed; the run gates nothing")
@@ -76,7 +77,11 @@ func main() {
 	scoped := -1
 	if *staged || *base != "" {
 		var aerr error
-		added, aerr = scopedAdds(root, *staged, *base)
+		if *tracked {
+			added, aerr = gatescope.TrackedAddedLines(root, *staged, *base, "*.go")
+		} else {
+			added, aerr = scopedAdds(root, *staged, *base)
+		}
 		if aerr != nil {
 			if !*allowNoDiff {
 				fmt.Fprintln(os.Stderr, diffFailure(*base, aerr))
@@ -88,7 +93,11 @@ func main() {
 		}
 		scoped = len(added)
 	}
-	violations, unread, err := scan(root, added)
+	walk := gatescope.Walk
+	if *tracked {
+		walk = gatescope.WalkTracked
+	}
+	violations, unread, err := scanWithWalk(root, added, walk)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "commentcheck:", err)
 		os.Exit(2)
@@ -114,9 +123,13 @@ func diffFailure(base string, err error) string {
 }
 
 func scan(root string, added map[string]map[int]bool) ([]violation, []unreadable, error) {
+	return scanWithWalk(root, added, gatescope.Walk)
+}
+
+func scanWithWalk(root string, added map[string]map[int]bool, walk func(string, string, func(string, string)) error) ([]violation, []unreadable, error) {
 	var violations []violation
 	var unread []unreadable
-	err := gatescope.Walk(root, ".go", func(path, _ string) {
+	err := walk(root, ".go", func(path, _ string) {
 		if added != nil && !gatescope.Touched(added, root, path) {
 			return
 		}

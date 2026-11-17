@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -491,17 +492,23 @@ func TestRepositoryUnreleasedSectionDeclaresEveryWireCut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := readChangelog(root)
-	if err != nil {
+	t.Chdir(root)
+	if err := withTrackedPolicyDocs(newTestContext(t), func(snapshot string) error {
+		body, err := readChangelog(snapshot)
+		if err != nil {
+			return err
+		}
+		if n, err := unreleasedEntries(string(body)); err != nil {
+			return err
+		} else if n == 0 {
+			return nil
+		}
+		if issues := LintWireBreak(string(body), "v0.999.0", cuts, migrationsFS(snapshot)); len(issues) > 0 {
+			return fmt.Errorf("the cut refuses these wire cuts since %s:\n%s", prev, formatAllIssues(issues))
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
-	}
-	if n, err := unreleasedEntries(string(body)); err != nil {
-		t.Fatal(err)
-	} else if n == 0 {
-		t.Skip("CHANGELOG.md [Unreleased] is empty after a release")
-	}
-	if issues := LintWireBreak(string(body), "v0.999.0", cuts, migrationsFS(root)); len(issues) > 0 {
-		t.Fatalf("the cut refuses these wire cuts since %s:\n%s", prev, formatAllIssues(issues))
 	}
 }
 

@@ -58,12 +58,45 @@ func Walk(root, suffix string, visit func(path, rel string)) error {
 	})
 }
 
+// WalkTracked visits tracked files, preserving the source checkers' directory exclusions.
+func WalkTracked(root, suffix string, visit func(path, rel string)) error {
+	out, err := git(root, "", "ls-files", "-z")
+	if err != nil {
+		return err
+	}
+	for rel := range strings.SplitSeq(out, "\x00") {
+		if !strings.HasSuffix(rel, suffix) {
+			continue
+		}
+		skip := false
+		for _, dir := range strings.Split(filepath.ToSlash(filepath.Dir(rel)), "/") {
+			if skipDir(dir) {
+				skip = true
+				break
+			}
+		}
+		if !skip {
+			visit(filepath.Join(root, rel), rel)
+		}
+	}
+	return nil
+}
+
 // AddedLines reports the lines a change adds, keyed by the path git names them
 // under. staged reads the index the commit is being built in; otherwise the
 // scope is the fork point from base, which also charges every untracked file
 // the pathspec matches, because git diff alone leaves those out. The pathspec
 // is a git pathspec such as *.go.
 func AddedLines(root string, staged bool, base, pathspec string) (map[string]map[int]bool, error) {
+	return addedLines(root, staged, base, pathspec, true)
+}
+
+// TrackedAddedLines reports changed lines without reading untracked worktree files.
+func TrackedAddedLines(root string, staged bool, base, pathspec string) (map[string]map[int]bool, error) {
+	return addedLines(root, staged, base, pathspec, false)
+}
+
+func addedLines(root string, staged bool, base, pathspec string, includeUntracked bool) (map[string]map[int]bool, error) {
 	// safety: git quotes a path holding a non-ASCII byte unless core.quotePath
 	// is off, and a quoted +++ header drops that file from the scope unjudged.
 	// It does not cover a path holding a space, which the header terminates
@@ -87,7 +120,7 @@ func AddedLines(root string, staged bool, base, pathspec string) (map[string]map
 		return nil, err
 	}
 	added := parseAddedLines(diff)
-	if !staged {
+	if !staged && includeUntracked {
 		if err := addUntracked(root, pathspec, added); err != nil {
 			return nil, err
 		}

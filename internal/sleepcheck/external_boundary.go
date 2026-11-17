@@ -181,8 +181,12 @@ func withoutApproved(findings []finding, allowed map[string]map[sourcePosition]b
 }
 
 func unconsumedBoundaryMarkers(root string, allowed map[string]map[sourcePosition]bool) ([]finding, error) {
+	return unconsumedBoundaryMarkersWithWalk(root, allowed, gatescope.Walk)
+}
+
+func unconsumedBoundaryMarkersWithWalk(root string, allowed map[string]map[sourcePosition]bool, walk func(string, string, func(string, string)) error) ([]finding, error) {
 	var unused []finding
-	err := gatescope.Walk(root, "_test.go", func(path, rel string) {
+	err := walk(root, "_test.go", func(path, rel string) {
 		// perf: every source is read, but only possible markers need a comment-aware AST.
 		source, err := os.ReadFile(path)
 		if err != nil || !bytes.Contains(source, []byte("sleepcheck:external-boundary")) {

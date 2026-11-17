@@ -13,14 +13,23 @@ regenerate="$4"
 
 fail=0
 for f in "$generated"/*.md; do
+  if ! git -C "$REPO_ROOT" ls-files --error-unmatch -- ":(literal)docs/$(basename "$f")" >/dev/null 2>&1; then
+    echo "generated page is not tracked: docs/$(basename "$f")" >&2
+    fail=1
+    continue
+  fi
   diff -u "$REPO_ROOT/docs/$(basename "$f")" "$f" || fail=1
 done
-for f in "$REPO_ROOT"/docs/$glob; do
-  if [ ! -e "$generated/$(basename "$f")" ] && head -n1 "$f" | grep -q "$header"; then
+while IFS= read -r -d '' file; do
+  name="${file#docs/}"
+  [[ "$name" != */* ]] || continue
+  case "$name" in $glob) ;; *) continue ;; esac
+  f="$REPO_ROOT/$file"
+  if [ ! -e "$generated/$name" ] && head -n1 "$f" | grep -q "$header"; then
     echo "stale generated page: docs/$(basename "$f")"
     fail=1
   fi
-done
+done < <(git -C "$REPO_ROOT" ls-files -z -- docs)
 if [ "$fail" -ne 0 ]; then
   echo "generated pages are stale; run $regenerate" >&2
   exit 1
