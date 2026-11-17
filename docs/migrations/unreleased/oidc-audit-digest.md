@@ -23,7 +23,7 @@ Issued JWT claims, token ID, run ID, node digest and expiry keep their meanings.
 See the OIDC guide's Audit investigation section for the offline recipe.
 
 Reconciliation admits only exact precomputed changes to those historical payloads
-under schema 40 while migration version 1 is pending. Every identity, timestamp,
+under the binary's current schema baseline while migration version 1 is pending. Every identity, timestamp,
 actor and other column stays fixed. Other updates and retention-protected deletes
 remain refused. The transaction restores the unconditional update guard before
 writing its `audit.oidc_scrubbed` receipt and marking completion. A failure rolls

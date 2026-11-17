@@ -141,6 +141,8 @@ func TestOIDCAuditScrubExceptionAllowsOnlyExactPayload(t *testing.T) {
 			`UPDATE audit_events SET attrs=(SELECT new_attrs FROM oidc_audit_scrub_rows WHERE id='old') WHERE id='other'`,
 			`DELETE FROM audit_events`,
 			`UPDATE sparkwing_schema_version SET version=39; ` + exact,
+			fmt.Sprintf(`UPDATE sparkwing_schema_version SET version=%d; `, store.ExpectedSchemaVersion()-1) + exact,
+			fmt.Sprintf(`UPDATE sparkwing_schema_version SET version=%d; `, store.ExpectedSchemaVersion()+1) + exact,
 			`UPDATE audit_privacy_migrations SET completed=1; ` + exact,
 		} {
 			if err := exec(q); err == nil {

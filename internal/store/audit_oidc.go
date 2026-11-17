@@ -71,8 +71,8 @@ func (op *Operator) reconcileOIDCAudit(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if version != 40 {
-			return errors.New("OIDC audit scrub requires schema 40")
+		if version != expectedSchemaVersion {
+			return fmt.Errorf("OIDC audit scrub requires schema %d", expectedSchemaVersion)
 		}
 		if err := verifySchemaBaseline(ctx, tx, ""); err != nil {
 			return err
@@ -217,7 +217,7 @@ func oidcScrubAllowance(d Dialect) string {
 		equal = " IS NOT DISTINCT FROM "
 	}
 	conditions := []string{
-		`(SELECT version FROM sparkwing_schema_version)=40`,
+		fmt.Sprintf(`(SELECT version FROM sparkwing_schema_version)=%d`, expectedSchemaVersion),
 		`(SELECT baseline_digest FROM sparkwing_schema_version)='` + schemaBaselineDigest() + `'`,
 		`(SELECT completed FROM audit_privacy_migrations WHERE version=1)=0`,
 		`OLD.kind='oidc.minted'`,
