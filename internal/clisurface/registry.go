@@ -262,7 +262,7 @@ func Registry() []Command {
 			{Name: "spark", Argument: "NAME", Required: true},
 		}},
 		{Path: "sparkwing pipeline sparks update", Flags: []Flag{}},
-		{Path: "sparkwing pipeline upgrade", Rules: []string{"Bump the current repository's Go or TypeScript SDK pin to the latest permitted SDK entry in the signed policy, or the SDK selected by --version. Select the newest permitted engine that accepts that SDK's declared protocol. SDK and engine versions are independent. Resolve native lockfiles and verify compilation/type checking plus describe/plan with the verified engine. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services."}, Flags: []Flag{
+		{Path: "sparkwing pipeline upgrade", Rules: []string{"Bump the current repository's Go or TypeScript SDK pin to the latest permitted SDK entry in the signed policy, or the SDK selected by --version. Select the newest permitted engine that accepts that SDK's declared protocol. SDK and engine versions are independent. Resolve native lockfiles and verify compilation/type checking plus pipeline details and plans with the verified engine. Discover the detail command from that engine's command index. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services."}, Flags: []Flag{
 			{Name: "version", Argument: "TAG"},
 			{Name: "dry-run"},
 		}},

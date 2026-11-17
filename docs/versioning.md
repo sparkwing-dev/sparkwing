@@ -252,11 +252,13 @@ Remove `node_modules/.sparkwing-sdk-receipt`, or `node_modules`, after switching
 Each installation makes one helper attempt with a ten-minute deadline. Failure
 stops the install, reports the cause, and kills and reaps its helper process tree.
 Verification then compiles Go packages, type-checks TypeScript with `tsc --noEmit`
-when `.sparkwing/tsconfig.json` exists, and runs list, describe and plan through
-that engine, including hidden pipelines. The TypeScript scaffold writes a
+when `.sparkwing/tsconfig.json` exists, and runs list, pipeline detail and plan
+commands through that engine, including hidden pipelines. Its command index
+selects `pipeline show`, or the older detail verb on published engines that
+predate it. The TypeScript scaffold writes a
 `tsconfig.json` and locks `typescript` as a development dependency, so `tsc` runs from
 the project's own install. A project without `tsconfig.json` skips the type check; Node
-strips its types, so describe and plan are its check. Verification never runs
+strips its types, so pipeline details and plans are its check. Verification never runs
 job bodies. Install and check environments pass through the shared environment
 builder, and registered proxy credentials are masked in failures.
 
@@ -264,7 +266,7 @@ Pin and lockfile edits apply once the new SDK resolves against the verified
 engine. When `go mod tidy` fails on a package the new release removed, the Go
 pin moves with `go get` instead. Each original digest is checked again so
 concurrent user edits are not overwritten. When the pipeline then fails to
-compile, describe or plan against the new pin, the pin stays applied and the
+compile, show its details or plan against the new pin, the pin stays applied and the
 command reports the failure, names the migration guides between the two
 versions and exits non-zero. Its report names the manifest and lockfile it
 changed (for Go, `.sparkwing/go.mod` and `.sparkwing/go.sum`); reverting

@@ -1,4 +1,4 @@
-### Changed
+### Removed
 
 - **cli (Breaking):** Read selected details with `pipeline show`, `repos show`, `secrets show` and `debug show`, and cache state with `cache status`
   The former spellings fail with a usage error naming the replacement. Flags,

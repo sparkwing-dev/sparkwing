@@ -118,8 +118,11 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 
 // safety: a selected published engine may predate the CLI read-verb cut.
 func (v *upgradeVerifier) pipelineReadVerb(ctx context.Context, checkout string, env procenv.Env, executable string) (string, error) {
+	// safety: bound engine invocations even if every continuation cursor is unique.
+	const pageLimit = 4
 	verb, cursor := "", ""
-	for {
+	seen := map[string]bool{}
+	for page := 1; ; page++ {
 		args := []string{"commands", "--path", "sparkwing pipeline", "--limit", "40", "--output=json"}
 		if cursor != "" {
 			args = append(args, "--cursor", cursor)
@@ -151,12 +154,19 @@ func (v *upgradeVerifier) pipelineReadVerb(ctx context.Context, checkout string,
 				next = command.NextCursor
 			}
 		}
+		if verb == "show" {
+			return verb, nil
+		}
 		if next == "" {
 			break
 		}
-		if next == cursor {
-			return "", errors.New("upgrade: selected engine command index did not advance")
+		if seen[next] {
+			return "", errors.New("upgrade: selected engine command index returned a repeated cursor")
 		}
+		if page == pageLimit {
+			return "", errors.New("upgrade: selected engine command index exceeded the page limit")
+		}
+		seen[next] = true
 		cursor = next
 	}
 	if verb == "" {
@@ -206,7 +216,7 @@ func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env procen
 	return nil
 }
 
-// safety: describe and plan refuse pipeline code with these codes; any other
+// safety: detail and plan commands refuse pipeline code with these codes; any other
 // failure (no engine, no daemon, a malformed answer) says nothing about the code.
 var pipelineCodeRefusals = []apierr.Code{apierr.UnknownPipeline, apierr.PlanFailed, apierr.PlanInvalid, apierr.InvalidArgs, apierr.SDKError}
 

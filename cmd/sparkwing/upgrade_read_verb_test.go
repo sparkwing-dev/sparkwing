@@ -48,3 +48,53 @@ func TestUpgradeVerifierContinuesCommandIndexPages(t *testing.T) {
 		t.Fatalf("verb=%s calls=%d error=%v", verb, calls, err)
 	}
 }
+
+func TestUpgradeVerifierRejectsCyclingCommandIndex(t *testing.T) {
+	calls := 0
+	v := upgradeVerifier{exec: func(context.Context, string, procenv.Env, string, ...string) ([]byte, error) {
+		calls++
+		if calls > 3 {
+			t.Fatal("command index followed a repeated cursor")
+		}
+		cursor := "a"
+		if calls == 2 {
+			cursor = "b"
+		}
+		return []byte(`{"path":"sparkwing pipeline describe"}` + "\n" + `{"kind":"page","next_cursor":"` + cursor + `"}`), nil
+	}}
+	_, err := v.pipelineReadVerb(t.Context(), t.TempDir(), procenv.Env{}, filepath.Join(t.TempDir(), "engine"))
+	if err == nil || !strings.Contains(err.Error(), "repeated cursor") || calls != 3 {
+		t.Fatalf("calls=%d error=%v", calls, err)
+	}
+}
+
+func TestUpgradeVerifierCapsCommandIndexPages(t *testing.T) {
+	cursors := []string{"a", "b", "c", "d"}
+	calls := 0
+	v := upgradeVerifier{exec: func(context.Context, string, procenv.Env, string, ...string) ([]byte, error) {
+		calls++
+		if calls > len(cursors) {
+			t.Fatal("command index exceeded four pages")
+		}
+		return []byte(`{"path":"sparkwing pipeline describe"}` + "\n" + `{"kind":"page","next_cursor":"` + cursors[calls-1] + `"}`), nil
+	}}
+	_, err := v.pipelineReadVerb(t.Context(), t.TempDir(), procenv.Env{}, filepath.Join(t.TempDir(), "engine"))
+	if err == nil || !strings.Contains(err.Error(), "page limit") || calls != 4 {
+		t.Fatalf("calls=%d error=%v", calls, err)
+	}
+}
+
+func TestUpgradeVerifierStopsCommandIndexAtShow(t *testing.T) {
+	calls := 0
+	v := upgradeVerifier{exec: func(context.Context, string, procenv.Env, string, ...string) ([]byte, error) {
+		calls++
+		if calls > 1 {
+			t.Fatal("command index continued after advertising show")
+		}
+		return []byte("{\"path\":\"sparkwing pipeline show\"}\n{\"kind\":\"page\",\"next_cursor\":\"a\"}"), nil
+	}}
+	verb, err := v.pipelineReadVerb(t.Context(), t.TempDir(), procenv.Env{}, filepath.Join(t.TempDir(), "engine"))
+	if err != nil || verb != "show" || calls != 1 {
+		t.Fatalf("verb=%s calls=%d error=%v", verb, calls, err)
+	}
+}

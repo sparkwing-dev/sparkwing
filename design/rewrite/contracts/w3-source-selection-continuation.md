@@ -109,7 +109,7 @@ providers. A missing classification or masker fails closed. The scan retains
 its eight-byte minimum and PEM-armor filtering. It never reports private paths
 or values. The caller-specific changed-blob scanner is deleted.
 
-Help, describe and plan share acquisition and prepared-environment withholding
+Help, pipeline details and plans share acquisition and prepared-environment withholding
 with execution. Child local-secret inheritance remains part of the child request
 contract.
 
