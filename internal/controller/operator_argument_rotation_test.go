@@ -105,7 +105,6 @@ func TestOperatorRotationMigratesScheduleAndJobArguments(t *testing.T) {
 			if code, result := f.rotate(t, f.server(t, keyRotationCipher(t, 3)), f.operator, "verify=1"); code != http.StatusOK || result["previous_key_only"] != float64(0) || result["plaintext_run_arguments"] != float64(0) || result["run_arguments"] != float64(10) {
 				t.Fatalf("retired-key verification: %d %v", code, result)
 			}
-
 		})
 	}
 }
