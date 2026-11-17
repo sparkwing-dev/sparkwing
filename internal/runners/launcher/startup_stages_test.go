@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"path/filepath"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -14,6 +15,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/startuptest"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -63,6 +65,9 @@ func TestLauncherStartupStagesSurvivePublicationFailure(t *testing.T) {
 			want := []string{"launcher_preparation", "launcher_reservation", "launcher_capacity_release", "launcher_job_create"}
 			if !fail {
 				want = append(want, "launcher_capacity_observed")
+			}
+			if !fail {
+				startuptest.CheckDocumented(t, filepath.Join("..", "..", "..", "docs", "observability.md"), "launcher_", stages)
 			}
 			if !slices.Equal(stages, want) {
 				t.Fatalf("stages=%v want=%v logs=%s", stages, want, logs.String())

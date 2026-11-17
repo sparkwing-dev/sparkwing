@@ -38,6 +38,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	"github.com/sparkwing-dev/sparkwing/internal/startuptest"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
@@ -410,6 +411,9 @@ func TestProductionCloudExchangeReachesAwardRenewal(t *testing.T) {
 						if record["success"] != (stage != failStage) {
 							t.Fatalf("wrong result: %s", line)
 						}
+					}
+					if failStage == "bootstrap_renewal" {
+						startuptest.CheckDocumented(t, filepath.Join("..", "..", "docs", "observability.md"), "bootstrap_", stages)
 					}
 					if !slices.Equal(stages, want) {
 						t.Fatalf("stages=%v want=%v logs=%s", stages, want, logs.String())
