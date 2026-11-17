@@ -486,13 +486,14 @@ logging it out also ends the CLI token it issued.
    read -r -s -p 'Dedicated account session: ' enrollment_session
    printf '\n'
    printf '%s\n' "$enrollment_session" | sparkwing runners add \
-     --profile work --runner build-box --team acme --session-stdin \
+     --profile work --runner build-box --session-stdin \
      --repos github.com/acme/repo --service-user sw-ci
    unset enrollment_session
    ```
 
-   Replace `acme` and the repository with your team and repository. Repeat
-   `--repos` for repositories that trust one another. Omitting `--personal`
+   The team you selected in the browser session owns the runner; enrollment
+   with `--session-stdin` takes no `--team`. Replace the repository with yours.
+   Repeat `--repos` for repositories that trust one another. Omitting `--personal`
    makes this shared team capacity. `--service-user sw-ci` uses a dedicated OS
    account and requires sudo. It keeps jobs away from your login user's SSH
    keys and cloud credentials. Prefer this on a teammate's daily workstation.
@@ -502,7 +503,8 @@ logging it out also ends the CLI token it issued.
    private credential and configuration, installs the service, and attempts
    logout. Close the private browser window after completion. If proof lookup
    or logout fails, sign out there to end the dedicated session. Check capacity
-   with `sparkwing runners list --profile work`.
+   on the console's **Team > Machines** page, or run `sparkwing login --profile work` and
+   then `sparkwing runners list --profile work`.
 
 Repository scopes permit jobs and secrets from those repositories. Every process
 running as the service's OS user can forge a CI pass, so share capacity only
