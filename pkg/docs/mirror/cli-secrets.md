@@ -38,6 +38,8 @@ sparkwing secrets list
 
 Remove a secret
 
+Delete the selected secret or variable without revealing its value.
+
 Delete the exact pipeline or unscoped row. A pipeline row is named by --repo and --pipeline together. JSON retains whether the row was deleted or already absent; plain emits the name.
 
 ### Flags
@@ -63,6 +65,8 @@ sparkwing secrets delete --secret DEPLOY_TOKEN
 ## `sparkwing secrets get`
 
 Read a secret's value
+
+Read a plain variable's value. Masked secrets are available only to pipeline runs that declare them.
 
 Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so get refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline.
 
@@ -90,6 +94,8 @@ sparkwing secrets get --secret REGION
 
 List secret names + metadata
 
+List secret and variable names and metadata without revealing values.
+
 List metadata without values, including each pipeline row's repository and pipeline, and pool restrictions. Search matches names case-insensitively; --repo matches a repository name case-insensitively or its key exactly, and --pipeline requires --repo. JSON emits metadata records; plain emits names.
 
 ### Flags
@@ -116,6 +122,8 @@ sparkwing secrets list
 
 Re-encrypt every stored secret under the current key
 
+Re-encrypt stored secrets under the current key and report rows that could not be rotated.
+
 Retain rotated counts and skipped row names/pipelines. The previous key is still needed when any row was skipped. JSON includes the controller's replay marker.
 
 ### Flags
@@ -131,6 +139,8 @@ Retain rotated counts and skipped row names/pipelines. The previous key is still
 ## `sparkwing secrets set`
 
 Store (or replace) a secret value
+
+Store or replace a secret from stdin, a file or --value. Use --variable to store a plain value.
 
 Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.
 

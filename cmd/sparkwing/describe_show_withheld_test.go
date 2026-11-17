@@ -58,7 +58,7 @@ func TestPipelineDescribeRevealsWithheldErrorOnlyWithTheFlag(t *testing.T) {
 		if show != strings.Contains(failure.Message, cause) {
 			t.Fatalf("show=%t: cause shown=%t: %+v", show, strings.Contains(failure.Message, cause), failure)
 		}
-		if !show && !strings.Contains(failure.Hint, "sparkwing pipeline describe --pipeline build --show-withheld") {
+		if !show && strings.Count(failure.Message+failure.Hint, "sparkwing pipeline describe --pipeline build --show-withheld") != 1 {
 			t.Fatalf("withheld error does not name the reveal command: %+v", failure)
 		}
 	}

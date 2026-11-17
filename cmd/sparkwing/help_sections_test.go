@@ -92,3 +92,20 @@ func TestCommonCommandsHaveDescriptionsAndExamples(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryLeafCommandHasPlainIntro(t *testing.T) {
+	registry := clisurface.Registry()
+	for _, surface := range registry {
+		if surface.Path != "sparkwing" && !strings.HasPrefix(surface.Path, "sparkwing ") {
+			continue
+		}
+		if slices.ContainsFunc(registry, func(other clisurface.Command) bool {
+			return strings.HasPrefix(other.Path, surface.Path+" ")
+		}) {
+			continue
+		}
+		if strings.TrimSpace(commandIntros[surface.Path]) == "" && surface.Path != "sparkwing commands" {
+			t.Errorf("missing plain intro for %s", surface.Path)
+		}
+	}
+}

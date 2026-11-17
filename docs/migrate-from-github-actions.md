@@ -119,7 +119,7 @@ repository root. For history or tags, as with `fetch-depth: 0`, call `plan.Check
 
 Sparkwing Cloud runners ship one Go and one Node version, and nothing else. Your own runners have whatever their
 machines have installed. To pin another version, fetch it into a directory the job caches. This script installs Node
-20 on Linux amd64 or arm64, checks its published SHA-256, and uses a private download directory:
+20 on Linux amd64 or arm64, checks its published SHA-256, and stages downloads inside `.tools` so the final rename stays on one filesystem:
 
 ```bash
 # scripts/setup-node.sh, sourced by a job
@@ -132,13 +132,13 @@ esac
 [ "$(uname -s)" = Linux ] || { echo "this recipe requires Linux" >&2; return 1; }
 NODE_HOME="$PWD/.tools/node-$NODE_VERSION-linux-$NODE_ARCH"
 setup_node() (
-  download=$(mktemp -d "${TMPDIR:-/tmp}/sparkwing-node.XXXXXX") || exit 1
+  mkdir -p .tools || exit 1
+  download=$(mktemp -d "$PWD/.tools/sparkwing-node.XXXXXX") || exit 1
   trap 'rm -rf "$download"' EXIT
   curl -fsSLo "$download/node.tar.xz" "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-$NODE_ARCH.tar.xz" || exit 1
   echo "$NODE_SHA256  $download/node.tar.xz" | sha256sum -c - || exit 1
   mkdir "$download/node" || exit 1
   tar -xJf "$download/node.tar.xz" -C "$download/node" --strip-components=1 || exit 1
-  mkdir -p .tools || exit 1
   mv "$download/node" "$NODE_HOME"
 )
 [ -x "$NODE_HOME/bin/node" ] || setup_node || return 1
@@ -172,12 +172,12 @@ esac
 [ "$(uname -s)" = Linux ] || { echo "this recipe requires Linux" >&2; return 1; }
 GO_HOME="$PWD/.tools/go-$GO_VERSION-linux-$GO_ARCH"
 setup_go() (
-  download=$(mktemp -d "${TMPDIR:-/tmp}/sparkwing-go.XXXXXX") || exit 1
+  mkdir -p .tools || exit 1
+  download=$(mktemp -d "$PWD/.tools/sparkwing-go.XXXXXX") || exit 1
   trap 'rm -rf "$download"' EXIT
   curl -fsSLo "$download/go.tar.gz" "https://go.dev/dl/go$GO_VERSION.linux-$GO_ARCH.tar.gz" || exit 1
   echo "$GO_SHA256  $download/go.tar.gz" | sha256sum -c - || exit 1
   tar -xzf "$download/go.tar.gz" -C "$download" || exit 1
-  mkdir -p .tools || exit 1
   mv "$download/go" "$GO_HOME"
 )
 [ -x "$GO_HOME/bin/go" ] || setup_go || return 1

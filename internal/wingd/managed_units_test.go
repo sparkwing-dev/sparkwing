@@ -305,3 +305,39 @@ func TestInstalledControllerIgnoresUnrelatedTimer(t *testing.T) {
 		})
 	}
 }
+
+func TestControllerInstalledRequiresManagedMarkerAndMatchingHome(t *testing.T) {
+	for _, goos := range []string{"linux", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			root := t.TempDir()
+			host := crontimer.Host{GOOS: goos, Home: root, ConfigHome: filepath.Join(root, "config"), SparkwingHome: filepath.Join(root, "private")}
+			manager, err := NewManagedUnitManager(host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			native := manager.(*nativeUnits)
+			body := native.render("/bin/sparkwing", "v1")
+			if err := os.MkdirAll(filepath.Dir(native.path()), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for _, tc := range []struct {
+				name, body string
+				installed  bool
+			}{
+				{"matching", body, true},
+				{"unmanaged", strings.ReplaceAll(body, crontimer.Marker, "another manager"), false},
+				{"other-home", strings.ReplaceAll(body, host.SparkwingHome, filepath.Join(root, "other")), false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					if err := os.WriteFile(native.path(), []byte(tc.body), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					got, err := manager.ControllerInstalled(t.Context())
+					if err != nil || got != tc.installed {
+						t.Fatalf("ControllerInstalled = %v, %v; want %v", got, err, tc.installed)
+					}
+				})
+			}
+		})
+	}
+}
