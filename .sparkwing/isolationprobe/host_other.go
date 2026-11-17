@@ -24,6 +24,8 @@ func hostProbes(o hostOptions) []Result {
 
 func readNetNS() string { return "" }
 
+func runtimeDeviceBind(string, mount) (string, bool) { return "", false }
+
 func discoverNodeAddress(context.Context, time.Duration) (string, error) {
 	return "", errors.New("node discovery needs Linux")
 }

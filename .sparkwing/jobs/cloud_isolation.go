@@ -16,6 +16,7 @@ import (
 	"sort"
 	"sparkwing-pipelines/isolationprobe"
 	"sparkwing-pipelines/isolationprobe/fixture"
+	"strconv"
 	"strings"
 	"time"
 
@@ -969,7 +970,7 @@ func (l *placementLog) usedNodes() []string {
 // safety: an occupant counts as a DaemonSet's only when its controller is a DaemonSet the cluster
 // lists in the pod's namespace, and as a run's only when its controller is one of that run's Jobs,
 // both by UID. Anyone able to create pods could copy a listed UID, so this trusts controller-written
-// metadata, which kubeAPIProof makes the run earn; a capacity placeholder is never exempt.
+// metadata, which kubeAPIProof makes the run earn. Capacity pods earn their separate spec check.
 func (l *placementLog) nodePod(p kubePod, jobNamespace string) nodePod {
 	np := nodePod{Namespace: p.Metadata.Namespace, Name: p.Metadata.Name}
 	owner, owned := p.Metadata.controller()
@@ -1089,6 +1090,32 @@ func (d *isolationDriver) observeNodes(ctx context.Context, used []string, sampl
 			return err
 		}
 		sample.onNode[name], sample.nodePods[name] = pods, docs
+	}
+	// bug: jobs may start between the first Job list and the node's pod list.
+	for _, pods := range sample.onNode {
+		if slices.ContainsFunc(pods, func(p kubePod) bool {
+			owner, ok := p.Metadata.controller()
+			return ok && owner.Kind == "Job" && p.Metadata.Namespace == d.args.JobNamespace && d.seen.jobRun[owner.UID] == ""
+		}) {
+			raw, err := d.kubectl(ctx, "get", "jobs", "-n", d.args.JobNamespace, "-o", "json")
+			if err != nil {
+				return err
+			}
+			jobs, err := decodeList[kubeJob](raw)
+			if err != nil {
+				return err
+			}
+			for _, job := range jobs {
+				var binding awardBinding
+				if job.Metadata.UID != "" && d.seen.jobRun[job.Metadata.UID] == "" && json.Unmarshal([]byte(job.Metadata.Annotations[awardBindingAnnotation]), &binding) == nil && binding.RunID != "" {
+					d.seen.jobRun[job.Metadata.UID] = binding.RunID
+				}
+			}
+			if err := d.save(fmt.Sprintf("cluster/jobs-observation-%d.json", len(d.seen.samples)), []byte(raw)); err != nil {
+				return err
+			}
+			break
+		}
 	}
 	missing := slices.ContainsFunc(used, func(name string) bool { return d.seen.claims[name] == nil })
 	if !missing {
@@ -1213,9 +1240,67 @@ func (d *isolationDriver) isolationNodeOf(n kubeNode, pods []kubePod) isolationN
 		NodeClass: n.Metadata.Labels[nodeClassLabel], Claimed: d.seen.claims[n.Metadata.Name] != nil,
 	}
 	for _, p := range pods {
-		node.Pods = append(node.Pods, d.seen.nodePod(p, d.args.JobNamespace))
+		occupant := d.seen.nodePod(p, d.args.JobNamespace)
+		if occupant.Run == "" && !occupant.DaemonSet {
+			occupant.Run = d.capacityRun(p)
+		}
+		node.Pods = append(node.Pods, occupant)
 	}
 	return node
+}
+
+// safety: the kube API grade protects launcher-written capacity metadata just as it protects Job
+// owners. The full binding, team and inert runner spec must agree before this pod counts as ours.
+func (d *isolationDriver) capacityRun(p kubePod) string {
+	if p.Metadata.Namespace != d.args.JobNamespace || len(p.Metadata.OwnerReferences) != 0 ||
+		p.Metadata.Labels["sparkwing.dev/capacity-request"] != "true" || p.Metadata.Labels["app.kubernetes.io/managed-by"] != "sparkwing-launcher" {
+		return ""
+	}
+	var demand struct {
+		Binding awardBinding `json:"binding"`
+	}
+	if json.Unmarshal([]byte(p.Metadata.Annotations["sparkwing.dev/capacity-demand"]), &demand) != nil {
+		return ""
+	}
+	b := demand.Binding
+	if b.UnitID == "" || b.Kind == "" || b.Generation <= 0 || !slices.ContainsFunc(d.runs, func(r *isolationRun) bool { return r.RunID == b.RunID && r.Team == b.Team }) ||
+		p.Metadata.Labels["sparkwing.dev/team"] != teamNodeValue(d.args.JobNamespace, b.Team) {
+		return ""
+	}
+	raw := fmt.Sprintf("%q/%q/%q/%q/%q/%d/%d/%q/%d", b.UnitID, b.Team, b.RunID, b.NodeID, b.Kind, b.Generation, b.Attempt, b.SourceNodeID, b.SourceGeneration)
+	sum := sha256.Sum256([]byte(raw))
+	if p.Metadata.Name != "sw-capacity-"+hex.EncodeToString(sum[:24]) || p.Spec.HostNetwork || p.Spec.HostPID || p.Spec.HostIPC ||
+		len(p.Spec.Containers) != 1 || len(p.Spec.InitContainers) != 0 || len(p.Spec.Volumes) != 0 ||
+		p.Spec.AutomountServiceAccountToken == nil || *p.Spec.AutomountServiceAccountToken {
+		return ""
+	}
+	security := p.Spec.SecurityContext
+	if security == nil || security.RunAsUser == nil || *security.RunAsUser != 65534 || security.RunAsGroup == nil || *security.RunAsGroup != 65534 || security.RunAsNonRoot == nil || !*security.RunAsNonRoot {
+		return ""
+	}
+	c := p.Spec.Containers[0]
+	s := c.SecurityContext
+	if c.Name != "capacity" || !slices.Equal(c.Command, []string{"/bin/sh", "-c", `trap 'exit 0' TERM; /usr/bin/sleep "$1" & wait`, "capacity"}) || len(c.Args) != 1 || s == nil ||
+		s.Privileged != nil && *s.Privileged || s.AllowPrivilegeEscalation == nil || *s.AllowPrivilegeEscalation || s.ReadOnlyRootFilesystem == nil || !*s.ReadOnlyRootFilesystem ||
+		s.Capabilities == nil || len(s.Capabilities.Add) != 0 || !slices.Contains(s.Capabilities.Drop, "ALL") {
+		return ""
+	}
+	if seconds, err := strconv.ParseFloat(c.Args[0], 64); err != nil || !(seconds > 0) {
+		return ""
+	}
+	for _, sample := range d.seen.samples {
+		for _, pods := range sample.pods {
+			for _, pod := range pods {
+				owner, _ := pod.Metadata.controller()
+				if d.seen.jobRun[owner.UID] == b.RunID && slices.ContainsFunc(pod.Spec.Containers, func(runner kubeContainer) bool {
+					return runner.Name == "run-node" && runner.Image != "" && runner.Image == c.Image
+				}) {
+					return b.RunID
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // safety: one observation is judged alone, with each started run's pods as they were then and only

@@ -2,6 +2,8 @@ package jobs
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -295,9 +297,12 @@ func launcherPod() kubePod {
 	var docker kubeContainer
 	docker.Name = "docker"
 	docker.SecurityContext = &struct {
-		Privileged   *bool `json:"privileged"`
-		Capabilities *struct {
-			Add []string `json:"add"`
+		Privileged               *bool `json:"privileged"`
+		AllowPrivilegeEscalation *bool `json:"allowPrivilegeEscalation"`
+		ReadOnlyRootFilesystem   *bool `json:"readOnlyRootFilesystem"`
+		Capabilities             *struct {
+			Add  []string `json:"add"`
+			Drop []string `json:"drop"`
 		} `json:"capabilities"`
 		SeccompProfile *struct {
 			Type             string `json:"type"`
@@ -306,8 +311,9 @@ func launcherPod() kubePod {
 		ProcMount string `json:"procMount"`
 	}{
 		Capabilities: &struct {
-			Add []string `json:"add"`
-		}{[]string{"SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE"}},
+			Add  []string `json:"add"`
+			Drop []string `json:"drop"`
+		}{Add: []string{"SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE"}},
 		SeccompProfile: &struct {
 			Type             string `json:"type"`
 			LocalhostProfile string `json:"localhostProfile"`
@@ -1134,9 +1140,8 @@ func addToNode(out string, p kubePod, raw func(map[string]any)) string {
 }
 
 // The review's forgery repro: a foreign workload on B1's node fails C2 whatever capacity metadata
-// it carries. The conformance run cannot authenticate a capacity placeholder, so none is exempt, not
-// even one claiming the owning run.
-func TestConformRefusesAnyCapacityPlaceholderOnATestedNode(t *testing.T) {
+// it carries. Claimed capacity metadata never exempts a foreign executable or unsafe spec.
+func TestConformRefusesForeignWorkloadsClaimingCapacity(t *testing.T) {
 	for _, mode := range []string{"plain-foreign", "foreign-run", "forged-owner-run", "forged-owner-run-foreign-team", "forged-owner-run-unsafe-spec", "forged-run-other-namespace"} {
 		t.Run(mode, func(t *testing.T) {
 			_, evidence, err := driveWrapped(t, func(c isolationCommand, out string) string {
@@ -1172,6 +1177,73 @@ func TestConformRefusesAnyCapacityPlaceholderOnATestedNode(t *testing.T) {
 				t.Fatalf("conform = %v, report = %.300s; want C2 for the foreign workload", err, report)
 			}
 		})
+	}
+}
+
+func TestPlacementAcceptsOnlyTheRunsInertCapacityPod(t *testing.T) {
+	for _, mode := range []string{"own", "foreign-team", "foreign-run", "wrong-name", "unsafe-command", "host-network", "different-image", "privileged"} {
+		t.Run(mode, func(t *testing.T) {
+			var pod kubePod
+			data := `{"spec":{"automountServiceAccountToken":false,"securityContext":{"runAsUser":65534,"runAsGroup":65534,"runAsNonRoot":true},"containers":[{"name":"capacity","image":"runner@sha256:fixture","command":["/bin/sh","-c","trap 'exit 0' TERM; /usr/bin/sleep \"$1\" & wait","capacity"],"args":["1200"],"securityContext":{"allowPrivilegeEscalation":false,"readOnlyRootFilesystem":true,"capabilities":{"drop":["ALL"]}}}]}}`
+			if err := json.Unmarshal([]byte(data), &pod); err != nil {
+				t.Fatal(err)
+			}
+			b := awardBinding{Kind: "work", UnitID: "fixture-unit", Team: "stg-iso-b", RunID: "run-1", NodeID: "output-allowed", Generation: 1}
+			if mode == "foreign-team" {
+				b.Team = "stg-iso-a"
+			}
+			if mode == "foreign-run" {
+				b.RunID = "run-9"
+			}
+			binding, _ := json.Marshal(map[string]any{"binding": b})
+			pod.Metadata.Namespace = isoJobNS
+			pod.Metadata.Annotations = map[string]string{"sparkwing.dev/capacity-demand": string(binding)}
+			pod.Metadata.Labels = map[string]string{"sparkwing.dev/capacity-request": "true", "app.kubernetes.io/managed-by": "sparkwing-launcher", "sparkwing.dev/team": teamNodeValue(isoJobNS, b.Team)}
+			raw := fmt.Sprintf("%q/%q/%q/%q/%q/%d/%d/%q/%d", b.UnitID, b.Team, b.RunID, b.NodeID, b.Kind, b.Generation, b.Attempt, b.SourceNodeID, b.SourceGeneration)
+			sum := sha256.Sum256([]byte(raw))
+			pod.Metadata.Name = "sw-capacity-" + hex.EncodeToString(sum[:24])
+			switch mode {
+			case "wrong-name":
+				pod.Metadata.Name += "x"
+			case "unsafe-command":
+				pod.Spec.Containers[0].Command = []string{"attacker"}
+			case "host-network":
+				pod.Spec.HostNetwork = true
+			case "different-image":
+				pod.Spec.Containers[0].Image = "attacker@sha256:fixture"
+			case "privileged":
+				yes := true
+				pod.Spec.Containers[0].SecurityContext.Privileged = &yes
+			}
+			runner := launcherPod()
+			runner.Spec.Containers[0].Image = "runner@sha256:fixture"
+			runner.Metadata.OwnerReferences = controlledBy("Job", "uid-own-job")
+			d := isolationDriver{args: isoArgs(), runs: []*isolationRun{{RunID: "run-1", Team: "stg-iso-b"}}, seen: newPlacementLog()}
+			d.seen.jobRun["uid-own-job"] = "run-1"
+			d.seen.samples = []placementSample{{pods: map[string][]runPod{"B1": {{kubePod: runner}}}}}
+			node := d.isolationNodeOf(isoNode("node-b1"), []kubePod{pod})
+			want := ""
+			if mode == "own" {
+				want = "run-1"
+			}
+			if node.Pods[0].Run != want {
+				t.Fatalf("capacity occupant run=%q, want %q", node.Pods[0].Run, want)
+			}
+		})
+	}
+}
+
+func TestNodeCaptureResolvesAJobCreatedDuringTheObservation(t *testing.T) {
+	fake := newIsoFake(t)
+	fake.triggered = []string{"run-1"}
+	d := isolationDriver{args: isoArgs(), seen: newPlacementLog(), evidence: t.TempDir(), tools: isolationTools{run: fake.run}}
+	sample := placementSample{}
+	if err := d.observeNodes(t.Context(), []string{isoFixtures[0].node}, &sample); err != nil {
+		t.Fatal(err)
+	}
+	uid := "uid-sw-run-1-" + isolationprobe.ProbeJob
+	if d.seen.jobRun[uid] != "run-1" {
+		t.Fatalf("new Job owner %q remains unresolved: %v", uid, d.seen.jobRun)
 	}
 }
 

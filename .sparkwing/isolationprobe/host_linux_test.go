@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -140,6 +141,65 @@ func TestErrnoNameNamesTheRefusal(t *testing.T) {
 		if got := errnoName(err); got != want {
 			t.Errorf("errnoName(%v) = %q, want %q", err, got, want)
 		}
+	}
+}
+
+func TestAuditAcceptsOnlyStandardDeviceBinds(t *testing.T) {
+	for _, dev := range []string{"null", "zero", "full", "random", "urandom", "tty"} {
+		line := "2100 2001 0:6 /" + dev + " /dev/" + dev + " rw - devtmpfs devtmpfs rw"
+		if r := auditMounts(ContextJob, parseMountinfo(line)); r[0].Verdict != Pass {
+			t.Errorf("standard %s bind: %+v", dev, r)
+		}
+	}
+	for _, line := range []string{
+		"2100 2001 0:6 /mem /dev/null rw - devtmpfs devtmpfs rw",
+		"2100 2001 0:6 /null /dev/zero rw - devtmpfs devtmpfs rw",
+		"2100 2001 0:6 / /dev rw - devtmpfs devtmpfs rw",
+		"2100 2001 0:6 /kmsg /dev/kmsg rw - devtmpfs devtmpfs rw",
+		"2100 2001 0:6 /null /tmp/null rw - devtmpfs devtmpfs rw",
+	} {
+		if r := auditMounts(ContextJob, parseMountinfo(line)); r[0].Verdict != Breach {
+			t.Errorf("unsafe bind %s: %+v", line, r)
+		}
+	}
+}
+
+func TestKernelReadAcceptsNullDeviceButFailsReadableMemory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory")
+	if err := os.WriteFile(path, []byte("kernel memory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		actual string
+		target string
+		want   bool
+	}{
+		{"/dev/null", "/proc/kcore", true}, {path, "/proc/kcore", false},
+		{"/dev/zero", "/proc/kcore", false}, {"/dev/null", "/dev/mem", false},
+	} {
+		f, err := os.Open(c.actual)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := maskedKernelFile(c.target, f)
+		_ = f.Close()
+		if got != c.want {
+			t.Errorf("%s as %s: masked=%v, want %v", c.actual, c.target, got, c.want)
+		}
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if !maskedKernelFile("/proc/kcore", f) {
+		t.Fatal("empty masked file rejected")
+	}
+	if r := openProbe(ContextJob, "/dev/null", os.O_WRONLY, "kernel control opens for writing"); r.Verdict != Breach {
+		t.Fatalf("write open is still a breach: %+v", r)
 	}
 }
 

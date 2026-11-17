@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"io"
 	"io/fs"
 	"net"
 	"os"
@@ -178,12 +179,82 @@ func openProbe(where, path string, flag int, name string) Result {
 	r := Result{Item: "C12", Context: where, Probe: name, Target: path, Expect: ExpectBlocked}
 	f, err := os.OpenFile(path, flag, 0)
 	if err == nil {
+		masked := flag == os.O_RDONLY && maskedKernelFile(path, f)
+		if masked {
+			r.Outcome, r.Verdict = kernelMaskKind(f)+"; read 0 bytes, EOF", Pass
+		}
 		_ = f.Close()
+		if masked {
+			return r
+		}
 		r.Outcome, r.Verdict = "opened", Breach
 		return r
 	}
 	r.Outcome, r.Verdict = errnoName(err), Pass
 	return r
+}
+
+var maskedProcPaths = map[string]bool{
+	"/proc/interrupts": true, "/proc/kcore": true, "/proc/keys": true,
+	"/proc/latency_stats": true, "/proc/timer_list": true,
+}
+
+// safety: runc masks these proc files with /dev/null; an open alone cannot distinguish that from
+// readable kernel memory. A bounded read must reach EOF without returning even one byte.
+func maskedKernelFile(path string, f *os.File) bool {
+	if !maskedProcPaths[path] {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil || !(info.Mode().IsRegular() || standardChar(info, 1, 3)) {
+		return false
+	}
+	var b [1]byte
+	n, err := f.Read(b[:])
+	return n == 0 && err == io.EOF
+}
+
+func standardChar(info fs.FileInfo, major, minor uint64) bool {
+	s, ok := info.Sys().(*syscall.Stat_t)
+	return ok && info.Mode()&os.ModeCharDevice != 0 && uint64(s.Rdev) == major<<8|minor
+}
+
+func kernelMaskKind(f *os.File) string {
+	if info, err := f.Stat(); err == nil && standardChar(info, 1, 3) {
+		return "masked path: null char device 1:3"
+	}
+	return "masked path: empty regular file"
+}
+
+// safety: user namespaces need these six device binds because mknod is unavailable there. Only
+// the expected mount root, destination, character type and device number earn an exception.
+func runtimeDeviceBind(where string, m mount) (string, bool) {
+	path := m.point
+	if where == ContextPrivileged {
+		path = strings.TrimPrefix(path, "/host")
+	}
+	if maskedProcPaths[path] && m.root == "/null" {
+		f, err := os.Open(m.point)
+		if err != nil {
+			return "", false
+		}
+		defer f.Close() //nolint:errcheck // only read-only inspection
+		if !maskedKernelFile(path, f) {
+			return "", false
+		}
+		return "devtmpfs root /null; " + kernelMaskKind(f) + "; read 0 bytes, EOF", true
+	}
+	devices := map[string][2]uint64{
+		"null": {1, 3}, "zero": {1, 5}, "full": {1, 7},
+		"random": {1, 8}, "urandom": {1, 9}, "tty": {5, 0},
+	}
+	name := strings.TrimPrefix(path, "/dev/")
+	d, known := devices[name]
+	if !known || m.root != "/"+name {
+		return "", false
+	}
+	info, err := os.Stat(m.point)
+	return "devtmpfs root " + m.root + "; standard char device " + strconv.FormatUint(d[0], 10) + ":" + strconv.FormatUint(d[1], 10), err == nil && standardChar(info, d[0], d[1])
 }
 
 func mountProbes(where, workDir string) []Result {
