@@ -8,6 +8,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -202,6 +203,9 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 		if process != nil {
 			err = errors.Join(err, closeErr, process.Cleanup(cleanupCtx))
 		}
+		if err != nil {
+			logs.explain("planning failed; see the error for the local details command")
+		}
 		err = errors.Join(err, logs.finish(cleanupCtx), context.Cause(parent))
 	}()
 	if err != nil {
@@ -271,13 +275,11 @@ func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.Declaration
 	if known {
 		message = boundedNodeErrText(p.Masker.Mask(err.Error()))
 	}
-	if code == apierr.PlanFailed && input.Entry != nil && input.Entry.Engine.Identity.Pin.SDK == engineid.GoSDK && slices.Contains([]string{"v0.1.0", "v0.2.0"}, input.Entry.Engine.Identity.Pin.Version) {
+	if code == apierr.PlanFailed && strings.Contains(err.Error(), "runtime error: invalid memory address or nil pointer dereference") && input.Entry != nil && input.Entry.Engine.Identity.Pin.SDK == engineid.GoSDK && slices.Contains([]string{"v0.1.0", "v0.2.0"}, input.Entry.Engine.Identity.Pin.Version) {
 		message += "; Go SDK v0.1.0 and v0.2.0 can panic when Plan reads Git during discovery; run `sparkwing pipeline upgrade` to use the current SDK"
 	}
 	failure := &apierr.Error{Code: code, Message: message}
-	if !known {
-		failure.Hint = p.Masker.Mask(fmt.Sprintf("Run this locally, in a checkout of this revision, to print the withheld error: %s", runspec.ShowWithheldCommand(input.Run.Pipeline)))
-	} else if structured != nil {
+	if known && structured != nil {
 		failure = p.Masker.Error(structured)
 		failure.Message = message
 	} else {

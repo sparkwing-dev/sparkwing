@@ -266,6 +266,9 @@ func TestShowWithheldPrintsMaskedDiscoveryFailuresOnlyWhenRequested(t *testing.T
 			if tc.show != strings.Contains(all, cause) || tc.show != strings.Contains(all, output) {
 				t.Fatalf("withheld text shown=%t, want %t: %s", strings.Contains(all, cause), tc.show, all)
 			}
+			if !tc.show && strings.Count(all, "--show-withheld") != 1 {
+				t.Fatalf("withheld remedy appears %d times, want once: %s", strings.Count(all, "--show-withheld"), all)
+			}
 			if !tc.show && !strings.Contains(all, "sparkwing pipeline describe --pipeline "+tc.selected+" --show-withheld") {
 				t.Fatalf("withheld output does not name the command that shows it: %s", all)
 			}
@@ -316,9 +319,9 @@ func TestShowWithheldPrintsOutputOfAnSDKThatStoppedBeforeDescribing(t *testing.T
 			if show != strings.Contains(all, crash) {
 				t.Fatalf("crash output shown=%t, want %t: %s", strings.Contains(all, crash), show, all)
 			}
-			notice := "the SDK stopped before describing its pipelines; to see this output, run `sparkwing pipeline describe --pipeline build --show-withheld`"
+			notice := "planning failed; see the error for the local details command"
 			if !show && !slices.ContainsFunc(logs, func(log string) bool { return strings.HasSuffix(log, notice) }) {
-				t.Fatalf("withheld notice does not name the command: %q", logs)
+				t.Fatalf("withheld notice does not point to the error: %q", logs)
 			}
 		})
 	}
