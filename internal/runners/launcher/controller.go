@@ -65,8 +65,8 @@ func (c *ControllerControl) claim(ctx context.Context, namespace string, exclude
 	demand.JobNamespace = namespace
 	demand.ExcludedTeamLabels = slices.Clone(excludedTeamLabels)
 	response, err := c.client.Claim(ctx, demand)
-	result.immediate = response.Held || response.Claim != nil
 	result.pollAfter = min(max(response.PollAfter, 0), controllerwire.MaxHonoredIdleClaimPoll)
+	result.immediate = response.Held || response.Claim != nil && result.pollAfter == 0
 	if err != nil || response.Claim == nil {
 		result.err = err
 		return result

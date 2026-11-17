@@ -425,7 +425,7 @@ Transport failures never trigger a second claim in the adapter.
 interval and bounds each held controller claim. The duration must be positive
 and defaults to five seconds. Cloud launcher claims wait for the controller
 commit that makes work claimable. Only one claim waits at a time, while
-reconciliation, renewal and teardown continue. A delivered award starts another
+reconciliation, renewal and teardown continue. A delivered award without poll advice starts another
 claim after placement, and a held empty response starts another claim at once.
 A controller without held-claim support keeps the polling fallback.
 
@@ -616,7 +616,7 @@ through the handoff and fresh-capacity fallback at 30 seconds.
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
 normal runs and retries, including launcher restarts.
 
-An unheld empty response or claim failure waits at least the configured poll
+An unheld empty response, explicit poll advice or claim failure waits at least the configured poll
 interval or the controller's `PollAfter`, whichever is longer, after response
 completion. A placement failure starts that interval after placement finishes.
 Advice is capped at the wire protocol's eight-second maximum. Variable request

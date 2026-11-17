@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -26,7 +27,8 @@ func TestCapacityWakePublishesBeforePollAndPollRecoversMissedWake(t *testing.T) 
 			synctest.Test(t, func(t *testing.T) {
 				l, kube, boundary, control := fixture()
 				l.Poll = 5 * time.Second
-				boundary.reserveErr = ErrNoDedicatedNode
+				available := &wakeCapacityBoundary{CloudBoundary: boundary}
+				l.Boundary = available
 				award := control.award
 				control.award = nil
 				l.Control = wakeAllocationControl{CloudControl: control, resources: &match.Resources{Cores: award.CPUCores, MemoryBytes: award.Memory}}
@@ -51,7 +53,7 @@ func TestCapacityWakePublishesBeforePollAndPollRecoversMissedWake(t *testing.T) 
 				}()
 				synctest.Wait()
 				time.Sleep(time.Second)
-				boundary.reserveErr = nil
+				available.ready.Store(true)
 				if mode == "closed watch" {
 					events.Stop()
 				}
@@ -82,81 +84,100 @@ func TestCapacityWakePublishesBeforePollAndPollRecoversMissedWake(t *testing.T) 
 }
 
 func TestRunHoldsClaimWithoutBlockingReconciliation(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		l, kube, _, _ := fixture()
-		l.Poll = 5 * time.Second
-		unit := wireAward(capability.UnitNode)
-		ready := make(chan struct{})
-		calls := 0
-		var wait time.Duration
-		wire := launcherWireFake{
-			claim: func(ctx context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
-				calls++
-				wait = request.Wait
-				if calls == 1 {
-					select {
-					case <-ready:
-						return controllerwire.ClaimResponse{Claim: &unit}, nil
-					case <-ctx.Done():
+	for _, advice := range []time.Duration{0, 7 * time.Second} {
+		t.Run(advice.String(), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				l, kube, _, _ := fixture()
+				l.Poll = 5 * time.Second
+				unit := wireAward(capability.UnitNode)
+				ready := make(chan struct{})
+				calls := 0
+				var wait time.Duration
+				wire := launcherWireFake{
+					claim: func(ctx context.Context, request controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+						calls++
+						wait = request.Wait
+						if calls == 1 {
+							select {
+							case <-ready:
+								return controllerwire.ClaimResponse{Claim: &unit, PollAfter: advice}, nil
+							case <-ctx.Done():
+								return controllerwire.ClaimResponse{}, ctx.Err()
+							}
+						}
+						<-ctx.Done()
 						return controllerwire.ClaimResponse{}, ctx.Err()
+					},
+					sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
+						response := controllerwire.LauncherSyncResponse{}
+						for _, ref := range request.Preparing {
+							response.Prepared = append(response.Prepared, controllerwire.LauncherPreparation{LeaseRef: ref, ExpiresAt: unit.LeaseExpiresAt})
+						}
+						for range request.Observed {
+							u := unit
+							u.Capability = ""
+							response.Awards = append(response.Awards, u)
+						}
+						return response, nil
+					},
+				}
+				var err error
+				l.Control, err = NewControllerControl(wire, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				passes := 0
+				kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) { passes++; return false, nil, nil })
+				ctx, cancel := context.WithCancel(t.Context())
+				done := make(chan error, 1)
+				go func() { done <- l.Run(ctx) }()
+				defer func() {
+					cancel()
+					if err := <-done; err != nil {
+						t.Error(err)
 					}
+				}()
+				synctest.Wait()
+				if wait != l.Poll {
+					t.Errorf("claim wait=%s, want safety poll %s", wait, l.Poll)
 				}
-				<-ctx.Done()
-				return controllerwire.ClaimResponse{}, ctx.Err()
-			},
-			sync: func(_ context.Context, request controllerwire.LauncherSyncRequest) (controllerwire.LauncherSyncResponse, error) {
-				response := controllerwire.LauncherSyncResponse{}
-				for _, ref := range request.Preparing {
-					response.Prepared = append(response.Prepared, controllerwire.LauncherPreparation{LeaseRef: ref, ExpiresAt: unit.LeaseExpiresAt})
+				time.Sleep(l.Poll)
+				synctest.Wait()
+				if passes < 2 {
+					t.Error("held claim blocked reconciliation")
 				}
-				for range request.Observed {
-					u := unit
-					u.Capability = ""
-					response.Awards = append(response.Awards, u)
+				time.Sleep(time.Millisecond)
+				start := time.Now()
+				close(ready)
+				synctest.Wait()
+				binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
+				if err != nil {
+					t.Fatal(err)
 				}
-				return response, nil
-			},
-		}
-		var err error
-		l.Control, err = NewControllerControl(wire, controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		passes := 0
-		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) { passes++; return false, nil, nil })
-		ctx, cancel := context.WithCancel(t.Context())
-		done := make(chan error, 1)
-		go func() { done <- l.Run(ctx) }()
-		defer func() {
-			cancel()
-			if err := <-done; err != nil {
-				t.Error(err)
-			}
-		}()
-		synctest.Wait()
-		if wait != l.Poll {
-			t.Errorf("claim wait=%s, want safety poll %s", wait, l.Poll)
-		}
-		time.Sleep(l.Poll)
-		synctest.Wait()
-		if passes < 2 {
-			t.Error("held claim blocked reconciliation")
-		}
-		time.Sleep(time.Millisecond)
-		start := time.Now()
-		close(ready)
-		synctest.Wait()
-		binding, err := cloudBinding(unit, capability.DeliveryBootstrap)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := kube.BatchV1().Jobs("cloud").Get(ctx, jobName(binding), metav1.GetOptions{}); err != nil {
-			t.Fatalf("ready signal did not publish Job: %v", err)
-		}
-		if elapsed := time.Since(start); elapsed != 0 {
-			t.Fatalf("ready signal waited %s", elapsed)
-		}
-	})
+				if _, err := kube.BatchV1().Jobs("cloud").Get(ctx, jobName(binding), metav1.GetOptions{}); err != nil {
+					t.Fatalf("ready signal did not publish Job: %v", err)
+				}
+				if elapsed := time.Since(start); elapsed != 0 {
+					t.Fatalf("ready signal waited %s", elapsed)
+				}
+				if advice > 0 {
+					if calls != 1 {
+						t.Fatalf("award bypassed controller advice: %d claims", calls)
+					}
+					time.Sleep(advice - time.Nanosecond)
+					synctest.Wait()
+					if calls != 1 {
+						t.Fatalf("claimed before advice expired: %d claims", calls)
+					}
+					time.Sleep(time.Nanosecond)
+					synctest.Wait()
+				}
+				if calls != 2 {
+					t.Fatalf("next held claim not started: %d claims", calls)
+				}
+			})
+		})
+	}
 }
 
 type wakeAllocationControl struct {
@@ -170,4 +191,16 @@ func (c wakeAllocationControl) Sync(ctx context.Context, observations []CloudJob
 		states[i].Resources = c.resources
 	}
 	return states, err
+}
+
+type wakeCapacityBoundary struct {
+	CloudBoundary
+	ready atomic.Bool
+}
+
+func (b *wakeCapacityBoundary) Reserve(ctx context.Context, binding CloudJobBinding, name string, placement CloudPlacement) (CloudNodeReservation, error) {
+	if !b.ready.Load() {
+		return CloudNodeReservation{}, ErrNoDedicatedNode
+	}
+	return b.CloudBoundary.Reserve(ctx, binding, name, placement)
 }
