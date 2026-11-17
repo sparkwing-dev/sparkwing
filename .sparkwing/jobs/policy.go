@@ -96,7 +96,9 @@ func checkTrackedAPISnapshot(ctx context.Context) error {
 		if _, err := sparkwing.Exec(ctx, "go", "run", filepath.Join(regexCheckRoot(), "cmd/apidiff/main.go"), "generated").Dir(root).Env("GOWORK", "off").Capture(); err != nil {
 			var execErr *sparkwing.ExecError
 			if errors.As(err, &execErr) {
-				return fmt.Errorf("API snapshot generation failed: %s", strings.TrimSpace(strings.ReplaceAll(execErr.Stderr, root+string(os.PathSeparator), "")))
+				diagnostic := *execErr
+				diagnostic.Stderr = strings.ReplaceAll(execErr.Stderr, root+string(os.PathSeparator), "")
+				return fmt.Errorf("API snapshot generation failed: %w", &diagnostic)
 			}
 			return fmt.Errorf("API snapshot generation failed: %w", err)
 		}
