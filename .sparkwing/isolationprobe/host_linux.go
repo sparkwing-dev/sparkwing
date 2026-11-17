@@ -211,12 +211,12 @@ func maskedKernelFile(path string, f *os.File) bool {
 	}
 	var b [1]byte
 	n, err := f.Read(b[:])
-	return n == 0 && err == io.EOF
+	return n == 0 && errors.Is(err, io.EOF)
 }
 
 func standardChar(info fs.FileInfo, major, minor uint64) bool {
 	s, ok := info.Sys().(*syscall.Stat_t)
-	return ok && info.Mode()&os.ModeCharDevice != 0 && uint64(s.Rdev) == major<<8|minor
+	return ok && info.Mode()&os.ModeCharDevice != 0 && s.Rdev == major<<8|minor
 }
 
 func kernelMaskKind(f *os.File) string {
@@ -238,7 +238,7 @@ func runtimeDeviceBind(where string, m mount) (string, bool) {
 		if err != nil {
 			return "", false
 		}
-		defer f.Close() //nolint:errcheck // only read-only inspection
+		defer f.Close()
 		if !maskedKernelFile(path, f) {
 			return "", false
 		}

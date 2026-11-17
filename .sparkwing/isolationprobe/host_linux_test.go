@@ -174,8 +174,10 @@ func TestKernelReadAcceptsNullDeviceButFailsReadableMemory(t *testing.T) {
 		target string
 		want   bool
 	}{
-		{"/dev/null", "/proc/kcore", true}, {path, "/proc/kcore", false},
-		{"/dev/zero", "/proc/kcore", false}, {"/dev/null", "/dev/mem", false},
+		{"/dev/null", "/proc/kcore", true},
+		{path, "/proc/kcore", false},
+		{"/dev/zero", "/proc/kcore", false},
+		{"/dev/null", "/dev/mem", false},
 	} {
 		f, err := os.Open(c.actual)
 		if err != nil {
