@@ -604,3 +604,27 @@ func TestStoreKeyringKeepsKeyDetailOutOfClientDiagnostics(t *testing.T) {
 		t.Fatalf("a controller keyring lost the operator detail its server logs: %v", err)
 	}
 }
+
+func TestOIDCAuditDigestCreatesOnlyAnExternalKey(t *testing.T) {
+	dir := t.TempDir()
+	keyPath := keyFileIn(t, dir)
+	ring := loadRing(t)
+	st := openStore(t)
+	cipher := ring.For(st.AsOperator())
+	id, digest, err := cipher.OIDCAuditDigest("", "audience", "person@example.test")
+	if err != nil || len(id) != 64 || len(digest) != 64 {
+		t.Fatalf("local audit digest: %v", err)
+	}
+	key, err := os.ReadFile(keyPath)
+	if err != nil || len(key) != secrets.KeySize {
+		t.Fatalf("external key missing: %v", err)
+	}
+	direct, err := secrets.NewCipher(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualID, actual, err := direct.OIDCAuditDigest(id, "audience", "person@example.test")
+	if err != nil || actualID != id || actual != digest {
+		t.Fatalf("external key did not reproduce digest: %v", err)
+	}
+}

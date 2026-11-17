@@ -628,6 +628,10 @@ names memory, and nice 10, so every job the runner hosts shares that cap. On
 Linux, jobs the CLI hosts itself are niced as well. A runner without systemd,
 macOS and Windows get no OS cap; macOS gives jobs background scheduling only.
 
+[`Cores()` requests](admission.md#core-requests) reserve admission capacity and
+are not per-job OS limits. Under `enforce`, a job can use more than its declared
+cores while capacity is idle because all jobs share the runner-wide cap.
+
 The controller reads the budget when it starts. After changing it, run
 `sparkwing daemon restart`. The restarted controller replaces a runner started
 under another budget; that runner finishes its held jobs under the old limits.

@@ -125,9 +125,15 @@ plan.job("preconditions", async (ctx) => { await ctx.exec(["git", "fetch"]).run(
 plan.job("test", async (ctx) => { await ctx.exec(["npm", "test"]).run(); }).cores(6);
 ```
 
+`Cores()` reserves admission capacity and is not an OS limit on the job.
+When the machine budget ends in
+[`enforce`](local-execution.md#capping-sparkwings-share-of-the-machine), which
+caps the local runner on a systemd Linux host, jobs share that runner-wide cap,
+so one job can use more than its declared cores while capacity is idle.
+
 A small request lets a job that mostly waits start beside running work. A
-larger request reserves cores in queue order, so the job does not share them,
-at the cost of fewer jobs running at once; a job left at the default may run
+larger request reserves more capacity in queue order, at the cost of fewer
+jobs running at once; a job left at the default may run
 more processes than it is charged, and the machine is then overcommitted, as
 with fixed runner slots. A request larger than the machine
 is charged the whole machine. Hosts without local admission ignore the request.

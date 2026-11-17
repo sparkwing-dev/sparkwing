@@ -456,26 +456,38 @@ func TestLoopPreservesHostFailureWhenVersionPolicyAlsoFails(t *testing.T) {
 
 func TestLoopRefreshesVersionPolicyWhileAtCapacity(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(t.Context(), 2*limits.VersionIndexRefresh)
+		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		checks, claims := 0, 0
 		loop := &Loop{
 			Config: LoopConfig{Version: "v1.0.0", MaxConcurrent: 1},
-			Controller: claimFunc(func(context.Context, controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+				if err := ctx.Err(); err != nil {
+					return controllerwire.ClaimResponse{}, err
+				}
 				claims++
 				return controllerwire.ClaimResponse{Claim: &controllerwire.ClaimedUnit{Unit: capability.UnitNode, UnitID: "unit", RunID: "run", Capability: "cap"}}, nil
 			}),
 			Host:         hostFunc(func(ctx context.Context, _ controllerwire.ClaimedUnit) error { <-ctx.Done(); return ctx.Err() }),
 			CheckVersion: func(context.Context, string) error { checks++; return nil },
 		}
-		if err := loop.Run(ctx); !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("Run = %v", err)
-		}
+		done := make(chan error, 1)
+		go func() { done <- loop.Run(ctx) }()
+		synctest.Wait()
+		time.Sleep(limits.VersionIndexRefresh)
+		synctest.Wait()
 		if checks < 2 {
-			t.Fatalf("policy refreshed %d times across two refresh intervals while saturated", checks)
+			t.Fatalf("policy refreshed %d times while saturated", checks)
 		}
 		if claims != 1 {
 			t.Fatalf("claimed %d units with an occupied single slot", claims)
+		}
+		cancel()
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run = %v", err)
+		}
+		if claims != 1 {
+			t.Fatalf("claimed %d units after cancellation", claims)
 		}
 	})
 }
@@ -1517,4 +1529,25 @@ func TestLoopQueuedCapStillRunsAnAwaitedChildJob(t *testing.T) {
 			t.Fatalf("admission cap starved awaited child execution: planned=%t child ran=%t queued=%d", planned.Load(), childRan, queued)
 		}
 	})
+}
+
+func TestLoopDoesNotClaimAfterPolicyCancelsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	claims := 0
+	loop := &Loop{
+		Config:       LoopConfig{Version: "v1.0.0", MaxConcurrent: 1},
+		CheckVersion: func(context.Context, string) error { cancel(); return nil },
+		Controller: claimFunc(func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {
+			claims++
+			return controllerwire.ClaimResponse{}, ctx.Err()
+		}),
+		Host: hostFunc(func(context.Context, controllerwire.ClaimedUnit) error { return nil }),
+	}
+	if err := loop.Run(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run = %v", err)
+	}
+	if claims != 0 {
+		t.Fatalf("issued %d claims after policy cancelled context", claims)
+	}
 }

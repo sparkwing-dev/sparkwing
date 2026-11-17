@@ -1028,7 +1028,15 @@ tokens, and deletes every team the account was the only member of. It refuses
 an account that is the last owner of a team with other members until ownership
 moves or that team is deleted.
 
-Deleted data stays in backups for a bounded time; see
+Account deletion preserves security audit records through the configured audit
+horizon, 400 days by default. OIDC audit rows retain keyed audience and subject
+digests, their key ID, and fixed tracing identifiers. They contain no raw OIDC
+audience or subject after the controller completes schema 40 reconciliation.
+An operator holding the external key and a candidate can still confirm a match.
+This retained evidence is pseudonymous, so deletion does not promise that it
+cannot be linked to a known candidate. See [audit investigation](oidc.md#audit-investigation).
+
+Deleted data can remain in backups until their retention policies retire them; see
 [deleted data in backups](backup-restore.md#deleted-data-in-backups).
 
 ### Device sign-in
