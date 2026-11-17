@@ -110,8 +110,12 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 			return controllerwire.ClaimResponse{}, err
 		}
 	}
+	wake := s.ClaimWake
+	if wake == nil && capability.CloudLauncher(c) {
+		wake = s.launcherWake
+	}
 	var held time.Time
-	if s.ClaimWake != nil && target == nil && body.Wait > 0 {
+	if wake != nil && target == nil && body.Wait > 0 {
 		held = time.Now().Add(min(body.Wait, controllerwire.MaxClaimWait))
 	}
 	var claim store.UnitClaim
@@ -120,14 +124,14 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 		searched := time.Now()
 		if !held.IsZero() {
 			// safety: taken before the search, so a commit racing it still wakes the hold.
-			committed = s.ClaimWake.NextCommit()
+			committed = wake.NextCommit()
 		}
 		claim, err = s.authority.ClaimUnit(ctx, store.UnitDemand{FreeSlots: body.FreeSlots, CapabilityPrefix: principal.Capability.Prefix, Kinds: body.Kinds, Labels: slices.Clone(body.Labels), JobNamespace: body.JobNamespace, ExcludedTeamLabels: slices.Clone(body.ExcludedTeamLabels), Target: target, OS: profile.OS, Arch: profile.Arch, Kubernetes: body.Kubernetes})
 		if target != nil || !errors.Is(err, store.ErrNotFound) {
 			break
 		}
 		if !held.IsZero() {
-			again, err := s.awaitClaimable(ctx, committed, held, store.Team(principal.Capability.Team), searched)
+			again, err := s.awaitClaimable(ctx, wake, committed, held, store.Team(principal.Capability.Team), searched)
 			if err != nil {
 				return controllerwire.ClaimResponse{}, err
 			}
@@ -154,7 +158,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 
 // perf: reports whether to search again, which only a commit or a lapsing
 // group wait can make worthwhile; false once the hold reaches until or the claimant leaves.
-func (s *EngineController) awaitClaimable(ctx context.Context, committed <-chan struct{}, until time.Time, team store.Team, searched time.Time) (bool, error) {
+func (s *EngineController) awaitClaimable(ctx context.Context, wake ClaimWake, committed <-chan struct{}, until time.Time, team store.Team, searched time.Time) (bool, error) {
 	wait := time.Until(until)
 	if wait <= 0 {
 		return false, nil
@@ -162,7 +166,7 @@ func (s *EngineController) awaitClaimable(ctx context.Context, committed <-chan 
 	// safety: the search settles a group wait that has run out. One that lapsed
 	// by the time the search began was already seen, so only a later lapse wakes
 	// the hold, at once if it passed while the search ran.
-	lapse, timed, err := s.ClaimWake.NextGroupWaitDeadline(ctx, team, searched)
+	lapse, timed, err := wake.NextGroupWaitDeadline(ctx, team, searched)
 	if err != nil {
 		return false, err
 	}

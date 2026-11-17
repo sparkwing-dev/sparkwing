@@ -29,8 +29,9 @@ type EngineController struct {
 	ProjectScheduling func(store.RunSnapshot) (store.ScheduleSnapshot, error)
 	ReadRunStatus     func(context.Context, store.Team, string) (RunStatusFacts, error)
 	// ClaimWake lets an empty untargeted claim that asks to wait be held until
-	// work may have arrived. Nil answers every claim at once.
-	ClaimWake ClaimWake
+	// work may have arrived. Nil answers non-Cloud claims at once.
+	ClaimWake    ClaimWake
+	launcherWake ClaimWake
 }
 
 // ClaimWake reports when held claims should search again. It must see every

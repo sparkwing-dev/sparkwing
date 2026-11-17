@@ -77,6 +77,7 @@ func NewEngineController(st *store.Store, cfg EngineController) *EngineControlle
 		return &cfg
 	}
 	op := st.AsOperator()
+	cfg.launcherWake = st
 	cfg.authority, cfg.operator = op, op
 	if cfg.Units == nil {
 		cfg.Units = op

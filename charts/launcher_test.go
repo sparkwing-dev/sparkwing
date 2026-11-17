@@ -124,6 +124,25 @@ func TestCloudLauncherProvisioningPermissions(t *testing.T) {
 	}
 }
 
+func TestCloudLauncherWatchesOnlyItsJobNamespace(t *testing.T) {
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-runner-bundle", "sparkwing", "cloud", append(launcherImages(""), "launcher.serviceAccountName=cloud-launcher")...))
+	found := false
+	for _, resource := range resources {
+		for _, rule := range resource.Rules {
+			if !slices.Contains(rule.Verbs, "watch") {
+				continue
+			}
+			if resource.Kind != "Role" || resource.Metadata.Namespace != "cloud-cloud-jobs" || !slices.Equal(rule.APIGroups, []string{""}) || !slices.Equal(rule.Resources, []string{"pods"}) {
+				t.Fatalf("watch exceeds the job namespace Pod scope: %+v %+v", resource, rule)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("launcher cannot watch capacity and execution Pod changes")
+	}
+}
+
 func TestCloudLauncherDefaultPollHonorsTheControllerIdleInterval(t *testing.T) {
 	data, err := os.ReadFile("sparkwing-runner-bundle/values.yaml")
 	if err != nil {
