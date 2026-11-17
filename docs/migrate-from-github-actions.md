@@ -219,6 +219,7 @@ because local jobs share its `.tools` directory. `GOROOT` points at the installe
 another Go installation. `GOTOOLCHAIN=local` prevents Go from downloading a different toolchain.
 To check the pin, look for `go version go1.26.11 linux/amd64` or `linux/arm64` in the job log.
 Both SDKs key the `.tools` cache on `scripts/setup-go.sh`, so changing the version or checksum invalidates it.
+Since `actions/setup-go` also caches Go modules by default, add [`GoModules()` (Go) or `goModules()` (TypeScript)](#cache) alongside the `.tools` cache for equivalent module caching.
 
 Python, Java and other toolchains follow the same pattern, or run inside `docker run <image>` where Docker is
 available. Changing the script changes the cache key, so a version bump downloads once and is cached again.
