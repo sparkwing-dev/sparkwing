@@ -16,6 +16,9 @@ import (
 // safety: every entry carries its reason and the guard refuses an empty
 // one, because an exemption without a reason is a silenced failure.
 var reviewedUnscopedSQL = map[string]string{
+	"(*Operator).checkOIDCAuditPrivacy":          "configured startup checks completed privacy reconciliation across every team and refuses late raw OIDC identities without disclosing their values",
+	"(*Operator).reconcileOIDCAudit":             "the pending schema 40 privacy migration scrubs every team's retained OIDC history through exact payload mappings and commits its own audit receipt",
+	"(*Operator).prepareOIDCScrub":               "the pending schema 40 privacy migration reads raw OIDC payloads across teams to compute exact replacements before opening its update guard",
 	"(*Operator).migrateRunnerLabelsTx":          "startup freezes pre-upgrade labels for all enrolled roots in the migration transaction; each read and update binds a globally unique capability prefix",
 	"(*Operator).NextActionsDispatch":            "the deployment sender expires leases and discovers work across teams; every approval, binding, installation, node and receipt joins on that work row team",
 	"(*Operator).PendingActionsCancellations":    "the deployment sender invalidates and enumerates receipts across teams; consent, runs and attempts correlate with each receipt team and exact job",
