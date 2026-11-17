@@ -229,9 +229,10 @@ sparkwing pipeline plan --pipeline hello
 sparkwing run hello
 ```
 
-This creates `.sparkwing/package.json` with an exact `@sparkwing/sdk` pin and a
-`typescript` development dependency, `tsconfig.json`, `index.ts`, `jobs/hello.ts`,
-`sparkwing.yaml` and `package-lock.json`. An existing `tsconfig.json` is kept. It uses the same `--on`,
+This creates `.sparkwing/package.json` with exact pins for `@sparkwing/sdk`,
+`typescript` and Node 22 `@types/node`. It also writes `tsconfig.json` with Node
+types enabled, `index.ts`, `jobs/hello.ts`, `sparkwing.yaml` and `package-lock.json`.
+Existing `package.json` and `tsconfig.json` files are kept. It uses the same `--on`,
 `--hidden` and `--short` flags as the Go shapes. Repeat the command with another
 pipeline name to add a pipeline to the TypeScript entry. The scaffold runs
 `npm install --package-lock-only` to write the lockfile, and Sparkwing installs
