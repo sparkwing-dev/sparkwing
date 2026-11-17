@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -46,17 +45,17 @@ func TestLandAPISnapshotPathsIgnoreScratchAndRejectTrackedDrift(t *testing.T) {
 	}
 	name := "pkg/cachecontrol/.Codex-scratch/bad.go"
 	writeGoFile(t, filepath.Join(root, name), "package scratch\nfunc Broken( {\n")
-	checks := map[string]func(context.Context) error{
-		"fast": func(ctx context.Context) error {
+	checks := map[string]func() error{
+		"fast": func() error {
 			host, plan, _ := prepareWork(t, &PrePush{})
-			_, err := host.RunStep(ctx, plan, "job", "api-snapshot")
+			_, err := host.RunStep(newTestContext(t), plan, "job", "api-snapshot")
 			return err
 		},
-		"merge-recheck": func(ctx context.Context) error { return recheckMergeDelta(ctx, []string{"README.md"}) },
+		"merge-recheck": func() error { return recheckMergeDelta(newTestContext(t), []string{"README.md"}) },
 	}
 	for label, check := range checks {
 		t.Run(label+"/ignored", func(t *testing.T) {
-			if err := check(newTestContext(t)); err != nil {
+			if err := check(); err != nil {
 				t.Fatalf("ignored scratch affected land: %v", err)
 			}
 		})
@@ -66,7 +65,7 @@ func TestLandAPISnapshotPathsIgnoreScratchAndRejectTrackedDrift(t *testing.T) {
 	gitCommitAll(t, root, "tracked API drift")
 	for label, check := range checks {
 		t.Run(label+"/tracked", func(t *testing.T) {
-			if err := check(newTestContext(t)); err == nil {
+			if err := check(); err == nil {
 				t.Fatal("tracked API drift passed land")
 			} else if !strings.Contains(err.Error(), "bash bin/regen-api-snapshot.sh") || !strings.Contains(err.Error(), "stage .apidiff/") || strings.Contains(err.Error(), "sparkwing-policy-files-") {
 				t.Fatalf("snapshot failure lost its repair guidance or exposed temporary paths: %v", err)

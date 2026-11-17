@@ -720,6 +720,7 @@ func TestCheckVersionsFreshnessExcludesTestdataModules(t *testing.T) {
 			}
 			writeFile(t, filepath.Join(moduleDir, "go.mod"),
 				"module fixture\n\ngo 1.26.0\n\nrequire "+sdkModulePath+" v0.68.0-qa.16\n")
+			gitRun(t, repo, "add", "--", c.moduleDir+"/go.mod")
 
 			err := CheckVersionsFreshness(context.Background(), repo)
 			if c.wantProblem {

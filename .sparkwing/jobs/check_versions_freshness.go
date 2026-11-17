@@ -14,7 +14,6 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 
-	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
 
@@ -247,12 +246,12 @@ func majorCapFor(modulePath string) int {
 }
 
 func findGoModFiles(ctx context.Context, root string) ([]string, error) {
-	result, err := sparkwing.Exec(ctx, "git", "ls-files", "-z", "--", "go.mod", "**/go.mod").Dir(root).Capture()
+	result, err := captureGit(ctx, root, "ls-files", "-z", "--", "go.mod", "**/go.mod")
 	if err != nil {
 		return nil, err
 	}
 	var out []string
-	for _, name := range splitNULNames(result.Stdout) {
+	for _, name := range splitNULNames(result) {
 		skip := false
 		for _, dir := range strings.Split(filepath.ToSlash(filepath.Dir(name)), "/") {
 			if dir == "node_modules" || dir == "vendor" || dir == "testdata" {
