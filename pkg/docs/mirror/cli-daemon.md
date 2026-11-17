@@ -39,6 +39,8 @@ sparkwing daemon status
 
 Read retained local controller events
 
+Read retained local controller events. Filter by run, event kind or age to narrow the output.
+
 Show the newest 50 matching records by default, in chronological order within each page. Positive --limit controls the bounded output; increase it to include older records.
 
 JSON emits event records followed by a page record with truncated. Plain and pretty output warn on stderr when older matching records are omitted. --explain reads the complete run timeline, including descendants, without pagination.
@@ -58,9 +60,18 @@ JSON emits event records followed by a page record with truncated. Plain and pre
 | `--limit N` | Maximum number of records to print, at least one. Raise it to include older records. |
 | `--explain` | Print the complete admission timeline for the --run run and all its descendant runs, without pagination. |
 
+### Examples
+
+```sh
+# Read events for one run
+sparkwing daemon events --run RUN_ID
+```
+
 ## `sparkwing daemon install`
 
 Install the local controller as a login service
+
+Install the local controller as a login service on Linux or macOS.
 
 Install the local controller as a login service with restart on failure using systemd user or launchd; no socket activation. Refuse Windows, where `sparkwing dashboard open` starts the controller on demand.
 
@@ -77,6 +88,8 @@ Install the local controller as a login service with restart on failure using sy
 
 Restart an answering local controller
 
+Restart the local controller while its runner and held jobs keep running.
+
 The local runner and the jobs it holds keep running through the restart; the replacement controller starts a new runner only when the version changes.
 
 ### Flags
@@ -89,9 +102,18 @@ The local runner and the jobs it holds keep running through the restart; the rep
 | `--help-all` | Include uncommon flags in command help. |
 | `--force` | Replace an existing object. |
 
+### Examples
+
+```sh
+# Restart the local controller
+sparkwing daemon restart
+```
+
 ## `sparkwing daemon status`
 
 Report local controller status
+
+Show whether the local controller is running, stopping or stopped.
 
 ### Flags
 
@@ -112,6 +134,8 @@ sparkwing daemon status
 ## `sparkwing daemon stop`
 
 Stop the local controller
+
+Stop the local controller, dashboard and runner after held work drains. A stop that exceeds its wait continues draining in the background.
 
 Stops the local controller, its dashboard and its local runner. The runner stops claiming work first. If it still holds jobs at the end of the stop wait, the command exits nonzero and names the runner. The controller keeps accepting that runner's results and exits on its own once the runner does; `sparkwing daemon status` reports `stopping` until then. The next run, schedule or `sparkwing dashboard open` starts the controller, dashboard and a new runner again.
 
@@ -134,6 +158,8 @@ sparkwing daemon stop
 ## `sparkwing daemon uninstall`
 
 Remove the controller login service
+
+Remove the local controller's login service registration.
 
 Remove the controller login service; Windows starts the controller on demand.
 

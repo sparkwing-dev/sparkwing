@@ -26,6 +26,8 @@ Manage your Cloud overflow allowance
 
 Set or remove your monthly overflow cap
 
+Set your monthly Cloud overflow allowance, or remove your saved cap with --uncapped.
+
 Set your monthly Cloud allowance with --minutes, or remove your saved cap with --uncapped. Exactly one is required. Zero prevents new Cloud overflow while local and registered-machine work remain eligible. Running work finishes. JSON returns the saved allowance and usage. Plain prints the allowance in minutes or uncapped.
 
 ### Flags
@@ -43,6 +45,8 @@ Set your monthly Cloud allowance with --minutes, or remove your saved cap with -
 ## `sparkwing overflow show`
 
 Show your monthly overflow allowance and usage
+
+Show your monthly Cloud overflow allowance and usage.
 
 Report the authenticated account's monthly Cloud allowance, used seconds and UTC period start. A null limit means uncapped. Plain prints the allowance in minutes or uncapped. Team standing and billing admission still apply.
 

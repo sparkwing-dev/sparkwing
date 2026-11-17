@@ -8,6 +8,8 @@ Every `sparkwing version` command, flag, and argument, generated from the CLI's 
 
 Inspect versions (CLI, SDK, sparks)
 
+Show installed component versions and update availability. Use --offline to skip release lookups.
+
 ### Subcommands
 
 - `hold` -- Show, set, or clear the operator ceiling on CLI upgrades
@@ -23,9 +25,18 @@ Inspect versions (CLI, SDK, sparks)
 | `--offline` | Skip the network check for the latest release and report only local version information. |
 | `--changelog` | Print the embedded changelog entry for this CLI version instead of the version report. |
 
+### Examples
+
+```sh
+# Show installed versions without checking releases
+sparkwing version --offline
+```
+
 ## `sparkwing version hold`
 
 Show, set, or clear the operator ceiling on CLI upgrades
+
+Show or change the version hold that controls automatic updates.
 
 ### Flags
 

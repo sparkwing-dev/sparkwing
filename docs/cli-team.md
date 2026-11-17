@@ -26,6 +26,8 @@ Manage your team
 
 Delete the team and all of its data
 
+Delete the team named by --confirm under its owner's authority. Active work is cancelled and team data is removed.
+
 Only a team owner deletes a team, and --confirm must repeat the slug of the team the profile's credential belongs to. The profile's token needs team.admin, which sparkwing login tokens never carry; a token created with --allow-team-admin from an administrator token has it, and the dashboard deletes a team without one. The controller refuses the owner's only team; deleting it means deleting the account, which the controller's support contact does on request. Deletion revokes every team token, including this profile's, ends members' sessions in the team, withdraws invitations and cancels active runs at once. Within minutes the controller removes the team's runs, logs, artifacts, cache, secrets, schedules, subscriptions and runners. Credit and payment records stay for accounting, and the slug stays reserved. JSON emits the deletion record; plain emits the slug.
 
 ### Flags
@@ -61,6 +63,8 @@ Manage team settings
 
 Change the team's enrollment, claim ranking and child-run settings
 
+Change team policies for machine enrollment, job routing, child runs or trusted cache writes.
+
 Only team administrators change team settings. Changes are audited. Pass --members-can-add-machines, --claim-ranking, --max-children-per-root or --high-trust, separately or together. False requires administration for personal enrollment and ends personal machines that members without administration enrolled; setting it back to true does not revive them. Shared runner registration, token minting and revocation always require administration.
 
 --max-children-per-root takes an integer from 1 to 1000 (default 50) and limits descendants across every depth, excluding retries. --claim-ranking takes distinct tiers from here, personal, github-actions, self-hosted and cloud, best first. A tier left out cannot take runs that select no runner. none means first come among every tier and default restores the default ranking (here,personal,github-actions,self-hosted, then cloud on Sparkwing Cloud). Cloud takes part only while the team has credits or a saved card; a self-hosted controller refuses it.
@@ -84,6 +88,8 @@ Only team administrators change team settings. Changes are audited. Pass --membe
 ## `sparkwing team settings show`
 
 Show the team's enrollment, claim ranking and child-run settings
+
+Show team policies for machine enrollment, job routing, child runs and trusted cache writes.
 
 Show the team's members_can_add_machines setting and claim ranking. members_can_add_machines defaults to true and allows members to enroll only their own personal machines. The claim ranking orders who takes a run that selects no runner: here, personal, github-actions, self-hosted, cloud by default; none means first come. The child-run ceiling defaults to 50 descendants per root, excluding retries. high_trust defaults to false; see team settings set. Plain prints the boolean, comma-separated ranking, child-run ceiling and high_trust.
 
