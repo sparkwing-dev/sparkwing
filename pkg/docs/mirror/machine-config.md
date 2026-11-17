@@ -188,6 +188,19 @@ The file carries credentials, so reads require an owner-only regular file.
 Unix uses mode `0600`. Windows checks the owning SID and DACL. Symlinks and
 reparse points are refused.
 
+Before creating or editing the file by hand on Unix, prepare it without
+replacing existing settings:
+
+```bash
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing"
+mkdir -p "$config_dir"
+touch "$config_dir/config.yaml"
+chmod 600 "$config_dir/config.yaml"
+```
+
+Merge the sections you need into that file. Do not overwrite existing profiles
+or add duplicate section keys.
+
 Settings writers lock `config.yaml.lock`, reread the file, change their section
 and atomically replace the file with an owner-only copy. Other sections and
 their comments survive. A write that would leave a dangling YAML alias fails.

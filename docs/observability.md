@@ -29,8 +29,10 @@ An interrupted or incomplete observation exits 3, and polling again may
 complete it. A run that does not exist, or that the credential cannot read,
 exits 4: stop polling.
 
-Native hosts also record structured `lease_keeper` diagnostics. Default CLI plain
-and pretty output and the dashboard's human log rendering hide these records.
+Native hosts also record structured `lease_keeper` diagnostics. Default CLI output, including JSON,
+and the dashboard's human log rendering hide these records.
+For a local foreground run, `sparkwing run PIPELINE --verbose -o json` includes
+the stored diagnostics.
 Use `sparkwing runs grep --run RUN --grep host_lease_keeper -o json` to read them
 through the run's existing log permissions. No additional credential is granted.
 The persisted host-owned `host_lease_keeper: true` stamp identifies these records

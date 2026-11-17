@@ -457,9 +457,66 @@ pools and launchers need the session pipe below. See
 [device sign-in](auth.md#device-sign-in). `sparkwing login` signs the CLI itself
 in the same way.
 
-For headless setup on a licensed `team` or Cloud controller, use the existing
-administrator's account ID from `operator teams create`. Run this inside the
-serving controller's pod and pipe its output directly to the enrolling CLI:
+### Shared team capacity
+
+A Cloud team admin can enroll shared capacity without controller-pod access.
+Use a dedicated browser session because enrollment logs that session out on
+success or failure. Do not use the browser session that approved your CLI login:
+logging it out also ends the CLI token it issued.
+
+1. In a separate private browser window, sign in to your Cloud console with
+   your identity provider, rather than a CLI token. Select the team that will
+   own the runner. Your account must currently have team administration.
+2. Open browser developer tools. Under Application (Chrome) or Storage
+   (Firefox), find Cookies for the console origin and copy the value of
+   `__Host-sw_session`. This is a credential. Keep it out of shell history,
+   files and logs. Leave this window open until enrollment finishes.
+3. On the Linux machine to enroll, save a URL-only profile if you do not already
+   have one. Replace the example controller URL with your Cloud API URL:
+
+   ```bash
+   sparkwing profiles add --profile work --controller https://api.sparkwing.example --no-probe
+   ```
+
+   This saves the connection without verifying access. Enrollment authenticates
+   with the independent session, rather than a profile bearer.
+4. In Bash, paste the session at the hidden prompt and pipe it to enrollment:
+
+   ```bash
+   read -r -s -p 'Dedicated account session: ' enrollment_session
+   printf '\n'
+   printf '%s\n' "$enrollment_session" | sparkwing runners add \
+     --profile work --runner build-box --session-stdin \
+     --repos github.com/acme/repo --service-user sw-ci
+   unset enrollment_session
+   ```
+
+   The team you selected in the browser session owns the runner; enrollment
+   with `--session-stdin` takes no `--team`. Replace the repository with yours.
+   Repeat `--repos` for repositories that trust one another. Omitting `--personal`
+   makes this shared team capacity. `--service-user sw-ci` uses a dedicated OS
+   account and requires sudo. It keeps jobs away from your login user's SSH
+   keys and cloud credentials. Prefer this on a teammate's daily workstation.
+   On a dedicated OS account supervised separately, replace `--service-user
+   sw-ci` with `--no-service` and run your supervisor under that account.
+5. The CLI obtains the session's CSRF proof, enrolls the runner, saves its
+   private credential and configuration, installs the service, and attempts
+   logout. Close the private browser window after completion. If proof lookup
+   or logout fails, sign out there to end the dedicated session. Check capacity
+   on the console's **Team > Machines** page, or run `sparkwing login --profile work` and
+   then `sparkwing runners list --profile work`.
+
+Repository scopes permit jobs and secrets from those repositories. Every process
+running as the service's OS user can forge a CI pass, so share capacity only
+with people the team trusts to bypass its required checks. See
+[session lifecycle](auth.md#browser-session-lifecycle) for expiry and logout.
+A `local` deployment does not support account sessions.
+
+### Operator enrollment recovery
+
+Operators of a self-hosted controller can obtain a break-glass session inside
+its serving pod. Cloud customers use the dedicated-session path above. Use an
+existing team administrator's account ID:
 
 ```bash
 kubectl -n sparkwing exec deployment/sparkwing-sparkwing-full-controller -- \
@@ -469,23 +526,14 @@ kubectl -n sparkwing exec deployment/sparkwing-sparkwing-full-controller -- \
     --repos github.com/acme/repo --no-service
 ```
 
-Pod access is the break-glass credential. The command opens the serving
-controller's recorded store, encryption keys and credential epoch. It requires
-an existing administrator of the named team and creates no account or membership.
-Output is pretty on a terminal and one JSON object when piped. Use `--output plain`
-for the raw session in enrollment pipes. The session goes only to stdout, and
-an audit line without the session goes to stderr. A durable `session.break_glass` audit row records the account ID and
-team, excluding the session and free-text reason. The initial expiry is 15 minutes. Enrollment renews the session through
-the normal account-session lifecycle. After fetching the session CSRF proof,
-enrollment attempts logout on success or failure. If fetching the proof or logout
-fails, the session remains live until expiry or revocation.
-Use a dedicated session because logout ends it for every client. A token minted
-by `sparkwing login` ends when its approving browser session signs out. If you
-copy a browser session cookie for enrollment, use a separate private browser
-window. Reusing the session that approved CLI login invalidates its token when
-enrollment logs out. See
-[session lifecycle](auth.md#browser-session-lifecycle) for expiry and logout. Keep session output private. A `local` deployment uses
-the local controller connection and does not support account sessions.
+Pod access is the break-glass credential. The command uses the serving
+controller's store, encryption keys and credential epoch. It creates no account
+or membership. `--output plain` emits the raw session to stdout and an audit
+line without the session to stderr. The initial expiry is 15 minutes. A durable
+`session.break_glass` audit row records the account and team. Enrollment renews
+the session, then attempts logout on success or failure. If proof lookup or
+logout fails, the session remains live until expiry or revocation. Keep its
+output private.
 
 For a reserved-pool launcher, use the same pipe with:
 

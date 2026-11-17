@@ -44,7 +44,7 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 | --- | --- | --- |
 | Read-only authorization validates each ancestor once inside its fixed database and time snapshot; write transactions retain ancestry discovery and ordered revalidation | `internal/store/capabilities_contract.go`: `authorityChainTx` | `internal/store/authorization_snapshot_test.go`: `TestAuthorizationSnapshotReadsEachAncestorOnce`, `TestAuthorizationSnapshotReadsWithoutLocksAndMutationLocksAncestry` |
 | Current-version stores match the embedded baseline digest; unstamped stores need every declared table, view and index before stamping | `internal/store/schema_baseline.go`: `verifySchemaBaseline` | `internal/store/schema_baseline_test.go`: `TestSchemaBaselineDigestRecordsAndReopens`, `TestSchemaBaselineDigestRefusesChangedBaseline`, `TestSchemaBaselineDigestLegacy` |
-| Keeper timing diagnostics cannot delay renewal, expiry or stop; human log views hide them while JSON preserves them | `internal/lease/diagnostics.go`; `internal/nodehost/native_assembly.go`; `cmd/sparkwing/runs_logs.go`; `web/src/lib/logParser.ts` | `internal/lease/diagnostics_test.go`: `TestKeeperDiagnosticsCannotDelayRenewalOrStop`; `cmd/sparkwing/runs_logs_test.go`: `TestRunLogsKeeperDiagnosticsLeaveHumanOutputUnchanged`; `web/src/lib/logParser.test.ts`: keeper diagnostics |
+| Keeper timing diagnostics cannot delay renewal, expiry or stop; default CLI views hide them; verbose local-run JSON and explicit JSON log searches preserve them | `internal/lease/diagnostics.go`; `internal/nodehost/native_assembly.go`; `cmd/sparkwing/runs_logs.go`; `web/src/lib/logParser.ts` | `internal/lease/diagnostics_test.go`: `TestKeeperDiagnosticsCannotDelayRenewalOrStop`; `cmd/sparkwing/runs_logs_test.go`: `TestRunLogsKeeperDiagnosticsLeaveDefaultOutputUnchanged`; `web/src/lib/logParser.test.ts`: keeper diagnostics |
 | Keeper diagnostics observe one window per bound log stream: detachment ends capture, queued records drain within 100 ms inside the unchanged retry-tail wait, then one summary per instance precedes the seal; renewal continues and no replacement writer opens | `internal/lease/diagnostics.go`: `Cutoff`, `Seal`, `Open`; `internal/nodehost/assembly_native_logs.go`: `finish`, `bind` | `internal/nodehost/lease_diagnostics_seal_test.go`: `TestNativeKeeperSealSummaryPreservesLeaseThroughFinish`, `TestNativeKeeperRetrySealsEachAttemptWindowBeforeTheFenceAdvances`; `internal/lease/diagnostics_seal_test.go`: loss, expiry, reopen and stalled-seal guards |
 | Native annotation and fresh-authority timings use credential-free spans; slow requests use bounded host-only JSON diagnostics hidden by human log views. Runner trace export is inactive without an existing OTEL endpoint, and long-lived runners give each request its own trace | `internal/otelutil/operation.go`; `internal/nodehost/annotation_timing.go`, `request_diagnostics.go`; `internal/controller/client/request_timing.go`; `internal/cluster/telemetry.go` | `TestControllerRequestTimingPropagatesWithoutSecrets`, `TestSlowControllerResponsePhasesWithoutCollector`, `TestAnnotationTimingIncludesFreshAuthorizationAndAcknowledgement`, `TestSlowAnnotationAuthorizationAttribution`, `TestRequestDiagnosticsCannotBlockTheCaller`, `TestRequestTimingWriterKeepsItsAttemptFence`, `TestRequestDiagnosticsDrainQueuedRecordsAtClose`, `TestRunnerExportsAndFlushesConfiguredTracing`, `TestLongLivedRunnerRequestsStartTheirOwnTraces`, `TestTraceFlushPreservesReturnedFailure`, `TestTracesOnlyExporterFailuresNeverEchoEndpointSecrets` |
 | Only a released baseline named by version and digest upgrades forward, in the open transaction, to a schema identical to a fresh one; every other store is refused unchanged (decision 90) | `internal/store/schema_upgrade.go`: `schemaUpgrades`, `upgradeSchemaTx` | `internal/store/schema_upgrade_test.go`: `TestSchemaUpgradeAddsMachineAdmissionToVersion30`, `TestSchemaUpgrade36PreservesActionsRows`, `TestSchemaUpgradeRemovesBuildTrustFromVersion36AndPreservesConfiguredInstall`, `TestSchemaUpgradeRefusesEveryOtherStore`, `TestPostgresSchemaUpgradeRunsOnceUnderConcurrentOpens`, `TestPostgresSchemaUpgradeKeepsWarmViewGrants` |
@@ -668,3 +668,20 @@ decision amends an earlier one where noted.
 - 75: Shared Cloud pools bind never-used nodes to one team/run; idle warm nodes may serve one class smaller at requested billing and limits. Warm placeholder authority stays in a dedicated namespace and pools pin the hardened EC2NodeClass.
 
 | The standalone Go SDK builds and tests on Go 1.25 without the host module | `sparkwing/go.mod`; `go.work` | `sparkwing/tidy_closure_test.go`: `TestSDKTidyClosureNeedsOnlySmallModules`; SDK floor proof |
+
+OIDC audit identity privacy is owned by `internal/store/audit_oidc.go` and
+`internal/secrets/oidc_audit.go`. `TestOIDCAuditUpgradeScrubsHistoricalRowsAndMatchesCandidates`,
+`TestOIDCAuditScrubExceptionAllowsOnlyExactPayload`,
+`TestOIDCAuditScrubRollbackRetryAndMalformedHistory` and
+`TestOIDCAuditDigestRotationAndFieldSeparation` guard reconciliation, append-only
+scope, rollback and external-key matching. `TestNativeOIDCMintCommittedIdentityProperty`
+checks the HTTP mint surface. Schema 40 installs the pending marker. Configured
+store startup reconciles before serving and preserves audit retention.
+Linux process inspection treats ENOENT and ESRCH as absent processes. Owners:
+`internal/procgroup/session_linux.go` and
+`internal/wingd/admission_process_liveness_linux.go`. Guards:
+`TestSessionIdentityVanished` and `TestAdmissionProcessRunningVanished`.
+
+Runner claim dispatch rechecks cancellation after version policy validation.
+Owner: `internal/runners/loop.go`; guard:
+`TestLoopDoesNotClaimAfterPolicyCancelsContext`.

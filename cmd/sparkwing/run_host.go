@@ -33,6 +33,7 @@ import (
 
 type localRunOptions struct {
 	standalone bool
+	verbose    bool
 }
 
 type localRunRuntime struct {
@@ -100,7 +101,7 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	}()
 	defer func() { cancelPreparation(); <-preparationStopped }()
 	ctx = preparing
-	runtime, err := deps.resolve(ctx, localRunOptions{standalone: flags.allowUnadmitted})
+	runtime, err := deps.resolve(ctx, localRunOptions{standalone: flags.allowUnadmitted, verbose: flags.verbose})
 	if err != nil {
 		return err
 	}
