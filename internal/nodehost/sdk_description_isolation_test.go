@@ -221,7 +221,7 @@ func TestShowWithheldPrintsMaskedDiscoveryFailuresOnlyWhenRequested(t *testing.T
 	for _, tc := range []struct {
 		selected string
 		show     bool
-	}{{"release", false}, {"release", true}, {"build", false}, {"build", true}} {
+	}{{"release", false}, {"release", true}, {"build", false}, {"build", true}, {"deploy", false}, {"deploy", true}} {
 		t.Run(fmt.Sprintf("%s/show=%t", tc.selected, tc.show), func(t *testing.T) {
 			p, input, _, _ := sdkPlanningFixture(t)
 			p.ShowWithheld = tc.show
@@ -269,6 +269,9 @@ func TestShowWithheldPrintsMaskedDiscoveryFailuresOnlyWhenRequested(t *testing.T
 			if !tc.show && tc.selected == "release" && !strings.Contains(strings.Join(logs, "\n"), "1 registered pipeline failed discovery (plan_failed)") {
 				t.Fatalf("failed discovery notice lost its count and class: %s", all)
 			}
+			if !tc.show && strings.Count(all, "sparkwing pipeline describe --pipeline "+tc.selected+" --show-withheld") != 1 {
+				t.Fatalf("selected pipeline's withheld remedy must appear exactly once: %s", all)
+			}
 			if !tc.show && strings.Count(all, "--show-withheld") != 1 {
 				t.Fatalf("withheld remedy appears %d times, want once: %s", strings.Count(all, "--show-withheld"), all)
 			}
@@ -278,7 +281,7 @@ func TestShowWithheldPrintsMaskedDiscoveryFailuresOnlyWhenRequested(t *testing.T
 			if tc.show && strings.Contains(all, revealedHint) {
 				t.Fatalf("shown output still points at the reveal command: %s", all)
 			}
-			if failed := tc.selected == "release"; failed != (err != nil) {
+			if failed := tc.selected != "build"; failed != (err != nil) {
 				t.Fatalf("selected %s returned %v", tc.selected, err)
 			}
 		})

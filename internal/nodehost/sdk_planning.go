@@ -105,6 +105,9 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 	logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, show: p.ShowWithheld, withheld: stopped}
 	var raw json.RawMessage
 	var prepared PreparedPlanning
+	presentError := func(err error) error {
+		return p.planningError(ctx, prepared.Declarations, err, logs.known, input)
+	}
 	err := p.process(ctx, input, &logs, true, func(ctx context.Context, session *executorSession) error {
 		if err := session.call(ctx, nodewire.Request{Op: nodewire.OpDescribe}, &raw, ""); err != nil {
 			return err
@@ -121,9 +124,9 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 			err = errors.Join(err, p.showFailedSiblings(ctx, prepared.Declarations, input.Entrypoint))
 		}
 		return err
-	})
+	}, presentError)
 	if err != nil {
-		return PreparedPlanning{}, p.planningError(ctx, prepared.Declarations, err, logs.known, input)
+		return PreparedPlanning{}, presentError(err)
 	}
 	declarationsKnown, withheld := logs.known, logs.withheld
 	if prepared.Description.Error != nil {
@@ -139,11 +142,14 @@ func (p SDKPlanner) prepare(ctx context.Context, input PlanningProcessInput, pla
 	prepared.Plan = func(ctx context.Context) (json.RawMessage, error) {
 		logs := planningLogs{debug: input.Debug, masker: p.Masker, sink: p.Log, known: declarationsKnown, show: p.ShowWithheld, withheld: withheld}
 		var raw json.RawMessage
+		presentError := func(err error) error {
+			return p.planningError(ctx, nil, err, logs.known, input)
+		}
 		err := p.process(ctx, input, &logs, false, func(ctx context.Context, session *executorSession) error {
 			return session.call(ctx, nodewire.Request{Op: nodewire.OpPlan, Pipeline: input.Entrypoint, Args: maps.Clone(input.Args), Run: &input.Run}, &raw, "")
-		})
+		}, presentError)
 		if err != nil {
-			return nil, p.planningError(ctx, nil, err, logs.known, input)
+			return nil, presentError(err)
 		}
 		return raw, nil
 	}
@@ -178,7 +184,7 @@ func clonePlanningProcessInput(input PlanningProcessInput) PlanningProcessInput 
 	return input
 }
 
-func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, logs *planningLogs, describe bool, body func(context.Context, *executorSession) error) (err error) {
+func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, logs *planningLogs, describe bool, body func(context.Context, *executorSession) error, presentError func(error) error) (err error) {
 	parent := ctx
 	if err := context.Cause(ctx); err != nil {
 		return err
@@ -203,7 +209,7 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 		if process != nil {
 			err = errors.Join(err, closeErr, process.Cleanup(cleanupCtx))
 		}
-		if err != nil {
+		if err != nil && strings.Contains(presentError(err).Error(), p.Masker.Mask(runspec.ShowWithheldCommand(input.Run.Pipeline))) {
 			logs.omitRemedy()
 		}
 		err = errors.Join(err, logs.finish(cleanupCtx), context.Cause(parent))
