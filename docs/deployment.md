@@ -185,7 +185,9 @@ the registries available.
 ## Profiles
 
 Profiles map cluster names to controller URLs. Stored in the `profiles`
-section of `~/.config/sparkwing/config.yaml`:
+section of `~/.config/sparkwing/config.yaml`. Before creating the file by hand,
+follow [Permissions and writes](machine-config.md#permissions-and-writes) to
+set mode `0600` and preserve existing settings:
 
 ```yaml
 profiles:
