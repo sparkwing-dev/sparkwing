@@ -4,6 +4,12 @@
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
+On a cold shared local start, the invoking CLI starts the controller before
+handing the pipeline to its pinned engine. This keeps store ownership with the
+installed CLI across SDK pins and daemon stops. The installed CLI must support
+the store's schema; an incompatible CLI refuses before handing off the run.
+Standalone CI keeps its controller in process under the selected engine.
+
 Intake and hosts derive plan placement from the sealed request. Local runs,
 local triggered runs, runner-hosted runs, launcher runs, `--runner here` and
 GitHub Actions use the same capability table for initial plans and expansions.

@@ -42,7 +42,7 @@ type pipelineEngineSwitcher struct {
 	diagnostics io.Writer
 }
 
-func switchToolchain(dir string, beforeExec func()) error {
+func switchToolchain(dir string, beforeExec func() error) error {
 	ctx, stop, _ := interruptContext()
 	defer stop()
 	typescript, err := pipelineentry.IsTypeScript(dir)
@@ -62,7 +62,9 @@ func switchToolchain(dir string, beforeExec func()) error {
 		current: current, target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 		execute: func(binary string, args, environment []string) error {
 			if beforeExec != nil {
-				beforeExec()
+				if err := beforeExec(); err != nil {
+					return err
+				}
 			}
 			return replayToolchain(binary, args, environment)
 		}, diagnostics: os.Stderr,

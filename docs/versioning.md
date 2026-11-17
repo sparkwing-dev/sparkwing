@@ -84,7 +84,7 @@ security policy comes from the verified version index.
 
 <!-- design:begin -->
 
-## The SDK pin selects the CLI
+## The SDK pin selects the pipeline engine
 
 Every placement acquires its sealed source, reads the pin, resolves and verifies
 a permitted engine that accepts the SDK's protocol, then uses that engine to
@@ -95,6 +95,14 @@ selected executable only after the resolver checks policy and cached bytes.
 A missing release fails instead of selecting another version.
 Retries retain the accepted portable engine identity and exact source SHA. Each
 machine resolves the appropriate platform asset for that same identity.
+
+For a shared local run, the invoking CLI starts the local controller before
+handing execution to a different pinned engine. The controller owns the store
+and must support its schema. An older pipeline pin therefore keeps its engine
+while using the installed CLI's controller after an upgrade or `daemon stop`.
+A CLI that cannot open the store refuses before delegation, even when the pin
+selects a newer engine. Upgrade the installed CLI to match the store.
+Standalone CI uses its selected engine's in-process controller and a private home.
 
 Engines come from the official GitHub Releases assets. Verification uses the
 shared release trust roots, signed checksums, exact asset digest, embedded version

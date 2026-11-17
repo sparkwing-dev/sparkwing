@@ -85,7 +85,7 @@ func main(){sw.Register("OLDEntry",func()sw.Pipeline[sw.NoInputs]{return pipelin
 			if tc.pipelineSHA == head {
 				wantRevision = "HEAD"
 			}
-			err = dispatchRunWithEngine(inv, func(directory string, beforeExec func()) error {
+			err = dispatchRunWithEngine(inv, func(directory string, beforeExec func() error) error {
 				raw, readErr := os.ReadFile(filepath.Join(directory, "main.go"))
 				if readErr != nil || !strings.Contains(string(raw), `return "`+wantRevision+`"`) {
 					t.Fatalf("engine selected from wrong source: %v", readErr)
