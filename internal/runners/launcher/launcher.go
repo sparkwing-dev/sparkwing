@@ -200,9 +200,6 @@ func (l *Launcher) Run(ctx context.Context) error {
 		reconcile = reconcile || !time.Now().Before(nextReconcile)
 		// perf: consume a ready award before slow reconciliation; the burst bound still yields to safety work.
 		applyClaim := claims.result != nil && claims.result.award != nil && claimed < maxClaimsPerCycle && blocking(synced) == nil && !time.Now().Before(cooldown)
-		if applyClaim {
-			reconcile = false
-		}
 		if pods == nil && !time.Now().Before(reconnect) && !applyClaim {
 			options := metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher, Limit: 1}
 			// perf: one row supplies the collection revision without replaying every Pod.
@@ -224,7 +221,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 				reconcile = true
 			}
 		}
-		if reconcile {
+		if reconcile && !applyClaim {
 		drainWatch:
 			for {
 				select {
@@ -272,7 +269,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 		if blocking(synced) == nil {
 			// safety: held awards without a Job or capacity Pod renew only here, so claim backoff must not skip them.
 			var err error
-			if reconcile {
+			if reconcile && !applyClaim {
 				err = l.placeWaiting(ctx)
 			}
 			startupRateLimit := false
@@ -322,6 +319,9 @@ func (l *Launcher) Run(ctx context.Context) error {
 		}
 		if claimImmediately {
 			claims.start(ctx, poll)
+		}
+		if applyClaim && reconcile {
+			continue
 		}
 		wait := min(poll, max(time.Until(nextReconcile), 0))
 		if pods == nil {

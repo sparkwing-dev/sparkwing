@@ -32,7 +32,9 @@ func (c *applicationControl) waitClaim(ctx context.Context, _ string, _ []string
 }
 
 func (c *applicationControl) Prepare(ctx context.Context, refs []capability.LeaseRef) (time.Time, error) {
-	c.applied <- refs[0]
+	if c.applied != nil {
+		c.applied <- refs[0]
+	}
 	return c.controlFake.Prepare(ctx, refs)
 }
 
