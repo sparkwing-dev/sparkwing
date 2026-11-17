@@ -1,11 +1,8 @@
 package store_test
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"maps"
-	"os"
 	"strings"
 	"testing"
 
@@ -17,14 +14,6 @@ func TestSchema41UpgradesLegacyArgumentRowsInEachDialect(t *testing.T) {
 	if store.ExpectedSchemaVersion() != 41 {
 		t.Fatal("argument document format requires schema 41")
 	}
-	baseline, err := os.ReadFile("schema.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest := sha256.Sum256([]byte(strings.ReplaceAll(string(baseline), "\r\n", "\n")))
-	if hex.EncodeToString(digest[:]) != "1bcc048252e13edb35021084dd24ad1d7f7adf9eb9cd9ee5fbc291a0ef7df189" {
-		t.Fatal("fixture must use the schema-40 SQL layout")
-	}
 	for _, dialect := range []struct {
 		name   string
 		target func(*testing.T) *storetest.Target
@@ -32,6 +21,13 @@ func TestSchema41UpgradesLegacyArgumentRowsInEachDialect(t *testing.T) {
 		t.Run(dialect.name, func(t *testing.T) {
 			target := dialect.target(t)
 			s := target.Open(t)
+			var digest string
+			if err := s.DB().QueryRowContext(t.Context(), `SELECT baseline_digest FROM sparkwing_schema_version`).Scan(&digest); err != nil {
+				t.Fatal(err)
+			}
+			if digest != "1bcc048252e13edb35021084dd24ad1d7f7adf9eb9cd9ee5fbc291a0ef7df189" {
+				t.Fatal("fixture must use the schema-40 SQL layout")
+			}
 			tenant, err := s.ForTeam(t.Context(), store.DefaultTeam)
 			if err != nil {
 				t.Fatal(err)
