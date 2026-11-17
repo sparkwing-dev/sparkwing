@@ -189,7 +189,7 @@ func TestRunnersDeleteServiceUserStopsThroughThePrivilegedStepThenRevokes(t *tes
 			t.Fatal(err)
 		}
 	})
-	if !slices.Equal(f.timeline, []string{"sudo -v", "sudo runners uninstall-service --service-user sw-ci --output json", "revoke"}) {
+	if !slices.Equal(f.timeline, []string{"sudo -v", "sudo runners uninstall-service --service-user sw-ci --output json", "revoke", "sudo runners uninstall-service --service-user sw-ci --revoked --output json"}) {
 		t.Fatalf("timeline = %q", f.timeline)
 	}
 	if f.tokens[0].RevokedAt == nil || !strings.Contains(out, "userdel") {
@@ -432,24 +432,6 @@ func TestRunnersUninstallServiceStopsTheServiceWhenTheAccountConfigIsGone(t *tes
 	}
 	if err != nil || removed.TokenPrefix != "swk_000000001_secret"[:len(removed.TokenPrefix)] || removed.TokenPrefix == "" || removed.Runner != "desk" || removed.Controller != "https://controller.example" {
 		t.Fatalf("removed = %+v err = %v, want the enrollment from the root-owned record", removed, err)
-	}
-}
-
-func TestRunnersUninstallServiceRemovesTheEnrollmentRecord(t *testing.T) {
-	fx := newInstallFixture(t)
-	if _, err := installServiceUser(t.Context(), "linux", "sw-ci", serviceUserEnrollment{Credential: "swk_000000001_secret", RunnerBinary: "/usr/local/bin/sparkwing-runner"}); err != nil {
-		t.Fatal(err)
-	}
-	record := filepath.Join(fx.host.HomeRoot, ".enrollments", "sw-ci.json")
-	if _, err := os.Stat(record); err != nil {
-		t.Fatalf("install wrote no enrollment record: %v", err)
-	}
-	removed, err := uninstallServiceUser(t.Context(), "linux", "sw-ci")
-	if err != nil || removed.TokenPrefix == "" {
-		t.Fatalf("removed = %+v err = %v", removed, err)
-	}
-	if _, err := os.Lstat(record); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the enrollment record outlived its runner: %v", err)
 	}
 }
 

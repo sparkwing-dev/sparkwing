@@ -149,7 +149,7 @@ Resume the runner enrolled on this machine after runners pause; it claims work a
 
 Remove a dedicated-user runner service (root)
 
-The privileged step of sparkwing runners delete --service-user, which runs it through sudo and then revokes the token it reports. Requires root. Stops and removes the system service of the OS user named by --service-user first, then reports the runner name, controller and token prefix from the root-owned enrollment record runners install-service wrote, falling back to that user's config, then deletes that record. When neither names the token, it says the service is stopped and how to find and revoke the token. The OS user and its home remain. JSON reports the account, home, runner, controller and token prefix.
+The privileged step of sparkwing runners delete --service-user, which runs it through sudo and then revokes the token it reports. Requires root. Stops and removes the system service of the OS user named by --service-user first, then reports the runner name, controller and token prefix from the root-owned enrollment record runners install-service wrote, falling back to that user's config, and keeps the record. When neither names the token, it says the service is stopped and how to find and revoke the token. The OS user and its home remain. JSON reports the account, home, runner, controller and token prefix. With --revoked, runners delete reports the token revoked, and the step deletes only that record.
 
 ### Flags
 
@@ -160,3 +160,4 @@ The privileged step of sparkwing runners delete --service-user, which runs it th
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--service-user USER` | Dedicated OS user the runner service runs as. (required) |
+| `--revoked` | The runner token is revoked: delete the enrollment record and nothing else. |
