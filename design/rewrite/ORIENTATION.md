@@ -53,6 +53,8 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 
 ### Tenancy
 
+Account self-deletion uses live direct sessions, confirms the exact sole-member team list in the committing transaction, and retains shared-team history and audit identifiers. Owner: `internal/store/account_deletion.go`. Guards: `TestSelfDeleteConfirmsEverySoleMemberTeamAndRevokesAccount`, `TestOwnAccountDeletionRechecksScopeAndRevokesAllSessions`, `TestOwnAccountDeletionRollsBackWhenAuditFails`.
+
 | Rule | Owner | Guard test |
 | --- | --- | --- |
 | Waitlisted operators retain console routes and navigation while customer pages stay gated | `internal/controller/identity.go`: `handleMe`; `web/src/components/WaitlistGate.tsx`, `Nav.tsx` | `internal/controller/operator_test.go`: `TestWaitlistedOperatorKeepsConsoleAccess`; `web/tests/browser/waitlist.spec.ts` |

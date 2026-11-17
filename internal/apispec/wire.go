@@ -35,6 +35,8 @@ func query(name, kind string) schema {
 
 func wireOperations() map[string]wireOperation {
 	result := map[string]wireOperation{
+		"GET /api/v1/me/deletion":                                 operation("Preview account deletion and its exact team scope", nil, wire.AccountDeletionPreview{}),
+		"DELETE /api/v1/me":                                       operation("Delete your own account and confirmed sole-member teams", wire.AccountDeletionRequest{}, wire.AccountDeletionResult{}),
 		"GET /api/status":                                         operation("Read team pipeline and operational health in the Wing status shape", nil, wire.WingStatus{}),
 		"GET /api/v1/pipelines/{name}/latest":                     operation("Read the latest authorized pipeline run", nil, wire.LatestRun{}, query("status", "string"), query("max_age", "string"), query("from_any_run", "boolean"), query("from_proven_run", "boolean"), query("run", "string"), query("job", "string")),
 		"GET /api/v1/operator/warm-capacity":                      operation("Read warm capacity policies and start metrics", nil, wire.WarmCapacity{}),

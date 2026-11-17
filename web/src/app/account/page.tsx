@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import AccountDeletion from "@/components/AccountDeletion";
 import { useEffect, useState } from "react";
 import { Notice, Panel, errorText } from "@/components/TeamShell";
 import { toast } from "@/components/Toasts";
@@ -16,7 +17,7 @@ import { useTeamState } from "@/lib/useTeam";
 export default function AccountPage() {
   const state = useTeamState();
   if (state.status === "loading") return <Notice>Loading…</Notice>;
-  if (state.status !== "ready") {
+  if (state.status !== "ready" && state.status !== "no-team" && state.status !== "waitlisted") {
     return (
       <Notice>
         Accounts exist only on a controller with teams enabled, for people who
@@ -27,7 +28,7 @@ export default function AccountPage() {
   return <Account me={state.me} />;
 }
 
-function Account({ me }: { me: Me }) {
+function Account({ me }: { me: Pick<Me, "user"> }) {
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full">
       <h1 className="text-xl font-bold mb-1">Your account</h1>
@@ -58,9 +59,7 @@ function Account({ me }: { me: Me }) {
         </div>
       </Panel>
       <TeamDeletions />
-      <p className="mt-4 text-sm text-[var(--muted)]">
-        Contact the deployment operator to delete your account.
-      </p>
+      <AccountDeletion />
     </div>
   );
 }

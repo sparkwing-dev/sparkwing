@@ -349,6 +349,8 @@ func runSparkwing(args []string) (result error) {
 		return runReviewCommand(context.Background(), inv, os.Stdout, resolveRunReview)
 	}
 	switch inv.Command.Path {
+	case "sparkwing account delete":
+		return runAccountDelete(context.Background(), inv)
 	case "sparkwing team delete":
 		return runTeamDelete(context.Background(), inv)
 	case "sparkwing team settings show", "sparkwing team settings set":

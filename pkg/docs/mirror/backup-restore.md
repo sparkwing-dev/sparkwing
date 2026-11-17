@@ -340,21 +340,43 @@ when an earlier deployment reported failure.
 
 ### Deleted data in backups
 
-Deleting a team or account removes its rows and objects from the live service.
-Copies remain in backups until those age out:
+Deleting an account removes its live identity and revokes its authority immediately.
+Deleting a team closes it immediately and queues its rows and objects for the
+retrying purge. Shared-team history remains with selected execution actors
+relabeled as "deleted user". Deletion is refused when the account is the sole
+owner of a team with other members. Sparkwing Cloud keeps account IDs in audit
+records for 400 days. Accounting records and reserved slugs also remain. See
+[Deleting a team or account](auth.md#deleting-a-team-or-account).
 
-- RDS automated backups keep point-in-time recovery for the instance's backup
-  retention period. On Sparkwing Cloud that is 7 days.
-- A versioned object bucket keeps a deleted object as a noncurrent version
-  until its lifecycle rule expires it. On Sparkwing Cloud the rule is 7 days.
-  S3 rounds each expiry up to the next midnight UTC and removes expired
-  versions asynchronously, so a deleted object is typically gone within 8 days.
-- Manual RDS snapshots never expire. Delete a manual snapshot within the same
-  retention period once the change it protected is verified, or record why it
-  must outlive that period.
+On Sparkwing Cloud, RDS automated backups retain a seven-day recovery window.
+That is not an every-copy deletion deadline. Accounts which existed on or before
+2026-10-02 may remain in encrypted operator archives. The SQLite pre-cutover
+archive uploaded on 2026-09-15 has a 365-day current-object lifecycle plus
+30 days for noncurrent versions, ending around 2027-10-15. S3 expiry is
+asynchronous. That rule filters `sqlite/`. PostgreSQL controller and billing
+archive copies under `postgres/` are removed
+within about 70 days of being taken. They expire after 35 days, then S3
+permanently deletes the old version up to 35 days later. Dumps taken before the
+rule took effect follow it from the date it was applied. Dumps already older
+than 35 days, including the 2026-10-02 dumps, become eligible for expiry then.
+Their stored bytes are removed up to 35 days later. S3 rounds expiry up to
+midnight UTC and deletes asynchronously, so these timings are approximate.
+Accounts created after 2026-10-02 are not in the 2026-09-15 or 2026-10-02
+archives. Account deletion does not scrub the archives.
+See [Account deletion retention](account-deletion-retention.md).
+Cloud run-data buckets are unversioned, so a successful object purge leaves no
+noncurrent object versions. Manual RDS snapshots do not expire and must not be
+created for customer data, because they would outlive the deletion window. A restore must
+reapply deletions made after its restore point before admitting traffic.
 
-On Sparkwing Cloud, deleted data therefore leaves automated copies in about 7
-days, typically within 8.
+Self-hosted operators must verify their own backup retention. Versioned object
+buckets need noncurrent-version expiry as well as live deletion. S3 rounds
+lifecycle expiry up to midnight UTC and deletes asynchronously, so a seven-day
+lifecycle rule alone cannot prove a strict seven-day erasure deadline. Local
+schema-upgrade backups keep the two newest copies by count, not age; remove
+copies containing deleted data within the promised window. Inventory manual
+snapshots, database/WAL archives and other copies too. The account endpoint
+cannot expire an operator's independent backups.
 
 Restoring a backup taken before a deletion brings the deleted data back.
 Repeat any deletion that happened after the restore point before reopening the

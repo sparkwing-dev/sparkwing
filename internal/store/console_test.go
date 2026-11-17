@@ -275,8 +275,11 @@ func TestConsoleGlobalAdmissionAuditDeduplicatesAndSurvivesDeletion(t *testing.T
 	if _, err := c.ConsoleDeleteAccount(t.Context(), a); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE account='victim'`).Scan(&count); err != nil || count != 1 {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE account='victim'`).Scan(&count); err != nil || count != 2 {
 		t.Fatalf("deleted audit: %d %v", count, err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events WHERE account='victim' AND kind='account.deleted' AND actor=?`, a.Principal.Capability.Subject.ID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("operator deletion audit: %d %v", count, err)
 	}
 }
 

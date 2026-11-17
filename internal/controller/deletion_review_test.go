@@ -29,18 +29,18 @@ func TestTeamPurgeWaitsForDeletionDelay(t *testing.T) {
 	}
 }
 
-func TestDeleteAccountRetiredSelfServiceCannotMutate(t *testing.T) {
+func TestDeleteAccountRejectsEmailOnlyConfirmation(t *testing.T) {
 	f := newIdentityFixture(t)
 	u := f.user("u", "uma@example.com")
 	for _, age := range []time.Duration{0, time.Hour} {
 		if _, err := teststore.SQL(t, f.store).Exec(`UPDATE sessions SET created_at = ?`, teststore.Now(f.store).Add(-age).UnixNano()); err != nil {
 			t.Fatal(err)
 		}
-		if code := f.call("DELETE", "/api/v1/me", u.auth, map[string]string{"confirm_email": "uma@example.com"}, nil); code != http.StatusMethodNotAllowed {
-			t.Fatalf("retired deletion with sign-in age %s = %d, want 405", age, code)
+		if code := f.call("DELETE", "/api/v1/me", u.auth, map[string]string{"confirm_email": "uma@example.com"}, nil); code != http.StatusBadRequest {
+			t.Fatalf("email-only confirmation with sign-in age %s = %d, want 400", age, code)
 		}
 		if me := f.me(u.auth); me.User.ID != u.id || me.ActiveTeam == nil || me.ActiveTeam.Slug != u.team {
-			t.Fatalf("retired deletion changed account: %+v", me)
+			t.Fatalf("unconfirmed deletion changed account: %+v", me)
 		}
 	}
 }

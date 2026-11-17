@@ -13,11 +13,11 @@ describe("navTabs", () => {
   });
 
   it("links no team views for a waitlisted account", () => {
-    assert.deepEqual(hrefs("waitlisted"), []);
+    assert.deepEqual(navTabs("waitlisted"), [{ href: "/account", label: "Account" }]);
   });
 
   it("links no team views before an approved account selects a team", () => {
-    assert.deepEqual(hrefs("no-team"), []);
+    assert.deepEqual(navTabs("no-team"), [{ href: "/account", label: "Account" }]);
   });
 
   it("keeps team secrets under the Team tab for a signed-in member", () => {

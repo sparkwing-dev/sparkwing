@@ -571,6 +571,8 @@ var commandSynopses = map[string]string{
 	"sparkwing billing standing":                    "Show the team's Cloud standing and latest tier request",
 	"sparkwing billing request-tier":                "Contact operators for High standing, higher limits or larger payments",
 	"sparkwing team":                                "Manage your team",
+	"sparkwing account":                             "Manage your signed-in account",
+	"sparkwing account delete":                      "Preview and delete your account and sole-member teams",
 	"sparkwing team delete":                         "Delete the team and all of its data",
 	"sparkwing team settings":                       "Manage team settings",
 	"sparkwing team settings show":                  "Show the team's enrollment, claim ranking and child-run settings",
@@ -693,6 +695,7 @@ var commandSections = map[string]string{
 	"sparkwing debug":         "Local",
 	"sparkwing repos":         "Local",
 	"sparkwing queue":         "Local",
+	"sparkwing account":       "Cloud",
 	"sparkwing login":         "Cloud",
 	"sparkwing profiles":      "Cloud",
 	"sparkwing runners":       "Cloud",
@@ -715,6 +718,7 @@ var commandSections = map[string]string{
 
 // hack: plain --help shows this intro in place of the reference rules, which --help-all adds back as details.
 var commandIntros = map[string]string{
+	"sparkwing account delete":         "Preview the teams and data removed with your account. Confirm your account ID and every listed team after a fresh sign-in to delete them.",
 	"sparkwing runs":                   "Inspect past runs, read logs and artifacts, or cancel and retry work. Use a run ID from runs list.",
 	"sparkwing runs annotations":       "Read or add annotations attached to a run.",
 	"sparkwing runs annotations add":   "Add an info annotation to a job or step in a run.",

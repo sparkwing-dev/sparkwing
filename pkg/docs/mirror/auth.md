@@ -571,7 +571,7 @@ Its public work queue is `/api/v1/runners/claim`.
 
 Operational deployment credentials carry `operator.limits`,
 `operator.object_store` or `operator.tokens` for their selected operations.
-Trust changes, grants, freezes and account deletion require an
+Trust changes, grants, freezes and operator account deletion require an
 operator-console session. Those powers do not follow from a deployment token.
 Use the dashboard's `/operator` page for trust, free-credit grants, holds and
 the signup waitlist. The retired `sparkwing-ops teams trust`, `credits grant`,
@@ -1018,26 +1018,76 @@ records of the team's events, such as run cancellations and deletions. The
 slug stays reserved and cannot be reused. `GET /api/v1/me/team-deletions` shows the requester each deletion's
 state.
 
-An owner cannot delete their only team: deleting it means deleting the account.
-Account deletion is an operator action. Ask the deployment's support contact,
-which the refusal names when the controller sets `--support-contact`. On
-Sparkwing Cloud that is support@sparkwing.dev. The
-operator calls `DELETE /api/v1/operator/accounts/{account}` from an operator
-console session. It removes the account's identities, sessions, memberships and
-tokens, and deletes every team the account was the only member of. It refuses
-an account that is the last owner of a team with other members until ownership
-moves or that team is deleted.
+An owner cannot delete their only team through team deletion. Delete the account
+from **Your account > Delete account**, or use `sparkwing account delete
+--profile NAME --session-stdin`. The profile selects the controller, and stdin
+supplies a direct account session signed in within the last 10 minutes. An old
+session can read the preview, but cannot confirm deletion. Sign out and sign in
+again when prompted, then supply the new session. A
+profile token cannot delete an account. Prefer the dashboard to avoid copying a
+session. The preview lists every team where you are the only member. Their runs
+and operational data go with them. Type the account ID to confirm in the
+dashboard. In the CLI, first read the preview, then repeat the account ID with
+`--confirm ACCOUNT_ID` and each listed team with `--confirm-team SLUG`.
+Waitlisted accounts and accounts without a team can open **Account** from the
+top navigation to reach the same deletion page.
 
-Account deletion preserves security audit records through the configured audit
-horizon, 400 days by default. OIDC audit rows retain keyed audience and subject
-digests, their key ID, and fixed tracing identifiers. They contain no raw OIDC
-audience or subject after the controller completes schema 40 reconciliation.
-An operator holding the external key and a candidate can still confirm a match.
-This retained evidence is pseudonymous, so deletion does not promise that it
-cannot be linked to a known candidate. See [audit investigation](oidc.md#audit-investigation).
+`GET /api/v1/me/deletion` returns `account_id`, `teams`, `blocked_teams`,
+`sign_in_required`, the shared-token `credential_notice`, and the documentation-owned
+`archive_notice`.
+`DELETE /api/v1/me` requires `confirm_account_id` and `confirm_teams`. The
+transaction rechecks the exact team list and refuses a stale confirmation.
+It removes your identities, sessions and memberships and revokes every token
+you hold or created, including descendants. Other browser and CLI sessions
+stop working immediately. This includes runner and CI tokens you created in
+shared teams, even though those teams remain. Another member should replace
+those credentials before deletion to avoid breaking runners or integrations.
+Sole-member teams close immediately and enter the same retrying cleanup as team
+deletion. If you are the sole owner of a team with other members, deletion is
+refused. Transfer ownership or delete that team first. Accounts without a team,
+including waitlisted accounts, can delete themselves too.
 
-Deleted data can remain in backups until their retention policies retire them; see
-[deleted data in backups](backup-restore.md#deleted-data-in-backups).
+Shared-team runs, logs, artifacts and other team-owned history remain for the
+remaining members. Selected execution actor fields, such as
+`runs.created_principal`, are relabeled as "deleted user". Other creator and
+financial references retain the opaque account ID. [Account deletion
+retention](account-deletion-retention.md) names those columns. User-supplied
+content, including logs and artifacts, may still contain personal information.
+That content follows the team's retention policy and is excluded from account
+identity erasure. Financial records remain for accounting. Sparkwing Cloud keeps
+account IDs in audit records for 400 days for security and abuse investigation.
+Self-hosted operators configure their own audit horizon. OIDC audit rows retain
+keyed audience and subject digests, their key ID, and fixed tracing identifiers.
+They contain no raw OIDC audience or subject after the controller completes
+schema 40 reconciliation. An operator holding the external key and a candidate
+can still confirm a match. This retained evidence is pseudonymous, so deletion
+does not promise that it cannot be linked to a known candidate. See [audit
+investigation](oidc.md#audit-investigation).
+
+Cloud live account identity and authority disappear in the request transaction.
+Team data normally disappears within minutes, with a final sweep 75 minutes
+later for finishing uploads. Failed purges retry and are not completed erasure.
+RDS automated backups have a seven-day recovery window, but not every copy
+expires within seven days. Accounts which existed on or before 2026-10-02 may
+remain in encrypted operator archives. The SQLite pre-cutover archive from
+2026-09-15 follows a 365-day lifecycle plus 30 days for noncurrent versions,
+ending around 2027-10-15 with asynchronous S3 expiry. PostgreSQL controller and
+billing archive copies under `postgres/` are removed
+within about 70 days of being taken. They expire after 35 days, then S3
+permanently deletes the old version up to 35 days later. Dumps taken before the
+rule took effect follow it from the date it was applied. Dumps already older
+than 35 days become eligible for expiry then, and their stored bytes are removed
+up to 35 days later. S3 rounds expiry up to midnight UTC and deletes
+asynchronously, so these timings are approximate. Accounts created after
+2026-10-02 are not in the 2026-09-15 or 2026-10-02 archives. See [Account
+deletion retention](account-deletion-retention.md).
+Shared-team history, retained creator IDs, financial records, reserved team
+slugs and audit history are the other exceptions above. Self-hosted operators
+own their backup and object-version retention and must verify their own policy.
+See [deleted data in backups](backup-restore.md#deleted-data-in-backups).
+
+Operators retain `DELETE /api/v1/operator/accounts/{account}` for support
+requests. It uses the same account erasure and team cleanup rules.
 
 ### Device sign-in
 

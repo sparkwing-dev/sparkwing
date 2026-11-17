@@ -10,6 +10,7 @@ export default function WaitlistGate({ children }: { children: ReactNode }) {
   const state = useTeamState();
   const pathname = usePathname();
   if (pathname === "/operator" || pathname.startsWith("/operator/")) return children;
+  if (pathname === "/account") return children;
   if (state.status === "loading") return <Notice>Loading…</Notice>;
   if (state.status === "waitlisted") return <WaitlistNotice me={state.me} />;
   if (state.status === "no-team" && pathname !== "/team/new") {

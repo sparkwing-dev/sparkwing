@@ -88,6 +88,18 @@
       "baselines": {}
     },
     {
+      "route": "/api/v1/me",
+      "kind": "api",
+      "exempt": "GET requires a live account session, absent from the dashboard page-weight corpus. DELETE requires a recent direct session and exact account/team confirmation, then removes the account and queues sole-member teams for purge. A scheduled probe must not delete a person's account. Real HTTP tests verify reads, confirmation, refusal and transactional erasure. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/me/deletion",
+      "kind": "api",
+      "exempt": "Requires a live direct account session and its current memberships to preview account deletion, absent from the dashboard page-weight corpus. Real HTTP tests verify sole-member scope, blocked owners, sign-in freshness and retention notices. Authorized latency, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
       "route": "/api/v1/auth/session",
       "kind": "api",
       "exempt": "Requires a licensed live account session and its sealed CSRF-key fixture, absent from the dashboard corpus. Renewal writes the session expiry. Handler tests exercise real SQLite correctness but do not measure authorized latency, cold start or response bytes.",
