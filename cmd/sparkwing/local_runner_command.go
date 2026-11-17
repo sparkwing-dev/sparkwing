@@ -87,7 +87,7 @@ func runLocalRunnerCommand(inv clisurface.Invocation) error {
 				slog.Warn("close the controller probe", "err", err)
 			}
 			return true
-		}, probe.C, localRunnerOrphanAfter)
+		}, probe.C, localRunnerOrphanAfter, localRunnerHomeGoneAfter)
 	}()
 	select {
 	case err := <-queue:
@@ -100,31 +100,42 @@ func runLocalRunnerCommand(inv clisurface.Invocation) error {
 const (
 	localRunnerControllerProbe = 30 * time.Second
 	// safety: a replacement controller binds the socket within seconds, so a
-	// controller missing this long is gone, and every retry against it would
-	// keep the runner's service alive with no owner.
+	// socket refusing connections this long has no controller behind it, and
+	// every retry against it would keep the runner's service alive with no owner.
 	localRunnerOrphanAfter = 10 * time.Minute
+	// safety: a home missing on every probe while the socket also refuses is
+	// deletion rather than a remount, so it needs a shorter wait, never none.
+	localRunnerHomeGoneAfter = time.Minute
 )
 
-// safety: a deleted home can never get its controller back, so it ends the wait at once.
-func awaitControllerGone(ctx context.Context, home string, reachable func(context.Context) bool, ticks <-chan time.Time, orphanAfter time.Duration) error {
-	var since time.Time
+// safety: reachable reports only that the socket accepts a connection, so a
+// controller that answers keeps the runner alive whatever its home looks like.
+func awaitControllerGone(ctx context.Context, home string, reachable func(context.Context) bool, ticks <-chan time.Time, orphanAfter, homeGoneAfter time.Duration) error {
+	var unreachableSince, homeGoneSince time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case now := <-ticks:
-			if _, err := os.Stat(home); errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("local runner exits: its state home %s is gone", home)
-			}
 			if reachable(ctx) {
-				since = time.Time{}
+				unreachableSince, homeGoneSince = time.Time{}, time.Time{}
 				continue
 			}
-			if since.IsZero() {
-				since = now
+			if unreachableSince.IsZero() {
+				unreachableSince = now
 			}
-			if now.Sub(since) >= orphanAfter {
-				return fmt.Errorf("local runner exits: no controller has served %s for %s", home, now.Sub(since).Round(time.Second))
+			if _, err := os.Stat(home); errors.Is(err, os.ErrNotExist) {
+				if homeGoneSince.IsZero() {
+					homeGoneSince = now
+				}
+				if now.Sub(homeGoneSince) >= homeGoneAfter {
+					return fmt.Errorf("local runner exits: its state home %s has been gone and its controller socket closed for %s", home, now.Sub(homeGoneSince).Round(time.Second))
+				}
+			} else {
+				homeGoneSince = time.Time{}
+			}
+			if now.Sub(unreachableSince) >= orphanAfter {
+				return fmt.Errorf("local runner exits: no controller has accepted a connection on the socket of %s for %s", home, now.Sub(unreachableSince).Round(time.Second))
 			}
 		}
 	}
