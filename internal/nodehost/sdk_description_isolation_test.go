@@ -136,7 +136,7 @@ func FuzzSDKDescribeIsolatesFailuresAndSecretDeclarations(f *testing.F) {
 				}
 			} else {
 				var failure *apierr.Error
-				if !errors.As(err, &failure) || failure.Code != apierr.PlanFailed || failure.Message != "describe failed: plan_failed (details withheld: secrets not yet known)" || prepared.Plan != nil {
+				if !errors.As(err, &failure) || failure.Code != apierr.PlanFailed || failure.Message != "describe failed: plan_failed (details withheld: secrets not yet known); to see the details locally, run `sparkwing pipeline describe --pipeline "+input.Run.Pipeline+" --show-withheld`" || prepared.Plan != nil {
 					t.Fatalf("broken pipeline did not withhold unclassified failure details: %+v: %v", prepared, err)
 				}
 			}

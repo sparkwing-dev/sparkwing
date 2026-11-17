@@ -8,6 +8,8 @@ Every `sparkwing login` command, flag, and argument, generated from the CLI's ow
 
 Sign in through the browser and save a CLI token
 
+Connect this machine to a controller by approving a short code in your browser. Save the connection as a profile.
+
 Sign this machine in through the browser and save a team member token in the profile. The command prints a code and the controller's /device page; open that page where you are signed in to the console, type the code, check the machine name, team and grants, and approve. Nothing is copied out of the browser.
 
 The token carries the grants --scope names, or by default your role's run and log grants: runs.read and logs.read, plus runs.write, runs.control and approvals.write for editors and owners. It never carries team.admin or more than you hold. It expires after 90 days and ends when the approving browser session signs out.

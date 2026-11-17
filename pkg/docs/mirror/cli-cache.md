@@ -8,6 +8,8 @@ Every `sparkwing cache` command, flag, and argument, generated from the CLI's ow
 
 Inspect or trim the compiled pipeline binary cache
 
+Inspect and maintain the local pipeline build cache.
+
 ### Subcommands
 
 - `explain` -- Show this repository's pipeline binary cache key and its inputs
@@ -23,6 +25,13 @@ Inspect or trim the compiled pipeline binary cache
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+### Examples
+
+```sh
+# Explain the next pipeline build
+sparkwing cache explain
+```
 
 ## `sparkwing cache explain`
 

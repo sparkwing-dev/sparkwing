@@ -8,6 +8,8 @@ Every `sparkwing daemon` command, flag, and argument, generated from the CLI's o
 
 Inspect and manage the local controller
 
+Inspect and manage the local controller that coordinates runs on this machine.
+
 ### Subcommands
 
 - `events` -- Read retained local controller events
@@ -25,6 +27,13 @@ Inspect and manage the local controller
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+### Examples
+
+```sh
+# Inspect the local controller
+sparkwing daemon status
+```
 
 ## `sparkwing daemon events`
 
@@ -92,6 +101,13 @@ Report local controller status
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+### Examples
+
+```sh
+# Inspect local controller readiness
+sparkwing daemon status
+```
 
 ## `sparkwing daemon stop`
 

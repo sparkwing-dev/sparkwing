@@ -8,6 +8,8 @@ Every `sparkwing secrets` command, flag, and argument, generated from the CLI's 
 
 Manage secrets in this machine's local store or on a controller
 
+Manage secret values and plain variables used by pipelines. List names without revealing secret values.
+
 ### Subcommands
 
 - `delete` -- Remove a secret
@@ -24,6 +26,13 @@ Manage secrets in this machine's local store or on a controller
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+### Examples
+
+```sh
+# List names without secret values
+sparkwing secrets list
+```
 
 ## `sparkwing secrets delete`
 

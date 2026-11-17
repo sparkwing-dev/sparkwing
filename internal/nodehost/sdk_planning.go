@@ -267,9 +267,12 @@ func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.Declaration
 	if !known && !slices.ContainsFunc(hosterr.Codes, func(definition hosterr.Definition) bool { return definition.Code == code }) {
 		code = apierr.SDKError
 	}
-	message := "describe failed: " + string(code) + " (details withheld: secrets not yet known)"
+	message := "describe failed: " + string(code) + " (details withheld: secrets not yet known); to see the details locally, run `" + p.Masker.Mask(runspec.ShowWithheldCommand(input.Run.Pipeline)) + "`"
 	if known {
 		message = boundedNodeErrText(p.Masker.Mask(err.Error()))
+	}
+	if code == apierr.PlanFailed && input.Entry != nil && input.Entry.Engine.Identity.Pin.SDK == engineid.GoSDK && slices.Contains([]string{"v0.1.0", "v0.2.0"}, input.Entry.Engine.Identity.Pin.Version) {
+		message += "; Go SDK v0.1.0 and v0.2.0 can panic when Plan reads Git during discovery; run `sparkwing pipeline upgrade` to use the current SDK"
 	}
 	failure := &apierr.Error{Code: code, Message: message}
 	if !known {
