@@ -267,7 +267,10 @@ foreground CLI hosts its run. The controller owns detached consumption.
 Standalone CI runs the same controller runtime in process with its own home.
 An unavailable shared controller does not authorize a second writer to its home.
 
-The controller remains running while idle. `sparkwing daemon stop` stops it.
+The OS account's default controller and installed login services remain running
+while idle. Private on-demand controllers exit after 20 minutes without work or
+clients. The next CLI call starts a new controller. `sparkwing daemon stop` stops
+one explicitly.
 Machine updates refresh installed controller and timer units together.
 See [local execution](local-execution.md#who-hosts-the-daemon).
 

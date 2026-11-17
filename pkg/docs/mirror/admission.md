@@ -36,7 +36,9 @@ waiter keeps its arrival order through owner handoff.
 
 For a run that waited, was refused, or lost its daemon, see [Diagnosing admission](diagnosing-admission.md).
 
-The local controller starts on demand and remains running while idle.
+The local controller starts on demand. Private homes retire after 20 idle minutes
+without live work or clients. The OS account's default home and installed login
+services remain running while idle.
 `sparkwing daemon stop` stops it. An installed systemd service or launchd agent
 restarts it after failure. See [Local execution](local-execution.md).
 

@@ -7,21 +7,24 @@ import (
 	"net"
 	"net/http"
 	"os/user"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
 const privateControllerIdle = 20 * time.Minute
 
-type idleClient struct{ background bool }
+type idleClient struct {
+	background bool
+	classified bool
+}
 type idleConnectionKey struct{}
 
 func (r *localRuntime) privateIdleExit(ctx context.Context, session *localRuntimeSession) bool {
 	home, err := r.accountHome()
-	if err != nil || home == "" || filepath.Clean(r.layout.home) == filepath.Join(home, ".sparkwing") || session.standalone {
+	if err != nil || home == "" || paths.PathsAt(r.layout.home).IsDefaultForHome(home) || session.standalone {
 		return false
 	}
 	if r.cfg.Installed != nil {
@@ -50,8 +53,9 @@ func (d *Daemon) watchPrivateIdle(ctx context.Context) {
 		case <-tick.C:
 		}
 		d.mu.Lock()
-		busy := d.privateIdleBusyLocked()
-		if busy {
+		busy := d.privateIdleBusyLocked(true)
+		// safety: a new polling socket must not reset idle time before its background request is identified.
+		if d.privateIdleBusyLocked(false) {
 			d.idleSince = time.Now()
 		}
 		expired := !busy && time.Since(d.idleSince) >= privateControllerIdle && !d.draining && !d.shuttingDown
@@ -72,7 +76,7 @@ func (d *Daemon) watchPrivateIdle(ctx context.Context) {
 		}
 		d.mu.Lock()
 		// safety: requests and activity reports can arrive while the store snapshot is read.
-		if d.privateIdleBusyLocked() || time.Since(d.idleSince) < privateControllerIdle {
+		if d.privateIdleBusyLocked(true) || time.Since(d.idleSince) < privateControllerIdle {
 			d.mu.Unlock()
 			continue
 		}
@@ -116,7 +120,7 @@ func (d *Daemon) serveIdleAPI(ctx context.Context, listener net.Listener, local 
 		background := idleRunnerRequest(r.URL.Path)
 		d.mu.Lock()
 		client := d.idleClients[connection]
-		client.background = background
+		client.background, client.classified = background, true
 		d.idleClients[connection] = client
 		if !background {
 			d.idleSince = time.Now()
@@ -150,12 +154,12 @@ func (d *Daemon) serveIdleAPI(ctx context.Context, listener net.Listener, local 
 	})
 }
 
-func (d *Daemon) privateIdleBusyLocked() bool {
+func (d *Daemon) privateIdleBusyLocked(includeUnclassified bool) bool {
 	if d.localActivity != (LocalActivity{}) || d.dashboardConns > 0 || len(d.conns) > 0 {
 		return true
 	}
 	for _, client := range d.idleClients {
-		if !client.background {
+		if !client.background && (includeUnclassified || client.classified) {
 			return true
 		}
 	}

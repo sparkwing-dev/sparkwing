@@ -43,7 +43,12 @@ func (p Paths) IsOperatorHome() bool {
 	if err != nil || home == "" {
 		return false
 	}
-	return filepath.Clean(p.Root) == filepath.Join(home, ".sparkwing")
+	return p.IsDefaultForHome(home)
+}
+
+// IsDefaultForHome reports whether p is the default state directory beneath userHome.
+func (p Paths) IsDefaultForHome(userHome string) bool {
+	return userHome != "" && filepath.Clean(p.Root) == filepath.Join(userHome, ".sparkwing")
 }
 
 // SandboxHome reports the sparkwing home in use when it is not the operator's

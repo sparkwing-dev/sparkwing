@@ -80,7 +80,7 @@ func TestPrivateControllerBusyResetsIdleBound(t *testing.T) {
 				case "dashboard":
 					d.dashboardConns = 1
 				case "cli":
-					d.idleClients = map[net.Conn]idleClient{nil: {}}
+					d.idleClients = map[net.Conn]idleClient{nil: {classified: true}}
 				case "admission":
 					d.conns[participant] = struct{}{}
 				}
@@ -332,4 +332,59 @@ func initIdleTestSignals() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 	signal.Stop(interrupt)
+}
+
+func TestBackgroundHandshakeDoesNotResetPrivateIdle(t *testing.T) {
+	initIdleTestSignals()
+	synctest.Test(t, func(t *testing.T) {
+		d, err := New(Config{Home: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.idleSince = time.Now()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
+		client, server := net.Pipe()
+		defer client.Close()
+		owner, err := controllerPeerIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener.connections <- localHTTPConnection{Conn: server, peer: owner}
+		serving := make(chan error, 1)
+		go func() {
+			serving <- d.serveIdleAPI(ctx, listener, localhostwire.LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })})
+		}()
+		joined := make(chan struct{})
+		go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+		synctest.Wait()
+		time.Sleep(21 * time.Minute)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+			t.Fatal("unidentified connection was retired")
+		default:
+		}
+		if _, err := fmt.Fprintf(client, "GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n", localRunnerPath); err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.ReadResponse(bufio.NewReader(client), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+		default:
+			t.Error("background handshake reset the private idle interval")
+		}
+		cancel()
+		<-joined
+		if err := <-serving; err != nil {
+			t.Fatal(err)
+		}
+	})
 }
