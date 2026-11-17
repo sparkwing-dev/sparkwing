@@ -266,6 +266,9 @@ func TestShowWithheldPrintsMaskedDiscoveryFailuresOnlyWhenRequested(t *testing.T
 			if tc.show != strings.Contains(all, cause) || tc.show != strings.Contains(all, output) {
 				t.Fatalf("withheld text shown=%t, want %t: %s", strings.Contains(all, cause), tc.show, all)
 			}
+			if !tc.show && tc.selected == "release" && !strings.Contains(strings.Join(logs, "\n"), "1 registered pipeline failed discovery (plan_failed)") {
+				t.Fatalf("failed discovery notice lost its count and class: %s", all)
+			}
 			if !tc.show && strings.Count(all, "--show-withheld") != 1 {
 				t.Fatalf("withheld remedy appears %d times, want once: %s", strings.Count(all, "--show-withheld"), all)
 			}
@@ -319,7 +322,7 @@ func TestShowWithheldPrintsOutputOfAnSDKThatStoppedBeforeDescribing(t *testing.T
 			if show != strings.Contains(all, crash) {
 				t.Fatalf("crash output shown=%t, want %t: %s", strings.Contains(all, crash), show, all)
 			}
-			notice := "planning failed; see the error for the local details command"
+			notice := "the SDK stopped before describing its pipelines"
 			if !show && !slices.ContainsFunc(logs, func(log string) bool { return strings.HasSuffix(log, notice) }) {
 				t.Fatalf("withheld notice does not point to the error: %q", logs)
 			}

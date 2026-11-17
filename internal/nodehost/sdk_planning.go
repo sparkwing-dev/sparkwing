@@ -204,7 +204,7 @@ func (p SDKPlanner) process(ctx context.Context, input PlanningProcessInput, log
 			err = errors.Join(err, closeErr, process.Cleanup(cleanupCtx))
 		}
 		if err != nil {
-			logs.explain("planning failed; see the error for the local details command")
+			logs.omitRemedy()
 		}
 		err = errors.Join(err, logs.finish(cleanupCtx), context.Cause(parent))
 	}()
