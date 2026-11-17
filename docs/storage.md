@@ -100,7 +100,7 @@ temporary files and finished runs.
 Local pipeline binaries stay in the local binary cache. It stores entries under
 `cache/pipelines/v1/entries` in the Sparkwing home. Cache status and pruning
 operate on that layout. Older layouts
-have no migration or retirement path. `cache info -o json` omits
+have no migration or retirement path. `cache status -o json` omits
 `legacy_entries` and `legacy_bytes`.
 
 Remote binaries use signed transfers and require authorized build provenance

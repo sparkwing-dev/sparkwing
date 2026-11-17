@@ -10,11 +10,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-func docsCacheInfo(output string) error {
+func docsCacheStatus(output string) error {
 	client := docs.NewWebClient()
 	stats, err := client.CacheInfo()
 	if err != nil {
-		return fmt.Errorf("cache info --docs: %w", err)
+		return fmt.Errorf("cache status --docs: %w", err)
 	}
 	switch output {
 	case "json":

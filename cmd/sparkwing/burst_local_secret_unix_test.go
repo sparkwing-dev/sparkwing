@@ -184,7 +184,7 @@ func TestLocalEntryPointsWithholdSigningMaterial(t *testing.T) {
 			case "help":
 				err = dispatchRunWithEngine(inv, func(string, func()) error { t.Fatal("help selected execution engine"); return nil })
 			case "describe":
-				err = runPipelineDescribe(inv)
+				err = runPipelineShow(inv)
 			case "plan":
 				err = runPipelinePlan(inv)
 			case "trigger", "trigger-working-tree":

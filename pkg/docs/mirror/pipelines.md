@@ -20,7 +20,7 @@ builds use public SDK pins.
 > `sparkwing-runner.exe agent` yourself or use the Linux installer inside WSL
 > when systemd user services are enabled.
 
-TypeScript pipelines use the same `pipeline list`, `pipeline describe`,
+TypeScript pipelines use the same `pipeline list`, `pipeline show`,
 `pipeline plan` and `run` commands. Start with the
 [TypeScript scaffold](getting-started.md#quick-start). `pipeline plan` renders the resolved DAG without dispatching
 jobs. `pipeline lint` checks Go source only, and reports that TypeScript lint is unsupported without failing. JSON output includes

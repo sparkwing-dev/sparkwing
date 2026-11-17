@@ -224,7 +224,7 @@ sparkwing pipeline new --pipeline hello --template typescript
 git add .sparkwing
 git commit -m "Add TypeScript pipeline"
 sparkwing pipeline list
-sparkwing pipeline describe --pipeline hello
+sparkwing pipeline show --pipeline hello
 sparkwing pipeline plan --pipeline hello
 sparkwing run hello
 ```

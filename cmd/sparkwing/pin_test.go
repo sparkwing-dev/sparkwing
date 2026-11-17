@@ -39,7 +39,7 @@ func TestPipelineTrigger_ThePinIsNoDefault(t *testing.T) {
 	}
 }
 
-func TestPipelineDescribe_ReportsThePin(t *testing.T) {
+func TestPipelineShow_ReportsThePin(t *testing.T) {
 	projectAt(t, pinnedProject)
 	catalog, err := gatherPipelinesCatalog(false)
 	if err != nil {

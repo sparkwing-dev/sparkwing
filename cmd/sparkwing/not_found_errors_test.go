@@ -31,7 +31,7 @@ func TestControllerNotFoundNamesTheSubjectAndExitsRefused(t *testing.T) {
 		{[]string{"runs", "logs", "--run", "nope"}, `run "nope"`, "sparkwing runs list --profile 'far'"},
 		{[]string{"runs", "cancel", "--run", "nope"}, `run "nope"`, "sparkwing runs list --profile 'far'"},
 		{[]string{"runs", "status", "--run", "nope"}, `run "nope"`, "sparkwing runs list --profile 'far'"},
-		{[]string{"secrets", "get", "--secret", "NOPE"}, `secret "NOPE"`, "sparkwing secrets list --profile 'far'"},
+		{[]string{"secrets", "show", "--secret", "NOPE"}, `secret "NOPE"`, "sparkwing secrets list --profile 'far'"},
 		{[]string{"schedules", "show", "--schedule", "nope"}, `schedule "nope"`, "sparkwing schedules list --profile 'far'"},
 		{[]string{"subscriptions", "show", "--subscription", "sub_nope"}, `subscription "sub_nope"`, "sparkwing subscriptions list --profile 'far'"},
 	} {

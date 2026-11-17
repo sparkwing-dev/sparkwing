@@ -39,7 +39,7 @@ func TestScaffoldAliasThroughCLI(t *testing.T) {
 	}
 	invoke("pipeline", "new", "--pipeline=sample-report", "--template=minimal")
 	var described Pipeline
-	if err := json.Unmarshal(invoke("pipeline", "describe", "--pipeline=sample-report", "-o=json"), &described); err != nil {
+	if err := json.Unmarshal(invoke("pipeline", "show", "--pipeline=sample-report", "-o=json"), &described); err != nil {
 		t.Fatal(err)
 	}
 	if described.Name != "sample-report" || described.Entrypoint != "SampleReport" {
@@ -109,7 +109,7 @@ func main() {
 		return out
 	}
 	var described Pipeline
-	if err := json.Unmarshal(invoke("pipeline", "describe", "--pipeline=example", "-o=json"), &described); err != nil {
+	if err := json.Unmarshal(invoke("pipeline", "show", "--pipeline=example", "-o=json"), &described); err != nil {
 		t.Fatal(err)
 	}
 	if described.Name != "example" || described.Entrypoint != "Example" {

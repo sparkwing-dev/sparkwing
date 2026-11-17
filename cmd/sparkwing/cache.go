@@ -25,25 +25,25 @@ import (
 
 var pruneCacheToLimits = bincache.PruneToLimits
 
-type cacheInfoReport struct {
-	Dir           string           `json:"dir"`
-	Entries       int              `json:"entries"`
-	ActiveEntries int              `json:"active_entries"`
-	BusyEntries   int              `json:"busy_entries"`
-	TotalBytes    int64            `json:"total_bytes"`
-	MaxBytes      int64            `json:"max_bytes"`
-	MaxEntries    int              `json:"max_entries"`
-	OverLimit     bool             `json:"over_limit"`
-	Items         []cacheInfoEntry `json:"items,omitempty"`
+type cacheStatusReport struct {
+	Dir           string             `json:"dir"`
+	Entries       int                `json:"entries"`
+	ActiveEntries int                `json:"active_entries"`
+	BusyEntries   int                `json:"busy_entries"`
+	TotalBytes    int64              `json:"total_bytes"`
+	MaxBytes      int64              `json:"max_bytes"`
+	MaxEntries    int                `json:"max_entries"`
+	OverLimit     bool               `json:"over_limit"`
+	Items         []cacheStatusEntry `json:"items,omitempty"`
 }
 
-type cacheInfoEntry struct {
+type cacheStatusEntry struct {
 	Key      string `json:"key"`
 	Bytes    int64  `json:"bytes"`
 	LastUsed string `json:"last_used,omitempty"`
 }
 
-func runCacheInfo(inv clisurface.Invocation) error {
+func runCacheStatus(inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
@@ -51,23 +51,23 @@ func runCacheInfo(inv clisurface.Invocation) error {
 	all := inv.Bool("all-entries")
 	docsCache := inv.Bool("docs")
 	if docsCache {
-		return docsCacheInfo(output)
+		return docsCacheStatus(output)
 	}
 
 	entries, err := bincache.ScanCache()
 	if err != nil {
-		return fmt.Errorf("cache info: %w", err)
+		return fmt.Errorf("cache status: %w", err)
 	}
 	status, err := bincache.Status(context.Background(), "")
 	if err != nil {
-		return fmt.Errorf("cache info: %w", err)
+		return fmt.Errorf("cache status: %w", err)
 	}
 	limits, err := bincache.ConfiguredLimits()
 	if err != nil {
-		return fmt.Errorf("cache info: %w", err)
+		return fmt.Errorf("cache status: %w", err)
 	}
 
-	report := cacheInfoReport{
+	report := cacheStatusReport{
 		Dir:           bincache.CacheRoot(),
 		Entries:       len(entries),
 		ActiveEntries: status.ActiveEntries,
@@ -84,7 +84,7 @@ func runCacheInfo(inv clisurface.Invocation) error {
 		shown = shown[:10]
 	}
 	for _, e := range shown {
-		item := cacheInfoEntry{Key: e.Key, Bytes: e.Bytes}
+		item := cacheStatusEntry{Key: e.Key, Bytes: e.Bytes}
 		if !e.LastUsed.IsZero() {
 			item.LastUsed = e.LastUsed.UTC().Format(time.RFC3339)
 		}
@@ -178,7 +178,7 @@ func writeCacheOutput(output string, payload any, pretty func()) error {
 		return json.NewEncoder(os.Stdout).Encode(payload)
 	case "plain":
 		switch report := payload.(type) {
-		case cacheInfoReport:
+		case cacheStatusReport:
 			fmt.Println(report.Dir)
 		case cacheExplainReport:
 			fmt.Println(report.Key)

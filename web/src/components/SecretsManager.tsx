@@ -51,7 +51,7 @@ const copy: Record<
   },
   local: {
     secretsHint:
-      "Not shown on this page. `sparkwing secrets get` on this machine, and any program that can reach this dashboard's address, can still read a secret's value.",
+      "Write-only. Only a pipeline run that declares a masked secret can read its value. Use `sparkwing secrets show` on this machine to read a plain variable.",
     variablesHint:
       "Plain configuration. This page shows a variable's value, and runs see it unmasked in logs.",
     variableKind: "Variable (plain config, not masked)",

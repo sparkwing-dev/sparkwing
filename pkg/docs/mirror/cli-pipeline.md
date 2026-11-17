@@ -12,7 +12,7 @@ Create, inspect and maintain this repository's pipelines, or trigger a run on a 
 
 ### Subcommands
 
-- `describe` -- Print one pipeline's full metadata
+- `show` -- Print one pipeline's full metadata
 - `hooks` -- Install / uninstall git pre-commit + pre-push + post-commit hooks
 - `lint` -- Check Go pipeline source for idiomatic anti-patterns; report TypeScript lint as unsupported
 - `list` -- Enumerate every pipeline with metadata
@@ -36,31 +36,6 @@ Create, inspect and maintain this repository's pipelines, or trigger a run on a 
 ```sh
 # Inspect the available pipelines
 sparkwing pipeline list
-```
-
-## `sparkwing pipeline describe`
-
-Print one pipeline's full metadata
-
-Show a pipeline's arguments and triggers without executing it. Use pipeline plan to see its jobs.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--pipeline NAME` | Pipeline name. (required) |
-| `--secrets` | Print only the secrets the pipeline declares, each marked required or optional. |
-| `--show-withheld` | Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs. |
-
-### Examples
-
-```sh
-# Show a pipeline's arguments and triggers
-sparkwing pipeline describe --pipeline build
 ```
 
 ## `sparkwing pipeline hooks`
@@ -244,6 +219,31 @@ Preview the jobs and steps a pipeline would select without executing them.
 ```sh
 # Preview the build pipeline
 sparkwing pipeline plan --pipeline build
+```
+
+## `sparkwing pipeline show`
+
+Print one pipeline's full metadata
+
+Show a pipeline's arguments and triggers without executing it. Use pipeline plan to see its jobs.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--pipeline NAME` | Pipeline name. (required) |
+| `--secrets` | Print only the secrets the pipeline declares, each marked required or optional. |
+| `--show-withheld` | Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs. |
+
+### Examples
+
+```sh
+# Show a pipeline's arguments and triggers
+sparkwing pipeline show --pipeline build
 ```
 
 ## `sparkwing pipeline sparks`

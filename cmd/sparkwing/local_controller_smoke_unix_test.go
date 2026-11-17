@@ -60,7 +60,7 @@ var localSmokeSteps = []localSmokeStep{
 	{args: []string{"secrets", "set", "--secret", "SMOKE_VARIABLE", "--variable", "--value", "plain"}},
 	{args: []string{"secrets", "set", "--secret", "SMOKE_SECRET"}, stdin: "masked-value"},
 	{args: []string{"secrets", "list"}},
-	{args: []string{"secrets", "get", "--secret", "SMOKE_VARIABLE"}},
+	{args: []string{"secrets", "show", "--secret", "SMOKE_VARIABLE"}},
 	{args: []string{"secrets", "rotate"}},
 	{args: []string{"secrets", "delete", "--secret", "SMOKE_SECRET"}},
 	{args: []string{"tokens", "list"}},

@@ -55,7 +55,7 @@ type repoPipeline struct {
 	LastStatus string `json:"last_status,omitempty"`
 }
 
-func runReposInfo(inv clisurface.Invocation) error {
+func runReposShow(inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, inv.Output(color.IsInteractiveStdout()))
 	}
@@ -101,7 +101,7 @@ func selectRepo(fleet []repos.Repo, sel string) (repos.Repo, error) {
 	if sel != "" {
 		scoped := scopeFleet(fleet, sel)
 		if len(scoped) == 0 {
-			return repos.Repo{}, &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("repos info: no tracked repo matches %q", sel)}
+			return repos.Repo{}, &apierr.Error{Code: apierr.NotFound, Message: fmt.Sprintf("repos show: no tracked repo matches %q", sel)}
 		}
 		return scoped[0], nil
 	}
@@ -125,7 +125,7 @@ func selectRepo(fleet []repos.Repo, sel string) (repos.Repo, error) {
 			}
 		}
 	}
-	return repos.Repo{}, fmt.Errorf("repos info: %q is not a registered sparkwing repo; select a registered checkout with -C PATH", cwd)
+	return repos.Repo{}, fmt.Errorf("repos show: %q is not a registered sparkwing repo; select a registered checkout with -C PATH", cwd)
 }
 
 func buildRepoInfo(ctx context.Context, repo repos.Repo, latest string, reader controllerwire.RunReader) (repoInfo, error) {

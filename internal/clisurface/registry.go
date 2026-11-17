@@ -22,7 +22,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing cache", Flags: []Flag{}},
 		{Path: "sparkwing cache explain", Rules: []string{"Explain the .sparkwing directory found from the working directory or -C DIR. Every pipeline in a repository shares one binary, so the command takes no pipeline name."}, Flags: []Flag{}},
-		{Path: "sparkwing cache info", Flags: []Flag{
+		{Path: "sparkwing cache status", Flags: []Flag{
 			{Name: "all-entries"},
 			{Name: "docs"},
 		}},
@@ -80,7 +80,7 @@ func Registry() []Command {
 			{Name: "namespace", Argument: "NAME"},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing debug env", Flags: []Flag{
+		{Path: "sparkwing debug show", Flags: []Flag{
 			{Name: "run", Argument: "ID", Required: true},
 			{Name: "job", Argument: "JOB", Required: true},
 			{Name: "profile", Argument: "NAME"},
@@ -208,7 +208,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing pipeline", Flags: []Flag{}},
-		{Path: "sparkwing pipeline describe", Flags: []Flag{
+		{Path: "sparkwing pipeline show", Flags: []Flag{
 			{Name: "pipeline", Argument: "NAME", Required: true},
 			{Name: "secrets"},
 			{Name: "show-withheld"},
@@ -380,7 +380,7 @@ func Registry() []Command {
 		}},
 		{Path: "sparkwing repos", Flags: []Flag{}},
 		{Path: "sparkwing repos add", Rules: []string{"--checkout is required; it must be a local path."}, Flags: []Flag{}},
-		{Path: "sparkwing repos info", Rules: []string{"--checkout is required; repository identity is distinct from local checkout."}, Flags: []Flag{}},
+		{Path: "sparkwing repos show", Rules: []string{"--checkout is required; repository identity is distinct from local checkout."}, Flags: []Flag{}},
 		{Path: "sparkwing repos list", Rules: []string{"Inventory includes each checkout SDK kind (go or typescript) and its native SDK pin. TypeScript pins come from the npm lockfile when present. JSON uses sdk and pin; plain appends SDK kind after name, pin and primary path."}, Flags: []Flag{
 			{Name: "checkouts"},
 			{Name: "pipelines"},
@@ -731,7 +731,7 @@ func Registry() []Command {
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
 			{Name: "profile", Argument: "NAME"},
 		}},
-		{Path: "sparkwing secrets get", Rules: []string{"Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so get refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
+		{Path: "sparkwing secrets show", Rules: []string{"Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so show refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline."}, Flags: []Flag{
 			{Name: "secret", Argument: "NAME", Required: true},
 			{Name: "repo", Argument: "REPO", Requires: []string{"pipeline"}},
 			{Name: "pipeline", Argument: "NAME", Requires: []string{"repo"}},
