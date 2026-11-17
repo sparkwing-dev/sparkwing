@@ -142,12 +142,9 @@ func (v *upgradeVerifier) pipelineReadVerb(ctx context.Context, checkout string,
 			if err != nil {
 				return "", fmt.Errorf("upgrade: decode selected engine command index: %w", err)
 			}
-			switch command.Path {
-			case "sparkwing pipeline show":
-				verb = "show"
-			case "sparkwing pipeline describe":
-				if verb == "" {
-					verb = "describe"
+			if name, pipeline := strings.CutPrefix(command.Path, "sparkwing pipeline "); pipeline {
+				if name == "show" || name == "describe" && verb == "" {
+					verb = name
 				}
 			}
 			if command.NextCursor != "" {
