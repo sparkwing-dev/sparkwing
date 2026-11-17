@@ -108,7 +108,7 @@ func (t *Tenant) scheduleRowsTx(ctx context.Context, tx *storeTx) ([]CronSchedul
 	defer rows.Close()
 	var out []CronSchedule
 	for rows.Next() {
-		row, err := scanCronSchedule(rows.Scan)
+		row, err := scanCronSchedule(t.s, rows.Scan)
 		if err != nil {
 			return nil, err
 		}
@@ -375,6 +375,10 @@ func (t *Tenant) replaceConsentedSchedules(ctx context.Context, a *capability.Au
 					}
 					if app == nil {
 						consent, err := json.Marshal(scheduleConsent{Version: 1, Authority: p.Authority, Request: request})
+						if err != nil {
+							return err
+						}
+						consent, err = encodeScheduleDocument(t.s, t.team, stored.ID, "consent_json", consent)
 						if err != nil {
 							return err
 						}

@@ -166,3 +166,17 @@ of a value written separately, whether to different streams or to the same strea
 with other text between them, are not masked. Masking guards against accidental
 disclosure, not against job code that deliberately transforms or splits a secret
 it can read.
+
+## Argument encryption at rest
+
+A keyed controller encrypts schedule arguments, overrides, consent requests and
+fire history, and job defaults declared with `WithArgs`, using the same keyring
+as run arguments. Authorized runners receive the restored values. Hashes and
+replay comparisons use the original plaintext documents.
+
+Existing plaintext rows remain readable until `sparkwing operator secrets rotate`
+seals them. Run `sparkwing operator secrets rotate --verify` afterward and require
+`plaintext_run_arguments: 0`, `previous_key_only: 0` and no unreadable rows before
+retiring the previous key. These counters include schedule and job documents.
+See [key rotation](security.md#rotating-the-secrets-key) for the deployment order
+and keyless-store behavior.

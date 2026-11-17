@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -35,14 +36,7 @@ const (
 	argGeneratedJobDefault = "canary-generated-job-default-55ad3c4d"
 )
 
-var argumentCanaries = []string{argSupplied, argPlain, argDefault, argListA, argListB, argGenerated}
-
-// safety: job-level WithArgs defaults are not sealed yet. This pins exactly where they remain in
-// plaintext, so sealing plan and node documents turns this test red until the expectation becomes zero.
-var knownPlaintextJobDefaults = map[string][]string{
-	argJobDefault:          {"nodes.spec_json", "runs.plan_json"},
-	argGeneratedJobDefault: {"nodes.expansion_body", "nodes.spec_json"},
-}
+var argumentCanaries = []string{argSupplied, argPlain, argDefault, argListA, argListB, argGenerated, argJobDefault, argGeneratedJobDefault}
 
 func TestRunArgumentValuesNeverReachStoredRows(t *testing.T) {
 	for _, dialect := range []struct {
@@ -84,26 +78,51 @@ func checkRunArgumentsAtRest(t *testing.T, s *store.Store) {
 			t.Fatalf("%s declaration default = %q", plan.RunID, got)
 		}
 	}
+	row, err := teamOf(t, s, source).ReadRun(ctx, source.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	planHash, err := runspec.CanonicalHash(json.RawMessage(row.Plan))
+	if err != nil || string(planHash) != row.PlanHash {
+		t.Fatalf("plaintext plan hash changed: %v", err)
+	}
+	var plan nodewire.PlanDoc
+	if json.Unmarshal(row.Plan, &plan) != nil || len(plan.Jobs) != 1 || *plan.Jobs[0].Arguments[0].Default != argJobDefault {
+		t.Fatal("plan default did not round trip")
+	}
 	snapshot, err := teamOf(t, s, source).ReadSnapshot(ctx, source.RunID)
 	if err != nil || len(snapshot.Expansions) != 1 || !slices.Contains(snapshot.Expansions[0].Registration.Values, argGenerated) || !slices.Contains(snapshot.Expansions[0].Registration.Values, argGeneratedJobDefault) {
 		t.Fatalf("expansion registration did not round trip: %+v, %v", snapshot.Expansions, err)
 	}
 
+	for _, node := range snapshot.Nodes {
+		var job nodewire.JobSpec
+		if json.Unmarshal(node.Spec, &job) != nil || len(job.Arguments) != 1 || job.Arguments[0].Default == nil {
+			t.Fatal("node default did not round trip")
+		}
+		want := argJobDefault
+		if job.ID == "child" {
+			want = argGeneratedJobDefault
+		}
+		if *job.Arguments[0].Default != want {
+			t.Fatal("node default changed")
+		}
+		hash, err := runspec.CanonicalHash(job)
+		if err != nil || string(hash) != node.SpecHash {
+			t.Fatalf("plaintext node hash changed: %v", err)
+		}
+		read, err := teamOf(t, s, source).ReadNode(ctx, node.Ref)
+		if err != nil || !bytes.Equal(read.Spec, node.Spec) {
+			t.Fatalf("node transport bytes changed: %v", err)
+		}
+	}
+	var expansion nodewire.PlanDoc
+	if json.Unmarshal(snapshot.Expansions[0].Body, &expansion) != nil || len(expansion.Jobs) != 1 || *expansion.Jobs[0].Arguments[0].Default != argGeneratedJobDefault {
+		t.Fatal("expansion default did not round trip")
+	}
+
 	if leaks := storedCanaries(t, s, argumentCanaries); len(leaks) > 0 {
 		t.Fatalf("argument values stored in plaintext:\n%s", strings.Join(leaks, "\n"))
-	}
-	for canary, want := range knownPlaintextJobDefaults {
-		var got []string
-		for _, leak := range storedCanaries(t, s, []string{canary}) {
-			location, _, _ := strings.Cut(leak, ": ")
-			if !slices.Contains(got, location) {
-				got = append(got, location)
-			}
-		}
-		slices.Sort(got)
-		if !slices.Equal(got, want) {
-			t.Fatalf("job-level default %s is stored in plaintext at %v, want exactly %v", canary, got, want)
-		}
 	}
 
 	if _, err := s.DB().ExecContext(ctx, storetest.Rebind(s, `UPDATE runs SET request_json=(SELECT request_json FROM runs WHERE id=?) WHERE id=?`), source.RunID, retry.RunID); err != nil {

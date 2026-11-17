@@ -330,6 +330,14 @@ func (t *Tenant) armCronScheduleTx(ctx context.Context, tx *storeTx, sched CronS
 	}
 	if created {
 		id = sched.ID
+	}
+	sealedArgs, err := encodeScheduleDocument(t.s, t.team, id, "args", []byte(args))
+	if err != nil {
+		return CronSchedule{}, false, err
+	}
+	args = string(sealedArgs)
+	if created {
+		id = sched.ID
 		armedAt := sched.ArmedAt
 		if armedAt.IsZero() {
 			armedAt = now
@@ -395,7 +403,7 @@ func (s *Store) listCronSchedules(ctx context.Context, query string, args ...any
 	}
 	defer closeRowsInto(rows, &err)
 	for rows.Next() {
-		sched, err := scanCronSchedule(rows.Scan)
+		sched, err := scanCronSchedule(s, rows.Scan)
 		if err != nil {
 			return nil, err
 		}
@@ -407,7 +415,7 @@ func (s *Store) listCronSchedules(ctx context.Context, query string, args ...any
 // GetCronSchedule returns one schedule, or an error wrapping
 // [ErrNotFound] when the id is unknown in t's team.
 func (t *Tenant) GetCronSchedule(ctx context.Context, id string) (CronSchedule, error) {
-	sched, err := scanCronSchedule(t.s.queryRow(ctx,
+	sched, err := scanCronSchedule(t.s, t.s.queryRow(ctx,
 		`SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team = ? AND id = ?`,
 		string(t.team), id).Scan)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -590,11 +598,19 @@ func (t *Tenant) setCronOverrideTx(ctx context.Context, tx *storeTx, id string, 
 		if err != nil {
 			return fmt.Errorf("SetCronOverride: %w", err)
 		}
-		overrideArgs = encoded
+		sealed, err := encodeScheduleDocument(t.s, t.team, id, "override_args", []byte(encoded))
+		if err != nil {
+			return err
+		}
+		overrideArgs = string(sealed)
 	}
 	base, err := json.Marshal(o.Base)
 	if err != nil {
 		return fmt.Errorf("SetCronOverride: encode base declaration: %w", err)
+	}
+	base, err = encodeScheduleDocument(t.s, t.team, id, "override_base", base)
+	if err != nil {
+		return err
 	}
 	setAt := o.SetAt
 	if setAt.IsZero() {
@@ -724,6 +740,11 @@ func (t *Tenant) resolveCronDueTx(ctx context.Context, tx *storeTx, id string, c
 				return err
 			}
 		}
+		sealedArgs, err := encodeArgumentBody(t.s.runEnvCipher, t.team, fireID, fireArgumentsScope(id), []byte(fireArgs))
+		if err != nil {
+			return err
+		}
+		fireArgs = string(sealedArgs)
 		if _, err := tx.execContext(ctx,
 			`INSERT INTO cron_fires (team, `+cronFireColumns+`) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?,''), ?, ?)`,
 			string(t.team), fireID, id, fire.DueAt.UnixNano(), fire.DecidedAt.UnixNano(),
@@ -789,6 +810,11 @@ func (t *Tenant) ListCronFires(ctx context.Context, scheduleID string, limit int
 		fire.RunID = runID.String
 		fire.DueAt = time.Unix(0, dueNS)
 		fire.DecidedAt = time.Unix(0, decidedNS)
+		plainArgs, err := decodeArgumentBody(t.s, t.team, fire.ID, fireArgumentsScope(fire.ScheduleID), []byte(args))
+		if err != nil {
+			return nil, err
+		}
+		args = string(plainArgs)
 		if fire.Args, err = decodeCronArgs(args); err != nil {
 			return nil, fmt.Errorf("cron fire %s: %w", fire.ID, err)
 		}
@@ -874,7 +900,7 @@ func updateCronScheduleTx(ctx context.Context, tx *storeTx, id, query string, ar
 }
 
 func getCronScheduleTx(ctx context.Context, tx *storeTx, team Team, id string) (CronSchedule, error) {
-	sched, err := scanCronSchedule(tx.QueryRowContext(ctx,
+	sched, err := scanCronSchedule(tx.store, tx.QueryRowContext(ctx,
 		`SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team = ? AND id = ?`, string(team), id).Scan)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CronSchedule{}, notFound("cron schedule", id)
@@ -882,7 +908,7 @@ func getCronScheduleTx(ctx context.Context, tx *storeTx, team Team, id string) (
 	return sched, err
 }
 
-func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
+func scanCronSchedule(s *Store, scan func(...any) error) (CronSchedule, error) {
 	var sched CronSchedule
 	var catchUpNS, armedNS, updatedNS, cursorNS int64
 	var paused, declared int64
@@ -914,6 +940,11 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 	sched.LastFiredAt = nanosToTime(lastFiredNS)
 	sched.NextDueAt = nanosToTime(nextDueNS)
 	var err error
+	plainArgs, err := decodeScheduleDocument(s, sched.Team, sched.ID, "args", []byte(args))
+	if err != nil {
+		return CronSchedule{}, err
+	}
+	args = string(plainArgs)
 	if sched.Args, err = decodeCronArgs(args); err != nil {
 		return CronSchedule{}, fmt.Errorf("cron schedule %s: %w", sched.ID, err)
 	}
@@ -934,12 +965,22 @@ func scanCronSchedule(scan func(...any) error) (CronSchedule, error) {
 	// safety: an override to no arguments at all is a stored '{}', which has to
 	// read back as an empty map rather than the nil that means "not overridden".
 	if overrideArgs.Valid {
+		plain, err := decodeScheduleDocument(s, sched.Team, sched.ID, "override_args", []byte(overrideArgs.String))
+		if err != nil {
+			return CronSchedule{}, err
+		}
+		overrideArgs.String = string(plain)
 		override.Args = map[string]string{}
 		if err := json.Unmarshal([]byte(overrideArgs.String), &override.Args); err != nil {
 			return CronSchedule{}, fmt.Errorf("cron schedule %s: decode override args: %w", sched.ID, err)
 		}
 	}
 	if overrideBase.Valid && overrideBase.String != "" {
+		plain, err := decodeScheduleDocument(s, sched.Team, sched.ID, "override_base", []byte(overrideBase.String))
+		if err != nil {
+			return CronSchedule{}, err
+		}
+		overrideBase.String = string(plain)
 		if err := json.Unmarshal([]byte(overrideBase.String), &override.Base); err != nil {
 			return CronSchedule{}, fmt.Errorf("cron schedule %s: decode override base: %w", sched.ID, err)
 		}

@@ -460,7 +460,11 @@ func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row runstate.Node
 	if err != nil {
 		return err
 	}
-	_, err = tx.execContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json,expansion,claim_requirements,claim_context,seq) VALUES (?,?,?,'pending',?,?,?,?,?,?,(SELECT COALESCE(MAX(seq),-1)+1 FROM nodes WHERE team=? AND run_id=?))`, team, row.Ref.RunID, row.Ref.NodeID, []byte(row.Spec), row.SpecHash, execution, row.Expansion, requirements, claimContext, team, row.Ref.RunID)
+	storedSpec, err := encodeJobArgumentBody(tx.store, team, string(row.Ref.RunID), nodeArgumentsScope(string(row.Ref.NodeID)), row.Spec)
+	if err != nil {
+		return err
+	}
+	_, err = tx.execContext(ctx, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,spec_hash,execution_json,expansion,claim_requirements,claim_context,seq) VALUES (?,?,?,'pending',?,?,?,?,?,?,(SELECT COALESCE(MAX(seq),-1)+1 FROM nodes WHERE team=? AND run_id=?))`, team, row.Ref.RunID, row.Ref.NodeID, storedSpec, row.SpecHash, execution, row.Expansion, requirements, claimContext, team, row.Ref.RunID)
 	return err
 }
 

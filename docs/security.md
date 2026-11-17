@@ -433,30 +433,36 @@ Stored run requests, accepted specs and generator expansion registrations keep
 argument names and secret classifications in plain JSON. Pipeline-level argument
 values, pipeline-level declared defaults and every masking registration value
 move into one `sealed_arguments` envelope in the same document, bound to the
-run's team, run ID and document kind. Job-level `WithArgs` declarations are not
-sealed yet: their defaults, including secret defaults, stay in plaintext in the
-stored plan (`runs.plan_json`), each job's node spec (`nodes.spec_json`) and a
-generator's expansion body (`nodes.expansion_body`). The same values are sealed
-where they also appear in the accepted spec and its masking registration, and
-run output masks them. A listing that meets a run whose envelope cannot be
+run's team, run ID and document kind. Job-level `WithArgs` defaults also seal at the store boundary in the plan
+(`runs.plan_json`), node spec (`nodes.spec_json`) and generated expansion body
+(`nodes.expansion_body`). These envelopes preserve the exact plaintext JSON,
+including unknown fields. Hash binding, replay checks and authorized runner
+transport use the restored plaintext. Node and expansion envelopes also bind
+the source node ID.
+
+Schedule declarations, overrides, override baselines, consent requests and fire
+history use the same keyring and argument envelopes. Each binds the team,
+schedule or fire ID and column kind. A fire also binds its schedule ID.
+A listing that meets a run whose envelope cannot be
 opened shows that run's argument values as `(unavailable)` and lists the other
 runs; reading that run's status, or anything that needs its values such as a
 retry, fails for that run alone. A keyed store whose key cannot be used refuses the run
 rather than store the values in plaintext. A PostgreSQL controller started
 without a `secrets-key` credential has no key: it refuses every secret write,
-stores run argument values, including secret defaults, unencrypted, and says so
-in a startup warning. Runs stored before argument sealing keep their plaintext
+stores argument values, including schedules and job defaults, unencrypted, and says so
+in a startup warning. Run and schedule documents stored before argument sealing keep their plaintext
 values and still read as written. `sparkwing operator secrets rotate` seals them in
 place and reports the count as `plaintext_run_arguments`; `--verify` only
-counts them. Local stores are not rewritten, because the local `secrets.key`
-sits beside `state.db` with the same file permissions. A rewritten row's old
+counts them. A keyless store must receive a secrets key before rotation can seal its rows.
+Local stores use `secrets.key` beside `state.db`. Keep that key separate from
+database-only backups when those backups require protection from their readers. A rewritten row's old
 plaintext can survive in SQLite free pages and WAL frames or PostgreSQL dead
 tuples until the database is vacuumed, and in every backup taken before the
 rewrite. Treat those copies as holding the plaintext arguments.
 
 ### Rotating the secrets key
 
-One key seals every team's secrets, git credentials, run arguments and
+One key seals every team's secrets, git credentials, run and schedule arguments and
 submitted run environments, and the session signing key. To replace it:
 
 1. Generate a new key (`openssl rand -base64 32`).
@@ -468,12 +474,12 @@ submitted run environments, and the session signing key. To replace it:
    `operator.tokens`, or `POST /api/v1/operator/secrets/rotate` from a console
    session signed in within the last 10 minutes. It reseals every row under the
    new key, one team at a time, and reports counts, `previous_key_only` (rows
-   that needed the previous key), `plaintext_run_arguments` (run documents it
+   that needed the previous key), `plaintext_run_arguments` (run and schedule documents it
    sealed for the first time) and any row neither key opens. It is safe to
    repeat, including after an interruption.
 4. Run `sparkwing operator secrets rotate --verify` (`?verify=1`). It writes
    nothing and reports how many rows still open only under the previous key and
-   how many run documents still hold plaintext arguments. Run the rotation again
+   how many run and schedule documents still hold plaintext arguments. Run the rotation again
    until it reports `previous_key_only: 0` and `plaintext_run_arguments: 0`.
 5. When verification reports zero and nothing unreadable, remove
    `secrets-key.previous` and restart every replica. A row reported unreadable

@@ -256,7 +256,11 @@ func (t *Tenant) AcceptExpansion(ctx context.Context, request ExpansionSubmissio
 				return err
 			}
 		}
-		write, err := tx.execContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_registration=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, accepted.hash, accepted.body, registration, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
+		storedBody, err := encodeJobArgumentBody(t.s, t.team, string(request.Source.RunID), expansionBodyArgumentsScope(string(request.Source.NodeID)), accepted.body)
+		if err != nil {
+			return err
+		}
+		write, err := tx.execContext(ctx, `UPDATE nodes SET expansion=?,expansion_digest=?,expansion_body=?,expansion_registration=?,expansion_failure=? WHERE team=? AND run_id=? AND node_id=? AND generation=? AND expansion='expected'`, result.State, accepted.hash, storedBody, registration, accepted.failure, t.team, request.Source.RunID, request.Source.NodeID, request.SourceGeneration)
 		if err != nil {
 			return err
 		}
@@ -444,7 +448,11 @@ func writeAcceptedPlanTx(ctx context.Context, tx *storeTx, team Team, id string,
 	if err != nil {
 		return err
 	}
-	write, err := tx.execContext(ctx, `UPDATE runs SET spec_json=?,spec_hash=?,sealed_at=?,plan_json=?,plan_hash=?,plan_accepted_generation=?,claim_wait_ns=?,admission=? WHERE team=? AND id=? AND sealed_at IS NULL`, raw, spec.Hash, spec.SealedAt.UnixNano(), []byte(body), spec.PlanHash, generation, int64(spec.Resolved.Settings.Options.ClaimWait.Value), spec.Resolved.Settings.Options.AdmissionClass.Value, team, id)
+	storedPlan, err := encodeJobArgumentBody(tx.store, team, id, planArgumentsScope, body)
+	if err != nil {
+		return err
+	}
+	write, err := tx.execContext(ctx, `UPDATE runs SET spec_json=?,spec_hash=?,sealed_at=?,plan_json=?,plan_hash=?,plan_accepted_generation=?,claim_wait_ns=?,admission=? WHERE team=? AND id=? AND sealed_at IS NULL`, raw, spec.Hash, spec.SealedAt.UnixNano(), storedPlan, spec.PlanHash, generation, int64(spec.Resolved.Settings.Options.ClaimWait.Value), spec.Resolved.Settings.Options.AdmissionClass.Value, team, id)
 	if err != nil {
 		return err
 	}

@@ -64,7 +64,13 @@ func readRunTx(ctx context.Context, tx *storeTx, team Team, id string) (RunRow, 
 	v.argumentsUnavailable = v.argumentsUnavailable || unavailable
 	v.Lineage, v.Retry = execution.Lineage, execution.Retry
 	v.admission = execution.admissionIdentity
-	v.Plan = plan
+	v.Plan, err = decodeArgumentBody(tx.store, team, id, planArgumentsScope, plan)
+	if err != nil {
+		if !tx.listing || !runArgumentsUnreadable(err) {
+			return v, err
+		}
+		v.argumentsUnavailable = true
+	}
 	v.CreatedAt = time.Unix(0, created).UTC()
 	v.CancelRequestedAt, v.StartedAt, v.FinishedAt = stateTime(cancel), stateTime(start), stateTime(finish)
 	if v.Request.Request.Mode == runspec.IntakePublish {
@@ -98,18 +104,22 @@ const nodeReadColumns = `node_id,status,outcome,status_detail,failure_reason,COA
  WHERE a.team=nodes.team AND a.run_id=nodes.run_id AND a.node_id=nodes.node_id)`
 
 func readNodeTx(ctx context.Context, tx *storeTx, team Team, ref runspec.NodeRef) (runstate.NodeRow, error) {
-	node, err := scanNode(tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID), ref.RunID)
+	node, err := scanNode(tx.store, team, tx.QueryRowContext(ctx, `SELECT `+nodeReadColumns+` FROM nodes WHERE team=? AND run_id=? AND node_id=?`, team, ref.RunID, ref.NodeID), ref.RunID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runstate.NodeRow{Ref: ref}, notFound("job", string(ref.NodeID))
 	}
 	return node, err
 }
 
-func scanNode(row rowScanner, runID runspec.RunID) (runstate.NodeRow, error) {
+func scanNode(s *Store, team Team, row rowScanner, runID runspec.RunID) (runstate.NodeRow, error) {
 	v := runstate.NodeRow{Ref: runspec.NodeRef{RunID: runID}}
 	var ready, queued, groupWait, lease, start, finish, cancel sql.NullInt64
 	var actor, execution, output, manifest []byte
 	err := row.Scan(&v.Ref.NodeID, &v.Status, &v.Outcome, &v.StatusDetail, &v.FailureReason, &v.ClaimedBy, &v.CapabilityPrefix, &v.OwnerCapabilityPrefix, &v.Generation, &v.Attempt, &v.Disruptions, &ready, &queued, &groupWait, &lease, &start, &finish, &cancel, &v.CancelReason, &v.StateSeq, &v.StateDigest, &actor, &v.Expansion, &v.ExpansionDigest, &execution, &v.Spec, &v.SpecHash, &output, &manifest, &v.ApplicationRetries)
+	if err != nil {
+		return v, err
+	}
+	v.Spec, err = decodeArgumentBody(s, team, string(runID), nodeArgumentsScope(string(v.Ref.NodeID)), v.Spec)
 	if err != nil {
 		return v, err
 	}
@@ -178,6 +188,14 @@ func readAcceptedExpansionsTx(ctx context.Context, tx *storeTx, team Team, id st
 				_ = rows.Close()
 				return out, false, errors.New("accepted expansion is missing host masking registrations; start a new run instead of resuming")
 			}
+			body, err = decodeArgumentBody(tx.store, team, id, expansionBodyArgumentsScope(node), body)
+			if err != nil {
+				if !tx.listing || !runArgumentsUnreadable(err) {
+					return out, false, errors.Join(err, rows.Close())
+				}
+				unavailable = true
+				continue
+			}
 			bodyHash, err := runspec.CanonicalHash(json.RawMessage(body))
 			if err != nil {
 				_ = rows.Close()
@@ -230,7 +248,7 @@ func readSnapshotTx(ctx context.Context, tx *storeTx, team Team, id string) (Run
 		return out, err
 	}
 	for rows.Next() {
-		node, err := scanNode(rows, runspec.RunID(id))
+		node, err := scanNode(tx.store, team, rows, runspec.RunID(id))
 		if err != nil {
 			return out, errors.Join(err, rows.Close())
 		}

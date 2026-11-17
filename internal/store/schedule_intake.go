@@ -90,6 +90,11 @@ func (t *Tenant) admitSchedule(ctx context.Context, schedule CronSchedule, key s
 		}
 		return AdmissionResult{}, err
 	}
+	plainConsent, err := decodeScheduleDocument(t.s, t.team, schedule.ID, "consent_json", []byte(in.consent))
+	if err != nil {
+		return AdmissionResult{}, err
+	}
+	in.consent = string(plainConsent)
 	display, err := scheduleDisplay(schedule)
 	if err != nil {
 		return AdmissionResult{}, err
@@ -241,7 +246,7 @@ func (in scheduleAdmission) resolve(ctx context.Context, tx *storeTx) (capabilit
 			return capability.Principal{}, err
 		}
 	}
-	current, err := scanCronSchedule(tx.QueryRowContext(ctx, `SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team=? AND id=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=?)`+tx.forUpdate(), s.Team, s.ID, s.Team).Scan)
+	current, err := scanCronSchedule(tx.store, tx.QueryRowContext(ctx, `SELECT `+cronScheduleColumns+` FROM cron_schedules WHERE team=? AND id=? AND NOT EXISTS (SELECT 1 FROM team_deletions WHERE slug=?)`+tx.forUpdate(), s.Team, s.ID, s.Team).Scan)
 	if err != nil {
 		return capability.Principal{}, err
 	}
@@ -249,6 +254,11 @@ func (in scheduleAdmission) resolve(ctx context.Context, tx *storeTx) (capabilit
 	if err := tx.QueryRowContext(ctx, `SELECT consent_json FROM cron_schedules WHERE team=? AND id=?`, s.Team, s.ID).Scan(&raw); err != nil {
 		return capability.Principal{}, err
 	}
+	plainConsent, err := decodeScheduleDocument(tx.store, s.Team, s.ID, "consent_json", []byte(raw))
+	if err != nil {
+		return capability.Principal{}, err
+	}
+	raw = string(plainConsent)
 	if raw != in.consent {
 		return capability.Principal{}, bindingRefusal()
 	}

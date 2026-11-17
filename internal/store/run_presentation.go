@@ -54,6 +54,7 @@ func (s *Store) refreshRunPresentations(ctx context.Context, runs []*Run, isolat
 		if err != nil {
 			return err
 		}
+		run.PlanSnapshot = row.Plan
 		display := row.Display()
 		run.TrustClass = display.TrustClass
 		run.Args = display.RequestedArgs

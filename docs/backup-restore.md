@@ -5,6 +5,17 @@ Keep a database backup, its matching controller image or binary, and the keys
 needed to open it. Rehearse recovery on an isolated controller before upgrading
 the live one. See [self-hosting](self-hosting.md) for deployment requirements.
 
+Argument encryption covers schedule declarations, overrides, consent requests,
+fire history and job defaults in plan, node and expansion documents. Restore
+the matching secrets keys before reading or resuming that work. After upgrading
+all controller readers, run `sparkwing operator secrets rotate` to seal legacy
+plaintext rows, then `sparkwing operator secrets rotate --verify`. Require zero
+plaintext argument documents and zero previous-key-only rows, with no unreadable
+rows. Database free pages, WAL, dead tuples and backups from before the rewrite
+can retain plaintext. Keep retired keys for encrypted older backups and protect
+older plaintext backups through their retention period. See
+[argument encryption migration](migrations/_unreleased.md#schedule-and-job-argument-encryption).
+
 ## Recovery inventory
 
 Record the controller version and image digest, startup arguments, database
