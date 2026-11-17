@@ -520,7 +520,8 @@ npm --prefix .sparkwing install --save-dev --save-exact @types/node@22
 
 In `.sparkwing/tsconfig.json`, add `"node"` to `compilerOptions.types` (create
 `"types": ["node"]` if absent). Keep any existing type entries. Run
-`npm --prefix .sparkwing exec -- tsc --noEmit`, then retry
+`npm --prefix .sparkwing exec -- tsc --noEmit --project .sparkwing/tsconfig.json`,
+then retry
 `sparkwing pipeline upgrade`. Commit `package.json`, `package-lock.json` and
 `tsconfig.json` under `.sparkwing/`. Upgrading the SDK pin does not add these
 project settings.
