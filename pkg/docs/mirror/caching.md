@@ -321,6 +321,8 @@ those.
 After each new entry, Sparkwing reclaims inactive entries to fit a byte
 ceiling and an entry count.
 
+Before editing these settings, follow the [0600 config recipe](machine-config.md#permissions).
+
 | [config.yaml](machine-config.md) key | Default | Meaning |
 | --- | --- | --- |
 | `cache.max_bytes` | `2GiB` | Total size ceiling. Accepts a suffix (`512MiB`, `4GB`). `0` disables. |

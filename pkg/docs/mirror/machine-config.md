@@ -102,6 +102,9 @@ daemon reads the budget at start, so restart it after a change.
 
 ## Dashboard
 
+Before editing `config.yaml`, follow [Permissions](#permissions) to create the
+file with mode `0600`.
+
 The shared local controller serves the dashboard whenever it runs.
 `dashboard.address` is the loopback IP and port it binds, `127.0.0.1:4343` by
 default. A non-loopback or host-name bind address is refused. A browser on
