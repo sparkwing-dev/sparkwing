@@ -288,7 +288,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 					}
 					// safety: admission precedes the response, so request latency cannot shorten the server's interval.
 					interval := max(poll, pollAfter)
-					// perf: fresh capacity is already requested; the sole expected wait can continue this burst.
+					// perf: the sole expected placement wait can continue this burst.
 					claimImmediately = immediate && (err == nil || launched && err == ErrNoDedicatedNode) //nolint:errorlint // Joined provisioning faults retain cooldown.
 					if claimImmediately {
 						interval = 0
