@@ -68,6 +68,7 @@ class BudgetProbeTest(unittest.TestCase):
                         burner.wait.assert_called_once()
             return json.loads(output.read_text())
 
+    @unittest.skipUnless(probe.sys.platform == "linux", "hosted runner proof requires Linux")
     def test_both_runner_cases_reuse_the_build_cache(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
