@@ -232,10 +232,7 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 				}
 				commands = append(commands, append([]string{program}, args...))
 				if program == selected.Executable && args[0] == "commands" {
-					if args[2] == "sparkwing pipeline "+tc.readVerb {
-						return []byte(`{"path":"sparkwing pipeline ` + tc.readVerb + `"}`), nil
-					}
-					return []byte(`{"kind":"page","total":0}`), nil
+					return []byte(`{"path":"sparkwing pipeline ` + tc.readVerb + `"}`), nil
 				}
 				if program == selected.Executable && len(args) > 1 && args[1] == "list" {
 					return catalog.Bytes(), nil
@@ -255,11 +252,7 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 					wantNative = [][]string{{"npm", "exec", "--offline", "--no", "--", "tsc", "--noEmit"}}
 				}
 			}
-			indexCalls := 1
-			if tc.readVerb == "describe" {
-				indexCalls = 2
-			}
-			if installs != 1 || len(commands) != len(wantNative)+5+indexCalls {
+			if installs != 1 || len(commands) != len(wantNative)+6 {
 				t.Fatalf("commands: %v", commands)
 			}
 			if !reflect.DeepEqual(commands[:len(wantNative)], wantNative) {
@@ -268,7 +261,7 @@ func TestUpgradeVerifierUsesStagedCheckoutAndExactEngine(t *testing.T) {
 			commands = commands[len(wantNative):]
 			for _, command := range commands {
 				if command[1] == "commands" {
-					if command[0] != selected.Executable || len(command) != 7 || command[2] != "--path" || command[4] != "--limit" || command[5] != "1" || command[6] != "--output=json" {
+					if command[0] != selected.Executable || len(command) != 7 || command[2] != "--path" || command[3] != "sparkwing pipeline" || command[4] != "--limit" || command[5] != "40" || command[6] != "--output=json" {
 						t.Fatalf("command discovery: %v", command)
 					}
 					continue

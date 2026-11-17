@@ -118,17 +118,22 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 
 // safety: a selected published engine may predate the CLI read-verb cut.
 func (v *upgradeVerifier) pipelineReadVerb(ctx context.Context, checkout string, env procenv.Env, executable string) (string, error) {
-	for _, verb := range []string{"show", "describe"} {
-		path := "sparkwing pipeline " + verb
-		raw, err := v.exec(ctx, checkout, env, executable, "commands", "--path", path, "--limit", "1", "--output=json")
+	verb, cursor := "", ""
+	for {
+		args := []string{"commands", "--path", "sparkwing pipeline", "--limit", "40", "--output=json"}
+		if cursor != "" {
+			args = append(args, "--cursor", cursor)
+		}
+		raw, err := v.exec(ctx, checkout, env, executable, args...)
 		if err != nil {
 			return "", fmt.Errorf("upgrade: inspect selected engine commands: %w", err)
 		}
 		decoder := json.NewDecoder(bytes.NewReader(raw))
-		found := false
+		next := ""
 		for {
 			var command struct {
-				Path string `json:"path"`
+				Path       string `json:"path"`
+				NextCursor string `json:"next_cursor"`
 			}
 			err := decoder.Decode(&command)
 			if errors.Is(err, io.EOF) {
@@ -137,13 +142,30 @@ func (v *upgradeVerifier) pipelineReadVerb(ctx context.Context, checkout string,
 			if err != nil {
 				return "", fmt.Errorf("upgrade: decode selected engine command index: %w", err)
 			}
-			found = found || command.Path == path
+			switch command.Path {
+			case "sparkwing pipeline show":
+				verb = "show"
+			case "sparkwing pipeline describe":
+				if verb == "" {
+					verb = "describe"
+				}
+			}
+			if command.NextCursor != "" {
+				next = command.NextCursor
+			}
 		}
-		if found {
-			return verb, nil
+		if next == "" {
+			break
 		}
+		if next == cursor {
+			return "", errors.New("upgrade: selected engine command index did not advance")
+		}
+		cursor = next
 	}
-	return "", errors.New("upgrade: selected engine advertises no pipeline detail command")
+	if verb == "" {
+		return "", errors.New("upgrade: selected engine advertises no pipeline detail command")
+	}
+	return verb, nil
 }
 
 func (v *upgradeVerifier) compileGo(ctx context.Context, dir string, env procenv.Env, pin engineid.Pin) error {
