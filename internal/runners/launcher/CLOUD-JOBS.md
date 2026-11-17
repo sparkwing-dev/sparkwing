@@ -427,13 +427,20 @@ and defaults to five seconds. Cloud launcher claims wait for the controller
 commit that makes work claimable. Only one claim waits at a time, while
 reconciliation, renewal and teardown continue. A delivered award without poll advice starts another
 claim after placement, and a held empty response starts another claim at once.
+Up to eight ready awards launch between safety passes without an intervening
+full reconciliation. Each launch still revalidates its own preparation and
+activation. After eight awards, the next claim waits for the configured poll.
+Claim responses cannot postpone the safety reconciliation deadline.
 A controller without held-claim support keeps the polling fallback.
 
 A watch on launcher-managed Pods in the job namespace wakes reconciliation
 when capacity starts or predecessor containers exit. Events only request a
 fresh pass through the same reservation, award, UID and admission checks.
-The safety poll recovers missed events. A failed or closed watch reconnects
-no sooner than the next poll. Held same-run successors also retain the
+Queued Pod events, including an ADDED replay after reconnecting, share one
+reconciliation pass. The safety poll recovers missed events. A failed or closed
+watch reconnects no sooner than the next poll. A failure streak warns once with
+the namespace, resource and verb. A forbidden watch names the missing permission.
+A healthy event or a full poll interval with a live watch resets the streak. Held same-run successors also retain the
 one-second teardown check and its 30-second bound.
 `--idle-grace <duration>` sets how long a used node may sit unreserved before
 retirement. It defaults to 60 seconds and must be at least the claim poll plus
@@ -631,7 +638,18 @@ advice bounds and reconciliation through a temporary failure with a fake clock.
 `TestRunHoldsClaimWithoutBlockingReconciliation` guard wake latency, recovery
 and independent reconciliation. The controller's
 `TestCloudLauncherClaimWakesOnCommitAndRecoversMissedSignal` guards the actual
-commit wake and a missed signal at the bounded rescan.
+real readiness commit wake and a missed signal at the bounded rescan.
+Cloud commit notifications coalesce behind a 250 ms minimum gap between searches;
+readiness after an idle gap wakes at once. The initial search, hold deadline,
+group-wait deadline and cancellation keep their existing boundaries. Local
+controller holds retain immediate commit wakes.
+`TestCloudLauncherHeldSearchCoalescesCommits` bounds 49 unrelated writes at 100 ms
+intervals to at most 20 searches in a five-second hold.
+`TestLauncherLaunchesWorkReadyTogetherInOneCycle` guards the production adapter's
+API-call count. `TestLauncherCoalescesPodWatchReplay`,
+`TestLauncherWarnsOncePerPodWatchFailureStreak` and
+`TestLauncherHeldRepliesKeepSafetyReconciliationOnSchedule` guard burst load,
+visible fallback and safety scheduling.
 
 Poll advice is process-local. The first claim after launcher startup logs a
 controller rate-limit reply at INFO,

@@ -19,6 +19,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
+const cloudClaimSearchInterval = 250 * time.Millisecond
+
 // RunnerAdmissionPolicy checks server-owned software policy before a new award.
 // Renewals do not call it because an existing runner must remain able to drain.
 type RunnerAdmissionPolicy interface {
@@ -131,7 +133,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 			break
 		}
 		if !held.IsZero() {
-			again, err := s.awaitClaimable(ctx, wake, committed, held, store.Team(principal.Capability.Team), searched)
+			again, err := s.awaitClaimable(ctx, wake, committed, held, store.Team(principal.Capability.Team), searched, capability.CloudLauncher(c))
 			if err != nil {
 				return controllerwire.ClaimResponse{}, err
 			}
@@ -158,7 +160,7 @@ func (s *EngineController) claim(ctx context.Context, authorized capability.Auth
 
 // perf: reports whether to search again, which only a commit or a lapsing
 // group wait can make worthwhile; false once the hold reaches until or the claimant leaves.
-func (s *EngineController) awaitClaimable(ctx context.Context, wake ClaimWake, committed <-chan struct{}, until time.Time, team store.Team, searched time.Time) (bool, error) {
+func (s *EngineController) awaitClaimable(ctx context.Context, wake ClaimWake, committed <-chan struct{}, until time.Time, team store.Team, searched time.Time, cloud bool) (bool, error) {
 	wait := time.Until(until)
 	if wait <= 0 {
 		return false, nil
@@ -177,7 +179,20 @@ func (s *EngineController) awaitClaimable(ctx context.Context, wake ClaimWake, c
 	defer timer.Stop()
 	select {
 	case <-committed:
-		return true, nil
+		if !cloud {
+			return true, nil
+		}
+		delay := min(max(time.Until(searched.Add(cloudClaimSearchInterval)), 0), max(time.Until(until), 0))
+		if timed {
+			delay = min(delay, max(time.Until(lapse), 0))
+		}
+		timer.Reset(delay)
+		select {
+		case <-timer.C:
+			return time.Now().Before(until), nil
+		case <-ctx.Done():
+			return false, nil
+		}
 	case <-timer.C:
 		return time.Now().Before(until), nil
 	case <-ctx.Done():

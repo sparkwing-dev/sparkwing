@@ -37,7 +37,7 @@ func (c *claimWait) stop(cancel context.CancelFunc) {
 }
 
 func (c *claimWait) step(ctx context.Context, poll time.Duration) (launched bool, pollAfter time.Duration, immediate, completed bool, err error) {
-	waiter, ok := c.launcher.Control.(claimWaiter)
+	_, ok := c.launcher.Control.(claimWaiter)
 	if !ok {
 		launched, pollAfter, err = c.launcher.claimReady(ctx)
 		c.completedAt = time.Now()
@@ -55,19 +55,25 @@ func (c *claimWait) step(ctx context.Context, poll time.Duration) (launched bool
 		}
 		return launched, result.pollAfter, result.immediate, true, err
 	}
-	if c.pending == nil {
-		excluded := make([]string, 0, len(c.launcher.Config.StoppedTeams))
-		for _, team := range c.launcher.Config.StoppedTeams {
-			excluded = append(excluded, TeamNodeValue(c.launcher.Config.Namespace, team))
-		}
-		done := make(chan claimResult, 1)
-		c.pending = done
-		// safety: only delivery waits concurrently; all placement and teardown stay in the reconciliation loop.
-		go func() {
-			result := waiter.waitClaim(ctx, c.launcher.Config.Namespace, excluded, poll)
-			result.received = time.Now()
-			done <- result
-		}()
-	}
+	c.start(ctx, poll)
 	return false, 0, false, false, nil
+}
+
+func (c *claimWait) start(ctx context.Context, poll time.Duration) {
+	waiter, ok := c.launcher.Control.(claimWaiter)
+	if !ok || c.pending != nil || c.result != nil || ctx.Err() != nil {
+		return
+	}
+	excluded := make([]string, 0, len(c.launcher.Config.StoppedTeams))
+	for _, team := range c.launcher.Config.StoppedTeams {
+		excluded = append(excluded, TeamNodeValue(c.launcher.Config.Namespace, team))
+	}
+	done := make(chan claimResult, 1)
+	c.pending = done
+	// safety: only delivery waits concurrently; all placement and teardown stay in the reconciliation loop.
+	go func() {
+		result := waiter.waitClaim(ctx, c.launcher.Config.Namespace, excluded, poll)
+		result.received = time.Now()
+		done <- result
+	}()
 }
