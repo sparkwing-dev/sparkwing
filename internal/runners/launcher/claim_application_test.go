@@ -3,6 +3,7 @@ package launcher
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"sync/atomic"
 	"testing"
@@ -113,7 +114,7 @@ func TestLauncherRecordsClaimApplicationOnceAcrossPlacementRetries(t *testing.T)
 	boundary.reserveErr = ErrNoDedicatedNode
 	var logs bytes.Buffer
 	l.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
-	if _, err := l.LaunchOne(t.Context()); err != ErrNoDedicatedNode {
+	if _, err := l.LaunchOne(t.Context()); !errors.Is(err, ErrNoDedicatedNode) {
 		t.Fatal(err)
 	}
 	for range 3 {
