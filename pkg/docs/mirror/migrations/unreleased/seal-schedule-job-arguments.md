@@ -1,7 +1,11 @@
 ## Schedule and job argument encryption
 
 Keyed stores seal schedule arguments and job-level `WithArgs` defaults using the
-run-argument keyring. The store upgrades schema 39 to 40 in the open transaction
+run-argument keyring.
+
+## Upgrade the store in place to schema baseline 40
+
+The store upgrades schema 39 to 40 in the open transaction
 on SQLite and PostgreSQL. This version fence protects the changed JSON format even though the
 SQL table layout stays the same. Older binaries refuse the newer store rather
 than misreading encrypted arguments. SQLite takes the normal pre-upgrade backup.

@@ -50,3 +50,32 @@ func TestMalformedArgumentDocumentsNeverSkipSealing(t *testing.T) {
 		t.Fatal("malformed node arguments were accepted")
 	}
 }
+
+func TestNodeArgumentsLeaveUnrelatedLegacyShapesReadable(t *testing.T) {
+	s := bindingStore(t)
+	for _, raw := range []string{
+		`{"id":"job","env":{"PRIVATE":"private-environment"}}`,
+		`{"id":"job","env":{"PRIVATE":"private-environment"},"arguments":[{"default":"binding-canary-91f2"}]}`,
+	} {
+		legacy, err := decodeNodeSpec(s, "a", "run", "job", []byte(raw))
+		if err != nil || !bytes.Equal(legacy, []byte(raw)) {
+			t.Fatalf("legacy metadata became unreadable: %v", err)
+		}
+		stored, err := encodeNodeSpec(s.runEnvCipher, "a", "run", "job", []byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plain, err := decodeNodeSpec(s, "a", "run", "job", stored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before, err := runspec.CanonicalHash(json.RawMessage(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		after, err := runspec.CanonicalHash(json.RawMessage(plain))
+		if err != nil || before != after {
+			t.Fatalf("legacy shape changed: %v", err)
+		}
+	}
+}

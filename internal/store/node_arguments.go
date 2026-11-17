@@ -2,11 +2,16 @@ package store
 
 import (
 	"encoding/json"
-
-	nodewire "github.com/sparkwing-dev/sparkwing/sparkwing/protocol"
 )
 
-func nodeArgumentSlots(job *nodewire.JobSpec) argumentSlots {
+type nodeArgumentDefault struct {
+	Default *string `json:"default,omitempty"`
+}
+type nodeArgumentDocument struct {
+	Arguments []nodeArgumentDefault `json:"arguments,omitempty"`
+}
+
+func nodeArgumentSlots(job *nodeArgumentDocument) argumentSlots {
 	var slots argumentSlots
 	for i := range job.Arguments {
 		if value := job.Arguments[i].Default; value != nil {
@@ -17,7 +22,7 @@ func nodeArgumentSlots(job *nodewire.JobSpec) argumentSlots {
 }
 
 func encodeNodeSpec(cipher SessionKeyCipher, team Team, run, node string, raw []byte) ([]byte, error) {
-	var job nodewire.JobSpec
+	var job nodeArgumentDocument
 	if json.Unmarshal(raw, &job) != nil {
 		return nil, corruptRunArguments()
 	}
@@ -39,13 +44,6 @@ func encodeNodeSpec(cipher SessionKeyCipher, team Team, run, node string, raw []
 }
 
 func decodeNodeSpec(s *Store, team Team, run, node string, raw []byte) ([]byte, error) {
-	var job nodewire.JobSpec
-	if err := decodeRunDocument(s, team, run, nodeArgumentsScope(node), raw, &job, nodeArgumentSlots); err != nil {
-		if runArgumentsUnreadable(err) {
-			return nil, err
-		}
-		return nil, corruptRunArguments()
-	}
 	envelope, err := sealedArgumentsEnvelope(raw)
 	if err != nil {
 		return nil, corruptRunArguments()
@@ -53,11 +51,18 @@ func decodeNodeSpec(s *Store, team Team, run, node string, raw []byte) ([]byte, 
 	if envelope == "" {
 		return raw, nil
 	}
+	var job nodeArgumentDocument
+	if err := decodeRunDocument(s, team, run, nodeArgumentsScope(node), raw, &job, nodeArgumentSlots); err != nil {
+		if runArgumentsUnreadable(err) {
+			return nil, err
+		}
+		return nil, corruptRunArguments()
+	}
 	return replaceNodeDefaults(raw, job.Arguments, "")
 }
 
 // safety: only default fields change; unknown metadata and large JSON integers remain hash-bound as written.
-func replaceNodeDefaults(raw []byte, defaults []nodewire.ArgumentDescription, envelope string) ([]byte, error) {
+func replaceNodeDefaults(raw []byte, defaults []nodeArgumentDefault, envelope string) ([]byte, error) {
 	var fields map[string]json.RawMessage
 	if json.Unmarshal(raw, &fields) != nil {
 		return nil, corruptRunArguments()
