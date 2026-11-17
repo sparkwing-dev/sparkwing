@@ -50,7 +50,7 @@ func TestUpdateGuideDescribesPrivateControllerRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, promise := range []string{"even when no login service is", "A stopped controller stays stopped.", "The old runner stops taking new claims", "not for those jobs to finish"} {
+	for _, promise := range []string{"even when no login service is", "A stopped controller stays stopped.", "Once the successor runner activates", "old runner stops taking new claims", "not for those jobs to finish", "`sparkwing daemon restart` once with the newly installed CLI"} {
 		if !strings.Contains(body, promise) {
 			t.Errorf("update guide omits %q", promise)
 		}
