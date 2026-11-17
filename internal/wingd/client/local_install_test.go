@@ -190,3 +190,5 @@ func TestLocalInstallRefusesUnverifiedSuccessorAndPreservesFailures(t *testing.T
 		})
 	}
 }
+
+func (u *installingUnits) ControllerInstalled(context.Context) (bool, error) { return false, nil }

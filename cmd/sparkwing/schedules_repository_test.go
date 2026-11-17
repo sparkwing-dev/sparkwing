@@ -489,3 +489,5 @@ func TestScheduleInstallRefusesInlineKeysBeforeResolvingServices(t *testing.T) {
 		})
 	}
 }
+
+func (f scheduleUnitsFixture) ControllerInstalled(context.Context) (bool, error) { return false, nil }

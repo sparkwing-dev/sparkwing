@@ -251,11 +251,12 @@ func composeLocalServices(ctx context.Context, config wingd.LocalRuntimeConfig, 
 		return result, &apierr.Error{Code: apierr.BadRequest, Message: "local runtime and managed units must use the same home"}
 	}
 	config.Admission.Home = home
-	result.runtime, err = wingd.NewLocalRuntime(config)
+	result.units, err = wingd.NewManagedUnitManager(host)
 	if err != nil {
 		return dashboardServices{}, err
 	}
-	result.units, err = wingd.NewManagedUnitManager(host)
+	config.Installed = result.units.ControllerInstalled
+	result.runtime, err = wingd.NewLocalRuntime(config)
 	if err != nil {
 		return dashboardServices{}, err
 	}

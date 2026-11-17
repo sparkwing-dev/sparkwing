@@ -289,8 +289,16 @@ caller after that cleanup, with the original service error preserved.
 The daemon accepts live controller counts through `setLocalActivity` for status.
 The runtime counts its dashboard HTTP connections until they close, including
 idle keep-alive sockets and hijacked connections. Controller activity updates
-cannot erase that count. The controller remains running while idle until an
-explicit stop, context cancellation or runtime failure.
+cannot erase that count. The OS account's default home and installed login services
+remain running while idle. Private on-demand controllers retire their runner and
+exit after 20 minutes without work, admission participants or client connections.
+Runner claim, lifecycle and probe traffic does not extend that interval. Raw
+socket liveness probes do not reset idle time, including probes from another
+controller's stale-socket cleanup. The
+runtime checks fresh store activity before retirement. Account-home lookup errors
+keep the controller running. The next client starts a new controller through the
+same election path. Explicit stop, context cancellation and runtime failure also
+stop the controller.
 
 The client `Probe` API reads controller HTTP status without requesting queue work.
 

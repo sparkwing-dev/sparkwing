@@ -31,8 +31,10 @@ The local controller owns the state store, admission, queue and dashboard in one
 home. Local pipeline execution stays in the CLI process. Standalone CI uses the
 same runtime in process and must not open a home already owned by a controller.
 
-The local controller remains running while idle. Use `sparkwing daemon stop` to
-stop it.
+The OS account's default controller and installed login services remain running
+while idle. Private on-demand homes retire after 20 minutes without work or
+clients, and the next CLI call starts them again. Use `sparkwing daemon stop` to
+stop a controller explicitly.
 
 Login services on Linux and macOS use a foreground controller process with an
 absolute home. The CLI adapter forwards home, version and standalone mode

@@ -712,7 +712,7 @@ func TestLocalDashboardSlowAuthDoesNotBlockOtherSessions(t *testing.T) {
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- serveLocalHTTP(ctx, listener, handler, nil, nil, 200*time.Millisecond) }()
+	go func() { done <- serveLocalHTTP(ctx, listener, handler, nil, nil, 200*time.Millisecond, nil) }()
 	defer func() {
 		cancel()
 		if err := <-done; err != nil {

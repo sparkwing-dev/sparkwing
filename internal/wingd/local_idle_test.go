@@ -1,0 +1,593 @@
+package wingd
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"testing/synctest"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+)
+
+func TestPrivateControllerIdleExitAndNextClient(t *testing.T) {
+	initIdleTestSignals()
+	synctest.Test(t, func(t *testing.T) {
+		f := &runtimeControllerFixture{}
+		r := newRuntimeFixture(t, f)
+		lifecycle := NewLocalLifecycle(r, nil)
+		opts := LocalStartOptions{Home: f.home, Version: "v1"}
+		if _, err := lifecycle.EnsureStarted(t.Context(), opts); err != nil {
+			t.Fatal(err)
+		}
+		first := r.run
+		time.Sleep(19 * time.Minute)
+		synctest.Wait()
+		if status, _ := lifecycle.Status(t.Context()); !status.Running {
+			t.Fatal("stopped before idle bound")
+		}
+		time.Sleep(2 * time.Minute)
+		synctest.Wait()
+		if status, _ := lifecycle.Status(t.Context()); status.Running || !f.closed.Load() {
+			t.Fatal("private controller did not exit and close its store")
+		}
+		if held, err := LockHeld(f.home); err != nil || held {
+			t.Fatalf("idle exit retained election: %t %v", held, err)
+		}
+		f.closed.Store(false)
+		if _, err := lifecycle.EnsureStarted(t.Context(), opts); err != nil {
+			t.Fatal(err)
+		}
+		if r.run == first {
+			t.Fatal("next client reused the stopped session")
+		}
+		if err := lifecycle.Stop(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestPrivateControllerBusyResetsIdleBound(t *testing.T) {
+	initIdleTestSignals()
+	for _, kind := range []string{"run", "queue", "held", "dashboard", "cli", "admission"} {
+		t.Run(kind, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := &runtimeControllerFixture{}
+				r := newRuntimeFixture(t, f)
+				lifecycle := NewLocalLifecycle(r, nil)
+				if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
+					t.Fatal(err)
+				}
+				d := r.run.daemon
+				activity := LocalActivity{}
+				participant := &conn{}
+				d.mu.Lock()
+				switch kind {
+				case "run":
+					activity.Runs = 1
+				case "queue":
+					activity.QueuedTriggers = 1
+				case "held":
+					activity.HeldLeases = 1
+				case "dashboard":
+					d.dashboardConns = 1
+				case "cli":
+					d.idleClients = map[net.Conn]idleClient{nil: {classified: true}}
+				case "admission":
+					d.conns[participant] = struct{}{}
+				}
+				d.mu.Unlock()
+				if err := d.setLocalActivity(activity); err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(21 * time.Minute)
+				synctest.Wait()
+				if status, _ := r.Status(t.Context()); !status.Running {
+					t.Fatal("busy controller exited")
+				}
+				d.mu.Lock()
+				d.dashboardConns = 0
+				d.idleClients = nil
+				delete(d.conns, participant)
+				d.mu.Unlock()
+				if err := d.setLocalActivity(LocalActivity{}); err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(19 * time.Minute)
+				synctest.Wait()
+				if status, _ := r.Status(t.Context()); !status.Running {
+					t.Fatal("busy time counted toward idle bound")
+				}
+				time.Sleep(2 * time.Minute)
+				synctest.Wait()
+				if status, _ := r.Status(t.Context()); status.Running {
+					t.Fatal("controller remained after work ended")
+				}
+			})
+		})
+	}
+}
+
+func TestDefaultControllerNeverIdleExits(t *testing.T) {
+	initIdleTestSignals()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	synctest.Test(t, func(t *testing.T) {
+		f := &runtimeControllerFixture{home: filepath.Join(home, ".sparkwing")}
+		r := newRuntimeFixture(t, f)
+		r.accountHome = func() (string, error) { return home, nil }
+		lifecycle := NewLocalLifecycle(r, nil)
+		if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Hour)
+		synctest.Wait()
+		if status, _ := r.Status(t.Context()); !status.Running {
+			t.Fatal("default controller exited")
+		}
+	})
+}
+
+func TestPrivateIdleRetiresRunnerAndLogsHome(t *testing.T) {
+	initIdleTestSignals()
+	synctest.Test(t, func(t *testing.T) {
+		f := &runtimeControllerFixture{}
+		r := newRuntimeFixture(t, f)
+		registry := &runtimeRetirement{controller: f, runnerHTTPFixture: runnerHTTPFixture{instance: localhostwire.LocalRunnerInstance{ID: "runner", PID: os.Getpid(), ProcessBirth: "retired-incarnation", State: "active"}}}
+		r.cfg.Open = func(context.Context, string) (LocalController, error) {
+			return &retiringRuntimeController{f, registry}, nil
+		}
+		var logs strings.Builder
+		r.cfg.Admission.Logf = func(format string, args ...any) { fmt.Fprintf(&logs, format+"\n", args...) }
+		if _, err := NewLocalLifecycle(r, nil).EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(21 * time.Minute)
+		synctest.Wait()
+		if !registry.drained || !f.closed.Load() {
+			t.Fatal("idle exit did not retire runner before closing controller")
+		}
+		if !strings.Contains(logs.String(), "private controller idle exit: home="+f.home+" idle=20m0s") {
+			t.Fatalf("missing idle exit log: %s", logs.String())
+		}
+	})
+}
+
+func TestPrivateIdleAPIConnections(t *testing.T) {
+	initIdleTestSignals()
+	for _, path := range []string{"/api/v1/runs", "/api/v1/runners/claim", localRunnerPath + "/runner", controllerHTTPPath + "probe"} {
+		t.Run(path, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				d, err := New(Config{Home: t.TempDir()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				d.idleSince = time.Now()
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
+				client, server := net.Pipe()
+				defer client.Close()
+				owner, err := controllerPeerIdentity()
+				if err != nil {
+					t.Fatal(err)
+				}
+				listener.connections <- localHTTPConnection{Conn: server, peer: owner}
+				done := make(chan error, 1)
+				go func() {
+					done <- d.serveIdleAPI(ctx, listener, localhostwire.LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })})
+				}()
+				joined := make(chan struct{})
+				go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+				// bug: runner connections also create credentials before they start polling.
+				reader := bufio.NewReader(client)
+				for _, requestPath := range []string{"/api/v1/tokens", path} {
+					if _, err := fmt.Fprintf(client, "GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n", requestPath); err != nil {
+						t.Fatal(err)
+					}
+					response, err := http.ReadResponse(reader, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					response.Body.Close()
+				}
+				time.Sleep(21 * time.Minute)
+				synctest.Wait()
+				select {
+				case <-d.quit:
+					if !idleRunnerRequest(path) {
+						t.Fatal("connected client lost its controller")
+					}
+				default:
+					if idleRunnerRequest(path) {
+						t.Fatal("idle runner control traffic prevented exit")
+					}
+					client.Close()
+					time.Sleep(21 * time.Minute)
+					synctest.Wait()
+					select {
+					case <-d.quit:
+					default:
+						t.Fatal("disconnected client kept controller alive")
+					}
+				}
+				if idleRunnerRequest(path) {
+					if _, err := fmt.Fprint(client, "POST /api/v1/runners/claim HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n"); err != nil {
+						t.Fatal(err)
+					}
+					claim, err := http.ReadResponse(reader, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					claim.Body.Close()
+					if claim.StatusCode != http.StatusServiceUnavailable {
+						t.Fatalf("retiring controller accepted claim: %d", claim.StatusCode)
+					}
+				}
+				if idleRunnerRequest(path) {
+					if _, err := fmt.Fprint(client, "POST /api/v1/claims/work/finish HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n"); err != nil {
+						t.Fatal(err)
+					}
+					response, err := http.ReadResponse(reader, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					response.Body.Close()
+					if response.StatusCode != http.StatusNoContent {
+						t.Fatal("retiring controller refused a worker result")
+					}
+				}
+				cancel()
+				<-joined
+				if err := <-done; err != nil {
+					t.Fatal(err)
+				}
+			})
+		})
+	}
+}
+
+type idleActivityController struct {
+	*runtimeControllerFixture
+	activity func(context.Context) (LocalActivity, error)
+}
+
+func (c *idleActivityController) LocalIdleActivity(ctx context.Context) (LocalActivity, error) {
+	return c.activity(ctx)
+}
+
+func TestPrivateIdleFreshActivityRefusesErrorsAndWork(t *testing.T) {
+	initIdleTestSignals()
+	for _, failure := range []bool{true, false} {
+		t.Run(fmt.Sprint(failure), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := &runtimeControllerFixture{}
+				r := newRuntimeFixture(t, f)
+				var busy atomic.Bool
+				busy.Store(true)
+				r.cfg.Open = func(context.Context, string) (LocalController, error) {
+					return &idleActivityController{f, func(context.Context) (LocalActivity, error) {
+						if busy.Load() {
+							if failure {
+								return LocalActivity{}, errors.New("snapshot unavailable")
+							}
+							return LocalActivity{Runs: 1}, nil
+						}
+						return LocalActivity{}, nil
+					}}, nil
+				}
+				if _, err := NewLocalLifecycle(r, nil).EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(21 * time.Minute)
+				synctest.Wait()
+				if status, _ := r.Status(t.Context()); !status.Running {
+					t.Fatal("stale idle report retired controller")
+				}
+				busy.Store(false)
+				time.Sleep(20 * time.Minute)
+				synctest.Wait()
+				if status, _ := r.Status(t.Context()); status.Running {
+					t.Fatal("fresh idle snapshot did not permit retirement")
+				}
+			})
+		})
+	}
+}
+
+func TestOverriddenHomeControllerIdleExits(t *testing.T) {
+	initIdleTestSignals()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	synctest.Test(t, func(t *testing.T) {
+		f := &runtimeControllerFixture{home: filepath.Join(home, ".sparkwing")}
+		r := newRuntimeFixture(t, f)
+		r.accountHome = func() (string, error) { return filepath.Join(home, "account"), nil }
+		if _, err := NewLocalLifecycle(r, nil).EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(21 * time.Minute)
+		synctest.Wait()
+		if status, _ := r.Status(t.Context()); status.Running {
+			t.Fatal("overridden HOME/.sparkwing did not retire")
+		}
+	})
+}
+
+func TestUnknownAccountHomeKeepsController(t *testing.T) {
+	initIdleTestSignals()
+	synctest.Test(t, func(t *testing.T) {
+		f := &runtimeControllerFixture{}
+		r := newRuntimeFixture(t, f)
+		r.accountHome = func() (string, error) { return "", errors.New("account unavailable") }
+		if _, err := NewLocalLifecycle(r, nil).EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Hour)
+		synctest.Wait()
+		if status, _ := r.Status(t.Context()); !status.Running {
+			t.Fatal("unknown account home permitted idle retirement")
+		}
+	})
+}
+
+// safety: process-wide signal handling must start outside a synctest bubble.
+func initIdleTestSignals() {
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	signal.Stop(interrupt)
+}
+
+func TestBackgroundHandshakeDoesNotResetPrivateIdle(t *testing.T) {
+	initIdleTestSignals()
+	synctest.Test(t, func(t *testing.T) {
+		d, err := New(Config{Home: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.idleSince = time.Now()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
+		client, server := net.Pipe()
+		defer client.Close()
+		owner, err := controllerPeerIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener.connections <- localHTTPConnection{Conn: server, peer: owner}
+		serving := make(chan error, 1)
+		go func() {
+			serving <- d.serveIdleAPI(ctx, listener, localhostwire.LocalHTTP{API: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })})
+		}()
+		joined := make(chan struct{})
+		go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+		synctest.Wait()
+		time.Sleep(21 * time.Minute)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+			t.Fatal("unidentified connection was retired")
+		default:
+		}
+		if _, err := fmt.Fprintf(client, "GET %s HTTP/1.1\r\nHost: localhost\r\n\r\n", localRunnerPath); err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.ReadResponse(bufio.NewReader(client), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+		default:
+			t.Error("background handshake reset the private idle interval")
+		}
+		cancel()
+		<-joined
+		if err := <-serving; err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestSocketLivenessProbesDoNotResetPrivateIdle(t *testing.T) {
+	initIdleTestSignals()
+	synctest.Test(t, func(t *testing.T) {
+		d, err := New(Config{Home: t.TempDir()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.idleSince = time.Now()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		listener := &localHTTPListener{connections: make(chan net.Conn, 1), closed: make(chan struct{})}
+		owner, err := controllerPeerIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		serving := make(chan error, 1)
+		go func() { serving <- d.serveIdleAPI(ctx, listener, localhostwire.LocalHTTP{API: http.NotFoundHandler()}) }()
+		joined := make(chan struct{})
+		go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+		for range 3 {
+			client, server := net.Pipe()
+			listener.connections <- localHTTPConnection{Conn: server, peer: owner}
+			synctest.Wait()
+			client.Close()
+			synctest.Wait()
+			time.Sleep(7 * time.Minute)
+			synctest.Wait()
+		}
+		select {
+		case <-d.quit:
+		default:
+			t.Error("socket liveness probes kept an idle private controller alive")
+		}
+		cancel()
+		<-joined
+		if err := <-serving; err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestPrivateIdleRechecksConcurrentActivity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		snapshot, release := make(chan struct{}, 1), make(chan struct{})
+		source := &idleActivityController{activity: func(context.Context) (LocalActivity, error) {
+			snapshot <- struct{}{}
+			<-release
+			return LocalActivity{}, nil
+		}}
+		d, err := New(Config{Home: t.TempDir(), Runs: source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.idleSince = time.Now()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		joined := make(chan struct{})
+		go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+		time.Sleep(privateControllerIdle)
+		<-snapshot
+		d.mu.Lock()
+		d.localActivity = LocalActivity{Runs: 1}
+		d.mu.Unlock()
+		close(release)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+			t.Fatal("retired despite activity arriving during snapshot")
+		default:
+		}
+		cancel()
+		<-joined
+	})
+}
+
+type idleRetirementStore struct {
+	runnerHTTPFixture
+	fail     atomic.Bool
+	attempts atomic.Int64
+}
+
+func (s *idleRetirementStore) DrainLocalRunner(ctx context.Context, subject, id string) error {
+	s.attempts.Add(1)
+	if s.fail.Load() {
+		return errors.New("retirement unavailable")
+	}
+	return s.runnerHTTPFixture.DrainLocalRunner(ctx, subject, id)
+}
+
+func TestPrivateIdleRetirementFailureResumesAndResetsClock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := &idleRetirementStore{runnerHTTPFixture: runnerHTTPFixture{instance: localhostwire.LocalRunnerInstance{ID: "runner", PID: os.Getpid(), ProcessBirth: "expired", State: "active"}}}
+		store.fail.Store(true)
+		d, err := New(Config{Home: t.TempDir(), Runs: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.idleSince = time.Now()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		joined := make(chan struct{})
+		go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+		time.Sleep(privateControllerIdle + time.Second)
+		synctest.Wait()
+		d.mu.Lock()
+		draining, retiring := d.draining, d.idleRetiring
+		d.mu.Unlock()
+		if draining || retiring || store.attempts.Load() != 1 {
+			t.Fatalf("failed retirement did not resume: draining=%v retiring=%v attempts=%d", draining, retiring, store.attempts.Load())
+		}
+		store.fail.Store(false)
+		time.Sleep(privateControllerIdle - 2*time.Second)
+		synctest.Wait()
+		if store.attempts.Load() != 1 {
+			t.Fatal("retried before full idle window")
+		}
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+		default:
+			t.Fatal("did not retry retirement after full window")
+		}
+		if store.attempts.Load() != 2 {
+			t.Fatal("retry skipped the active runner after failed drain")
+		}
+		cancel()
+		<-joined
+	})
+}
+
+func TestPrivateIdleHeldRunnerFinishesAfterExit(t *testing.T) {
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("cat unavailable for held-process fixture")
+	}
+	cmd := exec.Command(cat)
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	birth, err := admissionProcessBirth(cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	synctest.Test(t, func(t *testing.T) {
+		store := &idleRetirementStore{runnerHTTPFixture: runnerHTTPFixture{instance: localhostwire.LocalRunnerInstance{ID: "held", PID: cmd.Process.Pid, ProcessBirth: birth, State: "active"}}}
+		d, err := New(Config{Home: t.TempDir(), Runs: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.idleSince = time.Now()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		joined := make(chan struct{})
+		go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+		time.Sleep(privateControllerIdle + LocalRunnerRetireWait + time.Second)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+			t.Fatal("controller exited while runner held work")
+		default:
+		}
+		if store.attempts.Load() != 1 {
+			t.Fatal("runner was not drained")
+		}
+		if err := cmd.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		_ = cmd.Wait()
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+		default:
+			t.Fatal("runner exit did not finish idle retirement")
+		}
+		cancel()
+		<-joined
+	})
+}

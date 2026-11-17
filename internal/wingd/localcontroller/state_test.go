@@ -143,3 +143,41 @@ func TestStateWatchReportsChangesAndPropagatesReporterFailure(t *testing.T) {
 		}
 	})
 }
+
+func TestKilledHostRunActivitySettlesAfterLeaseReaper(t *testing.T) {
+	var binding Binding
+	c := openFixture(t, func(ctx context.Context, b Binding) (Services, error) {
+		binding = b
+		seedOwnerContext(t, ctx, b, "killed-host", true)
+		if _, err := stateSQL(t, b).ExecContext(ctx, `UPDATE triggers SET lease_expires_at=? WHERE id='killed-host'`, time.Now().Add(time.Hour).UnixNano()); err != nil {
+			t.Fatal(err)
+		}
+		services := serviceFixture(b)
+		var err error
+		services.State, err = NewState(b)
+		return services, err
+	})
+	if _, err := c.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	activity, err := c.LocalIdleActivity(t.Context())
+	if err != nil || activity.Runs != 1 || activity.HeldLeases != 1 {
+		t.Fatalf("active host activity=%+v: %v", activity, err)
+	}
+	if err := c.FinalizeCancelledRuns([]string{"killed-host"}, "holder process exited"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stateSQL(t, binding).ExecContext(t.Context(), `UPDATE triggers SET lease_expires_at=1 WHERE id='killed-host'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.sweep(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ownRuns(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	activity, err = c.LocalIdleActivity(t.Context())
+	if err != nil || activity != (wingd.LocalActivity{}) {
+		t.Fatalf("killed host did not settle to idle: %+v: %v", activity, err)
+	}
+}

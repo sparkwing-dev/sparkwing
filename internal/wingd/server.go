@@ -74,6 +74,9 @@ type Daemon struct {
 	runnerState        string
 	runnerErr          *apierr.Error
 	shuttingDown       bool
+	idleRetiring       bool
+	idleSince          time.Time
+	idleClients        map[net.Conn]idleClient
 	localActivity      LocalActivity
 	dashboardConns     int
 	localControl       func() LocalStatus

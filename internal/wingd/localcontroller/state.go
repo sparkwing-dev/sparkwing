@@ -78,6 +78,10 @@ func (s *localState) Watch(ctx context.Context, report func(wingd.LocalActivity)
 }
 
 func (s *localState) snapshot(ctx context.Context) (wingd.LocalActivity, error) {
-	activity, err := s.binding.Tenant.ExecutionActivity(ctx)
+	return snapshotLocalActivity(ctx, s.binding.Tenant)
+}
+
+func snapshotLocalActivity(ctx context.Context, tenant *store.Tenant) (wingd.LocalActivity, error) {
+	activity, err := tenant.ExecutionActivity(ctx)
 	return wingd.LocalActivity{Runs: activity.Runs, QueuedTriggers: activity.QueuedTriggers, HeldLeases: activity.HeldLeases}, err
 }

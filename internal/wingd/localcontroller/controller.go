@@ -123,6 +123,11 @@ type localController struct {
 	closeErr   error
 }
 
+// LocalIdleActivity reads fresh work counts before the controller retires.
+func (c *localController) LocalIdleActivity(ctx context.Context) (wingd.LocalActivity, error) {
+	return snapshotLocalActivity(ctx, c.tenant)
+}
+
 func (c *localController) HTTP() localhostwire.LocalHTTP { return c.services.HTTP }
 
 func (c *localController) Reconcile(ctx context.Context) (wingd.LocalActivity, error) {

@@ -18,7 +18,7 @@ func ServeAPI(ctx context.Context, listener net.Listener, s localhostwire.LocalH
 	}
 	return serveLocalHTTP(ctx, localAPIListener{listener}, s.API, func(ctx context.Context, connection net.Conn) context.Context {
 		return context.WithValue(localhostwire.WithLocalSocketPeer(ctx, connection.(authenticatedAPIConn).PeerIdentity()), socketPeerContextKey{}, true)
-	}, nil, 0)
+	}, nil, 0, nil)
 }
 
 type localAPIListener struct{ net.Listener }
@@ -89,10 +89,10 @@ func (c *localHTTPConn) PeerIdentity() localhostwire.LocalPeerIdentity {
 
 // ServeLocalHTTP cancels and joins handlers and connections before returning.
 func ServeLocalHTTP(ctx context.Context, listener net.Listener, handler http.Handler, connectionContext func(context.Context, net.Conn) context.Context, observe func(int)) error {
-	return serveLocalHTTP(ctx, listener, handler, connectionContext, observe, 15*time.Second)
+	return serveLocalHTTP(ctx, listener, handler, connectionContext, observe, 15*time.Second, nil)
 }
 
-func serveLocalHTTP(ctx context.Context, listener net.Listener, handler http.Handler, connectionContext func(context.Context, net.Conn) context.Context, observe func(int), readTimeout time.Duration) error {
+func serveLocalHTTP(ctx context.Context, listener net.Listener, handler http.Handler, connectionContext func(context.Context, net.Conn) context.Context, observe func(int), readTimeout time.Duration, stateChanged func(net.Conn, http.ConnState)) error {
 	if listener == nil || handler == nil {
 		return errors.New("wingd: controller HTTP requires a listener and shared handler")
 	}
@@ -106,6 +106,9 @@ func serveLocalHTTP(ctx context.Context, listener net.Listener, handler http.Han
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ConnContext:       connectionContext,
 		ConnState: func(connection net.Conn, state http.ConnState) {
+			if stateChanged != nil {
+				stateChanged(connection, state)
+			}
 			switch state {
 			case http.StateNew:
 				connections.Add(1)

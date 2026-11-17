@@ -3,6 +3,7 @@ package wingd
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
@@ -12,6 +13,7 @@ func (d *Daemon) dashboardConnection(delta int) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.dashboardConns += delta
+	d.idleSince = time.Now()
 }
 
 func (d *Daemon) setLocalActivity(activity LocalActivity) error {
@@ -20,6 +22,9 @@ func (d *Daemon) setLocalActivity(activity LocalActivity) error {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if activity != (LocalActivity{}) || d.localActivity != activity {
+		d.idleSince = time.Now()
+	}
 	d.localActivity = activity
 	return nil
 }

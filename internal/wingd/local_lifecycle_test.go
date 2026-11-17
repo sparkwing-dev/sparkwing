@@ -287,3 +287,5 @@ func TestLocalLifecycleJoinsFailedStartup(t *testing.T) {
 		}
 	})
 }
+
+func (u lifecycleUnits) ControllerInstalled(context.Context) (bool, error) { return false, nil }

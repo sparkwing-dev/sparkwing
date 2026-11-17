@@ -97,6 +97,26 @@ func (m *nativeUnits) controller() (ManagedUnit, string, bool, error) {
 	return unit, body, exists, nil
 }
 
+// ControllerInstalled checks only this home's login-service registration.
+func (m *nativeUnits) ControllerInstalled(ctx context.Context) (bool, error) {
+	if err := m.lock(ctx); err != nil {
+		return false, err
+	}
+	defer func() { <-m.gate }()
+	if m.host.GOOS == "windows" {
+		return false, nil
+	}
+	body, exists, managed, err := unitfile.Read(m.path(), crontimer.Marker)
+	if err != nil || !exists {
+		return false, err
+	}
+	if !managed {
+		return false, nil
+	}
+	args := unitfile.Arguments(m.host.GOOS, body)
+	return len(args) == 5 && slices.Equal(args[1:4], []string{"wingd", "run", "--home"}) && args[4] == m.host.SparkwingHome, nil
+}
+
 func (m *nativeUnits) inspect(ctx context.Context) ([]ManagedUnit, error) {
 	if m.host.GOOS == "windows" {
 		return nil, nil
