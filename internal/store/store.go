@@ -883,6 +883,10 @@ func (t *Tenant) ListDeclaredSteps(ctx context.Context, runID string) (_ map[str
 		if err := rows.Scan(&node, &spec); err != nil {
 			return nil, err
 		}
+		spec, err = decodeNodeSpec(t.s, t.team, runID, node, spec)
+		if err != nil {
+			continue
+		}
 		var declared struct {
 			Steps []struct {
 				ID string `json:"id"`
@@ -1334,7 +1338,7 @@ func scanApproval(rs rowScanner) (*Approval, error) {
 var schemaNeutral string
 
 // safety: fresh stores get this baseline whole; an older store upgrades only through schemaUpgrades.
-const expectedSchemaVersion = 39
+const expectedSchemaVersion = 40
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,

@@ -209,6 +209,12 @@ func (op *Operator) loadAwardRowTx(ctx context.Context, tx *storeTx, spec capabi
 	if err != nil {
 		return row, err
 	}
+	if spec.Unit == capability.UnitNode {
+		row.spec, err = decodeNodeSpec(tx.store, Team(row.team), row.run, row.node, row.spec)
+		if err != nil {
+			return row, err
+		}
+	}
 	var status string
 	var runCancel sql.NullInt64
 	err = tx.QueryRowContext(ctx, "SELECT status,cancel_requested_at,repo_key,repo_display,request_json,spec_json FROM runs WHERE team = ? AND id = ?", row.team, row.run).Scan(&status, &runCancel, &row.repo, &row.display, &row.request, &row.runSpec)

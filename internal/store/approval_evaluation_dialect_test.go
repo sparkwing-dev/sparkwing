@@ -49,12 +49,16 @@ func TestControllerApprovalEvaluationCommitsInEachDialect(t *testing.T) {
 			for _, policy := range []string{"open", "skip", "fail"} {
 				t.Run(policy, func(t *testing.T) {
 					s := dialect.target(t).Open(t, store.WithPolicies(sealStorePolicies))
+					value := argDefault
+					argument := nodewire.ArgumentDescription{Name: "gate-token", Type: "string", Default: &value, JobID: "gate"}
 					tenant, plan, err := storePlanSealRequestWith(t.Context(), s, func(_ *store.IntakeRequest, doc *nodewire.PlanDoc) {
-						doc.Jobs = []nodewire.JobSpec{{ID: "gate", Approval: &nodewire.ApprovalSpec{}, Closures: nodewire.ClosureSpec{SkipIf: []string{"guard"}}}}
+						doc.Jobs = []nodewire.JobSpec{{ID: "gate", Arguments: []nodewire.ArgumentDescription{argument}, Approval: &nodewire.ApprovalSpec{}, Closures: nodewire.ClosureSpec{SkipIf: []string{"guard"}}}}
 					})
 					if err != nil {
 						t.Fatal(err)
 					}
+					plan.Seal.Resolved.ArgumentDeclarations = []nodewire.ArgumentDescription{argument}
+					plan.Seal.Resolved.Args["gate-token"] = value
 					if _, err := tenant.AcceptPlan(t.Context(), plan); err != nil {
 						t.Fatal(err)
 					}

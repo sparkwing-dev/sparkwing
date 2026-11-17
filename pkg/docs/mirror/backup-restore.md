@@ -5,6 +5,9 @@ Keep a database backup, its matching controller image or binary, and the keys
 needed to open it. Rehearse recovery on an isolated controller before upgrading
 the live one. See [self-hosting](self-hosting.md) for deployment requirements.
 
+The argument format upgrade raises the store to schema 40, so older binaries
+refuse it. Restore a matching pre-upgrade backup before downgrading.
+
 Argument encryption covers schedule declarations, overrides, consent requests,
 fire history and job defaults in plan, node and expansion documents. Restore
 the matching secrets keys before reading or resuming that work. After upgrading

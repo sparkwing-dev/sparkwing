@@ -25,7 +25,7 @@ func TestOperatorRotationMigratesScheduleAndJobArguments(t *testing.T) {
 			f := newKeyRotationFixture(t, tc.open)
 			team := f.teams[0]
 			run := "run-" + string(team)
-			args := []byte(`{"token":"rotation-schedule-canary"}`)
+			args := []byte(`{"token":"rotation-schedule-canary","sealed_arguments":"user-value","body":"","argument_document_version":"1"}`)
 			job := []byte(`{"id":"job","arguments":[{"name":"token","type":"string","default":"rotation-job-canary","secret":true}]}`)
 			plan := append(append([]byte(`{ "jobs": [`), job...), []byte(`], "unknown":9007199254740993 }`)...)
 			base := append(append([]byte(`{"args":`), args...), '}')
@@ -85,7 +85,17 @@ func TestOperatorRotationMigratesScheduleAndJobArguments(t *testing.T) {
 				var values struct {
 					Strings []string `json:"strings"`
 				}
-				if err != nil || json.Unmarshal([]byte(plain), &values) != nil || len(values.Strings) != 1 || values.Strings[0] != string(column.raw) {
+				want := string(column.raw)
+				if column.scope == "node:job" {
+					want = "rotation-job-canary"
+					var metadata struct {
+						ID string `json:"id"`
+					}
+					if json.Unmarshal(raw, &metadata) != nil || metadata.ID != "job" {
+						t.Fatal("node metadata was hidden by rotation")
+					}
+				}
+				if err != nil || json.Unmarshal([]byte(plain), &values) != nil || len(values.Strings) != 1 || values.Strings[0] != want {
 					t.Fatalf("migrated bytes unavailable under current key: %v", err)
 				}
 			}

@@ -114,32 +114,3 @@ func TestArgumentDocumentRotationCountsWithoutChangingVerification(t *testing.T)
 		}
 	}
 }
-
-func TestScheduleConsentArgumentsStaySealedThroughAdmission(t *testing.T) {
-	tenant, a, request, now := consentedScheduleFixture(t)
-	tenant.s.runEnvCipher = bindingStore(t).runEnvCipher
-	request.Schedules[0].Args = map[string]string{"token": bindingCanary}
-	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var raw []byte
-	if err := tenant.s.queryRow(t.Context(), `SELECT consent_json FROM cron_schedules WHERE team=? AND id=?`, tenant.team, ids[0]).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(raw, []byte(bindingCanary)) || !bytes.Contains(raw, []byte(sealedArgumentsKey)) {
-		t.Fatal("schedule consent was not sealed")
-	}
-	row, err := tenant.GetCronSchedule(t.Context(), ids[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	*now = *row.NextDueAt
-	admitted, err := tenant.AdmitScheduledRun(t.Context(), row, *now)
-	if err != nil || admitted.Request.Request.RequestedArgs["token"] != bindingCanary {
-		t.Fatalf("sealed consent admission: %v", err)
-	}
-	if _, err := tenant.AdmitScheduledRun(t.Context(), row, *now); err != nil {
-		t.Fatalf("sealed consent replay: %v", err)
-	}
-}

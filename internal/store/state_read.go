@@ -119,7 +119,7 @@ func scanNode(s *Store, team Team, row rowScanner, runID runspec.RunID) (runstat
 	if err != nil {
 		return v, err
 	}
-	v.Spec, err = decodeArgumentBody(s, team, string(runID), nodeArgumentsScope(string(v.Ref.NodeID)), v.Spec)
+	v.Spec, err = decodeNodeSpec(s, team, string(runID), string(v.Ref.NodeID), v.Spec)
 	if err != nil {
 		return v, err
 	}

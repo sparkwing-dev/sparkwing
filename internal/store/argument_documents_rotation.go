@@ -9,7 +9,7 @@ func (r *sealedRotationTx) argumentBody(team Team, name, scope string, raw []byt
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
 	}
-	envelope, err := sealedArgumentsEnvelope(raw)
+	envelope, err := bodyArgumentsEnvelope(raw)
 	if err != nil {
 		return nil, corruptRunArguments()
 	}

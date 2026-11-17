@@ -460,7 +460,7 @@ func insertNodeTx(ctx context.Context, tx *storeTx, team Team, row runstate.Node
 	if err != nil {
 		return err
 	}
-	storedSpec, err := encodeJobArgumentBody(tx.store, team, string(row.Ref.RunID), nodeArgumentsScope(string(row.Ref.NodeID)), row.Spec)
+	storedSpec, err := encodeNodeSpec(tx.store.runEnvCipher, team, string(row.Ref.RunID), string(row.Ref.NodeID), row.Spec)
 	if err != nil {
 		return err
 	}

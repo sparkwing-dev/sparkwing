@@ -1,16 +1,23 @@
 ## Schedule and job argument encryption
 
 Keyed stores seal schedule arguments and job-level `WithArgs` defaults using the
-run-argument keyring. This changes the stored JSON format without changing the
-SQL baseline or schema version. Older controller binaries cannot read the new
-argument documents. Runner transport and plaintext hash binding stay unchanged.
+run-argument keyring. The store upgrades schema 39 to 40 in the open transaction
+on SQLite and PostgreSQL. This version fence protects the changed JSON format even though the
+SQL table layout stays the same. Older binaries refuse the newer store rather
+than misreading encrypted arguments. SQLite takes the normal pre-upgrade backup.
+A failed deployment after this schema increase requires database recovery rather
+than automatic rollback to the older binary. Runner transport and plaintext hash
+binding stay unchanged.
 
 Before upgrading, back up the database and its secrets keys. Stop writes and
 schedule ticks while replacing every controller reader and writer with the new
 version. Resume them together. Keep the current and previous keys mounted while
 rotation runs.
 
-Existing plaintext rows stay readable on SQLite and PostgreSQL. Run
+The schema upgrade leaves existing plaintext argument rows readable until
+resealed. Node specs encrypt only argument default values so SQL predicates and
+metadata readers continue to work for live runs. Schedule envelope versions are
+numeric, so string argument names such as `sealed_arguments` remain valid. Run
 `sparkwing operator secrets rotate` after upgrading all replicas. It seals the
 existing schedule declarations, overrides, override baselines, consent requests,
 fire history, plans, node specs and expansion bodies in transactions. An

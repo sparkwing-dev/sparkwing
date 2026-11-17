@@ -423,7 +423,13 @@ func (r *sealedRotationTx) expansionArguments(ctx context.Context, team Team, ru
 			{"spec_json", nodeArgumentsScope(e.node), e.spec},
 			{"expansion_body", expansionBodyArgumentsScope(e.node), e.body},
 		} {
-			value, err := r.argumentBody(team, run, column.scope, column.raw, true)
+			var value []byte
+			var err error
+			if column.name == "spec_json" {
+				value, err = r.nodeArguments(team, run, e.node, column.raw)
+			} else {
+				value, err = r.argumentBody(team, run, column.scope, column.raw, true)
+			}
 			if errors.Is(err, errSealedUnreadable) || err == nil && value == nil {
 				continue
 			}

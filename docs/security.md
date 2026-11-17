@@ -435,14 +435,20 @@ values, pipeline-level declared defaults and every masking registration value
 move into one `sealed_arguments` envelope in the same document, bound to the
 run's team, run ID and document kind. Job-level `WithArgs` defaults also seal at the store boundary in the plan
 (`runs.plan_json`), node spec (`nodes.spec_json`) and generated expansion body
-(`nodes.expansion_body`). These envelopes preserve the exact plaintext JSON,
-including unknown fields. Hash binding, replay checks and authorized runner
+(`nodes.expansion_body`). Plans and expansion bodies preserve exact plaintext
+JSON. Node specs seal only `arguments[*].default`, keeping steps, dependency
+edges, memo declarations, child permissions and approval predicates queryable.
+Unknown fields and large JSON integers survive node default restoration. Hash binding, replay checks and authorized runner
 transport use the restored plaintext. Node and expansion envelopes also bind
 the source node ID.
 
 Schedule declarations, overrides, override baselines, consent requests and fire
 history use the same keyring and argument envelopes. Each binds the team,
-schedule or fire ID and column kind. A fire also binds its schedule ID.
+schedule or fire ID and column kind. A fire also binds its schedule ID. Whole
+document envelopes have a numeric `argument_document_version`, which distinguishes
+them from string-valued argument maps even when an argument is named
+`sealed_arguments` or `body`. Store schema 40 prevents older binaries from
+misreading these envelopes.
 A listing that meets a run whose envelope cannot be
 opened shows that run's argument values as `(unavailable)` and lists the other
 runs; reading that run's status, or anything that needs its values such as a
@@ -454,8 +460,10 @@ in a startup warning. Run and schedule documents stored before argument sealing 
 values and still read as written. `sparkwing operator secrets rotate` seals them in
 place and reports the count as `plaintext_run_arguments`; `--verify` only
 counts them. A keyless store must receive a secrets key before rotation can seal its rows.
-Local stores use `secrets.key` beside `state.db`. Keep that key separate from
-database-only backups when those backups require protection from their readers. A rewritten row's old
+Local sealing offers limited protection because `secrets.key` sits beside
+`state.db` with the same file permissions. Someone who can read that directory
+can read both the database and its key. Database-only backups remain protected
+when the key is retained separately. A rewritten row's old
 plaintext can survive in SQLite free pages and WAL frames or PostgreSQL dead
 tuples until the database is vacuumed, and in every backup taken before the
 rewrite. Treat those copies as holding the plaintext arguments.
