@@ -199,7 +199,7 @@ func refillIntent(id, refill, status string) string {
 func TestUnmeteredControllerDoesNotRefill(t *testing.T) {
 	e, _ := refillFixture(t)
 	worker := New(e.Store, nil).WithBillingCheckout("https://checkout.test", "credential")
-	worker.checkout.http.Transport = billingPageTransport(func(r *http.Request) (*http.Response, error) {
+	worker.checkout.http.Transport = pairedBillingPageTransport(func(r *http.Request) (*http.Response, error) {
 		t.Fatalf("unmetered controller called the payment service: %s", r.URL.Path)
 		return nil, nil
 	})

@@ -29,7 +29,7 @@ func TestQueuedRefundLogLevel(t *testing.T) {
 			engineSQL(t, e.Store, `INSERT INTO card_refunds(payment_mode,team,payment_intent,reason,amount_micro,created_at) VALUES ('test','a','pi_due','refused',?,1)`, 1_000*store.MicroCreditsPerCent)
 			var logs bytes.Buffer
 			worker := NewDeployment(e.Store, deploymenttest.Team(t), slog.New(slog.NewJSONHandler(&logs, nil))).WithBillingCheckout("https://checkout.test", "credential")
-			worker.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+			worker.checkout.http.Transport = pairedBillingPageTransport(func(*http.Request) (*http.Response, error) {
 				return refillReply(http.StatusOK, fmt.Sprintf(`{"refund":"re_due","status":%q}`, tc.status)), nil
 			})
 			worker.refundQueuedPayments(t.Context())
@@ -66,7 +66,7 @@ func TestARefundTheCheckoutServiceCannotMakeIsLeftToTheOperator(t *testing.T) {
 			now := time.Unix(1_800_000_000, 0)
 			worker.checkout.now = func() time.Time { return now }
 			calls := 0
-			worker.checkout.http.Transport = billingPageTransport(func(*http.Request) (*http.Response, error) {
+			worker.checkout.http.Transport = pairedBillingPageTransport(func(*http.Request) (*http.Response, error) {
 				calls++
 				return tc.answer()
 			})

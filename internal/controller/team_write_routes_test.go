@@ -205,17 +205,21 @@ func (f *billingWriterFake) RequestAuthorizedStanding(_ context.Context, a capab
 
 type billingPageTransport func(*http.Request) (*http.Response, error)
 
-// RoundTrip answers as a checkout service paired with the controller: an answer that names no Stripe mode gets the
-// mode the request carried. Tests of the mode pairing name the answer's mode themselves or use modeCheckout.
 func (f billingPageTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	resp, err := f(r)
-	if resp != nil && resp.Header.Get(checkoutModeHeader) == "" {
-		if resp.Header == nil {
-			resp.Header = http.Header{}
+	return f(r)
+}
+
+func pairedBillingPageTransport(f billingPageTransport) billingPageTransport {
+	return func(r *http.Request) (*http.Response, error) {
+		resp, err := f(r)
+		if resp != nil && resp.Header.Get(checkoutModeHeader) == "" {
+			if resp.Header == nil {
+				resp.Header = http.Header{}
+			}
+			resp.Header.Set(checkoutModeHeader, r.Header.Get(checkoutModeHeader))
 		}
-		resp.Header.Set(checkoutModeHeader, r.Header.Get(checkoutModeHeader))
+		return resp, err
 	}
-	return resp, err
 }
 
 func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
@@ -226,7 +230,7 @@ func TestBillingPageHTTPAuthorityAndReplayProperty(t *testing.T) {
 	testOnlyTenantPort[billingWriter](f.s, func(context.Context, store.Team) (billingWriter, error) { return writer, nil })
 	calls := 0
 	mode := uint8(0)
-	f.s.checkout = &billingCheckout{url: "https://checkout.example", token: "private-service-key", http: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
+	f.s.checkout = &billingCheckout{url: "https://checkout.example", token: "private-service-key", http: &http.Client{Transport: pairedBillingPageTransport(func(r *http.Request) (*http.Response, error) {
 		calls++
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {

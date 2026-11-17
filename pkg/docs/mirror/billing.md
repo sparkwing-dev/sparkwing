@@ -31,9 +31,12 @@ Stripe mode: the controller with `--payment-mode`, the service with
 `BILLING_LIVE`. Every checkout-service call carries the controller's mode in
 the `Sparkwing-Payment-Mode` header, and every answer carries the service's.
 The service refuses a call in the other mode before it calls Stripe, and the
-controller refuses an answer in the other mode. Either refusal logs one
-`alert=checkout_misconfigured` naming `payment_mode`. A payment page fails at
-once and the owner can try again. A refill or refund is retried with backoff
+controller refuses an answer naming another mode or no mode, including a
+refusal. Add funds, card setup and portal requests fail at once without a
+`checkout_misconfigured` alert; the owner can try again. Only the background
+refill and refund workers emit that alert, once per misconfiguration, naming
+`payment_mode`. An absent alert does not prove the pairing is correct. A
+refill or refund is retried with backoff
 for up to six hours; after that the refill closes as `checkout_unavailable`
 and the refund is listed as failed for the operator, so finish the cutover
 well inside that window.

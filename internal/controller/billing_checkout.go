@@ -150,6 +150,12 @@ func (c *billingCheckout) post(ctx context.Context, pairing checkoutPairing, pat
 		return fmt.Errorf("%w: %w", errCheckoutUnavailable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	// safety: an unpaired service cannot authoritatively accept or refuse a payment, so neither success nor a final
+	// refusal can move a refill, refund or page forward until the response mode matches.
+	if mode := resp.Header.Get(checkoutModeHeader); mode != string(pairing.mode) {
+		return fmt.Errorf("%w: %w: the checkout service answered in Stripe mode %q, this controller runs in %q; set its BILLING_LIVE to match --payment-mode",
+			errCheckoutUnavailable, errCheckoutMisconfigured, mode, pairing.mode)
+	}
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 	if err != nil {
 		return fmt.Errorf("%w: read: %w", errCheckoutUnavailable, err)
@@ -168,12 +174,6 @@ func (c *billingCheckout) post(ctx context.Context, pairing checkoutPairing, pat
 			err = errors.Join(errRefillNoCard, err)
 		}
 		return err
-	}
-	// safety: a service that charged in another Stripe mode, or names none, is not believed, so its answer moves no
-	// refill, refund or page forward; it is retried and alerted like any other misconfigured pairing.
-	if mode := resp.Header.Get(checkoutModeHeader); mode != string(pairing.mode) {
-		return fmt.Errorf("%w: %w: the checkout service answered in Stripe mode %q, this controller runs in %q; set its BILLING_LIVE to match --payment-mode",
-			errCheckoutUnavailable, errCheckoutMisconfigured, mode, pairing.mode)
 	}
 	if err := json.Unmarshal(payload, out); err != nil {
 		return fmt.Errorf("%w: decode: %w", errCheckoutRefused, err)
