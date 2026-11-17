@@ -49,8 +49,8 @@ func seedAtomicRelease(t *testing.T, repo string) {
 	gitRun(t, repo, "commit", "-m", "seed")
 }
 
-// fixtureDocsGrammarTest stands in for the repository's grammar test with the
-// rule a generated index row broke: pipeline new needs --pipeline.
+// hack: a stand-in for the repository grammar test, holding the rule a generated
+// index row broke: pipeline new needs --pipeline.
 const fixtureDocsGrammarTest = `package doccheck
 
 import (
