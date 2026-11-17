@@ -528,6 +528,9 @@ func TestPrivateIdleRetirementFailureResumesAndResetsClock(t *testing.T) {
 		default:
 			t.Fatal("did not retry retirement after full window")
 		}
+		if store.attempts.Load() != 2 {
+			t.Fatal("retry skipped the active runner after failed drain")
+		}
 		cancel()
 		<-joined
 	})

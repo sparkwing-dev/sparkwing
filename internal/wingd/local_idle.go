@@ -170,11 +170,15 @@ func localAccountHome() (string, error) {
 }
 
 func (d *Daemon) resumePrivateIdle() bool {
+	d.runnerChanges.lock()
+	defer d.runnerChanges.unlock()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.idleRetiring || d.shuttingDown {
 		return false
 	}
+	// safety: resumed service may replace the runner before the next retirement attempt.
+	d.retiringRunner = nil
 	d.draining = false
 	d.idleRetiring = false
 	d.idleSince = time.Now()
