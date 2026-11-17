@@ -676,9 +676,11 @@ faults remain visible, and gateway failures still warn even during shutdown.
 `TestLauncherGateway503RemainsWarn` guard those distinctions.
 Job-local teardown failures unwrap their underlying cause, so a cancellation
 does not become an independent cleanup fault. Genuine teardown failures remain
-operator errors. `TestLauncherSIGTERMAtEveryPhase` sends SIGTERM during claim,
+operator errors. `TestLauncherSIGTERMAtEveryPhase` injects SIGTERM during claim,
 placement, warm reporting, reconciliation, teardown, retirement and budget reads
-through the real controller client, including joined-fault controls.
+through the real controller client, including joined-fault controls. Fake time
+bounds phase observation, and signal acknowledgement waits for cancellation to
+reach child contexts before the interrupted operation returns.
 
 The first reservation also records `sparkwing.dev/used-run` with its team and run
 ID. Release retains it alongside the permanent protected labels. Retirement runs
