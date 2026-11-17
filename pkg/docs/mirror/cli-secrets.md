@@ -13,7 +13,7 @@ Manage secret values and plain variables used by pipelines. List names without r
 ### Subcommands
 
 - `delete` -- Remove a secret
-- `get` -- Read a secret's value
+- `show` -- Read a secret's value
 - `list` -- List secret names + metadata
 - `rotate` -- Re-encrypt every stored secret under the current key
 - `set` -- Store (or replace) a secret value
@@ -38,6 +38,8 @@ sparkwing secrets list
 
 Remove a secret
 
+Delete the selected secret or variable without revealing its value.
+
 Delete the exact pipeline or unscoped row. A pipeline row is named by --repo and --pipeline together. JSON retains whether the row was deleted or already absent; plain emits the name.
 
 ### Flags
@@ -60,35 +62,11 @@ Delete the exact pipeline or unscoped row. A pipeline row is named by --repo and
 sparkwing secrets delete --secret DEPLOY_TOKEN
 ```
 
-## `sparkwing secrets get`
-
-Read a secret's value
-
-Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so get refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--secret NAME` | Secret name. (required) |
-| `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
-| `--pipeline NAME` | Pipeline name. |
-| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
-
-### Examples
-
-```sh
-# Read a variable
-sparkwing secrets get --secret REGION
-```
-
 ## `sparkwing secrets list`
 
 List secret names + metadata
+
+List secret and variable names and metadata without revealing values.
 
 List metadata without values, including each pipeline row's repository and pipeline, and pool restrictions. Search matches names case-insensitively; --repo matches a repository name case-insensitively or its key exactly, and --pipeline requires --repo. JSON emits metadata records; plain emits names.
 
@@ -116,6 +94,8 @@ sparkwing secrets list
 
 Re-encrypt every stored secret under the current key
 
+Re-encrypt stored secrets under the current key and report rows that could not be rotated.
+
 Retain rotated counts and skipped row names/pipelines. The previous key is still needed when any row was skipped. JSON includes the controller's replay marker.
 
 ### Flags
@@ -131,6 +111,8 @@ Retain rotated counts and skipped row names/pipelines. The previous key is still
 ## `sparkwing secrets set`
 
 Store (or replace) a secret value
+
+Store or replace a secret from stdin, a file or --value. Use --variable to store a plain value.
 
 Restricted --only-on secrets require matching pool demands at seal and reserved pools at release; restricted secrets are refused for here machines.
 
@@ -166,4 +148,32 @@ sparkwing secrets set --secret DEPLOY_TOKEN --file token.txt
 
 # Store a plain variable
 sparkwing secrets set --secret REGION --value us-east-1 --variable
+```
+
+## `sparkwing secrets show`
+
+Read a secret's value
+
+Read a plain variable's value. Masked secrets are available only to pipeline runs that declare them.
+
+Read a value stored with --variable. A masked secret is readable only by a pipeline run that declares it, so show refuses it. --repo and --pipeline together read the row that repository's pipeline would. JSON retains metadata and value, including an empty value. Pretty and plain emit the raw bytes without adding a newline.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--secret NAME` | Secret name. (required) |
+| `--repo REPO` | Repository identity as owner/name. Naming a repository grants no access. |
+| `--pipeline NAME` | Pipeline name. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+
+### Examples
+
+```sh
+# Read a variable
+sparkwing secrets show --secret REGION
 ```

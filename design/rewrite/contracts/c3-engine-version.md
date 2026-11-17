@@ -260,11 +260,11 @@ checkout. `UpgradeRequest.Checkout` and `UpgradeVerifier.Verify` both receive
 the checkout root. Pin reads, native dependency edits and collected changes use
 its validated `.sparkwing` directory. Application manifests at the root remain
 separate inputs. `UpgradeVerifier` resolves dependencies, compiles Go or type-checks
-TypeScript, then runs describe/plan with the exact verified engine. Job bodies
+TypeScript, then checks pipeline details and plans with the exact verified engine. Job bodies
 never run. Verified changes apply, with each original digest rechecked to
 avoid overwriting concurrent edits. The one other case that applies is a
 verification the pipeline's own code fails (`engine.ErrPipelineIncompatible`:
-an offline Go compile, a TypeScript type check, or describe/plan refusing the
+an offline Go compile, a TypeScript type check, or detail/plan commands refusing the
 code), which applies the pin and lockfile edits, reports the failure with the
 migration guides and the changed files, and exits non-zero. Every other failure,
 including SDK downloads, missing tools, installer output and malformed
@@ -365,7 +365,7 @@ release resolver and need an explicit development workflow during implementation
 | [`UpgradeRequest`](../../../internal/engine/upgrade.go) | chooses an exact release or the signed index's latest permitted release. |
 | [`PinEdit`](../../../internal/engine/upgrade.go) | preserves the source digest so an upgrade cannot overwrite concurrent user edits. |
 | [`UpgradePlan`](../../../internal/engine/upgrade.go) | contains concrete pin edits and the matching verified engine selection. |
-| [`UpgradeVerifier`](../../../internal/engine/upgrade.go) | checks dependency resolution, Go compilation or TypeScript type checking, then describe/plan with the exact selected engine. |
+| [`UpgradeVerifier`](../../../internal/engine/upgrade.go) | checks dependency resolution, Go compilation or TypeScript type checking, then pipeline details and plans with the exact selected engine. |
 | [`UpgradeResult`](../../../internal/engine/upgrade.go) | reports verification separately from a dry-run preview. |
 | [`Resolver.Upgrade`](../../../internal/engine/upgrade.go) | verifies the staged pin changes before applying them, rechecking BeforeDigest on each input. |
 | [`SoftwareUpdate`](../../../internal/engine/upgrade.go) | keeps a verified runner replacement separate from an SDK-matched pipeline engine. |

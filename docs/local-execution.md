@@ -4,6 +4,15 @@
 submits it to a controller. Both placements use the shared run and job hosts,
 sealed inputs and matching SDK engine.
 
+On a cold shared local start, the invoking CLI starts the controller before
+handing the pipeline to its pinned engine. This keeps store ownership with the
+installed CLI across SDK pins and daemon stops. The installed CLI must support
+the store's schema; an incompatible CLI refuses before handing off the run.
+A `--route burst` run starts the invoking CLI's local controller before engine
+handoff even when Cloud accepts the run, because it may fall back to local
+execution if Cloud is unreachable.
+Standalone CI keeps its controller in process under the selected engine.
+
 Intake and hosts derive plan placement from the sealed request. Local runs,
 local triggered runs, runner-hosted runs, launcher runs, `--runner here` and
 GitHub Actions use the same capability table for initial plans and expansions.
@@ -130,9 +139,14 @@ controller's database.
 
 Startup reconciles orphaned work and starts the private API before consumers.
 Readiness does not wait for pipeline compilation or source preparation.
-The CLI starts or waits for the controller immediately before submitting a run,
-after source preparation. Other local API commands, doctor and schedule timers
-use the same startup operation. A startup failure reports why the local
+Ordinary local runs start or wait for the controller while preparing their
+source. Submission waits for source validation and rechecks controller readiness,
+including when the controller retired during preparation.
+A preparation failure or an interrupt cancels and joins the startup request
+before cleanup. A controller and runner that already started keep running and
+retire after 20 idle minutes, like any private-home controller.
+Standalone runs start their in-process controller after source preparation.
+Other local API commands, doctor and schedule timers use the same startup operation. A startup failure reports why the local
 controller could not start before any request is submitted.
 
 The controller is the only writer of the shared store. Reads, cancellation,
@@ -208,8 +222,9 @@ Plain output is the resulting state. Store and API diagnostics come from doctor.
 Doctor also sweeps stray step sessions through the controller. A successful
 cleanup whose run was pruned reports an unrecorded-outcome warning and succeeds.
 
-Restart preserves a stopped controller. An answering controller on the exact
-installed version stays running unless `--force` is selected. Replacement waits
+Restart preserves a stopped controller. An answering installed controller on the exact
+installed version stays running unless `--force` is selected. Restart always
+replaces a running on-demand controller so it reloads machine settings. Replacement waits
 for shutdown before starting the installed executable with the same home,
 dashboard address. An incomplete drain or unready replacement
 returns an error without a success receipt. On Linux and macOS, jobs held by the
@@ -264,7 +279,10 @@ Preserve the key with the home's backups. A home holding sealed data without
 its key refuses to replace it.
 
 Windows supports the foreground controller. Machine updates refresh managed
-controller and schedule units together. See [local dashboard](native-mode.md).
+controller and schedule units together. An update also replaces a running
+on-demand controller through the restart lifecycle, preserving held local-runner
+jobs. A stopped controller stays stopped. See [updates](updates.md) and
+[local dashboard](native-mode.md).
 
 On Linux and macOS, the controller starts a separate local runner after its API
 is ready. A successor controller reuses a live runner with the same executable
@@ -602,7 +620,19 @@ An unavailable controller returns an error. See [admission](admission.md) and
 
 ### Capping sparkwing's share of the machine
 
-Set the machine budget in the private machine file:
+Create the private machine file if it does not exist. These commands keep any
+existing settings and set the required owner-only permissions:
+
+```bash
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing"
+mkdir -p "$config_dir"
+touch "$config_dir/config.yaml"
+chmod 600 "$config_dir/config.yaml"
+```
+
+Edit that file and merge this block into it. If it already has an `admission`
+section, change its `budget` key instead of adding a second section. Keep the
+other settings. See [Permissions and writes](machine-config.md#permissions-and-writes).
 
 ```yaml
 admission:
@@ -616,9 +646,17 @@ names memory, and nice 10, so every job the runner hosts shares that cap. On
 Linux, jobs the CLI hosts itself are niced as well. A runner without systemd,
 macOS and Windows get no OS cap; macOS gives jobs background scheduling only.
 
+[`Cores()` requests](admission.md#core-requests) reserve admission capacity and
+are not per-job OS limits. Under `enforce`, a job can use more than its declared
+cores while capacity is idle because all jobs share the runner-wide cap.
+
 The controller reads the budget when it starts. After changing it, run
 `sparkwing daemon restart`. The restarted controller replaces a runner started
 under another budget; that runner finishes its held jobs under the old limits.
+For an installed login service on the same CLI version, select
+`sparkwing daemon restart --force`. On older CLIs whose on-demand restart returns
+`restarted: false`, run `sparkwing daemon stop`, then start the next pipeline to
+load the new budget.
 
 `sparkwing queue list` reads the limits back from the running runner and reports
 what the OS applied: `OS-enforced: runner jobs capped at 2.0 cores, nice 10`, or

@@ -24,7 +24,7 @@ func TestDispatchRunSwitchesBeforeLocalIntake(t *testing.T) {
 	t.Chdir(repo)
 	calls := []string{}
 	sentinel := errors.New("selected engine failed")
-	err := dispatchRunWithEngineArgs([]string{"hello"}, func(got string, _ func()) error {
+	err := dispatchRunWithEngineArgs([]string{"hello"}, func(got string, _ func() error) error {
 		calls = append(calls, "switch")
 		if got != dir {
 			t.Fatalf("selected source = %s", got)

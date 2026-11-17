@@ -146,7 +146,7 @@ func exitCodeFor(err error) int {
 	return 1
 }
 
-func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, func()) error) (resultErr error) {
+func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, func() error) error) (resultErr error) {
 	pipelineName := inv.Pipeline
 	flags, passthrough := runFlagsFromInvocation(inv)
 	if flags.parseErr != nil {
@@ -191,8 +191,6 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 	if err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
-	var closeErr error
-	beforeExec := func() { closeErr = errors.Join(closeErr, code.Close(), selection.execution.Close()) }
 	route, err = loadRunRouting(selection.execution.Directory, pipelineName, flags)
 	if err != nil {
 		return err
@@ -203,11 +201,23 @@ func dispatchRunWithEngine(inv clisurface.Invocation, selectEngine func(string, 
 		}
 	}
 
-	if err := selectEngine(code.Directory, beforeExec); err != nil {
-		return errors.Join(err, closeErr)
+	beforeExec := func() error {
+		if err := errors.Join(code.Close(), selection.execution.Close()); err != nil {
+			return err
+		}
+		if flags.allowUnadmitted || route.Route != nil && *route.Route != "local" && flags.route != "burst" {
+			return nil
+		}
+		// bug: the pipeline engine may predate the shared store's schema.
+		ctx, stop, _ := interruptContext()
+		defer stop()
+		_, err := ensureLocalController(ctx, home, func(ctx context.Context) (dashboardServices, error) {
+			return resolveLocalServicesAt(ctx, home)
+		})
+		return err
 	}
-	if closeErr != nil {
-		return closeErr
+	if err := selectEngine(code.Directory, beforeExec); err != nil {
+		return err
 	}
 
 	return runConfiguredInvocation(pipelineName, flags, passthrough)
@@ -349,8 +359,8 @@ func runSparkwing(args []string) (result error) {
 		return dispatchRunWithEngine(inv, switchToolchain)
 	case "sparkwing pipeline list":
 		return runPipelineList(inv)
-	case "sparkwing pipeline describe":
-		return runPipelineDescribe(inv)
+	case "sparkwing pipeline show":
+		return runPipelineShow(inv)
 	case "sparkwing pipeline plan":
 		return runPipelinePlan(inv)
 	case "sparkwing pipeline lint":
@@ -371,8 +381,8 @@ func runSparkwing(args []string) (result error) {
 		return runSparksUpdate(inv)
 	case "sparkwing pipeline sparks inflate":
 		return runSparksInflate(inv)
-	case "sparkwing cache info":
-		return runCacheInfo(inv)
+	case "sparkwing cache status":
+		return runCacheStatus(inv)
 	case "sparkwing cache explain":
 		return runCacheExplain(inv)
 	case "sparkwing cache prune":
@@ -385,8 +395,8 @@ func runSparkwing(args []string) (result error) {
 		return runXrepoRemove(inv)
 	case "sparkwing repos prune":
 		return runXrepoPrune(inv)
-	case "sparkwing repos info":
-		return runReposInfo(inv)
+	case "sparkwing repos show":
+		return runReposShow(inv)
 	case "sparkwing repos update":
 		return runReposUpdate(inv)
 	case "sparkwing login":
@@ -403,7 +413,7 @@ func runSparkwing(args []string) (result error) {
 		return runCompletion(inv)
 	case "sparkwing runs logs", "sparkwing runs grep":
 		return runRunsLogs(context.Background(), inv)
-	case "sparkwing debug attach", "sparkwing debug env":
+	case "sparkwing debug attach", "sparkwing debug show":
 		return runDebug(inv)
 	case "sparkwing __complete":
 		return runInternalComplete(inv)

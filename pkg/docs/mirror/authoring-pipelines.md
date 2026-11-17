@@ -506,14 +506,32 @@ must be on PATH. Commit the exact SDK pin and native npm lockfile in
 TypeScript entry through Node, rather than compiling a standalone executable.
 Node only strips types, so run `npm exec -- tsc` in `.sparkwing/` to type-check
 the project against the scaffold's `tsconfig.json`. `sparkwing pipeline upgrade`
-runs the same check before it applies a new SDK pin.
+runs the same check before it applies a new SDK pin. New scaffolds pin Node 22
+`@types/node` declarations and enable Node types, so imports such as `node:fs`
+and `node:path` and globals such as `process` type-check.
+
+
+Older TypeScript scaffolds may lack Node declarations. If `pipeline upgrade`
+reports TS2307 or TS2591 for imports such as `node:fs`, install the declarations:
+
+```bash
+npm --prefix .sparkwing install --save-dev --save-exact @types/node@22
+```
+
+In `.sparkwing/tsconfig.json`, add `"node"` to `compilerOptions.types` (create
+`"types": ["node"]` if absent). Keep any existing type entries. Run
+`npm --prefix .sparkwing exec -- tsc --noEmit --project .sparkwing/tsconfig.json`,
+then retry
+`sparkwing pipeline upgrade`. Commit `package.json`, `package-lock.json` and
+`tsconfig.json` under `.sparkwing/`. Upgrading the SDK pin does not add these
+project settings.
 
 ### Registration and dependencies
 
 `definePipeline` registers an implementation. Import its module from the
 package's `main` entry and call `await main()` there. The YAML `entrypoint`
 names that registration, while YAML `name` is the name passed to `sparkwing run`.
-`pipeline list` reads YAML. `pipeline describe` reads declarations and
+`pipeline list` reads YAML. `pipeline show` reads declarations and
 `pipeline plan` renders the resolved DAG without dispatching jobs.
 
 ```ts
@@ -613,7 +631,7 @@ Use satisfiable guard tokens and check branch semantics in
 TypeScript `pipeline lint` prints an unsupported notice and exits zero. JSON
 reports `status: "unsupported"`. It analyzes neither TypeScript source nor its
 guards, so it cannot serve as an authoring gate. Run your TypeScript checker,
-`pipeline describe`, `pipeline plan` and focused execution tests. The host
+`pipeline show`, `pipeline plan` and focused execution tests. The host
 validates declarations and graphs when they are submitted.
 
 ### Local runs, schedules and child runs

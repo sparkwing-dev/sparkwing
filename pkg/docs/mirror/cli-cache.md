@@ -13,7 +13,7 @@ Inspect and maintain the local pipeline build cache.
 ### Subcommands
 
 - `explain` -- Show this repository's pipeline binary cache key and its inputs
-- `info` -- Print cache dir, size, ceilings, and recent entries
+- `status` -- Print cache dir, size, ceilings, and recent entries
 - `prune` -- Prune oldest cached binaries down to the ceilings
 - `warm` -- Prepare the local pipeline cache and dependencies
 
@@ -37,6 +37,8 @@ sparkwing cache explain
 
 Show this repository's pipeline binary cache key and its inputs
 
+Show the inputs that determine whether this repository's pipeline binary can be reused.
+
 Explain the .sparkwing directory found from the working directory or -C DIR. Every pipeline in a repository shares one binary, so the command takes no pipeline name.
 
 ### Flags
@@ -55,24 +57,11 @@ Explain the .sparkwing directory found from the working directory or -C DIR. Eve
 sparkwing cache explain
 ```
 
-## `sparkwing cache info`
-
-Print cache dir, size, ceilings, and recent entries
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--all-entries` | List every managed cache entry instead of the 10 most recently used. |
-| `--docs` | Report on the downloaded web docs cache instead of the pipeline binary cache; other flags are ignored. |
-
 ## `sparkwing cache prune`
 
 Prune oldest cached binaries down to the ceilings
+
+Remove old, unused pipeline binaries to meet cache limits. Use --docs to clear downloaded documentation instead.
 
 ### Flags
 
@@ -87,9 +76,42 @@ Prune oldest cached binaries down to the ceilings
 | `--all-entries` | Remove every binary cache entry that is not in use, ignoring the size and entry ceilings. |
 | `--docs` | Clear the downloaded web docs cache instead of pruning the binary cache; the size and entry flags are ignored. |
 
+### Examples
+
+```sh
+# Prune unused binaries to the configured limits
+sparkwing cache prune
+```
+
+## `sparkwing cache status`
+
+Print cache dir, size, ceilings, and recent entries
+
+Show the local pipeline cache's size, limits and recent entries. Use --docs to inspect the downloaded docs cache.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--all-entries` | List every managed cache entry instead of the 10 most recently used. |
+| `--docs` | Report on the downloaded web docs cache instead of the pipeline binary cache; other flags are ignored. |
+
+### Examples
+
+```sh
+# Inspect the pipeline binary cache
+sparkwing cache status
+```
+
 ## `sparkwing cache warm`
 
 Prepare the local pipeline cache and dependencies
+
+Prepare this repository's pipelines for a later run by compiling Go source or installing TypeScript dependencies.
 
 Build Go pipelines into the local binary cache or install TypeScript dependencies. Binary cache entries stay on this machine. JSON emits one preparation receipt; plain emits the prepared path.
 
@@ -104,3 +126,10 @@ Go preparation uses the filtered install environment and masks compiler diagnost
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--clear-cache` | Remove every unused pipeline binary cache entry on this machine before building, so the build starts cold. |
+
+### Examples
+
+```sh
+# Prepare this repository's pipelines
+sparkwing cache warm
+```

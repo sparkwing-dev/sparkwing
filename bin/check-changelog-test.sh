@@ -23,6 +23,20 @@ if ! /bin/bash "$fixture/bin/check-changelog.sh"; then
   exit 1
 fi
 
+printf 'package fixture\n' > "$fixture/sparkwing/scratch.go"
+/bin/bash "$fixture/bin/check-changelog.sh" --tracked
+if /bin/bash "$fixture/bin/check-changelog.sh" >/dev/null 2>&1; then
+  echo "check-changelog-test: hook ignored untracked covered source" >&2
+  exit 1
+fi
+git -C "$fixture" add -- sparkwing/scratch.go
+if /bin/bash "$fixture/bin/check-changelog.sh" --tracked >/dev/null 2>&1; then
+  echo "check-changelog-test: tracked policy ignored tracked covered source" >&2
+  exit 1
+fi
+git -C "$fixture" rm -qf -- sparkwing/scratch.go
+mkdir -p "$fixture/sparkwing"
+
 check_surface() {
   local changed="$1" want="$2" output status
   mkdir -p "$(dirname "$fixture/$changed")"
@@ -139,7 +153,13 @@ if [[ "$fixture/pkg/docs/mirror/index.md" -nt "$stamp" ]]; then
   echo "check-changelog-test: changelog update rewrote the unchanged docs" >&2
   exit 1
 fi
+git -C "$fixture" add -- docs pkg/docs/mirror
 /bin/bash "$fixture/bin/sync-docs.sh" --check >/dev/null
+
+printf 'ignored scratch\n' > "$fixture/docs/ignored.md"
+printf 'docs/ignored.md\n' >> "$fixture/.gitignore"
+/bin/bash "$fixture/bin/sync-docs.sh" --check >/dev/null
+rm "$fixture/docs/ignored.md"
 
 
 for drift in missing different; do

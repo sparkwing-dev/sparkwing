@@ -22,6 +22,11 @@ Local execution reads the cached signed mapping without fetching policy. An unli
 
 Each host process authenticates a cached engine's signatures, release layout, executable version and platform once per trusted key set. Reuse checks the executable SHA-256 and the unchanged verification record before selecting or installing its SDK. Records kept in memory contain digests and identities, never executable bytes. A process restart repeats the signature checks.
 
+Upgrade verification reads the selected engine's command index to choose its
+pipeline detail verb. Published engines can advertise `describe`, while newer
+engines advertise `show`. The invoking CLI's spelling changes neither the SDK
+pin nor the selected engine.
+
 A corrupt cache entry fails with an integrity error. Remove the affected release directory named by the error and retry to fetch and verify it again.
 
 ## Publication

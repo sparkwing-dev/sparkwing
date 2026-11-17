@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -410,8 +412,12 @@ func (p queuedTestProcess) terminated() bool {
 }
 
 func queuedProcessSnapshot(pid int) (queuedTestProcess, bool, error) {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if os.IsNotExist(err) {
+	return queuedProcessSnapshotRead(pid, os.ReadFile)
+}
+
+func queuedProcessSnapshotRead(pid int, readFile func(string) ([]byte, error)) (queuedTestProcess, bool, error) {
+	data, err := readFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
 		return queuedTestProcess{}, false, nil
 	}
 	if err != nil {
@@ -595,5 +601,19 @@ func TestOne(t *testing.T) { if testing.Short() { t.Skip("full collision body") 
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("queued critical packages narrowed the original module-wide name union: %v", err)
+	}
+}
+
+func TestQueuedProcessSnapshotVanished(t *testing.T) {
+	for _, cause := range []error{syscall.ENOENT, syscall.ESRCH, syscall.EACCES} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			missing := !errors.Is(cause, syscall.EACCES)
+			_, found, err := queuedProcessSnapshotRead(123, func(string) ([]byte, error) {
+				return nil, &os.PathError{Op: "open", Path: "/proc/123/stat", Err: cause}
+			})
+			if found || missing && err != nil || !missing && !errors.Is(err, cause) {
+				t.Fatalf("snapshot: found=%t err=%v, missing=%t", found, err, missing)
+			}
+		})
 	}
 }

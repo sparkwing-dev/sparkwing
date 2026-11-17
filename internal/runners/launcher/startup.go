@@ -137,3 +137,7 @@ func (l *Launcher) probeStartupImage(pod types.UID, started bool) bool {
 	l.startupImageProbes[pod] = budget
 	return true
 }
+
+func (l *Launcher) recordStartupStage(ctx context.Context, binding CloudJobBinding, stage string, started time.Time, success bool) {
+	l.logger().InfoContext(ctx, "Cloud startup", "stage", stage, "duration_ms", max(0, time.Since(started).Milliseconds()), "success", success, "run", binding.RunID, "unit", binding.UnitID, "generation", binding.Generation)
+}

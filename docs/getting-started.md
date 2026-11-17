@@ -28,6 +28,9 @@ adds capacity from your own machines to Cloud.
 Coming from GitHub Actions? [Migrate from GitHub Actions](migrate-from-github-actions.md)
 maps each workflow feature to its Sparkwing equivalent, and
 [known limitations](known-limitations.md) lists what has none yet.
+If search does not find the guide, list matching topics with
+`sparkwing docs list --search github`, then read
+`sparkwing docs read --topic migrate-from-github-actions`.
 
 ## Install
 
@@ -224,14 +227,15 @@ sparkwing pipeline new --pipeline hello --template typescript
 git add .sparkwing
 git commit -m "Add TypeScript pipeline"
 sparkwing pipeline list
-sparkwing pipeline describe --pipeline hello
+sparkwing pipeline show --pipeline hello
 sparkwing pipeline plan --pipeline hello
 sparkwing run hello
 ```
 
-This creates `.sparkwing/package.json` with an exact `@sparkwing/sdk` pin and a
-`typescript` development dependency, `tsconfig.json`, `index.ts`, `jobs/hello.ts`,
-`sparkwing.yaml` and `package-lock.json`. An existing `tsconfig.json` is kept. It uses the same `--on`,
+This creates `.sparkwing/package.json` with exact pins for `@sparkwing/sdk`,
+`typescript` and Node 22 `@types/node`. It also writes `tsconfig.json` with Node
+types enabled, `index.ts`, `jobs/hello.ts`, `sparkwing.yaml` and `package-lock.json`.
+Existing `package.json` and `tsconfig.json` files are kept. It uses the same `--on`,
 `--hidden` and `--short` flags as the Go shapes. Repeat the command with another
 pipeline name to add a pipeline to the TypeScript entry. The scaffold runs
 `npm install --package-lock-only` to write the lockfile, and Sparkwing installs
@@ -555,7 +559,13 @@ confirms its revocation. A failed revocation leaves the connection saved.
 `--keep-token` removes only the connection and leaves its credential live.
 
 To run work on this machine for that controller, add it as a runner with
-`sparkwing runners add --profile prod --runner this-laptop`.
+`sparkwing runners add --profile prod --runner this-laptop --personal --team acme`.
+Replace `acme` with your team handle. Run this in a terminal, open the printed
+`/device` URL, sign in directly to your Cloud account, enter the code, check the
+runner name and team, and approve. You need team administration, or membership
+with `members_can_add_machines` enabled. A CLI bearer cannot approve enrollment.
+Each teammate repeats this under their own account for their workstation. For
+shared team capacity, follow the [dedicated-session recipe](self-hosting.md#shared-team-capacity).
 
 ### Start a run
 

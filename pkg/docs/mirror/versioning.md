@@ -84,7 +84,7 @@ security policy comes from the verified version index.
 
 <!-- design:begin -->
 
-## The SDK pin selects the CLI
+## The SDK pin selects the pipeline engine
 
 Every placement acquires its sealed source, reads the pin, resolves and verifies
 a permitted engine that accepts the SDK's protocol, then uses that engine to
@@ -95,6 +95,17 @@ selected executable only after the resolver checks policy and cached bytes.
 A missing release fails instead of selecting another version.
 Retries retain the accepted portable engine identity and exact source SHA. Each
 machine resolves the appropriate platform asset for that same identity.
+
+For a shared local run, the invoking CLI starts the local controller before
+handing execution to a different pinned engine. The controller owns the store
+and must support its schema. An older pipeline pin therefore keeps its engine
+while using the installed CLI's controller after an upgrade or `daemon stop`.
+A CLI that cannot open the store refuses before delegation, even when the pin
+selects a newer engine. Upgrade the installed CLI to match the store.
+A `--route burst` run starts the invoking CLI's local controller before engine
+handoff even when Cloud accepts the run, because it may fall back to local
+execution if Cloud is unreachable.
+Standalone CI uses its selected engine's in-process controller and a private home.
 
 Engines come from the official GitHub Releases assets. Verification uses the
 shared release trust roots, signed checksums, exact asset digest, embedded version
@@ -252,19 +263,37 @@ Remove `node_modules/.sparkwing-sdk-receipt`, or `node_modules`, after switching
 Each installation makes one helper attempt with a ten-minute deadline. Failure
 stops the install, reports the cause, and kills and reaps its helper process tree.
 Verification then compiles Go packages, type-checks TypeScript with `tsc --noEmit`
-when `.sparkwing/tsconfig.json` exists, and runs list, describe and plan through
-that engine, including hidden pipelines. The TypeScript scaffold writes a
+when `.sparkwing/tsconfig.json` exists, and runs list, pipeline detail and plan
+commands through that engine, including hidden pipelines. Its command index
+selects `pipeline show`, or the older detail verb on published engines that
+predate it. The TypeScript scaffold writes a
 `tsconfig.json` and locks `typescript` as a development dependency, so `tsc` runs from
 the project's own install. A project without `tsconfig.json` skips the type check; Node
-strips its types, so describe and plan are its check. Verification never runs
+strips its types, so pipeline details and plans are its check. Verification never runs
 job bodies. Install and check environments pass through the shared environment
 builder, and registered proxy credentials are masked in failures.
+
+
+Older TypeScript scaffolds may lack Node declarations. If `pipeline upgrade`
+reports TS2307 or TS2591 for imports such as `node:fs`, install the declarations:
+
+```bash
+npm --prefix .sparkwing install --save-dev --save-exact @types/node@22
+```
+
+In `.sparkwing/tsconfig.json`, add `"node"` to `compilerOptions.types` (create
+`"types": ["node"]` if absent). Keep any existing type entries. Run
+`npm --prefix .sparkwing exec -- tsc --noEmit --project .sparkwing/tsconfig.json`,
+then retry
+`sparkwing pipeline upgrade`. Commit `package.json`, `package-lock.json` and
+`tsconfig.json` under `.sparkwing/`. Upgrading the SDK pin does not add these
+project settings.
 
 Pin and lockfile edits apply once the new SDK resolves against the verified
 engine. When `go mod tidy` fails on a package the new release removed, the Go
 pin moves with `go get` instead. Each original digest is checked again so
 concurrent user edits are not overwritten. When the pipeline then fails to
-compile, describe or plan against the new pin, the pin stays applied and the
+compile, show its details or plan against the new pin, the pin stays applied and the
 command reports the failure, names the migration guides between the two
 versions and exits non-zero. Its report names the manifest and lockfile it
 changed (for Go, `.sparkwing/go.mod` and `.sparkwing/go.sum`); reverting

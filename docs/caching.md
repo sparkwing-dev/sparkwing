@@ -321,6 +321,8 @@ those.
 After each new entry, Sparkwing reclaims inactive entries to fit a byte
 ceiling and an entry count.
 
+Before editing these settings, follow the [0600 config recipe](machine-config.md#permissions-and-writes).
+
 | [config.yaml](machine-config.md) key | Default | Meaning |
 | --- | --- | --- |
 | `cache.max_bytes` | `2GiB` | Total size ceiling. Accepts a suffix (`512MiB`, `4GB`). `0` disables. |
@@ -342,8 +344,8 @@ before admitting more work because concurrent activity can change free space.
 Inspect and reclaim on demand:
 
 ```bash
-sparkwing cache info                      # size, ceilings, recent entries
-sparkwing cache info --all-entries -o json        # every entry, machine-readable
+sparkwing cache status                      # size, ceilings, recent entries
+sparkwing cache status --all-entries -o json        # every entry, machine-readable
 sparkwing cache prune                     # trim to the configured ceilings
 sparkwing cache prune --max-bytes 512MiB  # trim to a smaller budget
 sparkwing cache prune --all-entries               # reclaim everything

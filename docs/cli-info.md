@@ -8,6 +8,8 @@ Every `sparkwing info` command, flag, and argument, generated from the CLI's own
 
 Describe Sparkwing and the selected project
 
+Show Sparkwing's capabilities and the selected repository's pipeline setup. Use --for-agent for agent orientation.
+
 ### Flags
 
 | Flag | Description |
@@ -18,3 +20,10 @@ Describe Sparkwing and the selected project
 | `--help-all` | Include uncommon flags in command help. |
 | `--for-agent` | Print the agent orientation block with this repository's current state instead of the summary table. |
 | `--first-time` | Print a welcome card with missing prerequisites and first commands to try; ignored with --for-agent. |
+
+### Examples
+
+```sh
+# Show agent orientation for this repository
+sparkwing info --for-agent
+```

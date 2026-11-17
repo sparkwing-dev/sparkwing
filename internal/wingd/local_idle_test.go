@@ -591,3 +591,60 @@ func TestPrivateIdleHeldRunnerFinishesAfterExit(t *testing.T) {
 		<-joined
 	})
 }
+
+func TestPrivateDrainLivenessFailureResumesIdleService(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		logs := make(chan string, 8)
+		d, err := New(Config{Home: t.TempDir(), Logf: func(format string, args ...any) { logs <- fmt.Sprintf(format, args...) }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		defer d.shutdownWithReason("test cleanup")
+		runner := localhostwire.LocalRunnerInstance{ID: "held-runner", PID: os.Getpid()}
+		d.draining, d.idleRetiring = true, true
+		d.retiringRunner = &runner
+		d.idleSince = time.Now().Add(-privateControllerIdle)
+		probes := 0
+		d.finishDrainWithProbe(ctx, runner, func(got localhostwire.LocalRunnerInstance) (bool, error) {
+			if got != runner {
+				t.Errorf("probed runner %+v, want %+v", got, runner)
+			}
+			probes++
+			return false, errors.New("process inspection unavailable")
+		})
+		synctest.Wait()
+		d.mu.Lock()
+		draining, retiring, since := d.draining, d.idleRetiring, d.idleSince
+		d.mu.Unlock()
+		d.runnerChanges.lock()
+		finishing, held := d.finishingDrain, d.retiringRunner
+		d.runnerChanges.unlock()
+		if probes != 1 || draining || retiring || finishing || held != nil || !since.Equal(time.Now()) {
+			t.Fatalf("liveness failure did not resume: probes=%d draining=%v retiring=%v finishing=%v held=%+v idleSince=%v", probes, draining, retiring, finishing, held, since)
+		}
+		if message := <-logs; !strings.Contains(message, "process inspection unavailable") {
+			t.Fatalf("inspection failure not reported: %s", message)
+		}
+		select {
+		case <-d.quit:
+			t.Fatal("inspection failure shut down the controller")
+		default:
+		}
+		time.Sleep(privateControllerIdle - time.Second)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+			t.Fatal("resumed controller retired before a full idle window")
+		default:
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+		default:
+			t.Fatal("resumed idle watcher did not retire the controller")
+		}
+	})
+}

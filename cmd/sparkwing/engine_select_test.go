@@ -425,3 +425,24 @@ func TestOlderEngineRefusesRenamedRunFlagsWithPipelineUpgrade(t *testing.T) {
 		}
 	}
 }
+
+func TestSwitchToolchainPreservesBeforeExecFailure(t *testing.T) {
+	_, selected, _, _ := engineSwitchFixture(t, engineid.GoSDK)
+	selected.Target = releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	previousRead, previousResolve, previousArgs := readEnginePin, resolveEnginePin, toolchainReplayArgs
+	t.Cleanup(func() {
+		readEnginePin, resolveEnginePin, toolchainReplayArgs = previousRead, previousResolve, previousArgs
+	})
+	readEnginePin = func(string, engineid.SDKKind) (engineid.Pin, error) { return selected.Identity.Pin, nil }
+	resolveEnginePin = func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error) {
+		return selected, nil
+	}
+	toolchainReplayArgs = []string{"run", "hello"}
+	t.Setenv(toolchainModeEnv, "local")
+	failure := errors.New("controller cannot open the store")
+	calls := 0
+	err := switchToolchain(t.TempDir(), func() error { calls++; return failure })
+	if !errors.Is(err, failure) || calls != 1 {
+		t.Fatalf("handoff dropped the controller failure: %v, hook calls=%d", err, calls)
+	}
+}

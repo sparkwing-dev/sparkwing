@@ -96,7 +96,7 @@ func TestDaemonLifecycleReportsSharedStatus(t *testing.T) {
 	}
 }
 
-func TestDaemonLifecyclePreservesStoppedAndCurrentControllers(t *testing.T) {
+func TestDaemonLifecyclePreservesStoppedAndCurrentInstalledControllers(t *testing.T) {
 	for _, test := range []struct {
 		args    []string
 		running bool
@@ -106,7 +106,7 @@ func TestDaemonLifecyclePreservesStoppedAndCurrentControllers(t *testing.T) {
 		{[]string{"stop"}, false},
 		{[]string{"restart"}, true},
 	} {
-		fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: test.running, Version: "v2"}}
+		fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: test.running, Installed: true, Version: "v2"}}
 		var out bytes.Buffer
 		err := runDaemonLifecycleCommandArgs(t.Context(), append(test.args, "-o", "json"), &out, func(context.Context) (dashboardServices, error) {
 			return dashboardServices{lifecycle: fake, options: wingd.LocalStartOptions{Version: "v2"}}, nil
@@ -350,5 +350,27 @@ func TestDaemonServiceRefusesInlineKeysBeforeResolvingServices(t *testing.T) {
 				t.Fatalf("inline key install refusal: %v", err)
 			}
 		})
+	}
+}
+
+func TestDaemonRestartReloadsSameVersionOnDemandController(t *testing.T) {
+	fake := &daemonLifecycleFake{status: wingd.LocalStatus{Running: true, PID: 42, Version: "v2"}}
+	options := wingd.LocalStartOptions{Home: t.TempDir(), Executable: "/bin/sparkwing", Version: "v2"}
+	var out bytes.Buffer
+	err := runDaemonLifecycleCommandArgs(t.Context(), []string{"restart", "-o", "json"}, &out, func(context.Context) (dashboardServices, error) {
+		return dashboardServices{lifecycle: fake, options: options, retireRunner: func(context.Context) error {
+			t.Fatal("restart retired held runner jobs")
+			return nil
+		}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result daemonLifecycleResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Restarted || result.PID == 42 || !reflect.DeepEqual(fake.calls, []string{"status", "stop", "status", "start"}) || fake.options != options {
+		t.Fatalf("same-version restart skipped reload: receipt=%+v calls=%v options=%+v", result, fake.calls, fake.options)
 	}
 }

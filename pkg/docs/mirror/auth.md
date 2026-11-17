@@ -1052,14 +1052,13 @@ financial references retain the opaque account ID.
 [Account deletion retention](account-deletion-retention.md) names those columns. User-supplied
 content, including logs and artifacts, may still contain personal information.
 That content follows the team's retention policy and is excluded from account
-identity erasure. Financial records remain for accounting. Audit identifiers
-remain for security and abuse investigation under the operator's existing
-retention policy (400 days by default). Most audit records contain identifiers, enums, counts and digests. OIDC mint
-records are an exception: they currently retain the caller-supplied audience
-and generated subject as plain strings. An audience can contain an email or
-other personal text. Account deletion preserves these append-only rows until
-audit retention expires. It does not scrub those strings. Do not put personal
-information or credentials in an OIDC audience.
+identity erasure. Financial records remain for accounting. Account deletion preserves security audit records through the configured audit
+horizon, 400 days by default. OIDC audit rows retain keyed audience and subject
+digests, their key ID, and fixed tracing identifiers. They contain no raw OIDC
+audience or subject after the controller completes schema 40 reconciliation.
+An operator holding the external key and a candidate can still confirm a match.
+This retained evidence is pseudonymous, so deletion does not promise that it
+cannot be linked to a known candidate. See [audit investigation](oidc.md#audit-investigation).
 
 Cloud live account identity and authority disappear in the request transaction.
 Team data normally disappears within minutes, with a final sweep 75 minutes

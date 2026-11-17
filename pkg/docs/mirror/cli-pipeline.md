@@ -12,7 +12,7 @@ Create, inspect and maintain this repository's pipelines, or trigger a run on a 
 
 ### Subcommands
 
-- `describe` -- Print one pipeline's full metadata
+- `show` -- Print one pipeline's full metadata
 - `hooks` -- Install / uninstall git pre-commit + pre-push + post-commit hooks
 - `lint` -- Check Go pipeline source for idiomatic anti-patterns; report TypeScript lint as unsupported
 - `list` -- Enumerate every pipeline with metadata
@@ -38,31 +38,6 @@ Create, inspect and maintain this repository's pipelines, or trigger a run on a 
 sparkwing pipeline list
 ```
 
-## `sparkwing pipeline describe`
-
-Print one pipeline's full metadata
-
-Show a pipeline's arguments and triggers without executing it. Use pipeline plan to see its jobs.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-| `--pipeline NAME` | Pipeline name. (required) |
-| `--secrets` | Print only the secrets the pipeline declares, each marked required or optional. |
-| `--show-withheld` | Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs. |
-
-### Examples
-
-```sh
-# Show a pipeline's arguments and triggers
-sparkwing pipeline describe --pipeline build
-```
-
 ## `sparkwing pipeline hooks`
 
 Install / uninstall git pre-commit + pre-push + post-commit hooks
@@ -86,6 +61,8 @@ Install / uninstall git pre-commit + pre-push + post-commit hooks
 
 Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers
 
+Install this repository's Git hooks from the triggers declared in sparkwing.yaml.
+
 ### Flags
 
 | Flag | Description |
@@ -94,11 +71,20 @@ Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml trigge
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+### Examples
+
+```sh
+# Install this repository's declared Git hooks
+sparkwing pipeline hooks install
+```
 
 ## `sparkwing pipeline hooks status`
 
 Report declared, installed, and missing sparkwing hooks
 
+Show which declared Sparkwing Git hooks are installed or missing.
+
 ### Flags
 
 | Flag | Description |
@@ -108,9 +94,18 @@ Report declared, installed, and missing sparkwing hooks
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 
+### Examples
+
+```sh
+# Check this repository's Git hooks
+sparkwing pipeline hooks status
+```
+
 ## `sparkwing pipeline hooks uninstall`
 
 Remove sparkwing-managed git hooks
+
+Remove this repository's Sparkwing-managed Git hooks.
 
 ### Flags
 
@@ -125,6 +120,8 @@ Remove sparkwing-managed git hooks
 
 Check Go pipeline source for idiomatic anti-patterns; report TypeScript lint as unsupported
 
+Check Go pipeline source for common mistakes. Use --rules to read the rules. TypeScript lint is unsupported.
+
 ### Flags
 
 | Flag | Description |
@@ -136,6 +133,13 @@ Check Go pipeline source for idiomatic anti-patterns; report TypeScript lint as 
 | `--pipeline NAME` | Pipeline name. |
 | `--rules` | Print the lint rules with what each forbids and why, without analyzing any source. |
 | `--dir DIR` | Analyze Go pipeline source in this directory instead of .sparkwing/jobs, or .sparkwing when there is no jobs directory. |
+
+### Examples
+
+```sh
+# Check this repository's Go pipelines
+sparkwing pipeline lint
+```
 
 ## `sparkwing pipeline list`
 
@@ -217,6 +221,31 @@ Preview the jobs and steps a pipeline would select without executing them.
 sparkwing pipeline plan --pipeline build
 ```
 
+## `sparkwing pipeline show`
+
+Print one pipeline's full metadata
+
+Show a pipeline's arguments and triggers without executing it. Use pipeline plan to see its jobs.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--pipeline NAME` | Pipeline name. (required) |
+| `--secrets` | Print only the secrets the pipeline declares, each marked required or optional. |
+| `--show-withheld` | Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs. |
+
+### Examples
+
+```sh
+# Show a pipeline's arguments and triggers
+sparkwing pipeline show --pipeline build
+```
+
 ## `sparkwing pipeline sparks`
 
 Manage sparks libraries declared in .sparkwing/sparkwing.yaml
@@ -244,6 +273,8 @@ Manage sparks libraries declared in .sparkwing/sparkwing.yaml
 
 Add a library to the sparks: block
 
+Add a Go library to this project's sparks declarations.
+
 ### Flags
 
 | Flag | Description |
@@ -260,6 +291,8 @@ Add a library to the sparks: block
 
 List the blocks a spark library offers
 
+List the reusable blocks a sparks library offers.
+
 ### Flags
 
 | Flag | Description |
@@ -275,6 +308,8 @@ List the blocks a spark library offers
 
 Remove a library from the sparks: block
 
+Remove a library from this project's sparks declarations.
+
 ### Flags
 
 | Flag | Description |
@@ -288,6 +323,8 @@ Remove a library from the sparks: block
 ## `sparkwing pipeline sparks inflate`
 
 Copy a spark library's source into this repo so you can edit it
+
+Copy a sparks library's source into this repository and replace its dependency with the local copy.
 
 Copy one library module into the project and replace its dependency with that local source. JSON emits the module, version, destination and replacement; plain emits the destination.
 
@@ -305,6 +342,8 @@ Copy one library module into the project and replace its dependency with that lo
 
 Validate a spark.json library manifest
 
+Validate a sparks library's spark.json manifest.
+
 ### Flags
 
 | Flag | Description |
@@ -319,6 +358,8 @@ Validate a spark.json library manifest
 
 Show declared sparks libraries and their resolved versions
 
+List this project's declared sparks libraries and resolved versions.
+
 ### Flags
 
 | Flag | Description |
@@ -332,6 +373,8 @@ Show declared sparks libraries and their resolved versions
 ## `sparkwing pipeline sparks update`
 
 Re-resolve every declared library
+
+Resolve every declared sparks library again and update the project's dependency overlay.
 
 ### Flags
 
@@ -397,7 +440,7 @@ Upgrade repository SDK pins
 
 Update this repository's SDK pin to a published release. Preview the changes with --dry-run.
 
-Bump the current repository's Go or TypeScript SDK pin to the latest permitted SDK entry in the signed policy, or the SDK selected by --version. Select the newest permitted engine that accepts that SDK's declared protocol. SDK and engine versions are independent. Resolve native lockfiles and verify compilation/type checking plus describe/plan with the verified engine. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services.
+Bump the current repository's Go or TypeScript SDK pin to the latest permitted SDK entry in the signed policy, or the SDK selected by --version. Select the newest permitted engine that accepts that SDK's declared protocol. SDK and engine versions are independent. Resolve native lockfiles and verify compilation/type checking plus pipeline details and plans with the verified engine. Discover the detail command from that engine's command index. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services.
 
 ### Flags
 

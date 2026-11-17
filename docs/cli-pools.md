@@ -27,6 +27,8 @@ Manage team runner pools
 
 Allow a repository and branch to use a pool
 
+Add an access rule for a reserved runner pool. Repositories must have independently verified authority.
+
 Require independently verified repository authority; a typed repository or branch grants no trust.
 
 Create a rule through the team-admin route with an idempotency key. JSON preserves the rule and replay result; plain emits its ID.
@@ -50,6 +52,8 @@ Create a rule through the team-admin route with an idempotency key. JSON preserv
 
 Remove a pool access rule
 
+Remove an access rule from a reserved runner pool.
+
 Delete the selected pool rule through the team-admin route. JSON retains whether it was deleted or already absent; plain emits the rule ID.
 
 ### Flags
@@ -67,6 +71,8 @@ Delete the selected pool rule through the team-admin route. JSON retains whether
 ## `sparkwing pools list`
 
 List runner pools
+
+List the team's reserved runner pools, their runners and access rules.
 
 Read controller-granted reservations and access rules. JSON emits each pool with its runners and rules; plain emits pool names.
 

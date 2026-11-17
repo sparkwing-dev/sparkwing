@@ -102,6 +102,9 @@ daemon reads the budget at start, so restart it after a change.
 
 ## Dashboard
 
+Before editing `config.yaml`, follow [Permissions](#permissions-and-writes) to create the
+file with mode `0600`.
+
 The shared local controller serves the dashboard whenever it runs.
 `dashboard.address` is the loopback IP and port it binds, `127.0.0.1:4343` by
 default. A non-loopback or host-name bind address is refused. A browser on
@@ -187,6 +190,19 @@ Ask a controller administrator to replace the allowed set with
 The file carries credentials, so reads require an owner-only regular file.
 Unix uses mode `0600`. Windows checks the owning SID and DACL. Symlinks and
 reparse points are refused.
+
+Before creating or editing the file by hand on Unix, prepare it without
+replacing existing settings:
+
+```bash
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing"
+mkdir -p "$config_dir"
+touch "$config_dir/config.yaml"
+chmod 600 "$config_dir/config.yaml"
+```
+
+Merge the sections you need into that file. Do not overwrite existing profiles
+or add duplicate section keys.
 
 Settings writers lock `config.yaml.lock`, reread the file, change their section
 and atomically replace the file with an owner-only copy. Other sections and

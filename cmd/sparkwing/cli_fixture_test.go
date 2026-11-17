@@ -305,7 +305,7 @@ func runCLITestMain(m *testing.M) int {
 }
 
 func TestDetachedHostEntrypointDoesNotRunPipelineFixtures(t *testing.T) {
-	for _, args := range [][]string{{"wingd", "run"}, {"pipeline", "describe"}, {"run"}, {"runs"}, {"runners"}, {"overflow"}, {"__sdk-install"}, {"__tick"}, {"__complete"}} {
+	for _, args := range [][]string{{"wingd", "run"}, {"pipeline", "show"}, {"run"}, {"runs"}, {"runners"}, {"overflow"}, {"__sdk-install"}, {"__tick"}, {"__complete"}} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			cmd := exec.CommandContext(t.Context(), os.Args[0], append(args, "--help")...)
 			cmd.Env = append(os.Environ(), "SPARKWING_TEST_DAEMON_ENTRYPOINT=1")

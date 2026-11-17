@@ -77,7 +77,7 @@ func TestEveryHelpExampleNamesARealCommand(t *testing.T) {
 }
 
 func TestCommonCommandsHaveDescriptionsAndExamples(t *testing.T) {
-	paths := []string{"runs", "pipeline", "pipeline new", "pipeline list", "pipeline upgrade", "pipeline describe", "pipeline plan", "pipeline trigger", "secrets", "daemon", "runners", "login", "profiles", "cache", "docs", "examples"}
+	paths := []string{"runs", "pipeline", "pipeline new", "pipeline list", "pipeline upgrade", "pipeline show", "pipeline plan", "pipeline trigger", "secrets", "daemon", "runners", "login", "profiles", "cache", "docs", "examples"}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
 			command := surfaceCommand("sparkwing " + path)
@@ -89,6 +89,23 @@ func TestCommonCommandsHaveDescriptionsAndExamples(t *testing.T) {
 	for _, surface := range clisurface.Registry() {
 		if strings.HasPrefix(surface.Path, "sparkwing runs ") && surfaceHelp(surface).Description == "" {
 			t.Errorf("missing description for %s", surface.Path)
+		}
+	}
+}
+
+func TestEveryLeafCommandHasPlainIntro(t *testing.T) {
+	registry := clisurface.Registry()
+	for _, surface := range registry {
+		if surface.Path != "sparkwing" && !strings.HasPrefix(surface.Path, "sparkwing ") {
+			continue
+		}
+		if slices.ContainsFunc(registry, func(other clisurface.Command) bool {
+			return strings.HasPrefix(other.Path, surface.Path+" ")
+		}) {
+			continue
+		}
+		if strings.TrimSpace(commandIntros[surface.Path]) == "" && surface.Path != "sparkwing commands" {
+			t.Errorf("missing plain intro for %s", surface.Path)
 		}
 	}
 }

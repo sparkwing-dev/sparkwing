@@ -18,7 +18,7 @@ func surfaceHelp(surface clisurface.Command) Command {
 	switch surface.Path {
 	case "sparkwing":
 		command.Description = "Run pipelines locally with run, or submit them to a controller with pipeline trigger. Use commands --search to find commands and --help for their flags."
-		command.Examples = []Example{{"Run a pipeline locally", "sparkwing run build"}, {"Inspect a pipeline", "sparkwing pipeline describe --pipeline build"}, {"Sign in to the local dashboard", "sparkwing dashboard open"}}
+		command.Examples = []Example{{"Run a pipeline locally", "sparkwing run build"}, {"Inspect a pipeline", "sparkwing pipeline show --pipeline build"}, {"Sign in to the local dashboard", "sparkwing dashboard open"}}
 	case "sparkwing commands":
 		command.Description = "Search command paths and summaries. Lists return bounded pages and a next_cursor when more matches exist. Markdown export includes the full selected command tree."
 		command.Examples = []Example{{"Find status commands", "sparkwing commands --search status"}, {"Export the reference", "sparkwing commands --format markdown --output plain"}}
@@ -133,8 +133,8 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing __complete --kind":                              "Which completion candidates to print for the given command words.",
 	"sparkwing billing request-tier --message":                 "What you need, sent to the operators with the team's standing and payment history.",
 	"sparkwing billing request-tier --tier":                    "Standing tier to request.",
-	"sparkwing cache info --all-entries":                       "List every managed cache entry instead of the 10 most recently used.",
-	"sparkwing cache info --docs":                              "Report on the downloaded web docs cache instead of the pipeline binary cache; other flags are ignored.",
+	"sparkwing cache status --all-entries":                     "List every managed cache entry instead of the 10 most recently used.",
+	"sparkwing cache status --docs":                            "Report on the downloaded web docs cache instead of the pipeline binary cache; other flags are ignored.",
 	"sparkwing cache prune --all-entries":                      "Remove every binary cache entry that is not in use, ignoring the size and entry ceilings.",
 	"sparkwing cache prune --docs":                             "Clear the downloaded web docs cache instead of pruning the binary cache; the size and entry flags are ignored.",
 	"sparkwing cache prune --max-bytes":                        "Remove least recently used entries until the binary cache is at most this size, overriding the configured ceiling; zero means no size limit.",
@@ -190,8 +190,8 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing operator tokens rotate --ttl":                   "Lifetime of the replacement credential in whole seconds or a duration; omitted or zero keeps the old credential's remaining lifetime.",
 	"sparkwing overflow set --minutes":                         "Monthly Cloud overflow allowance in minutes; zero stops new Cloud overflow while local and registered-machine work stays eligible.",
 	"sparkwing overflow set --uncapped":                        "Remove your saved monthly overflow cap; team standing and billing limits still apply.",
-	"sparkwing pipeline describe --secrets":                    "Print only the secrets the pipeline declares, each marked required or optional.",
-	"sparkwing pipeline describe --show-withheld":              "Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs.",
+	"sparkwing pipeline show --secrets":                        "Print only the secrets the pipeline declares, each marked required or optional.",
+	"sparkwing pipeline show --show-withheld":                  "Print planning output and errors withheld because a pipeline failed discovery to stderr, masked by known secrets. The failed pipeline's own secret defaults are unknown and print unmasked, so run it only where that output stays private, never in CI logs.",
 	"sparkwing pipeline lint --dir":                            "Analyze Go pipeline source in this directory instead of .sparkwing/jobs, or .sparkwing when there is no jobs directory.",
 	"sparkwing pipeline lint --rules":                          "Print the lint rules with what each forbids and why, without analyzing any source.",
 	"sparkwing pipeline new --hidden":                          "Mark the new pipeline hidden in sparkwing.yaml so pipeline list omits it unless --all is given.",
@@ -500,7 +500,7 @@ var commandSynopses = map[string]string{
 	"sparkwing __tick":                              "Evaluate every armed schedule once (the OS timer's entry point)",
 	"sparkwing cache":                               "Inspect or trim the compiled pipeline binary cache",
 	"sparkwing cache explain":                       "Show this repository's pipeline binary cache key and its inputs",
-	"sparkwing cache info":                          "Print cache dir, size, ceilings, and recent entries",
+	"sparkwing cache status":                        "Print cache dir, size, ceilings, and recent entries",
 	"sparkwing cache prune":                         "Prune oldest cached binaries down to the ceilings",
 	"sparkwing cache warm":                          "Prepare the local pipeline cache and dependencies",
 	"sparkwing commands":                            "Search the command index or export the CLI reference",
@@ -518,7 +518,7 @@ var commandSynopses = map[string]string{
 	"sparkwing dashboard status":                    "Report whether the controller runs and where the dashboard serves",
 	"sparkwing debug":                               "Interactive debugging for pipeline runs",
 	"sparkwing debug attach":                        "Attach to a running Kubernetes target (Cloud jobs unsupported)",
-	"sparkwing debug env":                           "Inspect public job, executor and pause diagnostics",
+	"sparkwing debug show":                          "Inspect public job, executor and pause diagnostics",
 	"sparkwing debug resume":                        "Resume a paused job",
 	"sparkwing docs":                                "Embedded user docs (offline)",
 	"sparkwing docs list":                           "Enumerate every doc topic",
@@ -547,7 +547,7 @@ var commandSynopses = map[string]string{
 	"sparkwing operator tokens revoke":              operatorTokensRevokeSynopsis,
 	"sparkwing operator tokens rotate":              operatorTokensRotateSynopsis,
 	"sparkwing pipeline":                            "This repo's pipelines",
-	"sparkwing pipeline describe":                   "Print one pipeline's full metadata",
+	"sparkwing pipeline show":                       "Print one pipeline's full metadata",
 	"sparkwing pipeline hooks":                      "Install / uninstall git pre-commit + pre-push + post-commit hooks",
 	"sparkwing pipeline hooks install":              "Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers",
 	"sparkwing pipeline hooks status":               "Report declared, installed, and missing sparkwing hooks",
@@ -594,7 +594,7 @@ var commandSynopses = map[string]string{
 	"sparkwing queue priority":                      "Change the priority of queued work",
 	"sparkwing repos":                               "The machine's fleet of sparkwing repos and their SDK pins",
 	"sparkwing repos add":                           "Register a checkout",
-	"sparkwing repos info":                          "Inspect repository versions, worktrees, and pipelines",
+	"sparkwing repos show":                          "Inspect repository versions, worktrees, and pipelines",
 	"sparkwing repos list":                          "List the machine's fleet of sparkwing repos",
 	"sparkwing repos prune":                         "Remove checkouts whose pipeline directory is gone",
 	"sparkwing repos delete":                        "Remove a registered checkout",
@@ -637,7 +637,7 @@ var commandSynopses = map[string]string{
 	"sparkwing schedules uninstall":                 "Disarm a repo's schedules, and remove the timer when nothing is left",
 	"sparkwing secrets":                             "Manage secrets in this machine's local store or on a controller",
 	"sparkwing secrets delete":                      "Remove a secret",
-	"sparkwing secrets get":                         "Read a secret's value",
+	"sparkwing secrets show":                        "Read a secret's value",
 	"sparkwing secrets list":                        "List secret names + metadata",
 	"sparkwing subscriptions":                       "Manage the team's run event subscriptions",
 	"sparkwing subscriptions create":                "Subscribe a URL to run events",
@@ -661,18 +661,18 @@ var commandSynopses = map[string]string{
 }
 
 var (
-	cmdSparkwing        = surfaceCommand("sparkwing")
-	cmdDebug            = surfaceCommand("sparkwing debug")
-	cmdPipelineTrigger  = surfaceCommand("sparkwing pipeline trigger")
-	cmdPipelineDescribe = surfaceCommand("sparkwing pipeline describe")
-	cmdRun              = surfaceCommand("sparkwing run")
-	cmdApprove          = surfaceCommand("sparkwing runs approvals approve")
-	cmdDeny             = surfaceCommand("sparkwing runs approvals deny")
-	cmdApprovals        = surfaceCommand("sparkwing runs approvals")
-	cmdApprovalsList    = surfaceCommand("sparkwing runs approvals list")
-	cmdAnnotations      = surfaceCommand("sparkwing runs annotations")
-	cmdAnnotationsList  = surfaceCommand("sparkwing runs annotations list")
-	cmdAnnotationsAdd   = surfaceCommand("sparkwing runs annotations add")
+	cmdSparkwing       = surfaceCommand("sparkwing")
+	cmdDebug           = surfaceCommand("sparkwing debug")
+	cmdPipelineTrigger = surfaceCommand("sparkwing pipeline trigger")
+	cmdPipelineShow    = surfaceCommand("sparkwing pipeline show")
+	cmdRun             = surfaceCommand("sparkwing run")
+	cmdApprove         = surfaceCommand("sparkwing runs approvals approve")
+	cmdDeny            = surfaceCommand("sparkwing runs approvals deny")
+	cmdApprovals       = surfaceCommand("sparkwing runs approvals")
+	cmdApprovalsList   = surfaceCommand("sparkwing runs approvals list")
+	cmdAnnotations     = surfaceCommand("sparkwing runs annotations")
+	cmdAnnotationsList = surfaceCommand("sparkwing runs annotations list")
+	cmdAnnotationsAdd  = surfaceCommand("sparkwing runs annotations add")
 )
 
 var commandSectionOrder = []string{"Local", "Cloud", "Admin and help"}
@@ -740,7 +740,7 @@ var commandIntros = map[string]string{
 	"sparkwing pipeline new":           "Add a Go or TypeScript pipeline from a template. Commit the generated source and dependency lockfiles.",
 	"sparkwing pipeline list":          "List pipelines in this repository with their summaries and triggers.",
 	"sparkwing pipeline upgrade":       "Update this repository's SDK pin to a published release. Preview the changes with --dry-run.",
-	"sparkwing pipeline describe":      "Show a pipeline's arguments and triggers without executing it. Use pipeline plan to see its jobs.",
+	"sparkwing pipeline show":          "Show a pipeline's arguments and triggers without executing it. Use pipeline plan to see its jobs.",
 	"sparkwing pipeline plan":          "Preview the jobs and steps a pipeline would select without executing them.",
 	"sparkwing pipeline trigger":       "Submit a pipeline to a controller. The selected profile supplies its connection and credentials.",
 	"sparkwing secrets":                "Manage secret values and plain variables used by pipelines. List names without revealing secret values.",
@@ -755,6 +755,117 @@ var commandIntros = map[string]string{
 		"Pass the pipeline's own arguments after --. `sparkwing run <pipeline> --help` lists the arguments a pipeline takes.\n\n" +
 		"Look at past runs with `sparkwing runs list` and `sparkwing runs logs --run ID`. To run on a controller instead of this machine, use `sparkwing pipeline trigger <pipeline> --profile NAME`.\n\n" +
 		"`sparkwing run --help-all` adds Cloud routing, publication, CI use without the shared controller, step windows and every flag.",
+	"sparkwing __complete":                          "Print shell completion candidates for the supplied command words.",
+	"sparkwing __sdk-install":                       "Install the SDK entry described by a request on stdin and print the command that runs it.",
+	"sparkwing __runner-account-write":              "Write runner enrollment and copy the runner binary into the dedicated account.",
+	"sparkwing __runner-account-read":               "Read the dedicated account's runner name, controller and token prefix.",
+	"sparkwing __runner-account-pause":              "Pause the dedicated account's runner, or resume it with --resume.",
+	"sparkwing __tick":                              "Evaluate armed local schedules, starting the local controller when needed.",
+	"sparkwing wingd runner":                        "Run the local runner instance selected by its supervising controller.",
+	"sparkwing wingd run":                           "Run the local controller in the foreground for the selected state home.",
+	"sparkwing billing refill":                      "Show automatic credit refill settings, or change them with the refill flags. Changes require team ownership.",
+	"sparkwing billing request-tier":                "Ask the operators for higher Cloud standing or payment limits. Only team owners can send a request.",
+	"sparkwing billing standing":                    "Show the team's Cloud standing and the outcome of its latest standing request.",
+	"sparkwing cache explain":                       "Show the inputs that determine whether this repository's pipeline binary can be reused.",
+	"sparkwing cache status":                        "Show the local pipeline cache's size, limits and recent entries. Use --docs to inspect the downloaded docs cache.",
+	"sparkwing cache prune":                         "Remove old, unused pipeline binaries to meet cache limits. Use --docs to clear downloaded documentation instead.",
+	"sparkwing cache warm":                          "Prepare this repository's pipelines for a later run by compiling Go source or installing TypeScript dependencies.",
+	"sparkwing completion":                          "Print a completion script for the shell named by --shell.",
+	"sparkwing daemon events":                       "Read retained local controller events. Filter by run, event kind or age to narrow the output.",
+	"sparkwing daemon install":                      "Install the local controller as a login service on Linux or macOS.",
+	"sparkwing daemon restart":                      "Restart the local controller while its runner and held jobs keep running.",
+	"sparkwing daemon status":                       "Show whether the local controller is running, stopping or stopped.",
+	"sparkwing daemon stop":                         "Stop the local controller, dashboard and runner after held work drains. A stop that exceeds its wait continues draining in the background.",
+	"sparkwing daemon uninstall":                    "Remove the local controller's login service registration.",
+	"sparkwing dashboard logs":                      "Read the local dashboard log tail, or follow new lines with --follow.",
+	"sparkwing dashboard open":                      "Print a one-time sign-in link for the local dashboard, starting the local controller if needed.",
+	"sparkwing dashboard status":                    "Show the local controller's status and dashboard address.",
+	"sparkwing debug attach":                        "Attach a shell to a running job's Kubernetes target. Cloud jobs do not support shell attachment.",
+	"sparkwing debug show":                          "Show a job's public execution details and current pause state.",
+	"sparkwing debug resume":                        "Resume a paused job in the selected run.",
+	"sparkwing docs list":                           "List documentation topics. Use --guides for reading guides or --versions for published docs versions.",
+	"sparkwing docs migrations":                     "Read migration guides for a release or a range of releases.",
+	"sparkwing docs read":                           "Read a documentation topic or guide. Use --section to start at a specific line.",
+	"sparkwing docs search":                         "Search the embedded documentation for sections that match your question.",
+	"sparkwing doctor":                              "Inspect local controller, service version and store compatibility diagnostics.",
+	"sparkwing info":                                "Show Sparkwing's capabilities and the selected repository's pipeline setup. Use --for-agent for agent orientation.",
+	"sparkwing operator limits set":                 "Change an operational limit or signup setting under operator authority. Values above deployment ceilings are refused.",
+	"sparkwing operator limits show":                "Show operational limits and visible runner usage under operator authority.",
+	"sparkwing operator object-store reset-breaker": "Clear the controller's tripped object-store budget breaker under operator authority.",
+	"sparkwing operator object-store status":        "Show the controller's object-store request budget and breaker state.",
+	"sparkwing operator secrets rotate":             "Reseal the controller's stored secrets and keys under its current encryption key. Use --verify to check remaining old-key rows without writing.",
+	"sparkwing operator teams create":               "Create a team and print its first administrator credential once. Existing or retired slugs are refused.",
+	"sparkwing operator teams show":                 "Show a team and the protected node label used for its Cloud capacity.",
+	"sparkwing operator tokens create":              "Issue a deployment service credential and print its bearer once.",
+	"sparkwing operator tokens list":                "List deployment service credential metadata without revealing bearers.",
+	"sparkwing operator tokens revoke":              "Revoke the deployment service credential selected by its prefix.",
+	"sparkwing operator tokens rotate":              "Replace a deployment service credential and print its new bearer once.",
+	"sparkwing operator warm-capacity set":          "Set the warm Cloud capacity policy for one hardware class.",
+	"sparkwing operator warm-capacity show":         "Show warm Cloud capacity policies and job start-time metrics.",
+	"sparkwing overflow set":                        "Set your monthly Cloud overflow allowance, or remove your saved cap with --uncapped.",
+	"sparkwing overflow show":                       "Show your monthly Cloud overflow allowance and usage.",
+	"sparkwing pipeline hooks install":              "Install this repository's Git hooks from the triggers declared in sparkwing.yaml.",
+	"sparkwing pipeline hooks status":               "Show which declared Sparkwing Git hooks are installed or missing.",
+	"sparkwing pipeline hooks uninstall":            "Remove this repository's Sparkwing-managed Git hooks.",
+	"sparkwing pipeline lint":                       "Check Go pipeline source for common mistakes. Use --rules to read the rules. TypeScript lint is unsupported.",
+	"sparkwing pipeline sparks add":                 "Add a Go library to this project's sparks declarations.",
+	"sparkwing pipeline sparks catalog":             "List the reusable blocks a sparks library offers.",
+	"sparkwing pipeline sparks delete":              "Remove a library from this project's sparks declarations.",
+	"sparkwing pipeline sparks inflate":             "Copy a sparks library's source into this repository and replace its dependency with the local copy.",
+	"sparkwing pipeline sparks lint":                "Validate a sparks library's spark.json manifest.",
+	"sparkwing pipeline sparks list":                "List this project's declared sparks libraries and resolved versions.",
+	"sparkwing pipeline sparks update":              "Resolve every declared sparks library again and update the project's dependency overlay.",
+	"sparkwing pools allow":                         "Add an access rule for a reserved runner pool. Repositories must have independently verified authority.",
+	"sparkwing pools disallow":                      "Remove an access rule from a reserved runner pool.",
+	"sparkwing pools list":                          "List the team's reserved runner pools, their runners and access rules.",
+	"sparkwing profiles add":                        "Save a controller connection and credential as a named profile.",
+	"sparkwing profiles delete":                     "Remove a saved controller connection and revoke its token. Use --keep-token to remove only the local profile.",
+	"sparkwing profiles list":                       "List saved controller connections without revealing their credentials.",
+	"sparkwing profiles set":                        "Change a saved profile's controller URL or replace its token from stdin.",
+	"sparkwing profiles show":                       "Show one saved controller connection without revealing its credential.",
+	"sparkwing queue list":                          "Show admission capacity, running holders and waiting work. Use --group to inspect one concurrency group.",
+	"sparkwing queue priority":                      "Change a local run's admission priority. Use --set front or --set back to move it within the waiting queue.",
+	"sparkwing repos add":                           "Register a local checkout in Sparkwing's repository inventory. Pass its path with --checkout.",
+	"sparkwing repos delete":                        "Remove a local checkout from Sparkwing's repository inventory. Pass its path with --checkout.",
+	"sparkwing repos show":                          "Show the registered repository and checkout selected by --checkout.",
+	"sparkwing repos list":                          "List registered repositories and their SDK versions. Use --checkouts to inspect individual checkouts.",
+	"sparkwing repos prune":                         "Remove repository inventory entries for checkouts that no longer contain a .sparkwing directory.",
+	"sparkwing repos update":                        "Update registered repositories to a published SDK release. Use --dry-run to preview the changes.",
+	"sparkwing runners add":                         "Enroll a machine to run jobs for a controller. Personal runners can use browser approval. Shared runners require an administrator session on stdin.",
+	"sparkwing runners delete":                      "Revoke a runner's credential and remove its enrollment.",
+	"sparkwing runners install-service":             "Install a runner service under the dedicated OS account named by --service-user. Requires root.",
+	"sparkwing runners uninstall-service":           "Remove the runner service for the dedicated OS account named by --service-user. Requires root.",
+	"sparkwing runners list":                        "List runners registered with the selected controller.",
+	"sparkwing runners pause":                       "Pause an enrolled runner so it stops taking new work.",
+	"sparkwing runners resume":                      "Resume an enrolled runner so it can take new work again.",
+	"sparkwing schedules install":                   "Install this repository's declared schedules locally or on the selected controller.",
+	"sparkwing schedules list":                      "List installed schedules and their status. Use --next to show upcoming fire times.",
+	"sparkwing schedules pause":                     "Pause a schedule's future automatic runs.",
+	"sparkwing schedules resume":                    "Resume a paused schedule's automatic runs.",
+	"sparkwing schedules run":                       "Start a schedule immediately using its saved configuration.",
+	"sparkwing schedules set":                       "Override an installed schedule's timing, arguments or source pin. Use --reset to restore its declared settings.",
+	"sparkwing schedules show":                      "Show a schedule's settings and recent fires. Use --next to preview upcoming fires.",
+	"sparkwing schedules uninstall":                 "Remove installed schedules locally or from the selected controller.",
+	"sparkwing secrets delete":                      "Delete the selected secret or variable without revealing its value.",
+	"sparkwing secrets show":                        "Read a plain variable's value. Masked secrets are available only to pipeline runs that declare them.",
+	"sparkwing secrets list":                        "List secret and variable names and metadata without revealing values.",
+	"sparkwing secrets rotate":                      "Re-encrypt stored secrets under the current key and report rows that could not be rotated.",
+	"sparkwing secrets set":                         "Store or replace a secret from stdin, a file or --value. Use --variable to store a plain value.",
+	"sparkwing subscriptions create":                "Create a webhook subscription for team run events and print its signing secret once.",
+	"sparkwing subscriptions delete":                "Delete a webhook subscription and its pending deliveries.",
+	"sparkwing subscriptions list":                  "List the team's webhook subscriptions without their signing secrets. Requires team administration.",
+	"sparkwing subscriptions rotate-secret":         "Replace a webhook subscription's signing secret and print the new secret once.",
+	"sparkwing subscriptions show":                  "Show one webhook subscription's settings without its signing secret.",
+	"sparkwing team delete":                         "Delete the team named by --confirm under its owner's authority. Active work is cancelled and team data is removed.",
+	"sparkwing team settings set":                   "Change team policies for machine enrollment, job routing, child runs or trusted cache writes.",
+	"sparkwing team settings show":                  "Show team policies for machine enrollment, job routing, child runs and trusted cache writes.",
+	"sparkwing tokens create":                       "Create a team API credential with the requested scopes and print its bearer once.",
+	"sparkwing tokens list":                         "List team credential metadata without revealing bearers.",
+	"sparkwing tokens revoke":                       "Revoke the team credential selected by its prefix.",
+	"sparkwing tokens rotate":                       "Replace a team credential and print its new bearer once.",
+	"sparkwing update":                              "Update installed Sparkwing software from verified release assets. Use --dry-run to preview the update.",
+	"sparkwing version":                             "Show installed component versions and update availability. Use --offline to skip release lookups.",
+	"sparkwing version hold":                        "Show or change the version ceiling that `sparkwing update` will not pass.",
 }
 
 var briefFlags = map[string]bool{
@@ -815,8 +926,8 @@ var commandExamples = map[string][]Example{
 		{"List this repository's pipelines", "sparkwing pipeline list"},
 		{"Find pipelines about deploys", "sparkwing pipeline list --search deploy"},
 	},
-	"sparkwing pipeline describe": {
-		{"Show a pipeline's arguments and triggers", "sparkwing pipeline describe --pipeline build"},
+	"sparkwing pipeline show": {
+		{"Show a pipeline's arguments and triggers", "sparkwing pipeline show --pipeline build"},
 	},
 	"sparkwing pipeline new": {
 		{"Add a pipeline to this repository", "sparkwing pipeline new --pipeline lint"},
@@ -829,8 +940,8 @@ var commandExamples = map[string][]Example{
 		{"Store a secret from a file", "sparkwing secrets set --secret DEPLOY_TOKEN --file token.txt"},
 		{"Store a plain variable", "sparkwing secrets set --secret REGION --value us-east-1 --variable"},
 	},
-	"sparkwing secrets get": {
-		{"Read a variable", "sparkwing secrets get --secret REGION"},
+	"sparkwing secrets show": {
+		{"Read a variable", "sparkwing secrets show --secret REGION"},
 	},
 	"sparkwing secrets list": {
 		{"List secret names without values", "sparkwing secrets list"},
@@ -862,4 +973,29 @@ var commandExamples = map[string][]Example{
 	"sparkwing cache explain": {
 		{"Show why the next run reuses or rebuilds the pipeline binary", "sparkwing cache explain"},
 	},
+	"sparkwing cache status":           {{"Inspect the pipeline binary cache", "sparkwing cache status"}},
+	"sparkwing cache prune":            {{"Prune unused binaries to the configured limits", "sparkwing cache prune"}},
+	"sparkwing cache warm":             {{"Prepare this repository's pipelines", "sparkwing cache warm"}},
+	"sparkwing completion":             {{"Print Bash completions", "sparkwing completion --shell bash"}},
+	"sparkwing daemon events":          {{"Read events for one run", "sparkwing daemon events --run RUN_ID"}},
+	"sparkwing daemon restart":         {{"Restart the local controller", "sparkwing daemon restart"}},
+	"sparkwing dashboard status":       {{"Show the local dashboard address", "sparkwing dashboard status"}},
+	"sparkwing dashboard logs":         {{"Read the last 40 dashboard log lines", "sparkwing dashboard logs --tail 40"}},
+	"sparkwing debug show":             {{"Inspect one job's public diagnostics", "sparkwing debug show --run RUN_ID --job build"}},
+	"sparkwing debug resume":           {{"Resume a paused job", "sparkwing debug resume --run RUN_ID --job build"}},
+	"sparkwing docs list":              {{"List reading guides", "sparkwing docs list --guides"}},
+	"sparkwing docs read":              {{"Read the authoring guide", "sparkwing docs read --guide authoring"}},
+	"sparkwing docs migrations":        {{"Read a release migration guide", "sparkwing docs migrations --version v0.74.0"}},
+	"sparkwing info":                   {{"Show agent orientation for this repository", "sparkwing info --for-agent"}},
+	"sparkwing pipeline hooks status":  {{"Check this repository's Git hooks", "sparkwing pipeline hooks status"}},
+	"sparkwing pipeline hooks install": {{"Install this repository's declared Git hooks", "sparkwing pipeline hooks install"}},
+	"sparkwing pipeline lint":          {{"Check this repository's Go pipelines", "sparkwing pipeline lint"}},
+	"sparkwing profiles show":          {{"Inspect a saved connection", "sparkwing profiles show --profile prod"}},
+	"sparkwing profiles delete":        {{"Remove a local profile while keeping its token", "sparkwing profiles delete --profile prod --keep-token"}},
+	"sparkwing queue list":             {{"Inspect waiting work and admission capacity", "sparkwing queue list"}},
+	"sparkwing repos list":             {{"List registered checkouts", "sparkwing repos list --checkouts"}},
+	"sparkwing schedules pause":        {{"Pause an installed schedule", "sparkwing schedules pause --schedule nightly"}},
+	"sparkwing schedules resume":       {{"Resume a paused schedule", "sparkwing schedules resume --schedule nightly"}},
+	"sparkwing update":                 {{"Preview an installed software update", "sparkwing update --dry-run"}},
+	"sparkwing version":                {{"Show installed versions without checking releases", "sparkwing version --offline"}},
 }

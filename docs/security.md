@@ -71,7 +71,7 @@ when a sibling fails discovery, with planning output withheld. The withheld
 notice names how many pipelines failed and their error codes, never their names,
 and gives the isolated-home retry when that refusal is the only failure.
 Otherwise the notice and the withheld error name
-`sparkwing pipeline describe --pipeline <name> --show-withheld`. That command
+`sparkwing pipeline show --pipeline <name> --show-withheld`. That command
 describes in the CLI process and writes the withheld output and errors to its
 stderr, never to run logs or the describe cache, masked by the values registered
 so far. A failed pipeline's own secret defaults are unknown, so that command,
@@ -329,9 +329,15 @@ runner enrollment, and invitation acceptance commit their audit events in the
 same transaction. These events contain IDs and closed decision values, without
 approval comments, cancellation reasons, email addresses or other personal text.
 Each OIDC token a run mints is audited as `oidc.minted` in the transaction that
-rechecks the run's authority, naming the run, a digest of its job, the
-audience, and the token's `jti`, subject and expiry, so a leaked token traces to
-its mint. A token whose audit row does not commit is never returned.
+rechecks the run's authority. Its attributes are `node_digest`,
+`audience_digest`, `subject_digest`, `digest_key_id`, `token_id` and `expires_at`.
+Audience and subject use field-separated HMAC-SHA-256 under the external secrets
+keyring. The raw audience and subject never enter new audit rows. A token's
+random `jti`, opaque run ID and expiry still trace it to its mint. These fixed
+identifiers contain no caller text. The subject is digested because it includes
+pipeline and ref text. Every audience is digested because callers choose it.
+See [audit investigation](oidc.md#audit-investigation) for candidate matching,
+key rotation and retained-copy limits. A token whose audit row does not commit is never returned.
 An authenticated request refused because of the run, job, claim, child or team
 it names is audited as `access.refused` in the acting credential's own team. The
 row names the actor, the HTTP method, the registered route template, the refusal

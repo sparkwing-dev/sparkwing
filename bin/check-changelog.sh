@@ -5,9 +5,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+tracked=false
+if [[ $# -gt 0 && "$1" == --tracked ]]; then
+  tracked=true
+  shift
+fi
+
 if [[ $# -gt 0 ]]; then
   if [[ "$1" == "-h" || "$1" == "--help" ]]; then
-    echo "usage: bash bin/check-changelog.sh"
+    echo "usage: bash bin/check-changelog.sh [--tracked]"
     echo "Require a nonempty docs/changes/<slug>.md fragment for covered surfaces."
     exit 0
   fi
@@ -49,7 +55,7 @@ done < <(
     git diff --name-only -z "$base"...HEAD
     git diff --name-only -z HEAD
     git diff --name-only -z --cached
-    git ls-files --others --exclude-standard -z
+    if ! "$tracked"; then git ls-files --others --exclude-standard -z; fi
   } | sort -zu
 )
 

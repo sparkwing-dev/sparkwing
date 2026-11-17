@@ -197,7 +197,7 @@ func TestIncompleteDiscoveryNamesLocalRemedyWithoutDeclaredSecrets(t *testing.T)
 		t.Fatal(err)
 	}
 	for _, output := range []string{failure, string(presentation)} {
-		if strings.Contains(output, private) || !strings.Contains(output, "sparkwing pipeline describe --pipeline NAME --show-withheld") {
+		if strings.Contains(output, private) || !strings.Contains(output, "sparkwing pipeline show --pipeline NAME --show-withheld") {
 			t.Fatalf("unsafe or undiscoverable diagnostic: %s", output)
 		}
 	}

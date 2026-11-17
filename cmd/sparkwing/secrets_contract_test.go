@@ -160,7 +160,7 @@ func TestSecretManagementExplicitReadAndExactDeletion(t *testing.T) {
 	}
 	for _, format := range []string{"pretty", "json", "plain"} {
 		var out bytes.Buffer
-		if err := manageSecrets(t.Context(), secretInvocation(t, "get", "--secret", "TOKEN", "--repo", "acme/web", "--pipeline", "deploy", "-o", format), manager, nil, &out, io.Discard, false); err != nil {
+		if err := manageSecrets(t.Context(), secretInvocation(t, "show", "--secret", "TOKEN", "--repo", "acme/web", "--pipeline", "deploy", "-o", format), manager, nil, &out, io.Discard, false); err != nil {
 			t.Fatal(err)
 		}
 		if format == "json" {
@@ -238,7 +238,7 @@ func TestSecretManagementRejectsInvalidInputBeforeConnection(t *testing.T) {
 		{"set", "--secret", "TOKEN", "--repo", "acme/web", "--pipeline", "deploy", "--shared"},
 		{"set", "--secret", "TOKEN", "--repo", "acme/web", "--shared"},
 		{"list", "-o", "table"},
-		{"get"},
+		{"show"},
 		{"delete", "TOKEN"},
 	} {
 		if err := runSecretArgs(args); err == nil {
@@ -252,7 +252,7 @@ func TestSecretManagementRejectsInvalidInputBeforeConnection(t *testing.T) {
 func TestSecretManagementRefusesPipelineWithoutRepository(t *testing.T) {
 	for _, args := range [][]string{
 		{"set", "--secret", "TOKEN", "--value", "secret", "--pipeline", "deploy"},
-		{"get", "--secret", "TOKEN", "--pipeline", "deploy"},
+		{"show", "--secret", "TOKEN", "--pipeline", "deploy"},
 		{"delete", "--secret", "TOKEN", "--pipeline", "deploy"},
 		{"list", "--pipeline", "deploy"},
 	} {

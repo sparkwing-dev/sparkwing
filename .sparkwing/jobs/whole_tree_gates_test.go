@@ -12,6 +12,7 @@ var wholeTreeGates = []struct {
 }{
 	{"home-resolution", checkHomeResolution},
 	{"docs-mirror", checkDocsMirror},
+	{"api-snapshot", checkTrackedAPISnapshot},
 }
 
 const wholeTreeGateBudget = 30 * time.Second
