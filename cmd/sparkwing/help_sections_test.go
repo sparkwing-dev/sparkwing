@@ -75,3 +75,20 @@ func TestEveryHelpExampleNamesARealCommand(t *testing.T) {
 		t.Errorf("examples cover %d commands, want at least 20", len(commandExamples))
 	}
 }
+
+func TestCommonCommandsHaveDescriptionsAndExamples(t *testing.T) {
+	paths := []string{"runs", "pipeline", "pipeline new", "pipeline list", "pipeline upgrade", "pipeline describe", "pipeline plan", "pipeline trigger", "secrets", "daemon", "runners", "login", "profiles", "cache", "docs", "examples"}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			command := surfaceCommand("sparkwing " + path)
+			if command.Description == "" || len(command.Examples) == 0 {
+				t.Fatalf("missing description or examples for %s", path)
+			}
+		})
+	}
+	for _, surface := range clisurface.Registry() {
+		if strings.HasPrefix(surface.Path, "sparkwing runs ") && surfaceHelp(surface).Description == "" {
+			t.Errorf("missing description for %s", surface.Path)
+		}
+	}
+}

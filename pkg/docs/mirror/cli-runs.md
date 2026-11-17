@@ -8,6 +8,8 @@ Every `sparkwing runs` command, flag, and argument, generated from the CLI's own
 
 Inspect and control pipeline runs
 
+Inspect past runs, read logs and artifacts, or cancel and retry work. Use a run ID from runs list.
+
 ### Subcommands
 
 - `annotations` -- Read or append persistent job + step annotations
@@ -32,9 +34,18 @@ Inspect and control pipeline runs
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 
+### Examples
+
+```sh
+# Find a run to inspect
+sparkwing runs list
+```
+
 ## `sparkwing runs annotations`
 
 Read or append persistent job + step annotations
+
+Read or add annotations attached to a run.
 
 ### Subcommands
 
@@ -53,6 +64,8 @@ Read or append persistent job + step annotations
 ## `sparkwing runs annotations add`
 
 Append an annotation to a job or step
+
+Attach a notice, warning or error to a run.
 
 Plain emits run/job[/step]. JSON retains the controller replay result.
 
@@ -74,6 +87,8 @@ Plain emits run/job[/step]. JSON retains the controller replay result.
 
 List annotations on a run
 
+List the annotations recorded for a run.
+
 JSON emits job_id, optional step_id, level, message and source location per annotation. Plain emits one message per line, with line breaks replaced by spaces.
 
 ### Flags
@@ -94,6 +109,8 @@ JSON emits job_id, optional step_id, level, message and source location per anno
 
 List approval gates (pending and history)
 
+List pending approvals and approve or deny a waiting job.
+
 ### Subcommands
 
 - `approve` -- Approve a pending approval-gate job
@@ -112,6 +129,8 @@ List approval gates (pending and history)
 ## `sparkwing runs approvals approve`
 
 Approve a pending approval-gate job
+
+Approve a waiting job so the run can continue.
 
 The controller derives the approver from authentication. Plain emits run/job. JSON includes the approval and replay result.
 
@@ -132,6 +151,8 @@ The controller derives the approver from authentication. Plain emits run/job. JS
 
 Deny a pending approval-gate job
 
+Deny a waiting job and stop it from continuing.
+
 The controller derives the approver from authentication. Plain emits run/job. JSON includes the approval and replay result.
 
 ### Flags
@@ -151,6 +172,8 @@ The controller derives the approver from authentication. Plain emits run/job. JS
 
 List pending approvals (or one run's history)
 
+List approval requests and their decisions for a run.
+
 Without --run, list pending approvals. With --run, include resolved history. Plain emits run/job.
 
 ### Flags
@@ -167,6 +190,8 @@ Without --run, list pending approvals. With --run, include resolved history. Pla
 ## `sparkwing runs artifacts`
 
 List or download a run’s committed artifact files
+
+List or download the files a run published as artifacts.
 
 List files from each job's committed Artifacts manifest. --job narrows the list to one job. Unfinished jobs and absent or expired manifests yield no files. Missing or corrupt retained manifests fail listing; missing or corrupt file bytes fail download.
 
@@ -192,9 +217,18 @@ Reads use the selected controller profile or the local controller and require cu
 | `--cursor CURSOR` | Continue from next_cursor using the same filters. |
 | `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
+### Examples
+
+```sh
+# List a run's artifacts
+sparkwing runs artifacts --run RUN_ID
+```
+
 ## `sparkwing runs cancel`
 
 Request cancellation of in-flight runs
+
+Ask a running or queued run to stop. Jobs already running receive cancellation.
 
 ### Flags
 
@@ -217,6 +251,8 @@ sparkwing runs cancel --run RUN_ID
 ## `sparkwing runs grep`
 
 Search run log text
+
+Search recorded log lines across runs. Filter by pipeline, run or time to narrow the results.
 
 Search controller logs across matching runs. Filters apply before the run page limit. --max-matches limits matches per log subject, with zero meaning uncapped.
 
@@ -261,6 +297,8 @@ sparkwing runs grep --run RUN_ID --grep timeout
 ## `sparkwing runs list`
 
 List recent pipeline runs
+
+List recent runs with their IDs and outcomes. Use the ID to inspect status or read logs.
 
 Read runs through the selected controller. Filters apply before pagination. Runs are ordered by descending team number. --since accepts days and weeks, such as 7d or 2w.
 
@@ -317,6 +355,8 @@ sparkwing runs list --pipeline build --status failed
 
 Print a run's logs
 
+Read recorded logs for a run, or follow new lines until it finishes.
+
 Read job-attempt and trigger, plan or eval logs through the controller. --job selects a job. --tree includes descendants. --events-only and --no-events select lifecycle events or output.
 
 Every read consumes all available pages. Without --follow, a snapshot with pending final log segments reports logs incomplete and exits 3. --follow waits for new records until final log segments are complete. An interrupted observation exits 3. A run that does not exist or that the credential cannot read exits 4; stop polling on 4.
@@ -358,6 +398,8 @@ sparkwing runs logs --run RUN_ID --job build --follow
 
 Delete finished runs older than a threshold, or by id
 
+Remove old local run history. Preview the selected records before deleting them.
+
 Select --run, including --run - for IDs on stdin, or --older-than. Age selection reads every page and includes only terminal runs started before the cutoff. A failed selection deletes nothing.
 
 --dry-run prints the selected IDs without deleting. The controller enforces retention pins. JSON reports the selected run and any structured failure. Plain emits acknowledged run IDs.
@@ -378,6 +420,8 @@ Select --run, including --run - for IDs on stdin, or --older-than. Age selection
 ## `sparkwing runs retry`
 
 Trigger fresh runs copying pipeline + args from old ones
+
+Start a new run using a previous run's inputs. Select failed jobs to avoid repeating successful work.
 
 Select --failed to reuse successful jobs or --all-jobs to execute the sealed plan again. Retry preserves the source request, plan, source trust and actor. The controller records the retrier separately.
 
@@ -415,6 +459,8 @@ sparkwing runs retry --run RUN_ID --failed
 
 Report run counts, success rate, and duration percentiles
 
+Summarize run outcomes and execution times over a selected period.
+
 Read every matching root-run page through the selected controller. --since accepts days and weeks. JSON emits pipeline counts, success percentage, mean duration and nearest-rank P50 and P95. Plain emits pipeline names.
 
 --sizing reads controller measurements, job rows, source, drift, memo exclusions and demand floors. --reset selects one --pipeline or --all-pipelines --yes and preserves resource pins. --since applies to run statistics only.
@@ -440,6 +486,8 @@ Sizing reset requires an authorized controller route. Until that contract exists
 ## `sparkwing runs status`
 
 Read one run's status, attempts, notices and selected view
+
+Show a run's outcome and jobs. Follow it to wait for a final result.
 
 Read the same public run detail through a controller profile or the local controller. Numeric run selectors are per-team numbers.
 
@@ -481,6 +529,8 @@ sparkwing runs status --run RUN_ID --follow
 
 Split recent runs' time into waiting, setup and running per job
 
+Show where a run spent time, from preparation through job execution.
+
 Read the newest finished root runs of one pipeline, skipping dry runs, with their jobs, steps and lifecycle events, through the selected controller.
 
 Each job's window, from its first ready event to its end, splits into queue (ready to claimed), admit (claimed to started: concurrency and machine admission, then source checkout), approval, setup (started to the attempt's first step: compile and cache restore), running (any step in progress) and gap (a started job with no step in progress). Each run's wall splits into the most advanced phase any job was in, plus idle when no job is active, so the phases always sum to the wall.
@@ -502,3 +552,10 @@ Text prints run-level and per-job P50 and P90, the five longest waits, and faile
 | `--job JOB` | Report only these jobs in the job, wait and failure sections; run-level phases still cover every job. Repeatable; comma-separated values are accepted. |
 | `--top N` | Most jobs and most failure groups to show, 20 by default; the page record and text say how many were left out. Must be at least 1. |
 | `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+
+### Examples
+
+```sh
+# Inspect time spent in a run
+sparkwing runs timing --run RUN_ID
+```

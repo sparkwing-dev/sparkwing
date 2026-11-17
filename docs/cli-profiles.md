@@ -8,6 +8,8 @@ Every `sparkwing profiles` command, flag, and argument, generated from the CLI's
 
 Manage controller connection profiles
 
+Manage saved controller connections. Pass --profile to select one for a command.
+
 ### Subcommands
 
 - `add` -- Add a controller connection profile
@@ -24,6 +26,13 @@ Manage controller connection profiles
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+### Examples
+
+```sh
+# List saved connections
+sparkwing profiles list
+```
 
 ## `sparkwing profiles add`
 
@@ -77,6 +86,13 @@ Print every registered profile
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+### Examples
+
+```sh
+# List saved controller connections
+sparkwing profiles list
+```
 
 ## `sparkwing profiles set`
 

@@ -715,6 +715,39 @@ var commandSections = map[string]string{
 
 // hack: plain --help shows this intro in place of the reference rules, which --help-all adds back as details.
 var commandIntros = map[string]string{
+	"sparkwing runs":                   "Inspect past runs, read logs and artifacts, or cancel and retry work. Use a run ID from runs list.",
+	"sparkwing runs annotations":       "Read or add annotations attached to a run.",
+	"sparkwing runs annotations add":   "Attach a notice, warning or error to a run.",
+	"sparkwing runs annotations list":  "List the annotations recorded for a run.",
+	"sparkwing runs approvals":         "List pending approvals and approve or deny a waiting job.",
+	"sparkwing runs approvals approve": "Approve a waiting job so the run can continue.",
+	"sparkwing runs approvals deny":    "Deny a waiting job and stop it from continuing.",
+	"sparkwing runs approvals list":    "List approval requests and their decisions for a run.",
+	"sparkwing runs artifacts":         "List or download the files a run published as artifacts.",
+	"sparkwing runs cancel":            "Ask a running or queued run to stop. Jobs already running receive cancellation.",
+	"sparkwing runs grep":              "Search recorded log lines across runs. Filter by pipeline, run or time to narrow the results.",
+	"sparkwing runs list":              "List recent runs with their IDs and outcomes. Use the ID to inspect status or read logs.",
+	"sparkwing runs logs":              "Read recorded logs for a run, or follow new lines until it finishes.",
+	"sparkwing runs prune":             "Remove old local run history. Preview the selected records before deleting them.",
+	"sparkwing runs retry":             "Start a new run using a previous run's inputs. Select failed jobs to avoid repeating successful work.",
+	"sparkwing runs stats":             "Summarize run outcomes and execution times over a selected period.",
+	"sparkwing runs timing":            "Compare recent pipeline timings and find the jobs that take the most time.",
+	"sparkwing runs status":            "Show a run's outcome and jobs. Follow it to wait for a final result.",
+	"sparkwing pipeline":               "Create, inspect and maintain this repository's pipelines, or trigger a run on a controller.",
+	"sparkwing pipeline new":           "Add a Go or TypeScript pipeline from a template. Commit the generated source and dependency lockfiles.",
+	"sparkwing pipeline list":          "List pipelines in this repository with their summaries and triggers.",
+	"sparkwing pipeline upgrade":       "Update this repository's SDK pin to a published release. Preview the changes with --dry-run.",
+	"sparkwing pipeline describe":      "Show a pipeline's arguments, jobs and triggers without executing its jobs.",
+	"sparkwing pipeline plan":          "Preview the jobs and steps a pipeline would select without executing them.",
+	"sparkwing pipeline trigger":       "Submit a pipeline to a controller. The selected profile supplies its connection and credentials.",
+	"sparkwing secrets":                "Manage secret values and plain variables used by pipelines. List names without revealing secret values.",
+	"sparkwing daemon":                 "Inspect and manage the local controller that coordinates runs on this machine.",
+	"sparkwing runners":                "Enroll and manage machines that execute jobs for a controller.",
+	"sparkwing login":                  "Connect this machine to a controller by approving a short code in your browser. Save the connection as a profile.",
+	"sparkwing profiles":               "Manage saved controller connections. Pass --profile to select one for a command.",
+	"sparkwing cache":                  "Inspect and maintain the local pipeline build cache.",
+	"sparkwing docs":                   "Search and read the documentation shipped with this CLI. Use docs search to find a topic.",
+	"sparkwing examples":               "Browse complete example pipelines. Select a language or print one example's source.",
 	"sparkwing run": "Run a pipeline from this repository on this machine. The local runner executes its jobs and the command prints their logs until the run finishes, then exits nonzero if the run failed.\n\n" +
 		"Pass the pipeline's own arguments after --. `sparkwing run <pipeline> --help` lists the arguments a pipeline takes.\n\n" +
 		"Look at past runs with `sparkwing runs list` and `sparkwing runs logs --run ID`. To run on a controller instead of this machine, use `sparkwing pipeline trigger <pipeline> --profile NAME`.\n\n" +
@@ -733,6 +766,21 @@ var briefFlags = map[string]bool{
 }
 
 var commandExamples = map[string][]Example{
+	"sparkwing runs":             {{"Find a run to inspect", "sparkwing runs list"}},
+	"sparkwing pipeline":         {{"Inspect the available pipelines", "sparkwing pipeline list"}},
+	"sparkwing pipeline upgrade": {{"Preview the SDK update", "sparkwing pipeline upgrade --dry-run"}},
+	"sparkwing pipeline plan":    {{"Preview the build pipeline", "sparkwing pipeline plan --pipeline build"}},
+	"sparkwing secrets":          {{"List names without secret values", "sparkwing secrets list"}},
+	"sparkwing daemon":           {{"Inspect the local controller", "sparkwing daemon status"}},
+	"sparkwing runners":          {{"List registered runners", "sparkwing runners list --profile prod"}},
+	"sparkwing profiles":         {{"List saved connections", "sparkwing profiles list"}},
+	"sparkwing cache":            {{"Explain the next pipeline build", "sparkwing cache explain"}},
+	"sparkwing docs":             {{"Find documentation about secrets", "sparkwing docs search --search secrets"}},
+	"sparkwing examples":         {{"List TypeScript examples", "sparkwing examples --language typescript"}},
+	"sparkwing runs timing":      {{"Compare recent build timings", "sparkwing runs timing --pipeline build"}},
+	"sparkwing runs artifacts":   {{"List a run's artifacts", "sparkwing runs artifacts --run RUN_ID"}},
+	"sparkwing daemon status":    {{"Inspect local controller readiness", "sparkwing daemon status"}},
+	"sparkwing profiles list":    {{"List saved controller connections", "sparkwing profiles list"}},
 	"sparkwing run": {
 		{"Run the hello pipeline on this machine", "sparkwing run hello"},
 		{"Pass arguments to the pipeline after --", "sparkwing run deploy -- --env staging"},

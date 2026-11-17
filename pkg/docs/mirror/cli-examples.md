@@ -8,6 +8,8 @@ Every `sparkwing examples` command, flag, and argument, generated from the CLI's
 
 Read complete example pipelines
 
+Browse complete example pipelines. Select a language or print one example's source.
+
 ### Flags
 
 | Flag | Description |
@@ -21,3 +23,10 @@ Read complete example pipelines
 | `--category CATEGORY` | List only examples in this category. |
 | `--cloud CLOUD` | List only examples for this cloud, plus examples not tied to any cloud. |
 | `--language LANGUAGE` | List only examples in this language: go or typescript. |
+
+### Examples
+
+```sh
+# List TypeScript examples
+sparkwing examples --language typescript
+```

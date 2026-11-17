@@ -8,6 +8,8 @@ Every `sparkwing docs` command, flag, and argument, generated from the CLI's own
 
 Embedded user docs (offline)
 
+Search and read the documentation shipped with this CLI. Use docs search to find a topic.
+
 ### Subcommands
 
 - `list` -- Enumerate every doc topic
@@ -23,6 +25,13 @@ Embedded user docs (offline)
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+### Examples
+
+```sh
+# Find documentation about secrets
+sparkwing docs search --search secrets
+```
 
 ## `sparkwing docs list`
 

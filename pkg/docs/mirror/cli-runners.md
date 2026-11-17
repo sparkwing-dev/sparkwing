@@ -8,6 +8,8 @@ Every `sparkwing runners` command, flag, and argument, generated from the CLI's 
 
 Manage runners
 
+Enroll and manage machines that execute jobs for a controller.
+
 ### Subcommands
 
 - `add` -- Register a runner
@@ -26,6 +28,13 @@ Manage runners
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+### Examples
+
+```sh
+# List registered runners
+sparkwing runners list --profile prod
+```
 
 ## `sparkwing runners add`
 

@@ -8,6 +8,8 @@ Every `sparkwing pipeline` command, flag, and argument, generated from the CLI's
 
 This repo's pipelines
 
+Create, inspect and maintain this repository's pipelines, or trigger a run on a controller.
+
 ### Subcommands
 
 - `describe` -- Print one pipeline's full metadata
@@ -29,9 +31,18 @@ This repo's pipelines
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 
+### Examples
+
+```sh
+# Inspect the available pipelines
+sparkwing pipeline list
+```
+
 ## `sparkwing pipeline describe`
 
 Print one pipeline's full metadata
+
+Show a pipeline's arguments, jobs and triggers without executing its jobs.
 
 ### Flags
 
@@ -130,6 +141,8 @@ Check Go pipeline source for idiomatic anti-patterns; report TypeScript lint as 
 
 Enumerate every pipeline with metadata
 
+List pipelines in this repository with their summaries and triggers.
+
 ### Flags
 
 | Flag | Description |
@@ -154,6 +167,8 @@ sparkwing pipeline list --search deploy
 ## `sparkwing pipeline new`
 
 Scaffold a new Go or TypeScript pipeline
+
+Add a Go or TypeScript pipeline from a template. Commit the generated source and dependency lockfiles.
 
 ### Flags
 
@@ -180,6 +195,8 @@ sparkwing pipeline new --pipeline lint
 
 Render the runtime-resolved DAG without dispatching any jobs
 
+Preview the jobs and steps a pipeline would select without executing them.
+
 ### Flags
 
 | Flag | Description |
@@ -192,6 +209,13 @@ Render the runtime-resolved DAG without dispatching any jobs
 | `--pipeline NAME` | Pipeline name. (required) |
 | `--start-at STEP` | Preview the run as if it started at this step, marking steps that are neither this step nor downstream of it as skipped. |
 | `--stop-at STEP` | Preview the run as if it stopped after this step, marking steps that are neither this step nor upstream of it as skipped. |
+
+### Examples
+
+```sh
+# Preview the build pipeline
+sparkwing pipeline plan --pipeline build
+```
 
 ## `sparkwing pipeline sparks`
 
@@ -322,6 +346,8 @@ Re-resolve every declared library
 
 Submit a pipeline run to a controller
 
+Submit a pipeline to a controller. The selected profile supplies its connection and credentials.
+
 Flags including --profile may precede the verb; unknown engine flags before -- are usage errors.
 
 --resume reattaches only a here run; --runner must be absent or here. The existing sealed spec is authoritative; reject new args, reason, agent, source flags and detach on resume.
@@ -369,6 +395,8 @@ sparkwing pipeline trigger deploy --profile prod --detach
 
 Upgrade repository SDK pins
 
+Update this repository's SDK pin to a published release. Preview the changes with --dry-run.
+
 Bump the current repository's Go or TypeScript SDK pin to the latest permitted SDK entry in the signed policy, or the SDK selected by --version. Select the newest permitted engine that accepts that SDK's declared protocol. SDK and engine versions are independent. Resolve native lockfiles and verify compilation/type checking plus describe/plan with the verified engine. A pipeline that fails that check against the new pin still gets the pin: the command reports the failure, names the migration guides and exits non-zero. Refuse revoked targets with their signed reason. --dry-run reports pin edits without changing files or installed services.
 
 ### Flags
@@ -381,3 +409,10 @@ Bump the current repository's Go or TypeScript SDK pin to the latest permitted S
 | `--help-all` | Include uncommon flags in command help. |
 | `--version TAG` | SDK release tag to pin the repository to instead of the latest permitted release. |
 | `--dry-run` | Show what would change without changing anything. |
+
+### Examples
+
+```sh
+# Preview the SDK update
+sparkwing pipeline upgrade --dry-run
+```
