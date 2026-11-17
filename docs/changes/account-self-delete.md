@@ -19,6 +19,9 @@
 
 ### Fixed
 
+- **cli:** Explain account deletion before listing confirmation requirements
+  Account deletion help includes the plain introduction shown by other commands.
+
 - **controller + cli:** Compare confirmed team slugs independently of database collation
   Missing confirmation flags identify the required list. Plain preview includes
   blocked teams and fails when deletion is blocked. Previews warn that runner

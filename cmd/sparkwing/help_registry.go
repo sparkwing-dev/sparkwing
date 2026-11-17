@@ -718,6 +718,7 @@ var commandSections = map[string]string{
 
 // hack: plain --help shows this intro in place of the reference rules, which --help-all adds back as details.
 var commandIntros = map[string]string{
+	"sparkwing account delete":         "Preview the teams and data removed with your account. Confirm your account ID and every listed team after a fresh sign-in to delete them.",
 	"sparkwing runs":                   "Inspect past runs, read logs and artifacts, or cancel and retry work. Use a run ID from runs list.",
 	"sparkwing runs annotations":       "Read or add annotations attached to a run.",
 	"sparkwing runs annotations add":   "Add an info annotation to a job or step in a run.",
