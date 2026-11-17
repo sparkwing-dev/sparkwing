@@ -267,7 +267,7 @@ func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.Declaration
 	if !known && !slices.ContainsFunc(hosterr.Codes, func(definition hosterr.Definition) bool { return definition.Code == code }) {
 		code = apierr.SDKError
 	}
-	message := "describe failed: " + string(code) + " (details withheld: secrets not yet known)"
+	message := "describe failed: " + string(code) + " (details withheld: secrets not yet known); to see the details locally, run `" + p.Masker.Mask(runspec.ShowWithheldCommand(input.Run.Pipeline)) + "`"
 	if known {
 		message = boundedNodeErrText(p.Masker.Mask(err.Error()))
 	}

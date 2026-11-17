@@ -181,3 +181,24 @@ func TestRiskRefusalNamesLabelsWhileDiscoveryIsIncomplete(t *testing.T) {
 		}
 	}
 }
+
+func TestIncompleteDiscoveryNamesLocalRemedyWithoutDeclaredSecrets(t *testing.T) {
+	private := "declared-private-token"
+	gate, err := NewDeclarationGate(nodewire.DescribeDoc{Pipelines: []nodewire.PipelineDescription{
+		{Name: "healthy", Args: []nodewire.ArgumentDescription{{Name: "token", Type: "string", Secret: true, Default: &private}}},
+		{Name: "broken", Error: &apierr.Error{Code: apierr.PlanFailed, Message: private}},
+	}}, secrets.NewMasker())
+	if err != nil {
+		t.Fatal(err)
+	}
+	failure := gate.Error(errors.New(private)).Error()
+	presentation, err := json.Marshal(gate.Presentation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, output := range []string{failure, string(presentation)} {
+		if strings.Contains(output, private) || !strings.Contains(output, "sparkwing pipeline describe --show-withheld") {
+			t.Fatalf("unsafe or undiscoverable diagnostic: %s", output)
+		}
+	}
+}
