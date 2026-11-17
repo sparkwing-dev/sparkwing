@@ -73,10 +73,16 @@ func productionRuntime(version string) clusterRuntime {
 				go func() {
 					seeded <- seedGoCaches(goSeedRoot, goStandardSeed, version, options.ModuleCache, os.Getenv("GOCACHE"))
 				}()
-				if err := waitForDocker(ctx, os.Getenv("DOCKER_HOST"), dockerStartup); err != nil {
+				started := time.Now()
+				err := waitForDocker(ctx, os.Getenv("DOCKER_HOST"), dockerStartup)
+				slog.InfoContext(ctx, "Cloud startup", "stage", "bootstrap_docker", "duration_ms", time.Since(started).Milliseconds(), "success", err == nil)
+				if err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
-				if err := <-seeded; err != nil {
+				started = time.Now()
+				err = <-seeded
+				slog.InfoContext(ctx, "Cloud startup", "stage", "bootstrap_seed_barrier", "duration_ms", time.Since(started).Milliseconds(), "success", err == nil)
+				if err != nil {
 					slog.Warn("Go caches start cold", "err", err)
 				}
 				home, err := wingd.HomeDir("")

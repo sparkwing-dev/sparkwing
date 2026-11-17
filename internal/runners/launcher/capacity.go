@@ -404,16 +404,28 @@ func (l *Launcher) waitingAwards() []*CloudJobAward {
 }
 
 func (l *Launcher) releaseCapacity(ctx context.Context, b CloudJobBinding) error {
+	_, err := l.releaseCapacityWithStart(ctx, b)
+	return err
+}
+
+func (l *Launcher) releaseCapacityWithStart(ctx context.Context, b CloudJobBinding) (time.Time, error) {
 	name := capacityName(b)
 	l.forget(name)
 	pod, err := l.Kube.CoreV1().Pods(l.Config.Namespace).Get(ctx, name, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return nil
+		return time.Time{}, nil
 	}
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
-	return l.deleteCapacityPod(ctx, pod)
+	var started time.Time
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.Name == "capacity" && status.State.Running != nil && !status.State.Running.StartedAt.IsZero() {
+			started = status.State.Running.StartedAt.Time
+			break
+		}
+	}
+	return started, l.deleteCapacityPod(ctx, pod)
 }
 
 // capacitySecurity drops every capability and privilege escalation and keeps
