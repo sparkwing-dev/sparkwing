@@ -28,3 +28,5 @@ without adding a newline.
 `info --for-agent` keeps the orientation entry point. Documentation still uses
 `docs read`, and collection commands still use `list`. The SDK's internal
 `describe` protocol and pipeline pins keep their meaning.
+SDK upgrade verification discovers the selected engine's detail command, so it
+can verify both older and newer engines.

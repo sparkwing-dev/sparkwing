@@ -98,8 +98,12 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 	if err != nil {
 		return err
 	}
+	readVerb, err := v.pipelineReadVerb(ctx, checkout, hostEnv, selected.Executable)
+	if err != nil {
+		return err
+	}
 	for _, name := range names {
-		for _, operation := range []string{"describe", "plan"} {
+		for _, operation := range []string{readVerb, "plan"} {
 			if _, err := v.exec(ctx, checkout, hostEnv, selected.Executable, "pipeline", operation, "--pipeline="+name, "--output=json"); err != nil {
 				err = fmt.Errorf("upgrade: %s pipeline %q: %w", operation, name, err)
 				if pipelineCodeRefusal(err) {
@@ -110,6 +114,36 @@ func (v *upgradeVerifier) Verify(ctx context.Context, checkout string, selected 
 		}
 	}
 	return nil
+}
+
+// safety: a selected published engine may predate the CLI read-verb cut.
+func (v *upgradeVerifier) pipelineReadVerb(ctx context.Context, checkout string, env procenv.Env, executable string) (string, error) {
+	for _, verb := range []string{"show", "describe"} {
+		path := "sparkwing pipeline " + verb
+		raw, err := v.exec(ctx, checkout, env, executable, "commands", "--path", path, "--limit", "1", "--output=json")
+		if err != nil {
+			return "", fmt.Errorf("upgrade: inspect selected engine commands: %w", err)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		found := false
+		for {
+			var command struct {
+				Path string `json:"path"`
+			}
+			err := decoder.Decode(&command)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return "", fmt.Errorf("upgrade: decode selected engine command index: %w", err)
+			}
+			found = found || command.Path == path
+		}
+		if found {
+			return verb, nil
+		}
+	}
+	return "", errors.New("upgrade: selected engine advertises no pipeline detail command")
 }
 
 func (v *upgradeVerifier) compileGo(ctx context.Context, dir string, env procenv.Env, pin engineid.Pin) error {
@@ -140,7 +174,7 @@ func (v *upgradeVerifier) compileGo(ctx context.Context, dir string, env procenv
 
 func (v *upgradeVerifier) checkTypes(ctx context.Context, dir string, env procenv.Env) error {
 	// safety: without a tsconfig, tsc prints its help and exits 1, which would read as a code
-	// failure; node strips the types of such a pipeline, so describe and plan verify it instead.
+	// failure; node strips the types of such a pipeline, so detail and plan reads verify it instead.
 	if _, err := os.Stat(filepath.Join(dir, "tsconfig.json")); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	} else if err != nil {
