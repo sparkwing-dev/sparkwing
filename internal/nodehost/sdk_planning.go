@@ -271,7 +271,7 @@ func (p SDKPlanner) planningError(ctx context.Context, gate *runspec.Declaration
 	if known {
 		message = boundedNodeErrText(p.Masker.Mask(err.Error()))
 	}
-	if pin := input.Entry.Engine.Identity.Pin; code == apierr.PlanFailed && pin.SDK == engineid.GoSDK && pin.Version == "v0.1.0" {
+	if code == apierr.PlanFailed && input.Entry != nil && input.Entry.Engine.Identity.Pin.SDK == engineid.GoSDK && input.Entry.Engine.Identity.Pin.Version == "v0.1.0" {
 		message += "; Go SDK v0.1.0 can panic when Plan reads Git during discovery; run `sparkwing pipeline upgrade` to use the current SDK"
 	}
 	failure := &apierr.Error{Code: code, Message: message}
