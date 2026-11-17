@@ -82,7 +82,7 @@ func checkRunArgumentsAtRest(t *testing.T, s *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	planHash, err := runspec.CanonicalHash(json.RawMessage(row.Plan))
+	planHash, err := runspec.CanonicalHash(row.Plan)
 	if err != nil || string(planHash) != row.PlanHash {
 		t.Fatalf("plaintext plan hash changed: %v", err)
 	}
