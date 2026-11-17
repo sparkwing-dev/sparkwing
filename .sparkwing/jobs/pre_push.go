@@ -30,7 +30,7 @@ func (PrePush) Help() string {
 	return "Judges the push against what the whole change since origin/main can answer and one commit cannot: " +
 		"a CHANGELOG.md entry for every covered surface the push changes (bin/check-changelog.sh), " +
 		"api/openapi.yaml agreeing with the controller's route table (bin/check-api-spec.sh), the public API " +
-		"surface matching the .apidiff/ snapshot (bin/check-api-snapshot.sh), and `go build`, `go vet` and the " +
+		"surface matching the tracked .apidiff/ snapshot, and `go build`, `go vet` and the " +
 		"fast linter subset, including depguard dependency rules, over every package holding changed Go files. After the workspace build, it builds root release commands with CGO disabled against the published SDK pin, without workspace, SDK replacement, vendor or alternate-modfile overrides. Publish SDK API changes and update the root pin before using them. It repeats " +
 		"nothing `pre-commit` already ran per file: the formatters, the comment, sleep and regex sweeps, the " +
 		"docs mirror and home resolution are the commit tier's, and a push whose commits skipped that hook is " +
@@ -190,7 +190,7 @@ func (p *PrePush) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	budget.checks, budget.head = p.Checks, p.Head
 	budget.step(w, "changelog", checkChangelogRequired)
 	budget.step(w, "api-spec", checkAPISpec)
-	budget.step(w, "api-snapshot", checkAPISnapshot)
+	budget.step(w, "api-snapshot", checkTrackedAPISnapshot)
 	build := budget.step(w, "build-touched", runBuildTouched)
 	budget.step(w, "build-published-sdk", runPublishedSDKBuildTouched).Needs(build)
 	budget.step(w, "vet-touched", runVetTouched)
@@ -209,13 +209,6 @@ func checkChangelogRequired(ctx context.Context) error {
 func checkAPISpec(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-spec.sh").Env("GOWORK", "auto").Run(); err != nil {
 		return fmt.Errorf("api/openapi.yaml disagrees with the controller's route table; run `bash bin/gen-api-docs.sh`: %w", err)
-	}
-	return nil
-}
-
-func checkAPISnapshot(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Env("GOWORK", "auto").Run(); err != nil {
-		return fmt.Errorf("the public API surface drifted from .apidiff/; record the change in CHANGELOG.md, then run `bash bin/regen-api-snapshot.sh` and stage .apidiff/: %w", err)
 	}
 	return nil
 }

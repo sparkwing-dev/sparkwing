@@ -67,6 +67,14 @@ func TestAddedLines_ChargesTheBranchAndItsUntrackedFiles(t *testing.T) {
 		t.Errorf("added = %v; a file only the base carries is charged to the branch", added)
 	}
 
+	tracked, err := TrackedAddedLines(repo, false, "main", "*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tracked["tracked.go"][3] || len(tracked) != 1 {
+		t.Fatalf("tracked added lines = %v", tracked)
+	}
+
 	if !Added(added, repo, filepath.Join(repo, "tracked.go"), 3) {
 		t.Error("Added did not resolve an absolute path against the walked root")
 	}
@@ -167,4 +175,24 @@ func unsetForTest(t *testing.T, name string) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestWalkTrackedExcludesScratchAndKeepsTrackedNames(t *testing.T) {
+	root := newRepo(t)
+	write(t, filepath.Join(root, ".gitignore"), "ignored/\n")
+	if err := os.MkdirAll(filepath.Join(root, "ignored"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "ignored", "broken.go"), "broken")
+	write(t, filepath.Join(root, "untracked.go"), "broken")
+	name := " quoted'$.go"
+	write(t, filepath.Join(root, name), "broken")
+	runGit(t, root, "add", "--", name)
+	var seen []string
+	if err := WalkTracked(root, ".go", func(_, rel string) { seen = append(seen, rel) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || seen[0] != name || seen[1] != "base.go" {
+		t.Fatalf("tracked files = %q", seen)
+	}
 }

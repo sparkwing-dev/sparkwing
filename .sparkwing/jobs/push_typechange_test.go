@@ -17,6 +17,7 @@ func TestTypeChangeRunsAffectedReader(t *testing.T) {
 			root := gateFixtureRepo(t)
 			if mode == "merge delta" {
 				configurePublishedSDKFixture(t, root)
+				writeAPISnapshotFixture(t, root, "")
 			}
 			input := filepath.Join(root, "internal", "input.txt")
 			writeGoFile(t, input, "ok")

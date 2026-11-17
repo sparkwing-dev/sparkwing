@@ -162,7 +162,7 @@ func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 	budget.step(w, "sdk-pins", func(context.Context) error {
 		return checkReleasePins(sparkwing.WorkDir())
 	}).Needs(freshness).SafeWithoutDryRun()
-	budget.step(w, "changelog-links", checkChangelogLinks).Needs(freshness).SafeWithoutDryRun()
+	budget.step(w, "changelog-links", checkTrackedChangelogLinks).Needs(freshness).SafeWithoutDryRun()
 	budget.step(w, "docs-sidebar", checkDocsSidebar).Needs(freshness).SafeWithoutDryRun()
 	budget.verdict(w)
 	return nil, nil

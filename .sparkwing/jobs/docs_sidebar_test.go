@@ -43,6 +43,8 @@ func TestDocsSidebarGatesPolicyAndReleaseCut(t *testing.T) {
 			writeFile(t, filepath.Join(repo, "go.work"), "go 1.26.0\n\nuse (\n .\n ./sparkwing\n)\n")
 			writeFile(t, filepath.Join(repo, "docs", "_sidebar.json"), `{"categories":[{"label":"CLI","slugs":["index"]}]}`)
 			writeFile(t, filepath.Join(repo, "docs", "index.md"), "# Docs\n")
+			gitInit(t, repo)
+			runTestGit(t, repo, "add", "docs")
 			t.Chdir(repo)
 			_, _, doc := prepareWork(t, tc.job)
 			if findStep(doc, "docs-sidebar") == nil {
@@ -52,6 +54,10 @@ func TestDocsSidebarGatesPolicyAndReleaseCut(t *testing.T) {
 				t.Fatalf("valid sidebar: %v", err)
 			}
 			writeFile(t, filepath.Join(repo, "docs", "cli-login.md"), "# Login\n")
+			if err := runReleaseStateCheck(t, repo, "docs-sidebar"); err != nil {
+				t.Fatalf("untracked page affected sidebar: %v", err)
+			}
+			runTestGit(t, repo, "add", "docs/cli-login.md")
 			if err := runReleaseStateCheck(t, repo, "docs-sidebar"); err == nil || !strings.Contains(err.Error(), "cli-login.md") {
 				t.Fatalf("unlisted page passed or was not named: %v", err)
 			}
