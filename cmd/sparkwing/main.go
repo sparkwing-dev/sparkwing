@@ -284,6 +284,12 @@ func runSparkwing(args []string) (result error) {
 		return runRunnerAccountWrite(inv)
 	case "sparkwing __runner-account-read":
 		return runRunnerAccountRead(inv)
+	case "sparkwing __runner-account-pause":
+		return runRunnerAccountPause(inv)
+	case "sparkwing runners pause", "sparkwing runners resume":
+		if inv.Has("service-user") {
+			return setRunnerPaused(inv, inv.Command.Path == "sparkwing runners pause", os.Stdout)
+		}
 	}
 	cleanupStaleUpdate()
 	previousArgs, previousDirectory := toolchainReplayArgs, toolchainReplayDirectory

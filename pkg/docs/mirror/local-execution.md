@@ -272,7 +272,12 @@ build. A runner roll starts a successor and stops new claims on the old instance
 The old runner keeps its held jobs, uploads and terminal acknowledgements until
 they finish. A healthy drain has no kill deadline. Controller replacement does
 not cancel these runner processes. Existing execution leases still apply during
-an outage. An idle local runner's claim waits at the controller, which answers
+an outage. A runner exits on its own once no controller has accepted a
+connection on the home's socket for 10 minutes, or for 1 minute when its state
+home is also missing on every check. While the socket accepts connections the
+runner keeps running, even if its home is briefly missing. When it exits, its
+service stops and kills the jobs it still holds. The next `sparkwing` command
+starts a fresh controller and runner. An idle local runner's claim waits at the controller, which answers
 as soon as a commit makes work claimable, or empty after 10 s. The runner then
 claims again at once, so a run submitted to an idle runner starts within
 milliseconds of intake. An idle machine sends one claim and records the runner
@@ -511,7 +516,8 @@ membership or repository permission. See [scheduling](scheduling.md),
 new work, planning included. Jobs it already holds run to completion and report
 normally. The runner keeps polling with no free slots, so it stays online.
 `sparkwing runners resume` lets it claim again on its next poll, without a
-restart. The pause survives a runner restart.
+restart. The pause survives a runner restart. For a runner enrolled with
+`runners add --service-user`, pass the same `--service-user` to both commands.
 
 The pause is local to the machine: a `paused` file beside the runner credential
 in `runner.credentials_dir`. `sparkwing runners list` on this machine shows the

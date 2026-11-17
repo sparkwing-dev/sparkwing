@@ -495,6 +495,7 @@ var commandSynopses = map[string]string{
 	"sparkwing":                                     "Run and inspect pipelines",
 	"sparkwing __complete":                          "Print completion candidates for the shell scripts",
 	"sparkwing __runner-account-write":              "Write a dedicated runner account's config (runs as that account)",
+	"sparkwing __runner-account-pause":              "Pause or resume a dedicated runner account's runner (runs as that account)",
 	"sparkwing __runner-account-read":               "Read a dedicated runner account's enrollment (runs as that account)",
 	"sparkwing __tick":                              "Evaluate every armed schedule once (the OS timer's entry point)",
 	"sparkwing cache":                               "Inspect or trim the compiled pipeline binary cache",

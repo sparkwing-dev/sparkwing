@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -140,6 +141,108 @@ func TestErrnoNameNamesTheRefusal(t *testing.T) {
 		if got := errnoName(err); got != want {
 			t.Errorf("errnoName(%v) = %q, want %q", err, got, want)
 		}
+	}
+}
+
+func TestAuditAcceptsOnlyStandardDeviceBinds(t *testing.T) {
+	for _, dev := range []string{"null", "zero", "full", "random", "urandom", "tty"} {
+		line := "2100 2001 0:6 /" + dev + " /dev/" + dev + " rw - devtmpfs devtmpfs rw"
+		if r := auditMounts(ContextJob, parseMountinfo(line)); r[0].Verdict != Pass {
+			t.Errorf("standard %s bind: %+v", dev, r)
+		}
+	}
+	for _, line := range []string{
+		"2100 2001 0:6 /mem /dev/null rw - devtmpfs devtmpfs rw",
+		"2100 2001 0:6 /null /dev/zero rw - devtmpfs devtmpfs rw",
+		"2100 2001 0:6 / /dev rw - devtmpfs devtmpfs rw",
+		"2100 2001 0:6 /kmsg /dev/kmsg rw - devtmpfs devtmpfs rw",
+		"2100 2001 0:6 /null /tmp/null rw - devtmpfs devtmpfs rw",
+	} {
+		if r := auditMounts(ContextJob, parseMountinfo(line)); r[0].Verdict != Breach {
+			t.Errorf("unsafe bind %s: %+v", line, r)
+		}
+	}
+}
+
+func TestKernelReadAcceptsNullDeviceButFailsReadableMemory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory")
+	if err := os.WriteFile(path, []byte("kernel memory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		actual string
+		target string
+		want   bool
+	}{
+		{"/dev/null", "/proc/kcore", true},
+		{path, "/proc/kcore", false},
+		{"/dev/zero", "/proc/kcore", false},
+		{"/dev/null", "/dev/mem", false},
+	} {
+		f, err := os.Open(c.actual)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := maskedKernelFile(c.target, f)
+		_ = f.Close()
+		if got != c.want {
+			t.Errorf("%s as %s: masked=%v, want %v", c.actual, c.target, got, c.want)
+		}
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if maskedKernelFile("/proc/kcore", f) {
+		t.Fatal("empty regular file passed as the null device")
+	}
+	if r := openProbe(ContextJob, "/dev/null", os.O_WRONLY, "kernel control opens for writing"); r.Verdict != Breach {
+		t.Fatalf("write open is still a breach: %+v", r)
+	}
+}
+
+func TestDeviceBindChecksDeviceNumberMaskRootAndExactDestination(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, where, root, point, actual string
+		want                             bool
+	}{
+		{"standard null", ContextJob, "/null", "/dev/null", "/dev/null", true},
+		{"wrong device number", ContextJob, "/null", "/dev/null", "/dev/zero", false},
+		{"null mask", ContextJob, "/null", "/proc/kcore", "/dev/null", true},
+		{"wrong mask root", ContextJob, "/zero", "/proc/kcore", "/dev/null", false},
+		{"mask with readable data", ContextJob, "/null", "/proc/kcore", "/dev/zero", false},
+		{"mask with regular file", ContextJob, "/null", "/proc/kcore", empty, false},
+		{"sidecar null", ContextPrivileged, "/null", "/host/dev/null", "/dev/null", true},
+		{"sidecar mask", ContextPrivileged, "/null", "/host/proc/kcore", "/dev/null", true},
+		{"sidecar prefix lookalike", ContextPrivileged, "/null", "/hostnull", "/dev/null", false},
+		{"relative destination", ContextJob, "/null", "null", "/dev/null", false},
+		{"sidecar path in job", ContextJob, "/null", "/host/dev/null", "/dev/null", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			stat := func(path string) (fs.FileInfo, error) {
+				if path != c.point {
+					t.Fatalf("stat %q, want %q", path, c.point)
+				}
+				return os.Stat(c.actual)
+			}
+			open := func(path string) (*os.File, error) {
+				if path != c.point {
+					t.Fatalf("open %q, want %q", path, c.point)
+				}
+				return os.Open(c.actual)
+			}
+			if _, got := inspectDeviceBind(c.where, mount{root: c.root, point: c.point, fstype: "devtmpfs"}, stat, open); got != c.want {
+				t.Fatalf("accepted=%v, want %v", got, c.want)
+			}
+		})
 	}
 }
 

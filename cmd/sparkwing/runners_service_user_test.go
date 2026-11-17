@@ -189,7 +189,7 @@ func TestRunnersDeleteServiceUserStopsThroughThePrivilegedStepThenRevokes(t *tes
 			t.Fatal(err)
 		}
 	})
-	if !slices.Equal(f.timeline, []string{"sudo -v", "sudo runners uninstall-service --service-user sw-ci --output json", "revoke"}) {
+	if !slices.Equal(f.timeline, []string{"sudo -v", "sudo runners uninstall-service --service-user sw-ci --output json", "revoke", "sudo runners uninstall-service --service-user sw-ci --revoked --output json"}) {
 		t.Fatalf("timeline = %q", f.timeline)
 	}
 	if f.tokens[0].RevokedAt == nil || !strings.Contains(out, "userdel") {

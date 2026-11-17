@@ -51,17 +51,23 @@ type kubeProbe struct {
 }
 
 type kubeContainer struct {
-	Name  string `json:"name"`
-	Ports []struct {
+	Name    string   `json:"name"`
+	Image   string   `json:"image"`
+	Command []string `json:"command"`
+	Args    []string `json:"args"`
+	Ports   []struct {
 		ContainerPort int    `json:"containerPort"`
 		Protocol      string `json:"protocol"`
 	} `json:"ports"`
 	LivenessProbe   *kubeProbe `json:"livenessProbe"`
 	ReadinessProbe  *kubeProbe `json:"readinessProbe"`
 	SecurityContext *struct {
-		Privileged   *bool `json:"privileged"`
-		Capabilities *struct {
-			Add []string `json:"add"`
+		Privileged               *bool `json:"privileged"`
+		AllowPrivilegeEscalation *bool `json:"allowPrivilegeEscalation"`
+		ReadOnlyRootFilesystem   *bool `json:"readOnlyRootFilesystem"`
+		Capabilities             *struct {
+			Add  []string `json:"add"`
+			Drop []string `json:"drop"`
 		} `json:"capabilities"`
 		SeccompProfile *struct {
 			Type             string `json:"type"`
@@ -72,6 +78,7 @@ type kubeContainer struct {
 }
 
 type kubePod struct {
+	rawSpec  json.RawMessage
 	Metadata kubeMeta `json:"metadata"`
 	Spec     struct {
 		NodeName                     string `json:"nodeName"`
@@ -80,7 +87,12 @@ type kubePod struct {
 		HostIPC                      bool   `json:"hostIPC"`
 		HostUsers                    *bool  `json:"hostUsers"`
 		AutomountServiceAccountToken *bool  `json:"automountServiceAccountToken"`
-		Volumes                      []struct {
+		SecurityContext              *struct {
+			RunAsUser    *int64 `json:"runAsUser"`
+			RunAsGroup   *int64 `json:"runAsGroup"`
+			RunAsNonRoot *bool  `json:"runAsNonRoot"`
+		} `json:"securityContext"`
+		Volumes []struct {
 			Name     string           `json:"name"`
 			HostPath *json.RawMessage `json:"hostPath"`
 		} `json:"volumes"`
@@ -96,6 +108,25 @@ type kubePod struct {
 			Status string `json:"status"`
 		} `json:"conditions"`
 	} `json:"status"`
+}
+
+// UnmarshalJSON retains the full spec so capacity grading cannot overlook fields outside the
+// discovery projection.
+func (p *kubePod) UnmarshalJSON(data []byte) error {
+	type plain kubePod
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var raw struct {
+		Spec json.RawMessage `json:"spec"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*p = kubePod(decoded)
+	p.rawSpec = raw.Spec
+	return nil
 }
 
 func (p kubePod) ready() bool {
@@ -154,10 +185,15 @@ type kubeJob struct {
 // safety: the launcher's award binding is the only record tying a Kubernetes Job to a run and a
 // job; its fields carry no JSON tags, so the names are the Go fields'.
 type awardBinding struct {
-	Kind   string `json:"Kind"`
-	Team   string `json:"Team"`
-	RunID  string `json:"RunID"`
-	NodeID string `json:"NodeID"`
+	Kind             string `json:"Kind"`
+	Team             string `json:"Team"`
+	RunID            string `json:"RunID"`
+	NodeID           string `json:"NodeID"`
+	UnitID           string `json:"UnitID"`
+	Generation       int64  `json:"Generation"`
+	Attempt          int64  `json:"Attempt"`
+	SourceNodeID     string `json:"SourceNodeID"`
+	SourceGeneration int64  `json:"SourceGeneration"`
 }
 
 const (

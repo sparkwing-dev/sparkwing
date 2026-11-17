@@ -115,7 +115,7 @@ Read the same runner details from the local controller or a selected profile. Th
 
 Stop this machine's runner from claiming new work
 
-Pause the runner enrolled on this machine: it finishes held jobs and claims no new work, including planning, while it keeps polling so it stays online. The pause is a file beside the runner credential, local to this machine; runners list on this machine shows the runner paused, while other machines and the console see it idle. It survives a runner restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name.
+Pause the runner enrolled on this machine: it finishes held jobs and claims no new work, including planning, while it keeps polling so it stays online. The pause is a file beside the runner credential, local to this machine; runners list on this machine shows the runner paused, while other machines and the console see it idle. It survives a runner restart. With --service-user, pause the runner enrolled with runners add --service-user: sudo runs the step as that OS user against the config in its home. JSON reports the runner, paused and whether the state changed. Plain emits the runner name.
 
 ### Flags
 
@@ -126,12 +126,13 @@ Pause the runner enrolled on this machine: it finishes held jobs and claims no n
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--config PATH` | Machine config file holding the enrolled runner section, the standard Sparkwing config file by default. |
+| `--service-user USER` | Pause the runner enrolled with runners add --service-user, through sudo as that OS user. |
 
 ## `sparkwing runners resume`
 
 Let this machine's paused runner claim work again
 
-Resume the runner enrolled on this machine after runners pause; it claims work again on its next poll, without a restart. JSON reports the runner, paused and whether the state changed. Plain emits the runner name.
+Resume the runner enrolled on this machine after runners pause; it claims work again on its next poll, without a restart. With --service-user, resume the runner enrolled with runners add --service-user through sudo, as runners pause does. JSON reports the runner, paused and whether the state changed. Plain emits the runner name.
 
 ### Flags
 
@@ -142,12 +143,13 @@ Resume the runner enrolled on this machine after runners pause; it claims work a
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--config PATH` | Machine config file holding the enrolled runner section, the standard Sparkwing config file by default. |
+| `--service-user USER` | Resume the runner enrolled with runners add --service-user, through sudo as that OS user. |
 
 ## `sparkwing runners uninstall-service`
 
 Remove a dedicated-user runner service (root)
 
-The privileged step of sparkwing runners delete --service-user, which runs it through sudo and then revokes the token it reports. Requires root. Stops and removes the system service of the OS user named by --service-user first, then reports the runner name, controller and token prefix from the root-owned enrollment record runners install-service wrote, falling back to that user's config. When neither names the token, it says the service is stopped and how to find and revoke the token. The OS user and its home remain. JSON reports the account, home, runner, controller and token prefix.
+The privileged step of sparkwing runners delete --service-user, which runs it through sudo and then revokes the token it reports. Requires root. Stops and removes the system service of the OS user named by --service-user first, then reports the runner name, controller and token prefix from the root-owned enrollment record runners install-service wrote, falling back to that user's config, and keeps the record. When neither names the token, it says the service is stopped and how to find and revoke the token. The OS user and its home remain. JSON reports the account, home, runner, controller and token prefix. With --revoked, runners delete reports the token revoked, and the step deletes only that record.
 
 ### Flags
 
@@ -158,3 +160,4 @@ The privileged step of sparkwing runners delete --service-user, which runs it th
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--service-user USER` | Dedicated OS user the runner service runs as. (required) |
+| `--revoked` | The runner token is revoked: delete the enrollment record and nothing else. |

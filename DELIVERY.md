@@ -1497,14 +1497,26 @@ seen once stays a failure even if a later observation looks healthy. The
 launcher deletes a run's Jobs when the run ends, so placement comes only from
 these records.
 
-Conformance needs tested nodes without capacity placeholders. Only two kinds of
-pod may share a tested node. One is a pod whose controller is a DaemonSet the
-cluster lists. The other is a pod whose controller is one of the run's own Jobs.
-Both are matched by UID. A label, an annotation or an owner kind alone never
-counts. A capacity placeholder fails the run even when it belongs to the run
-that owns the node, because the conformance run cannot prove who created it.
-The launcher creates placeholders only while a job waits for a node. If a
-report names one, rerun once the run's nodes are free of them.
+A tested node may hold the run's own Job pods, cluster-listed DaemonSet pods,
+and the launcher's inert capacity placeholder for that same run and team.
+Job and DaemonSet owners are matched by UID. A capacity pod must match its
+binding-derived name, team label, runner image and unprivileged sleep-only
+spec. The driver retains its complete raw spec and accepts only the expected
+capacity fields. Lifecycle hooks, probes, init/ephemeral containers,
+environment injection, security overrides and unknown execution fields all
+fail placement. Another team's or run's capacity pod still fails placement. If a Job
+starts between capture calls, the driver reads Jobs again to resolve the newly
+observed owner's UID and retains that capture.
+
+User namespaces bind the six standard character devices from devtmpfs.
+The mount audit accepts only their expected roots, destinations, character
+types and device numbers. The privileged DinD probe sees those same sidecar
+devices under `/host/dev`, because Docker resolves its read-only `/:/host`
+bind inside the sidecar. Standard masked proc files pass only when a bounded
+read reaches EOF without returning a byte and the file is the null character
+device (1:3), with mount root `/null`. Empty regular files do not qualify.
+A devtmpfs directory, an unexpected device or an actual host filesystem still
+fails the audit. The sidecar path exception requires the exact `/host/` prefix.
 
 Placement rests on one assumption, which the report header states. Pod metadata
 cannot be authenticated from inside the cluster. Anyone able to create or

@@ -74,11 +74,17 @@ func auditMounts(where string, mounts []mount) []Result {
 			pods[sub[1]] = true
 		}
 	}
-	var out []Result
+	var out, observed []Result
 	if len(pods) > 1 {
 		out = append(out, Result{Item: "C10", Context: where, Probe: "mount audit: one pod's kubelet directory", Expect: ExpectBlocked, Outcome: "volumes from more than one pod", Verdict: Breach})
 	}
 	for _, m := range mounts {
+		if m.fstype == "devtmpfs" {
+			if detail, ok := runtimeDeviceBind(where, m); ok {
+				observed = append(observed, Result{Item: "C10", Context: where, Probe: "runtime device bind", Target: m.point, Expect: ExpectObserved, Outcome: detail, Verdict: Observed})
+				continue
+			}
+		}
 		diskBacked := diskFS[m.fstype] || strings.HasPrefix(m.source, "/dev/")
 		switch {
 		case hostKernelFS[m.fstype]:
@@ -91,7 +97,7 @@ func auditMounts(where string, mounts []mount) []Result {
 	if len(out) > 0 {
 		summary.Outcome, summary.Verdict = "a mount reaches outside the pod", Breach
 	}
-	return append([]Result{summary}, out...)
+	return append(append([]Result{summary}, out...), observed...)
 }
 
 func ownPodRoot(root string) bool {

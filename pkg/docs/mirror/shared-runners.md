@@ -54,6 +54,14 @@ under your home, for example by asdf, are out of the service's reach: install
 the toolchains its jobs need system-wide. The command lists the PATH entries it
 left out.
 
+Pause and resume it with the same `--service-user` targeting. Sudo runs the
+step as that OS user, against the config in its home:
+
+```sh
+sparkwing runners pause --service-user sparkwing-runner
+sparkwing runners resume --service-user sparkwing-runner
+```
+
 Remove it with:
 
 ```sh

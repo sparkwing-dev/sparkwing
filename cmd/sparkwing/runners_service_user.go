@@ -263,6 +263,19 @@ func runRunnersUninstallService(inv clisurface.Invocation) error {
 	if inv.Help() {
 		return writeCommandHelp(surfaceHelp(inv.Command), os.Stdout, format)
 	}
+	if inv.Bool("revoked") {
+		record, err := forgetServiceUserEnrollment(runnerServiceGOOS, inv.Value("service-user"))
+		if err != nil {
+			return err
+		}
+		if format == "json" {
+			return json.NewEncoder(os.Stdout).Encode(struct {
+				Record string `json:"record"`
+			}{record})
+		}
+		fmt.Printf("deleted the enrollment record %s\n", opsview.DisplayText(record))
+		return nil
+	}
 	removed, err := uninstallServiceUser(context.Background(), runnerServiceGOOS, inv.Value("service-user"))
 	if err != nil {
 		return err
@@ -305,6 +318,19 @@ func uninstallServiceUser(ctx context.Context, goos, name string) (serviceUserRe
 		return removed, fmt.Errorf("%s, but nothing names its runner token (%w); find it with sparkwing tokens list --type runner and revoke it with sparkwing tokens revoke", state.Detail, recordErr)
 	}
 	return removed, nil
+}
+
+// safety: the record is the only durable name of the token once a job deletes
+// the account's config, so it goes only after the caller confirmed the revoke.
+func forgetServiceUserEnrollment(goos, name string) (string, error) {
+	if err := requireServiceRoot(goos, name, "uninstall-service"); err != nil {
+		return "", err
+	}
+	record := enrollmentRecordPath(goos, name)
+	if err := os.Remove(record); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return record, err
+	}
+	return record, nil
 }
 
 func readAccountEnrollment(ctx context.Context, goos string, account runnerservice.Account) (serviceUserRemoved, error) {
@@ -490,7 +516,10 @@ func removeServiceUserRunner(ctx context.Context, manager controllerwire.TokenMa
 	}
 	revoked, err := manager.RevokeToken(ctx, removal.tokenPrefix)
 	if err != nil {
-		return err
+		return fmt.Errorf("the service is stopped, but revoking its token %s failed: %w; the enrollment record still names it, so rerun sparkwing runners delete --profile %s --service-user %s", removal.tokenPrefix, err, removal.profileName, removal.serviceUser)
+	}
+	if _, err := serviceUserPrivilege.Run(ctx, []string{"runners", "uninstall-service", "--service-user", removal.serviceUser, "--revoked", "--output", "json"}, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: revoked %s, but its enrollment record remains: %v\n", removal.tokenPrefix, err)
 	}
 	switch removal.format {
 	case "json":
