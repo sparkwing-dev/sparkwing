@@ -38,7 +38,7 @@ func TestUpdateRefreshesRunningPrivateController(t *testing.T) {
 	if err := manager.Refresh(t.Context(), executable, "v1.2.3"); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(lifecycle.calls, []string{"status", "stop", "status", "start"}) || lifecycle.status.Version != "v1.2.3" {
+	if !reflect.DeepEqual(lifecycle.calls, []string{"status", "status", "stop", "status", "start"}) || lifecycle.status.Version != "v1.2.3" {
 		t.Fatalf("old controller still serves work: status=%+v calls=%v", lifecycle.status, lifecycle.calls)
 	}
 	want := wingd.LocalStartOptions{Home: home, Executable: executable, Version: "v1.2.3"}

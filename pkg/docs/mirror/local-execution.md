@@ -208,8 +208,9 @@ Plain output is the resulting state. Store and API diagnostics come from doctor.
 Doctor also sweeps stray step sessions through the controller. A successful
 cleanup whose run was pruned reports an unrecorded-outcome warning and succeeds.
 
-Restart preserves a stopped controller. An answering controller on the exact
-installed version stays running unless `--force` is selected. Replacement waits
+Restart preserves a stopped controller. An answering installed controller on the exact
+installed version stays running unless `--force` is selected. Restart always
+replaces a running on-demand controller so it reloads machine settings. Replacement waits
 for shutdown before starting the installed executable with the same home,
 dashboard address. An incomplete drain or unready replacement
 returns an error without a success receipt. On Linux and macOS, jobs held by the
@@ -622,6 +623,10 @@ macOS and Windows get no OS cap; macOS gives jobs background scheduling only.
 The controller reads the budget when it starts. After changing it, run
 `sparkwing daemon restart`. The restarted controller replaces a runner started
 under another budget; that runner finishes its held jobs under the old limits.
+For an installed login service on the same CLI version, select
+`sparkwing daemon restart --force`. On older CLIs whose on-demand restart returns
+`restarted: false`, run `sparkwing daemon stop`, then start the next pipeline to
+load the new budget.
 
 `sparkwing queue list` reads the limits back from the running runner and reports
 what the OS applied: `OS-enforced: runner jobs capped at 2.0 cores, nice 10`, or

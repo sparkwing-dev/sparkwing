@@ -21,6 +21,10 @@ func (u updateLocalUnits) Refresh(ctx context.Context, executable, version strin
 	if err != nil || installed {
 		return err
 	}
+	status, err := u.services.lifecycle.Status(ctx)
+	if err != nil || !status.Running || status.Version == version {
+		return err
+	}
 	u.services.options.Executable, u.services.options.Version = executable, version
 	return runDaemonLifecycleCommand(ctx, clisurface.Invocation{Command: clisurface.Command{Path: "sparkwing daemon restart"}}, io.Discard,
 		func(context.Context) (dashboardServices, error) { return u.services, nil })
