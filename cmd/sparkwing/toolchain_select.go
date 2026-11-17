@@ -28,6 +28,13 @@ var (
 
 var (
 	readEnginePin    = engine.ReadPin
+	resolveEnginePin = func(ctx context.Context, pin engineid.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
+		resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, LocalOnly: true})
+		if err != nil {
+			return engine.Resolved{}, err
+		}
+		return resolver.Resolve(ctx, pin, target)
+	}
 	enginePinVersion = func(pin engineid.Pin) (string, error) {
 		return engine.CachedEngineVersion(context.Background(), pin)
 	}
@@ -42,7 +49,7 @@ type pipelineEngineSwitcher struct {
 	diagnostics io.Writer
 }
 
-func switchToolchain(dir string, beforeExec func()) error {
+func switchToolchain(dir string, beforeExec func() error) error {
 	ctx, stop, _ := interruptContext()
 	defer stop()
 	typescript, err := pipelineentry.IsTypeScript(dir)
@@ -62,17 +69,13 @@ func switchToolchain(dir string, beforeExec func()) error {
 		current: current, target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 		execute: func(binary string, args, environment []string) error {
 			if beforeExec != nil {
-				beforeExec()
+				if err := beforeExec(); err != nil {
+					return err
+				}
 			}
 			return replayToolchain(binary, args, environment)
 		}, diagnostics: os.Stderr,
-		resolve: func(ctx context.Context, pin engineid.Pin, target releaseasset.Target, mode toolchain.Mode) (engine.Resolved, error) {
-			resolver, err := engine.NewResolver(engine.Config{BuildVersion: installedVersion(), Mode: mode, LocalOnly: true})
-			if err != nil {
-				return engine.Resolved{}, err
-			}
-			return resolver.Resolve(ctx, pin, target)
-		},
+		resolve: resolveEnginePin,
 	}
 	return command.run(ctx, dir, sdk, os.Getenv(toolchainModeEnv), toolchainArgs(), os.Environ())
 }

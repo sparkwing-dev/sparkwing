@@ -1195,3 +1195,17 @@ func TestEnvVarWalkIgnoresUntrackedScratch(t *testing.T) {
 		t.Fatalf("reads after staging scratch = %q", got)
 	}
 }
+
+func TestEnginePinDocsKeepControllerOwnership(t *testing.T) {
+	for _, topic := range []string{"versioning", "local-execution"} {
+		body, err := docs.ReadRaw(topic)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, contract := range []string{"invoking CLI starts the", "before", "pinned engine", "store", "Standalone CI", "--route burst", "local controller before engine"} {
+			if !strings.Contains(body, contract) {
+				t.Errorf("%s omits controller handoff contract %q", topic, contract)
+			}
+		}
+	}
+}

@@ -254,7 +254,7 @@ func parseRunFlagsArgs(args []string) (runFlags, []string) {
 	return runFlagsFromInvocation(inv)
 }
 
-func dispatchRunWithEngineArgs(args []string, selectEngine func(string, func()) error) error {
+func dispatchRunWithEngineArgs(args []string, selectEngine func(string, func() error) error) error {
 	inv, err := clisurface.Parse("sparkwing", append([]string{"run"}, args...))
 	if err != nil {
 		return err
