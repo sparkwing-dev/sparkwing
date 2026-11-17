@@ -12,6 +12,8 @@ than misreading encrypted arguments. SQLite takes the normal pre-upgrade backup.
 A failed deployment after this schema increase requires database recovery rather
 than automatic rollback to the older binary. Runner transport and plaintext hash
 binding stay unchanged.
+The schema-40 OIDC audit privacy migration also completes at startup on schema
+41 when its pending marker remains.
 
 Before upgrading, back up the database and its secrets keys. Stop writes and
 schedule ticks while replacing every controller reader and writer with the new

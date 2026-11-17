@@ -87,3 +87,40 @@ func TestSchema41UpgradesLegacyArgumentRowsInEachDialect(t *testing.T) {
 		})
 	}
 }
+
+func TestSchema41ScrubsPendingSchema40OIDCAuditInEachDialect(t *testing.T) {
+	for _, dialect := range []struct {
+		name   string
+		target func(*testing.T) *storetest.Target
+	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
+		t.Run(dialect.name, func(t *testing.T) {
+			target := dialect.target(t)
+			s := target.Open(t)
+			seedHistoricalOIDCAudit(t, s, historicalOIDCAttrs)
+			if _, err := s.DB().ExecContext(t.Context(), `UPDATE audit_privacy_migrations SET completed=0 WHERE version=1`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.DB().ExecContext(t.Context(), `UPDATE sparkwing_schema_version SET version=40,baseline_digest='1bcc048252e13edb35021084dd24ad1d7f7adf9eb9cd9ee5fbc291a0ef7df189'`); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s = target.Open(t, oidcAuditPolicies(t))
+			var completed, receipts int
+			if err := s.DB().QueryRowContext(t.Context(), `SELECT completed FROM audit_privacy_migrations WHERE version=1`).Scan(&completed); err != nil || completed != 1 {
+				t.Fatalf("audit migration marker = %d, %v", completed, err)
+			}
+			if err := s.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM audit_events WHERE kind='audit.oidc_scrubbed'`).Scan(&receipts); err != nil || receipts != 1 {
+				t.Fatalf("audit migration receipts = %d, %v", receipts, err)
+			}
+			var attrs string
+			if err := s.DB().QueryRowContext(t.Context(), `SELECT attrs FROM audit_events WHERE id='old'`).Scan(&attrs); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(attrs, "person@example.test") || !strings.Contains(attrs, "audience_digest") || !strings.Contains(attrs, "subject_digest") {
+				t.Fatal("schema-40 audit history was not scrubbed during the argument format upgrade")
+			}
+		})
+	}
+}

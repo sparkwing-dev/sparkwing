@@ -675,7 +675,10 @@ OIDC audit identity privacy is owned by `internal/store/audit_oidc.go` and
 `TestOIDCAuditDigestRotationAndFieldSeparation` guard reconciliation, append-only
 scope, rollback and external-key matching. `TestNativeOIDCMintCommittedIdentityProperty`
 checks the HTTP mint surface. Schema 40 installs the pending marker. Configured
-store startup reconciles before serving and preserves audit retention.
+store startup reconciles before serving and preserves audit retention. The temporary
+exception requires the current schema and baseline digest.
+`TestSchema41ScrubsPendingSchema40OIDCAuditInEachDialect` guards reconciliation
+after the argument-format upgrade on both store dialects.
 Linux process inspection treats ENOENT and ESRCH as absent processes. Owners:
 `internal/procgroup/session_linux.go` and
 `internal/wingd/admission_process_liveness_linux.go`. Guards:
