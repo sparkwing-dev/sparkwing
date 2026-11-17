@@ -1,8 +1,9 @@
 package nodehost
 
 import (
-	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 )
 
 func TestSDKRunContextCarriesStepBounds(t *testing.T) {
