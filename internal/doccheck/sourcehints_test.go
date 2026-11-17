@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/gitenv/testgit"
 )
 
 //sparkwing:critical
@@ -37,6 +39,7 @@ func TestCheckSourceHintsRejectsStaleHints(t *testing.T) {
 	} {
 		root := t.TempDir()
 		writeSource(t, root, "cmd/tool/hint.go", "package main\n\nvar hint = "+literal+"\n")
+		trackSources(t, root)
 		if checkSourceHints(root) {
 			t.Fatalf("stale hint accepted: %s", literal)
 		}
@@ -62,6 +65,7 @@ func data() { run("commit", "-m", "sparkwing sample commit"); strings.NewReader(
 `)
 	writeSource(t, root, "cmd/tool/hint_test.go", "package main\n\nvar old = \"sparkwing update --cli\"\n")
 	writeSource(t, root, "internal/x/testdata/hint.go", "package x\n\nvar old = \"sparkwing update --cli\"\n")
+	trackSources(t, root)
 	if !checkSourceHints(root) {
 		t.Fatal("current hints or prose rejected")
 	}
@@ -92,6 +96,7 @@ func FuzzConcatenatedRecoveryCommandsUseCurrentGrammar(f *testing.F) {
 			}
 			writeSource(t, root, "cmd/tool/hint.go", "package main\nvar suffix string\nvar hint = "+expression+"\n")
 			want := strings.HasPrefix(command, "sparkwing dashboard")
+			trackSources(t, root)
 			if got := checkSourceHints(root); got != want {
 				t.Fatalf("grammar verdict=%t want=%t: %s", got, want, expression)
 			}
@@ -133,9 +138,49 @@ func FuzzNamedConstantRecoveryCommandsUseCurrentGrammar(f *testing.F) {
 			}
 			writeSource(t, root, "cmd/tool/hint.go", prefix+declarations+"var hint = "+expression+"\n"+suffix)
 			want := strings.HasPrefix(command, "sparkwing dashboard")
+			trackSources(t, root)
 			if got := checkSourceHints(root); got != want {
 				t.Fatalf("named constant grammar verdict=%t want=%t: form=%d expression=%s", got, want, form%7, expression)
 			}
 		}
 	})
+}
+
+func trackSources(t *testing.T, root string) {
+	t.Helper()
+	for _, args := range [][]string{{"init", "--quiet"}, {"add", "."}} {
+		if output, err := testgit.Command("git", append([]string{"-C", root}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, output)
+		}
+	}
+}
+
+func TestSourceChecksJudgeOnlyTrackedFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name, violation string
+		check           func(string) bool
+	}{
+		{"comments", "package fixture\n// pipelines.yaml is retired.\n", func(root string) bool { return checkProductionComments(root) == nil }},
+		{"hints", "package fixture\nvar hint = \"run sparkwing unknown-root repair\"\n", checkSourceHints},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			tracked := "pkg/cachecontrol/with space\nand newline.go"
+			writeSource(t, root, ".gitignore", ".Codex-scratch/\n")
+			writeSource(t, root, tracked, "package fixture\n")
+			trackSources(t, root)
+			writeSource(t, root, "pkg/cachecontrol/.Codex-scratch/bad.go", "malformed Go\n")
+			writeSource(t, root, "pkg/cachecontrol/untracked.go", "malformed Go\n")
+			if output, err := testgit.Command("git", "-C", root, "check-ignore", "pkg/cachecontrol/.Codex-scratch/bad.go").CombinedOutput(); err != nil {
+				t.Fatalf("scratch must be ignored: %v\n%s", err, output)
+			}
+			if !tc.check(root) {
+				t.Fatal("untracked malformed sources failed the check")
+			}
+			writeSource(t, root, tracked, tc.violation)
+			if tc.check(root) {
+				t.Fatal("tracked violation escaped the check")
+			}
+		})
+	}
 }
