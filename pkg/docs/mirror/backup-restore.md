@@ -345,7 +345,7 @@ does not scrub the archives.
 See [Account deletion retention](account-deletion-retention.md).
 Cloud run-data buckets are unversioned, so a successful object purge leaves no
 noncurrent object versions. Manual RDS snapshots do not expire and must not be
-created for customer data under the seven-day deletion promise. A restore must
+created for customer data, because they would outlive the deletion window. A restore must
 reapply deletions made after its restore point before admitting traffic.
 
 Self-hosted operators must verify their own backup retention. Versioned object
