@@ -260,6 +260,21 @@ strips its types, so describe and plan are its check. Verification never runs
 job bodies. Install and check environments pass through the shared environment
 builder, and registered proxy credentials are masked in failures.
 
+
+Older TypeScript scaffolds may lack Node declarations. If `pipeline upgrade`
+reports TS2307 or TS2591 for imports such as `node:fs`, install the declarations:
+
+```bash
+npm --prefix .sparkwing install --save-dev --save-exact @types/node@22
+```
+
+In `.sparkwing/tsconfig.json`, add `"node"` to `compilerOptions.types` (create
+`"types": ["node"]` if absent). Keep any existing type entries. Run
+`npm --prefix .sparkwing exec -- tsc --noEmit`, then retry
+`sparkwing pipeline upgrade`. Commit `package.json`, `package-lock.json` and
+`tsconfig.json` under `.sparkwing/`. Upgrading the SDK pin does not add these
+project settings.
+
 Pin and lockfile edits apply once the new SDK resolves against the verified
 engine. When `go mod tidy` fails on a package the new release removed, the Go
 pin moves with `go get` instead. Each original digest is checked again so
