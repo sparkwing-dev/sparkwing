@@ -190,6 +190,7 @@ var schemaTables = []schemaTable{
 	{Name: "blob_tombstones", Owner: schemaTenant},
 	{Name: "blobs", Owner: schemaTenant},
 	{Name: "audit_events", Owner: schemaOperator},
+	{Name: "audit_privacy_migrations", Owner: schemaOperator},
 	{Name: "capabilities", Owner: schemaOperator},
 	{Name: "card_refunds", Owner: schemaTenant, RetainOnTeamDeletion: true},
 	{Name: "claim_awards", Owner: schemaOperator},

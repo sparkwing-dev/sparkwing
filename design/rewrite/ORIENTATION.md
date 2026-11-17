@@ -668,6 +668,14 @@ decision amends an earlier one where noted.
 
 | The standalone Go SDK builds and tests on Go 1.25 without the host module | `sparkwing/go.mod`; `go.work` | `sparkwing/tidy_closure_test.go`: `TestSDKTidyClosureNeedsOnlySmallModules`; SDK floor proof |
 
+OIDC audit identity privacy is owned by `internal/store/audit_oidc.go` and
+`internal/secrets/oidc_audit.go`. `TestOIDCAuditUpgradeScrubsHistoricalRowsAndMatchesCandidates`,
+`TestOIDCAuditScrubExceptionAllowsOnlyExactPayload`,
+`TestOIDCAuditScrubRollbackRetryAndMalformedHistory` and
+`TestOIDCAuditDigestRotationAndFieldSeparation` guard reconciliation, append-only
+scope, rollback and external-key matching. `TestNativeOIDCMintCommittedIdentityProperty`
+checks the HTTP mint surface. Schema 40 installs the pending marker. Configured
+store startup reconciles before serving and preserves audit retention.
 Linux process inspection treats ENOENT and ESRCH as absent processes. Owners:
 `internal/procgroup/session_linux.go` and
 `internal/wingd/admission_process_liveness_linux.go`. Guards:

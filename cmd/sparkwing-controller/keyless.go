@@ -27,3 +27,7 @@ func (keylessCipher) SealBound(secrets.Purpose, string, string, string, bool, bo
 func (keylessCipher) OpenBound(secrets.Purpose, string, string, string, bool, bool, string) (string, error) {
 	return "", errKeyless
 }
+
+func (keylessCipher) OIDCAuditDigest(string, string, string) (string, string, error) {
+	return "", "", errKeyless
+}
