@@ -671,8 +671,12 @@ of silently clamping them. See [machine settings](machine-config.md).
 
 ## Windows with Git Bash
 
-Go and TypeScript are supported on native Windows. Git Bash supplies Bash and
-shell utilities, while pipelines still need native tools for the commands they
+Native Windows is experimental and unsupported for production. WSL2 with
+systemd enabled is the supported way to run Sparkwing on Windows. See
+[known limitations](known-limitations.md#windows-is-experimental).
+
+Experimental Go and TypeScript execution on native Windows needs Git Bash for
+Bash and shell utilities. Pipelines also need native tools for the commands they
 execute. Use `node.exe` to invoke JavaScript command entrypoints.
 
 Windows process cleanup uses kill-on-close Job Objects. Unix uses owned process

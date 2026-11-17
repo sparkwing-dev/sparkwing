@@ -13,9 +13,19 @@ start from a login session; see [running with no daemon](local-execution.md#runn
 
 ### Windows is experimental
 
-Native Windows binaries ship, but the runner service is not installed, schedules are recorded without firing, and
-local runs can fail at controller startup. Use WSL2 with systemd and the Linux installer. See
-[Windows with Git Bash](local-execution.md#windows-with-git-bash).
+Native Windows is experimental and unsupported for production. WSL2 with systemd enabled is the supported way
+to run Sparkwing on Windows. Use the [Linux installer](getting-started.md#install).
+
+Native Windows has these limitations:
+
+- The runner service installer supports Linux and macOS only. Windows uses an embedded local runner.
+- Schedule installation records schedules but does not fire them automatically.
+- When `sparkwing update` restarts a running controller, its embedded runner has a 20-second drain deadline.
+  A held job may make the restart fail after the new binary is installed. This risk still needs a native Windows acceptance run.
+- Jobs get no OS resource cap, and process termination has no SIGTERM grace period.
+
+Experimental Go and TypeScript execution needs Git Bash and native tools for the commands a pipeline runs.
+See [Windows with Git Bash](local-execution.md#windows-with-git-bash) for execution and acceptance limits.
 
 ### Local jobs share your working tree
 
