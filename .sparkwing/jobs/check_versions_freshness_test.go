@@ -851,3 +851,23 @@ func TestPinBumpIdentityArgs(t *testing.T) {
 		})
 	}
 }
+
+func TestVersionFreshnessEnumeratesTrackedModules(t *testing.T) {
+	root := gateFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, ".gitignore"), ".Codex-scratch/\n")
+	gitAddAll(t, root)
+	writeGoFile(t, filepath.Join(root, ".Codex-scratch/go.mod"), "invalid module\n")
+	writeGoFile(t, filepath.Join(root, "untracked/go.mod"), "invalid module\n")
+	files, err := findGoModFiles(newTestContext(t), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("tracked modules = %v", files)
+	}
+	runTestGit(t, root, "add", "-f", ".Codex-scratch/go.mod")
+	files, err = findGoModFiles(newTestContext(t), root)
+	if err != nil || len(files) != 3 {
+		t.Fatalf("tracked scratch module omitted: %v %v", files, err)
+	}
+}

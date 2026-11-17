@@ -14,6 +14,7 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
 
@@ -48,7 +49,7 @@ func checkPublishedVersionsFreshness(ctx context.Context, repoRoot string) error
 }
 
 func checkVersionsFreshness(ctx context.Context, repoRoot string, checkLocalReplacements bool) error {
-	mods, err := findGoModFiles(repoRoot)
+	mods, err := findGoModFiles(ctx, repoRoot)
 	if err != nil {
 		return fmt.Errorf("scan go.mod files: %w", err)
 	}
@@ -245,25 +246,25 @@ func majorCapFor(modulePath string) int {
 	return -1
 }
 
-func findGoModFiles(root string) ([]string, error) {
+func findGoModFiles(ctx context.Context, root string) ([]string, error) {
+	result, err := sparkwing.Exec(ctx, "git", "ls-files", "-z", "--", "go.mod", "**/go.mod").Dir(root).Capture()
+	if err != nil {
+		return nil, err
+	}
 	var out []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		name := d.Name()
-		if d.IsDir() {
-			if name == ".git" || name == "node_modules" || name == "vendor" || name == "testdata" {
-				return filepath.SkipDir
+	for _, name := range splitNULNames(result.Stdout) {
+		skip := false
+		for _, dir := range strings.Split(filepath.ToSlash(filepath.Dir(name)), "/") {
+			if dir == "node_modules" || dir == "vendor" || dir == "testdata" {
+				skip = true
+				break
 			}
-			return nil
 		}
-		if name == "go.mod" {
-			out = append(out, path)
+		if !skip {
+			out = append(out, filepath.Join(root, name))
 		}
-		return nil
-	})
-	return out, err
+	}
+	return out, nil
 }
 
 func findReplaceFor(f *modfile.File, modulePath string) *modfile.Replace {

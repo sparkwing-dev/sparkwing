@@ -607,7 +607,8 @@ policy/review run selects both with `--only '*[wy]'` (the job names ending in
 `w` or `y`). Selecting review
 alone includes preconditions but skips policy. The policy
 job judges tracked files only, so ignored and untracked scratch does not change
-its verdict. Markdownlint retains its root and docs scope. Comments and test
+its verdict. The fast push tier and merge-delta recheck use the same tracked
+API snapshot check. Markdownlint retains its root and docs scope. Comments and test
 sleep checks retain their changed-line scope. The hook tiers still inspect
 untracked Go files in range mode. The policy job collects every finding before
 it fails. The heavy `gate` job likewise lets
@@ -756,7 +757,8 @@ the gate once it finishes, or stop it if it is stuck. Nothing was learned about
 the tree. An exit 4 saying "Timeout exceeded" is golangci-lint's own
 `run.timeout` instead: raise it in `.golangci.yml`.
 
-Version freshness excludes `testdata` fixture modules, matching the committed-module checks.
+Version freshness reads tracked module manifests and excludes `testdata` fixture
+modules, matching the committed-module checks.
 
 `push-tag` declares the `destructive` and `prod` risk labels, so only the
 second command tags and pushes. The tag push starts the hosted release below.

@@ -24,7 +24,7 @@ func runReleaseStateCheck(t *testing.T, repo, name string) error {
 	case "sdk-pins":
 		return checkReleasePins(repo)
 	case "changelog-links":
-		return checkChangelogLinks(ctx)
+		return checkTrackedChangelogLinks(ctx)
 	default:
 		t.Fatalf("unknown release state check %s", name)
 		return nil

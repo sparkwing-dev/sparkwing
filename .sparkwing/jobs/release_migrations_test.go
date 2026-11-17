@@ -501,6 +501,7 @@ func TestRepositoryUnreleasedSectionDeclaresEveryWireCut(t *testing.T) {
 		if n, err := unreleasedEntries(string(body)); err != nil {
 			return err
 		} else if n == 0 {
+			t.Skip("CHANGELOG.md [Unreleased] is empty after a release")
 			return nil
 		}
 		if issues := LintWireBreak(string(body), "v0.999.0", cuts, migrationsFS(snapshot)); len(issues) > 0 {

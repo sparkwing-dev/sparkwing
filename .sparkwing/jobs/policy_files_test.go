@@ -84,6 +84,8 @@ func TestTrackedPolicyChangelogIgnoresScratch(t *testing.T) {
 	runTestGit(t, root, "add", "-f", name)
 	if err := checkTrackedChangelogLinks(newTestContext(t)); err == nil {
 		t.Fatal("tracked malformed fragment passed policy")
+	} else if !strings.Contains(err.Error(), "a released changelog entry may be edited to repair a link") || !strings.Contains(err.Error(), "restore the document") {
+		t.Fatalf("changelog failure lost its repair advice: %v", err)
 	}
 }
 

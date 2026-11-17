@@ -273,10 +273,7 @@ func checkPreReleaseDocExamples(ctx context.Context) error {
 }
 
 func checkPreReleaseAPISnapshot(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "bash bin/check-api-snapshot.sh").Env("GOWORK", "auto").Run(); err != nil {
-		return errors.New("api-snapshot: drift -- run `bash bin/regen-api-snapshot.sh` and commit .apidiff/")
-	}
-	return nil
+	return checkTrackedAPISnapshot(ctx)
 }
 
 func preReleaseShell(command string) func(context.Context) error {
