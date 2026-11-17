@@ -110,6 +110,21 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 	if runtime.controller == nil || runtime.prepare == nil || runtime.close == nil || (!flags.detached && (runtime.follow == nil || flags.allowUnadmitted && runtime.bind == nil)) {
 		return &apierr.Error{Code: hosterr.Unavailable, Message: "local run integration has incomplete intake or host bindings"}
 	}
+	var controllerReady <-chan struct{}
+	var controllerErr error
+	if runtime.ensureController != nil && !flags.allowUnadmitted {
+		ready := make(chan struct{})
+		controllerReady = ready
+		go func() {
+			defer close(ready)
+			controllerErr = runtime.ensureController(ctx)
+		}()
+		defer func() {
+			// safety: startup must join before runtime.close releases its transports.
+			cancelPreparation()
+			<-ready
+		}()
+	}
 	prepared, err := runtime.prepare(ctx, pipeline, flags)
 	if err != nil {
 		return err
@@ -164,6 +179,12 @@ func runLocalCommand(ctx context.Context, pipeline string, flags runFlags, args 
 			defer func() { resultErr = errors.Join(resultErr, closeCache()) }()
 		} else if err := closeCache(); err != nil {
 			return err
+		}
+	}
+	if controllerReady != nil {
+		<-controllerReady
+		if controllerErr != nil {
+			return controllerErr
 		}
 	}
 	if runtime.ensureController != nil {
