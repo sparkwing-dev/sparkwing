@@ -36,7 +36,7 @@ sparkwing version --offline
 
 Show, set, or clear the operator ceiling on CLI upgrades
 
-Show or change the version hold that controls automatic updates.
+Show or change the version ceiling that `sparkwing update` will not pass.
 
 ### Flags
 

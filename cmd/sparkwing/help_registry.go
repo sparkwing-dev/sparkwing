@@ -753,7 +753,7 @@ var commandIntros = map[string]string{
 		"Look at past runs with `sparkwing runs list` and `sparkwing runs logs --run ID`. To run on a controller instead of this machine, use `sparkwing pipeline trigger <pipeline> --profile NAME`.\n\n" +
 		"`sparkwing run --help-all` adds Cloud routing, publication, CI use without the shared controller, step windows and every flag.",
 	"sparkwing __complete":                          "Print shell completion candidates for the supplied command words.",
-	"sparkwing __sdk-install":                       "Read an SDK install request from stdin and print the command needed to install it.",
+	"sparkwing __sdk-install":                       "Install the SDK entry described by a request on stdin and print the command that runs it.",
 	"sparkwing __runner-account-write":              "Write runner enrollment and copy the runner binary into the dedicated account.",
 	"sparkwing __runner-account-read":               "Read the dedicated account's runner name, controller and token prefix.",
 	"sparkwing __runner-account-pause":              "Pause the dedicated account's runner, or resume it with --resume.",
@@ -862,7 +862,7 @@ var commandIntros = map[string]string{
 	"sparkwing tokens rotate":                       "Replace a team credential and print its new bearer once.",
 	"sparkwing update":                              "Update installed Sparkwing software from verified release assets. Use --dry-run to preview the update.",
 	"sparkwing version":                             "Show installed component versions and update availability. Use --offline to skip release lookups.",
-	"sparkwing version hold":                        "Show or change the version hold that controls automatic updates.",
+	"sparkwing version hold":                        "Show or change the version ceiling that `sparkwing update` will not pass.",
 }
 
 var briefFlags = map[string]bool{
