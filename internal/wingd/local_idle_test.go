@@ -594,8 +594,8 @@ func TestPrivateIdleHeldRunnerFinishesAfterExit(t *testing.T) {
 
 func TestPrivateDrainLivenessFailureResumesIdleService(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		var logs strings.Builder
-		d, err := New(Config{Home: t.TempDir(), Logf: func(format string, args ...any) { fmt.Fprintf(&logs, format, args...) }})
+		logs := make(chan string, 8)
+		d, err := New(Config{Home: t.TempDir(), Logf: func(format string, args ...any) { logs <- fmt.Sprintf(format, args...) }})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -624,8 +624,8 @@ func TestPrivateDrainLivenessFailureResumesIdleService(t *testing.T) {
 		if probes != 1 || draining || retiring || finishing || held != nil || !since.Equal(time.Now()) {
 			t.Fatalf("liveness failure did not resume: probes=%d draining=%v retiring=%v finishing=%v held=%+v idleSince=%v", probes, draining, retiring, finishing, held, since)
 		}
-		if !strings.Contains(logs.String(), "process inspection unavailable") {
-			t.Fatalf("inspection failure not reported: %s", &logs)
+		if message := <-logs; !strings.Contains(message, "process inspection unavailable") {
+			t.Fatalf("inspection failure not reported: %s", message)
 		}
 		select {
 		case <-d.quit:
