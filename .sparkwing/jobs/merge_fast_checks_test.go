@@ -15,10 +15,9 @@ func TestMergeRecheckRejectsQATrustOnlyIntegrationBreak(t *testing.T) {
 	writeAPISnapshotFixture(t, r.dev, "")
 	r.git(r.dev, "add", ".")
 	base := map[string]string{
-		"internal/api.go":           "package internal\nfunc Value() int { return 1 }\n",
-		"bin/check-changelog.sh":    "exit 0\n",
-		"bin/check-api-spec.sh":     "exit 0\n",
-		"bin/check-api-snapshot.sh": "exit 0\n",
+		"internal/api.go":        "package internal\nfunc Value() int { return 1 }\n",
+		"bin/check-changelog.sh": "exit 0\n",
+		"bin/check-api-spec.sh":  "exit 0\n",
 	}
 	r.commit(r.dev, base, "Go base")
 	r.git(r.dev, "push", "--quiet", "origin", "HEAD:main")

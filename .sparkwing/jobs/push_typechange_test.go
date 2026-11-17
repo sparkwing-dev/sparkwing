@@ -26,7 +26,7 @@ func TestTypeChangeRunsAffectedReader(t *testing.T) {
 import ("os"; "testing")
 func TestReader(t *testing.T) { b,e:=os.ReadFile("input.txt"); if e!=nil {t.Fatal(e)}; if string(b)!="ok" {t.Fatal("typechange-reader-failed")} }
 `)
-			for _, script := range []string{"check-changelog.sh", "check-api-spec.sh", "check-api-snapshot.sh"} {
+			for _, script := range []string{"check-changelog.sh", "check-api-spec.sh"} {
 				writeGoFile(t, filepath.Join(root, "bin", script), "exit 0\n")
 			}
 			gitCommitAll(t, root, "good regular reader input")
