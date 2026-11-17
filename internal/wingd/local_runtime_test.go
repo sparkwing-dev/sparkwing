@@ -95,7 +95,9 @@ func (l *runtimeListener) Addr() net.Addr            { return &net.UnixAddr{Name
 
 func newRuntimeFixture(t *testing.T, controller *runtimeControllerFixture) *localRuntime {
 	t.Helper()
-	controller.home = t.TempDir()
+	if controller.home == "" {
+		controller.home = t.TempDir()
+	}
 	runtime, err := NewLocalRuntime(LocalRuntimeConfig{Admission: Config{Home: controller.home, Sampler: runtimeSampler{}}, Dashboard: DashboardSettings{Address: "127.0.0.1:0"}, Open: func(_ context.Context, home string) (LocalController, error) {
 		held, err := LockHeld(home)
 		if err != nil || !held {
@@ -305,7 +307,7 @@ func TestLocalRuntimeWrongHomeNeverOpensIt(t *testing.T) {
 	}
 }
 
-func TestLocalRuntimeRemainsIdleUntilStopped(t *testing.T) {
+func TestInstalledLocalRuntimeRemainsIdleUntilStopped(t *testing.T) {
 	// safety: Go's process-wide signal goroutine must start outside a synctest bubble.
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
@@ -313,6 +315,7 @@ func TestLocalRuntimeRemainsIdleUntilStopped(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := &runtimeControllerFixture{}
 		r := newRuntimeFixture(t, f)
+		r.cfg.Installed = func(context.Context) (bool, error) { return true, nil }
 		lifecycle := NewLocalLifecycle(r, nil)
 		if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
 			t.Fatal(err)

@@ -30,6 +30,8 @@ type LocalRuntimeConfig struct {
 	Admission Config
 	Dashboard DashboardSettings
 	Open      func(context.Context, string) (LocalController, error)
+	// Installed reports whether this home has a persistent login service.
+	Installed func(context.Context) (bool, error)
 }
 
 type localRuntime struct {
@@ -210,7 +212,7 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		serve("controller API", func() error {
 			local := controller.HTTP()
 			local.API = d.admissionHTTP(d.localRunnerHTTP(d.controllerHTTP(logins.socketRoutes(local.API))))
-			return ServeAPI(apiCtx, &readyListener{Listener: ln, ready: apiReady}, local)
+			return d.serveIdleAPI(apiCtx, &readyListener{Listener: ln, ready: apiReady}, local)
 		})
 	}
 	dashboardReady := make(chan struct{})
@@ -236,6 +238,9 @@ func (r *localRuntime) serve(ctx context.Context, session *localRuntimeSession, 
 		case <-ready:
 		case <-ctx.Done():
 		}
+	}
+	if r.privateIdleExit(ctx, session) {
+		workers.Go(func() { d.watchPrivateIdle(ctx) })
 	}
 	r.mu.Lock()
 	if ctx.Err() == nil {

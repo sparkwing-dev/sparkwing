@@ -233,7 +233,13 @@ start immediately. This refusal leaves the daemon running. When no runs are
 active, run `sparkwing daemon restart --force` with the required build, or use a
 separate `SPARKWING_HOME`.
 
-The controller remains running while idle. `sparkwing daemon stop` stops it.
+The default `~/.sparkwing` controller remains running while idle. An on-demand
+controller for another home exits after 20 minutes with no active runs, queued
+work, connected clients or runner-held work, and retires its supervised runner.
+Runner control polling does not count as client activity. The controller log
+records the home and idle duration. The next CLI call starts a fresh controller.
+Installed login services remain running while idle. `sparkwing daemon stop`
+stops a controller explicitly.
 Linux and macOS support an installed login service through `daemon install`.
 The service retains the installing caller's home, config and secrets-key file
 paths. Every generated systemd or launchd definition pins
