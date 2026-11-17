@@ -529,7 +529,7 @@ sparkwing runs status --run RUN_ID --follow
 
 Split recent runs' time into waiting, setup and running per job
 
-Show where a run spent time, from preparation through job execution.
+Compare recent pipeline timings and find the jobs that take the most time.
 
 Read the newest finished root runs of one pipeline, skipping dry runs, with their jobs, steps and lifecycle events, through the selected controller.
 
@@ -556,6 +556,6 @@ Text prints run-level and per-job P50 and P90, the five longest waits, and faile
 ### Examples
 
 ```sh
-# Inspect time spent in a run
-sparkwing runs timing --run RUN_ID
+# Compare recent build timings
+sparkwing runs timing --pipeline build
 ```
