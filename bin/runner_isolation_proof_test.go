@@ -24,6 +24,11 @@ import (
 // this suite itself runs on hosted VMs; the cases with every variable set use
 // --preflight, which checks the same facts and never writes.
 func TestRunnerIsolationProofRefusesOutsideDisposableRunner(t *testing.T) {
+	testProofRefusesOutsideDisposableRunner(t, "runner-isolation-proof.sh")
+}
+
+func testProofRefusesOutsideDisposableRunner(t *testing.T, script string) {
+	t.Helper()
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skipf("bash unavailable: %v", err)
 	}
@@ -56,7 +61,7 @@ func TestRunnerIsolationProofRefusesOutsideDisposableRunner(t *testing.T) {
 				t.Skip("as root the planted record is root-owned")
 			}
 			dir := t.TempDir()
-			args := []string{"runner-isolation-proof.sh"}
+			args := []string{script}
 			for _, arg := range tc.args {
 				if arg == "EVIDENCE" {
 					arg = filepath.Join(dir, "evidence")
@@ -90,7 +95,12 @@ func TestRunnerIsolationProofRefusesOutsideDisposableRunner(t *testing.T) {
 }
 
 func TestRunnerIsolationProofWorkflowIsManualReadOnlyAndSecretFree(t *testing.T) {
-	body, err := os.ReadFile("../.github/workflows/runner-isolation-proof.yaml")
+	testProofWorkflow(t, "runner-isolation-proof")
+}
+
+func testProofWorkflow(t *testing.T, proof string) {
+	t.Helper()
+	body, err := os.ReadFile("../.github/workflows/" + proof + ".yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +115,7 @@ func TestRunnerIsolationProofWorkflowIsManualReadOnlyAndSecretFree(t *testing.T)
 			RunsOn      string            `yaml:"runs-on"`
 			Steps       []struct {
 				Uses string            `yaml:"uses"`
+				If   string            `yaml:"if"`
 				With map[string]string `yaml:"with"`
 				Run  string            `yaml:"run"`
 			} `yaml:"steps"`
@@ -131,18 +142,25 @@ func TestRunnerIsolationProofWorkflowIsManualReadOnlyAndSecretFree(t *testing.T)
 		if len(job.Permissions) != 1 || job.Permissions["contents"] != "read" {
 			t.Fatalf("%s permissions = %v, want %v", name, job.Permissions, readOnly)
 		}
-		if !strings.HasPrefix(job.RunsOn, "ubuntu-") || strings.Contains(job.RunsOn, "self-hosted") {
+		if job.RunsOn != "ubuntu-24.04" {
 			t.Fatalf("%s runs on %q; the proof needs a disposable GitHub-hosted Ubuntu VM", name, job.RunsOn)
 		}
 		runs := false
+		uploads := false
 		for _, step := range job.Steps {
 			if strings.HasPrefix(step.Uses, "actions/checkout@") && step.With["persist-credentials"] != "false" {
 				t.Fatalf("%s checkout leaves the job token on disk", name)
 			}
-			runs = runs || strings.Contains(step.Run, "bin/runner-isolation-proof.sh")
+			runs = runs || strings.Contains(step.Run, "bin/"+proof+".sh")
+			if strings.HasPrefix(step.Uses, "actions/upload-artifact@") {
+				uploads = step.If == "${{ always() }}" && step.With["if-no-files-found"] == "error" && step.With["path"] != ""
+			}
 		}
 		if !runs {
-			t.Fatalf("%s never runs bin/runner-isolation-proof.sh", name)
+			t.Fatalf("%s never runs bin/%s.sh", name, proof)
+		}
+		if !uploads {
+			t.Fatalf("%s must upload evidence even when the proof fails", name)
 		}
 	}
 }
