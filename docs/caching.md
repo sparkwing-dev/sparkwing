@@ -321,7 +321,7 @@ those.
 After each new entry, Sparkwing reclaims inactive entries to fit a byte
 ceiling and an entry count.
 
-Before editing these settings, follow the [0600 config recipe](machine-config.md#permissions).
+Before editing these settings, follow the [0600 config recipe](machine-config.md#permissions-and-writes).
 
 | [config.yaml](machine-config.md) key | Default | Meaning |
 | --- | --- | --- |

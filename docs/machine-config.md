@@ -102,7 +102,7 @@ daemon reads the budget at start, so restart it after a change.
 
 ## Dashboard
 
-Before editing `config.yaml`, follow [Permissions](#permissions) to create the
+Before editing `config.yaml`, follow [Permissions](#permissions-and-writes) to create the
 file with mode `0600`.
 
 The shared local controller serves the dashboard whenever it runs.
