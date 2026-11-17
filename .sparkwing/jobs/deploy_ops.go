@@ -50,6 +50,7 @@ func (c deployCommand) String() string {
 
 type deployRegistry interface {
 	retain(ctx context.Context, password string, pin imagePin) error
+	tag(ctx context.Context, password string, pin imagePin, tag string) error
 	digest(ctx context.Context, password, ref string) (string, error)
 	revision(ctx context.Context, password, ref string) (string, error)
 	publish(ctx context.Context, password string, in PublishImagesArgs) error
@@ -1334,6 +1335,22 @@ func (r ecrRegistry) digest(ctx context.Context, password, ref string) (string, 
 
 // safety: an index carries no config, so the label is read from its first
 // platform image; publish-images labels every platform the same way.
+func (r ecrRegistry) tag(ctx context.Context, password string, pin imagePin, tag string) error {
+	ref, err := name.NewDigest(pin.Repository + "@" + pin.Digest)
+	if err != nil {
+		return err
+	}
+	target := ref.Context().Tag(tag)
+	if current, err := remote.Head(target, r.options(ctx, password)...); err == nil && current.Digest.String() == pin.Digest {
+		return nil
+	}
+	desc, err := remote.Get(ref, r.options(ctx, password)...)
+	if err != nil {
+		return err
+	}
+	return remote.Put(target, desc, r.options(ctx, password)...)
+}
+
 func (r ecrRegistry) revision(ctx context.Context, password, ref string) (string, error) {
 	parsed, err := name.ParseReference(ref)
 	if err != nil {
