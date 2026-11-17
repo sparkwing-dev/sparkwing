@@ -813,7 +813,7 @@ var commandExamples = map[string][]Example{
 		{"Find pipelines about deploys", "sparkwing pipeline list --search deploy"},
 	},
 	"sparkwing pipeline describe": {
-		{"Show a pipeline's jobs, arguments and triggers", "sparkwing pipeline describe --pipeline build"},
+		{"Show a pipeline's arguments and triggers", "sparkwing pipeline describe --pipeline build"},
 	},
 	"sparkwing pipeline new": {
 		{"Add a pipeline to this repository", "sparkwing pipeline new --pipeline lint"},

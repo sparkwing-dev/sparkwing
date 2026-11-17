@@ -59,7 +59,7 @@ Show a pipeline's arguments and triggers without executing it. Use pipeline plan
 ### Examples
 
 ```sh
-# Show a pipeline's jobs, arguments and triggers
+# Show a pipeline's arguments and triggers
 sparkwing pipeline describe --pipeline build
 ```
 
