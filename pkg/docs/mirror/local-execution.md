@@ -130,9 +130,14 @@ controller's database.
 
 Startup reconciles orphaned work and starts the private API before consumers.
 Readiness does not wait for pipeline compilation or source preparation.
-The CLI starts or waits for the controller immediately before submitting a run,
-after source preparation. Other local API commands, doctor and schedule timers
-use the same startup operation. A startup failure reports why the local
+Ordinary local runs start or wait for the controller while preparing their
+source. Submission waits for source validation and rechecks controller readiness,
+including when the controller retired during preparation.
+A preparation failure or an interrupt cancels and joins the startup request
+before cleanup. A controller and runner that already started keep running and
+retire after 20 idle minutes, like any private-home controller.
+Standalone runs start their in-process controller after source preparation.
+Other local API commands, doctor and schedule timers use the same startup operation. A startup failure reports why the local
 controller could not start before any request is submitted.
 
 The controller is the only writer of the shared store. Reads, cancellation,
