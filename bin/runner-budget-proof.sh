@@ -6,11 +6,13 @@ if [[ ${1:-} == --preflight ]]; then
   exec bash "$REPO/bin/runner-isolation-proof.sh" --preflight "${2:-}"
 fi
 # Reuse the privileged proof's host facts before creating any state.
-bash "$REPO/bin/runner-isolation-proof.sh" --preflight || exit 2
+HOST_FACTS=$(bash "$REPO/bin/runner-isolation-proof.sh" --preflight 2>&1) || { printf '%s\n' "$HOST_FACTS"; exit 2; }
 [[ $# == 1 && -n $1 ]] || { echo "usage: $0 EVIDENCE_DIR" >&2; exit 2; }
 EVIDENCE=$(realpath -m "$1")
 WORK="${RUNNER_TEMP:?}/runner-budget-work"
+umask 077
 mkdir -p "$EVIDENCE" "$WORK/bin"
+printf '%s\n' "$HOST_FACTS" >"$EVIDENCE/hosted-vm-facts.txt"
 exec > >(tee "$EVIDENCE/proof.log") 2>&1
 export GOWORK=off
 XDG_RUNTIME_DIR="/run/user/$(id -u)"
