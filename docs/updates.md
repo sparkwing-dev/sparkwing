@@ -40,6 +40,14 @@ receipt contains `managed_units: "refreshed"`. Plain output is the installed
 version. A current CLI still refreshes its managed units so repeating an update
 can recover from a previous refresh failure.
 
+A running on-demand controller is also refreshed, even when no login service is
+installed. Update drains and replaces it through the same lifecycle as
+`sparkwing daemon restart`. A stopped controller stays stopped. On Linux and
+macOS, held jobs keep running under their old local runner while the new
+controller starts a successor runner. The old runner stops taking new claims
+and exits after its held jobs and result acknowledgements finish. Update waits
+for controller readiness, not for those jobs to finish.
+
 The update replaces only the `sparkwing` CLI. A runner service runs
 `sparkwing-runner`, which updates itself when its controller directs it: it
 drains held claims, replaces its binary, refreshes its units and restarts. So

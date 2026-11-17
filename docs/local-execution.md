@@ -264,7 +264,10 @@ Preserve the key with the home's backups. A home holding sealed data without
 its key refuses to replace it.
 
 Windows supports the foreground controller. Machine updates refresh managed
-controller and schedule units together. See [local dashboard](native-mode.md).
+controller and schedule units together. An update also replaces a running
+on-demand controller through the restart lifecycle, preserving held local-runner
+jobs. A stopped controller stays stopped. See [updates](updates.md) and
+[local dashboard](native-mode.md).
 
 On Linux and macOS, the controller starts a separate local runner after its API
 is ready. A successor controller reuses a live runner with the same executable
