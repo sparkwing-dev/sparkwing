@@ -10,7 +10,7 @@ import (
 )
 
 func TestOldSDKPlanFailureNamesUpgradeWithoutExposingPanic(t *testing.T) {
-	for _, version := range []string{"v0.1.0", "v0.3.0"} {
+	for _, version := range []string{"v0.1.0", "v0.2.0", "v0.3.0"} {
 		t.Run(version, func(t *testing.T) {
 			planner, input, _, _ := sdkPlanningFixture(t)
 			input.Entry.Engine.Identity.Pin = engineid.Pin{SDK: engineid.GoSDK, Version: version}
@@ -19,7 +19,7 @@ func TestOldSDKPlanFailureNamesUpgradeWithoutExposingPanic(t *testing.T) {
 				t.Fatal(failure)
 			}
 			upgrade := strings.Contains(failure.Error(), "sparkwing pipeline upgrade")
-			if upgrade != (version == "v0.1.0") {
+			if upgrade != (version != "v0.3.0") {
 				t.Fatalf("SDK %s diagnostic: %v", version, failure)
 			}
 		})
