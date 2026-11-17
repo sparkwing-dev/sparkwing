@@ -123,7 +123,7 @@ func (d *Daemon) serveIdleAPI(ctx context.Context, listener net.Listener, local 
 		}
 		retiring := d.idleRetiring
 		d.mu.Unlock()
-		if retiring && (!background || r.URL.Path == "/api/v1/runners/claim") && r.URL.Path != controllerHTTPPath+"status" && r.URL.Path != controllerHTTPPath+"drain" {
+		if retiring && r.URL.Path == "/api/v1/runners/claim" {
 			writeLocalRunnerFailure(w, errControllerStopping)
 			return
 		}

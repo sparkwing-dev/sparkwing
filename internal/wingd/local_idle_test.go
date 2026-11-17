@@ -216,6 +216,19 @@ func TestPrivateIdleAPIConnections(t *testing.T) {
 						t.Fatal("disconnected client kept controller alive")
 					}
 				}
+				if idleRunnerRequest(path) {
+					if _, err := fmt.Fprint(client, "POST /api/v1/claims/work/finish HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n"); err != nil {
+						t.Fatal(err)
+					}
+					response, err := http.ReadResponse(reader, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					response.Body.Close()
+					if response.StatusCode != http.StatusNoContent {
+						t.Fatal("retiring controller refused a worker result")
+					}
+				}
 				cancel()
 				<-joined
 				if err := <-done; err != nil {
