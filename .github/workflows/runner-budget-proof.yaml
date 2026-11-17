@@ -1,0 +1,42 @@
+name: Runner CPU budget proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runner-budget-proof
+  cancel-in-progress: false
+
+jobs:
+  prove:
+    name: Runner CPU budget proof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      GOWORK: "auto"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26.11"
+          cache: false
+
+      - name: Prove local runner CPU budget
+        run: bash bin/runner-budget-proof.sh "$RUNNER_TEMP/runner-budget-evidence"
+
+      - name: Upload evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: runner-budget-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runner-budget-evidence
+          if-no-files-found: error
+          retention-days: 14
