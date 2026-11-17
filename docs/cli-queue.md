@@ -26,6 +26,8 @@ Inspect queued work and scheduling priority
 
 List running and queued work with expected start and finish
 
+Show admission capacity, running holders and waiting work. Use --group to inspect one concurrency group.
+
 ### Flags
 
 | Flag | Description |
@@ -37,9 +39,18 @@ List running and queued work with expected start and finish
 | `--profile PROFILE` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 | `--group GROUP` | Show only this concurrency group's capacity, lease holders and waiting runs instead of the whole queue. |
 
+### Examples
+
+```sh
+# Inspect waiting work and admission capacity
+sparkwing queue list
+```
+
 ## `sparkwing queue priority`
 
 Change the priority of queued work
+
+Change a local run's admission priority. Use --set front or --set back to move it within the waiting queue.
 
 Queued local jobs follow their run's priority. --set front moves a visible waiting run ahead of the other queued runs.
 

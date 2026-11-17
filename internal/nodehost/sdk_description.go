@@ -29,7 +29,12 @@ func (p SDKPlanner) describe(raw json.RawMessage, input PlanningProcessInput, de
 		arguments, err = gate.Resolve(input.Entrypoint, input.Args, input.SecretArgs)
 	}
 	if err != nil {
-		return PreparedPlanning{Declarations: gate}, gate.Complete() && arguments.Registration.Version != 0, gate.Error(err)
+		failure := gate.Error(err)
+		if pipeline, ok := doc.Pipeline(input.Entrypoint); ok && pipeline.Error != nil {
+			// safety: planningError classifies the raw panic before withholding unknown secret values.
+			failure = pipeline.Error
+		}
+		return PreparedPlanning{Declarations: gate}, gate.Complete() && arguments.Registration.Version != 0, failure
 	}
 	prepared := PreparedPlanning{Declarations: gate, Description: arguments.Description, Args: arguments.Args, SecretArgs: arguments.SecretArgs, SecretRegistration: arguments.Registration}
 

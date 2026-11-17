@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -87,6 +88,12 @@ func (l *planningLogs) explain(reason string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.withheld = reason
+}
+
+func (l *planningLogs) omitRemedy() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.withheld, _, _ = strings.Cut(l.withheld, "; to see ")
 }
 
 func (l *planningLogs) release(ctx context.Context) error {

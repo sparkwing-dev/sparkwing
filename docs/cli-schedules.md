@@ -32,6 +32,8 @@ Manage scheduled pipeline runs
 
 Arm a repo's declared schedules on this host and install the OS timer
 
+Install this repository's declared schedules locally or on the selected controller.
+
 Capture the installing environment; native timers on Linux/macOS invoke __tick. Windows schedules are daemon-run.
 
 ### Flags
@@ -52,6 +54,8 @@ Capture the installing environment; native timers on Linux/macOS invoke __tick. 
 ## `sparkwing schedules list`
 
 List the schedules armed on this host
+
+List installed schedules and their status. Use --next to show upcoming fire times.
 
 ### Flags
 
@@ -77,6 +81,8 @@ sparkwing schedules list
 
 Pause a schedule
 
+Pause a schedule's future automatic runs.
+
 ### Flags
 
 | Flag | Description |
@@ -87,11 +93,20 @@ Pause a schedule
 | `--help-all` | Include uncommon flags in command help. |
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
 | `--profile PROFILE` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+
+### Examples
+
+```sh
+# Pause an installed schedule
+sparkwing schedules pause --schedule nightly
+```
 
 ## `sparkwing schedules resume`
 
 Resume a paused schedule
 
+Resume a paused schedule's automatic runs.
+
 ### Flags
 
 | Flag | Description |
@@ -103,9 +118,18 @@ Resume a paused schedule
 | `--schedule SCHEDULE` | Schedule name. Repeatable; comma-separated values are accepted. (required) |
 | `--profile PROFILE` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
+### Examples
+
+```sh
+# Resume a paused schedule
+sparkwing schedules resume --schedule nightly
+```
+
 ## `sparkwing schedules run`
 
 Launch a schedule's pipeline now
+
+Start a schedule immediately using its saved configuration.
 
 ### Flags
 
@@ -121,6 +145,8 @@ Launch a schedule's pipeline now
 ## `sparkwing schedules set`
 
 Override a declared cadence on this host
+
+Override an installed schedule's timing, arguments or source pin. Use --reset to restore its declared settings.
 
 ### Flags
 
@@ -145,6 +171,8 @@ Override a declared cadence on this host
 
 Show one schedule's full record and its recent fires
 
+Show a schedule's settings and recent fires. Use --next to preview upcoming fires.
+
 ### Flags
 
 | Flag | Description |
@@ -168,6 +196,8 @@ sparkwing schedules show --schedule nightly --next 3
 ## `sparkwing schedules uninstall`
 
 Disarm a repo's schedules, and remove the timer when nothing is left
+
+Remove installed schedules locally or from the selected controller.
 
 ### Flags
 

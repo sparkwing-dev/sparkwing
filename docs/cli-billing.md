@@ -27,6 +27,8 @@ Inspect Cloud standing, contact operators and set automatic refill
 
 Show or change the team's automatic refill
 
+Show automatic credit refill settings, or change them with the refill flags. Changes require team ownership.
+
 Show the team's automatic refill: whether it is on, the threshold and amount, the team's weekly and monthly limits, the refill caps its payment history allows, refills in the last 7 and 30 days, the last failure and the limit that stops the next refill. Any change flag updates the settings first, keeping each one not given; only team owners change them. When the balance falls below the threshold the saved card is charged the amount, between $10 and $1,000 at every standing tier. Contact us through sparkwing billing request-tier for larger payments. Turning refill on needs a saved card. A weekly or monthly limit of 0 is none. A refill a limit stops is not made, and Cloud work stops when the credits run out. JSON returns the refill state; plain prints on or off.
 
 ### Flags
@@ -49,6 +51,8 @@ Show the team's automatic refill: whether it is on, the threshold and amount, th
 
 Contact operators for High standing, higher limits or larger payments
 
+Ask the operators for higher Cloud standing or payment limits. Only team owners can send a request.
+
 Contact the Sparkwing operators for High standing, higher limits or payments above $1,000. Describe what you need in the message, including if the team already has High standing. Only team owners request it, and a team has at most one open request. The message reaches the operator with the team's standing and payment history. The operator approves by granting standing or declines with a reason; see the outcome with sparkwing billing standing. JSON returns the stored request; plain prints its ID.
 
 ### Flags
@@ -66,6 +70,8 @@ Contact the Sparkwing operators for High standing, higher limits or payments abo
 ## `sparkwing billing standing`
 
 Show the team's Cloud standing and latest tier request
+
+Show the team's Cloud standing and the outcome of its latest standing request.
 
 Report the team's Cloud standing, the tier its payment history earns, the highest tier prepaid funds can reach and its latest standing request with the operator's decision. Prepaid funds raise standing at most one tier above the history tier. Plain prints the standing tier.
 

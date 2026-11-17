@@ -8,6 +8,8 @@ Every `sparkwing update` command, flag, and argument, generated from the CLI's o
 
 Update the CLI binary
 
+Update installed Sparkwing software from verified release assets. Use --dry-run to preview the update.
+
 Update installed machine software using verified release assets. Re-render managed timers and restart an installed local-controller service through one upgrade hook, preserving schedules and configuration. A CLI update reports that installed runner services update themselves from their controller; it does not restart them. Install sparkwing-runner beside the CLI with install.sh --runner; it then updates itself from verified release assets. Repository SDK pins use sparkwing pipeline upgrade. --dry-run performs neither action.
 
 ### Flags
@@ -22,3 +24,10 @@ Update installed machine software using verified release assets. Re-render manag
 | `--force` | Replace an existing object. |
 | `--override-hold` | Allow the update to go past the operator's version hold. |
 | `--version TAG` | CLI release tag to install instead of the latest release. |
+
+### Examples
+
+```sh
+# Preview an installed software update
+sparkwing update --dry-run
+```

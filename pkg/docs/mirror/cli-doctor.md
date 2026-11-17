@@ -8,6 +8,8 @@ Every `sparkwing doctor` command, flag, and argument, generated from the CLI's o
 
 Inspect local controller and machine diagnostics
 
+Inspect local controller, service version and store compatibility diagnostics.
+
 Identify removed timer verbs, service version skew and incompatible store schemas through the local controller lifecycle. Inspection does not open state.db. Partial reports retain findings and exit nonzero when controller inspection fails.
 
 ### Flags

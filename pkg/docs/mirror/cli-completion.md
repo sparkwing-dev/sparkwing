@@ -8,6 +8,8 @@ Every `sparkwing completion` command, flag, and argument, generated from the CLI
 
 Emit a shell completion script
 
+Print a completion script for the shell named by --shell.
+
 ### Flags
 
 | Flag | Description |
@@ -17,3 +19,10 @@ Emit a shell completion script
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--shell NAME` | Shell for completion output. Values: bash, zsh, fish, powershell. |
+
+### Examples
+
+```sh
+# Print Bash completions
+sparkwing completion --shell bash
+```

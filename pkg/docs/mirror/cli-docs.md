@@ -37,6 +37,8 @@ sparkwing docs search --search secrets
 
 Enumerate every doc topic
 
+List documentation topics. Use --guides for reading guides or --versions for published docs versions.
+
 ### Flags
 
 | Flag | Description |
@@ -54,9 +56,18 @@ Enumerate every doc topic
 | `--version vX.Y.Z` | Docs version to list; without --web it must match this CLI's embedded version or latest. |
 | `--no-cache` | Fetch from sparkwing.dev without using the local docs web cache; has no effect without --web. |
 
+### Examples
+
+```sh
+# List reading guides
+sparkwing docs list --guides
+```
+
 ## `sparkwing docs migrations`
 
 Per-version migration guides (agent-friendly)
+
+Read migration guides for a release or a range of releases.
 
 ### Flags
 
@@ -72,9 +83,18 @@ Per-version migration guides (agent-friendly)
 | `--web` | Read migration guides from sparkwing.dev instead of the copies embedded in this CLI. |
 | `--no-cache` | Fetch from sparkwing.dev without using the local docs web cache; has no effect without --web. |
 
+### Examples
+
+```sh
+# Read a release migration guide
+sparkwing docs migrations --version v0.74.0
+```
+
 ## `sparkwing docs read`
 
 Read one document
+
+Read a documentation topic or guide. Use --section to start at a specific line.
 
 ### Flags
 
@@ -92,9 +112,18 @@ Read one document
 | `--version vX.Y.Z` | Docs version to read; without --web it must match this CLI's embedded version or latest. |
 | `--no-cache` | Fetch from sparkwing.dev without using the local docs web cache; has no effect without --web. |
 
+### Examples
+
+```sh
+# Read the authoring guide
+sparkwing docs read --guide authoring
+```
+
 ## `sparkwing docs search`
 
 Find the section that answers a question
+
+Search the embedded documentation for sections that match your question.
 
 ### Flags
 

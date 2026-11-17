@@ -29,6 +29,8 @@ Manage the team's run event subscriptions
 
 Subscribe a URL to run events
 
+Create a webhook subscription for team run events and print its signing secret once.
+
 Create a team run event subscription through the team-admin route with an idempotency key. Sparkwing posts each matching run.started and run.finished event to --url as CloudEvents 1.0 JSON signed with Standard Webhooks headers.
 
 A controller accepts only an https URL whose host is a public name or address; the local controller also accepts http and loopback receivers. Omitted --event selects run.finished when --status is given and both events otherwise; --status applies only to run.finished, and every other omitted filter matches all values. A team holds at most 20 subscriptions.
@@ -55,6 +57,8 @@ The signing secret is printed once and never shown again; rotate-secret replaces
 
 Delete a run event subscription
 
+Delete a webhook subscription and its pending deliveries.
+
 Delete a subscription and its pending deliveries through the team-admin route. JSON retains whether it was deleted or already absent and exits 0 either way; pretty and plain emit the deleted ID, and report a subscription the team does not hold as not found with a non-zero exit.
 
 ### Flags
@@ -72,6 +76,8 @@ Delete a subscription and its pending deliveries through the team-admin route. J
 
 List run event subscriptions
 
+List the team's webhook subscriptions without their signing secrets. Requires team administration.
+
 List the team's run event subscriptions without their secrets; only team administrators may read them, because a URL can carry a credential. JSON emits one record per subscription; plain emits IDs.
 
 ### Flags
@@ -87,6 +93,8 @@ List the team's run event subscriptions without their secrets; only team adminis
 ## `sparkwing subscriptions rotate-secret`
 
 Replace a subscription's signing secret
+
+Replace a webhook subscription's signing secret and print the new secret once.
 
 Replace a subscription's signing secret and print the new one once. Signing switches at once; deliveries the receiver rejects meanwhile are retried for 24 hours. JSON emits the subscription and its secret; plain emits the secret.
 
@@ -104,6 +112,8 @@ Replace a subscription's signing secret and print the new one once. Signing swit
 ## `sparkwing subscriptions show`
 
 Show a run event subscription
+
+Show one webhook subscription's settings without its signing secret.
 
 Show one subscription without its secret. JSON emits the subscription; plain emits its URL.
 

@@ -48,6 +48,8 @@ Manage deployment operational ceilings
 
 Set a deployment operational ceiling
 
+Change an operational limit or signup setting under operator authority. Values above deployment ceilings are refused.
+
 Operational ceilings and signup settings only; values above ceilings are refused, never silently clamped.
 
 ### Flags
@@ -65,6 +67,8 @@ Operational ceilings and signup settings only; values above ceilings are refused
 ## `sparkwing operator limits show`
 
 Print every compute guard and visible runner usage
+
+Show operational limits and visible runner usage under operator authority.
 
 ### Flags
 
@@ -98,6 +102,8 @@ Operate the controller's object-store request budget
 
 Clear a tripped object-store budget or ceiling freeze
 
+Clear the controller's tripped object-store budget breaker under operator authority.
+
 ### Flags
 
 | Flag | Description |
@@ -111,6 +117,8 @@ Clear a tripped object-store budget or ceiling freeze
 ## `sparkwing operator object-store status`
 
 Show the controller's object-store request budget
+
+Show the controller's object-store request budget and breaker state.
 
 ### Flags
 
@@ -142,6 +150,8 @@ Maintain the controller's sealed values
 ## `sparkwing operator secrets rotate`
 
 Reseal every stored secret and key under the current key
+
+Reseal the controller's stored secrets and keys under its current encryption key. Use --verify to check remaining old-key rows without writing.
 
 Reseal every team's secrets, git credentials, run arguments and submitted run environments, and the session signing key, under the controller's current key. Run arguments stored before argument sealing are sealed for the first time. Run it after the previous key is mounted beside the new one; remove the previous key only when nothing is reported unreadable.
 
@@ -182,6 +192,8 @@ Create teams under operator authority
 
 Create a team and issue its first administrator credential
 
+Create a team and print its first administrator credential once. Existing or retired slugs are refused.
+
 Create a new team and its first team-admin credential atomically under operator authority. Existing or retired team slugs are refused.
 
 JSON includes the one-time capability and account metadata. Plain and pretty print the capability once. This operation is never retried automatically.
@@ -201,6 +213,8 @@ JSON includes the one-time capability and account metadata. Plain and pretty pri
 ## `sparkwing operator teams show`
 
 Show a team and its protected node label
+
+Show a team and the protected node label used for its Cloud capacity.
 
 Show the team's protected node label and value when binding shared Cloud capacity.
 
@@ -242,6 +256,8 @@ Manage deployment service credentials
 
 Issue a deployment service credential
 
+Issue a deployment service credential and print its bearer once.
+
 Only deployment service credentials; never console trust, grants, freezes or account deletion powers. Licensed self-hosters have no deployment-admin token path.
 
 Use the deployment /operator/tokens routes. JSON includes the new bearer and metadata; plain emits the bearer once. TTL accepts nonnegative whole seconds, including zero for no expiry.
@@ -264,6 +280,8 @@ Use the deployment /operator/tokens routes. JSON includes the new bearer and met
 
 List deployment service credentials
 
+List deployment service credential metadata without revealing bearers.
+
 Read deployment credential metadata. JSON emits one record per token, with exact scopes and no bearer. Plain emits prefixes. --token selects one prefix.
 
 ### Flags
@@ -283,6 +301,8 @@ Read deployment credential metadata. JSON emits one record per token, with exact
 
 Revoke a deployment service credential
 
+Revoke the deployment service credential selected by its prefix.
+
 Revoke through the deployment token route. JSON retains the confirmed revocation; plain emits the prefix.
 
 ### Flags
@@ -299,6 +319,8 @@ Revoke through the deployment token route. JSON retains the confirmed revocation
 ## `sparkwing operator tokens rotate`
 
 Rotate a deployment service credential
+
+Replace a deployment service credential and print its new bearer once.
 
 Rotate through the deployment token route. JSON includes the new bearer, metadata and old revocation time; plain emits the new bearer. Grace defaults to 24h. Zero TTL preserves the old remaining lifetime. Durations use nonnegative whole seconds.
 
@@ -337,6 +359,8 @@ Manage warm Cloud capacity per hardware class
 
 Set Off, Manual or Auto warm capacity for one class
 
+Set the warm Cloud capacity policy for one hardware class.
+
 Replace one class policy. Off is the default. Counts default to zero and the start-time target to 20s.
 
 Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 when the hourly median exceeds the target, clamped to min/max.
@@ -360,6 +384,8 @@ Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 whe
 ## `sparkwing operator warm-capacity show`
 
 Show warm capacity policies and start-time metrics
+
+Show warm Cloud capacity policies and job start-time metrics.
 
 ### Flags
 
