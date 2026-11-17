@@ -516,7 +516,12 @@ func (l *Loop) run(ctx context.Context) (policyErr, runErr error) {
 			}
 			go func() {
 				var response controllerwire.ClaimResponse
-				err := claims.Err()
+				// safety: a parent cancel closes its own done channel before its children's,
+				// so checking only claims would let one claim slip out during shutdown.
+				err := ctx.Err()
+				if err == nil {
+					err = claims.Err()
+				}
 				if err == nil {
 					response, err = l.Controller.Claim(claims, request)
 				}
