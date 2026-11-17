@@ -111,11 +111,16 @@ pool=gpu only"), or that no runner of the allowed tiers is online.
 Enroll a machine into a Cloud team:
 
 ```bash
-sparkwing runners add --profile work --runner builder
+sparkwing runners add --profile work --runner builder --personal --team acme
 ```
 
-Personal capacity belongs to your own account and requires an independent
-account session during enrollment. Team capacity uses a team-admin credential.
+Replace `acme` with your team handle. Run in a terminal, open the printed
+`/device` page, sign in directly to your Cloud account, enter the code, verify
+the runner and team, and approve. You need team administration, or membership
+with `members_can_add_machines` enabled. Each teammate enrolls their own
+workstation under their own account. Personal capacity belongs to that account.
+Shared team capacity requires a dedicated account session from a team admin,
+repository scopes and a choice of OS service user.
 See [Self-hosted runners](self-hosting.md#add-workstation-capacity).
 
 ## Selecting a profile

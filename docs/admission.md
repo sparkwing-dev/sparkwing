@@ -52,7 +52,8 @@ restart. These waits require no admission setting.
 The default `classic` mode preserves Sparkwing's admission behavior from before
 selectable modes. To change the machine-wide
 policy, set it in the `admission` section of `~/.config/sparkwing/config.yaml`
-(see [Machine settings](machine-config.md)) and restart the daemon.
+(see [Permissions and writes](machine-config.md#permissions-and-writes)
+for creating an owner-only file and preserving existing settings) and restart the daemon.
 `sparkwing queue` reports the active mode.
 
 ```yaml
