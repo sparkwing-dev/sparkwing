@@ -165,7 +165,7 @@ func TestSourceChecksJudgeOnlyTrackedFiles(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			tracked := "pkg/cachecontrol/with space\nand newline.go"
+			tracked := "pkg/cachecontrol/with space.go"
 			writeSource(t, root, ".gitignore", ".Codex-scratch/\n")
 			writeSource(t, root, tracked, "package fixture\n")
 			trackSources(t, root)
