@@ -182,6 +182,9 @@ func parseRunnerEnrollment(inv clisurface.Invocation) (runnerEnrollment, *namedP
 		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--launcher requires --reserved-for on a shared runner"}
 	}
 	enrollment.sessionStdin = inv.Bool("session-stdin")
+	if enrollment.sessionStdin && inv.Has("team") {
+		return enrollment, nil, &clisurface.UsageError{Path: inv.Command.Path, Message: "--team cannot be used with --session-stdin; the team chosen in the browser session decides ownership"}
+	}
 	enrollment.serviceUser = inv.Value("service-user")
 	if inv.Has("service-user") {
 		if err := runnerservice.ValidAccountName(enrollment.serviceUser); err != nil {

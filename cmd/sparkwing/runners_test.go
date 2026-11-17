@@ -943,3 +943,15 @@ func TestRunnersEnrollmentRecordsKubernetesPlatform(t *testing.T) {
 		t.Fatalf("enrolled platform: %+v", f.enrolled)
 	}
 }
+
+func TestRunnersAddRejectsTeamWithSessionStdin(t *testing.T) {
+	f := newRunnersFixture(t)
+	err := f.run([]string{"add", "--profile", "prod", "--runner", "desk", "--team", "acme", "--session-stdin", "--no-service", "--config", f.config})
+	var usage *clisurface.UsageError
+	if !errors.As(err, &usage) || !strings.Contains(usage.Message, "team chosen in the browser session decides ownership") {
+		t.Fatalf("conflicting enrollment flags = %v, want usage error explaining browser team ownership", err)
+	}
+	if len(f.runnerTokens(t)) != 0 || len(*f.calls) != 0 {
+		t.Fatal("conflicting enrollment flags had enrollment or service effects")
+	}
+}

@@ -202,11 +202,14 @@ func TestDiscoveryRejectsInvalidSelectionAndKeepsExportsExhaustive(t *testing.T)
 }
 
 func TestDiscoveryDocsFindsActionsMigration(t *testing.T) {
-	for _, query := range []string{"github actions migration", "github actions migrate", "github actions migrating"} {
+	for _, query := range []string{"github actions migration", "github actions migrate", "github actions migrating", "gha", "runs-on", "convert workflow", "github actions yaml"} {
 		t.Run(query, func(t *testing.T) {
 			rows, _, output := discoveryOutput(t, "docs", "search", "--search", query)
 			if len(rows) == 0 || rows[0]["slug"] != "migrate-from-github-actions" {
 				t.Fatalf("migration guide should lead %q: %s", query, output)
+			}
+			if snippet, _ := rows[0]["snippet"].(string); snippet == "" || strings.Contains(snippet, "<!--") {
+				t.Fatalf("search should show guide prose for %q: %s", query, output)
 			}
 		})
 	}
