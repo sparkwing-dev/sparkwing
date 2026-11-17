@@ -19,7 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-func TestPipelineDescribeRevealsWithheldErrorOnlyWithTheFlag(t *testing.T) {
+func TestPipelineShowRevealsWithheldErrorOnlyWithTheFlag(t *testing.T) {
 	const cause = "private planning cause"
 	checkout := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(checkout, ".sparkwing"), 0o700); err != nil {
@@ -42,7 +42,7 @@ func TestPipelineDescribeRevealsWithheldErrorOnlyWithTheFlag(t *testing.T) {
 		}, checkout)
 	}
 	for _, show := range []bool{false, true} {
-		args := []string{"pipeline", "describe", "--pipeline", "build", "-o", "json"}
+		args := []string{"pipeline", "show", "--pipeline", "build", "-o", "json"}
 		if show {
 			args = append(args, "--show-withheld")
 		}
@@ -50,7 +50,7 @@ func TestPipelineDescribeRevealsWithheldErrorOnlyWithTheFlag(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = runPipelineDescribeCommand(inv, withEntry)
+		err = runPipelineShowCommand(inv, withEntry)
 		var failure *apierr.Error
 		if !errors.As(err, &failure) {
 			t.Fatalf("show=%t: describe error = %v", show, err)
@@ -58,7 +58,7 @@ func TestPipelineDescribeRevealsWithheldErrorOnlyWithTheFlag(t *testing.T) {
 		if show != strings.Contains(failure.Message, cause) {
 			t.Fatalf("show=%t: cause shown=%t: %+v", show, strings.Contains(failure.Message, cause), failure)
 		}
-		if !show && strings.Count(failure.Message+failure.Hint, "sparkwing pipeline describe --pipeline build --show-withheld") != 1 {
+		if !show && strings.Count(failure.Message+failure.Hint, "sparkwing pipeline show --pipeline build --show-withheld") != 1 {
 			t.Fatalf("withheld error does not name the reveal command: %+v", failure)
 		}
 	}

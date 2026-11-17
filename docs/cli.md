@@ -50,7 +50,7 @@ files and reports the result in the selected output mode. Supported output
 modes are `pretty`, `json`, and `plain`.
 
 Cache JSON reports expose their fields directly through `.entries` and similar
-fields. Cache failures return a nonzero status with no stdout record. Plain cache output is the cache directory for `cache info`,
+fields. Cache failures return a nonzero status with no stdout record. Plain cache output is the cache directory for `cache status`,
 the key for `cache explain`, and the reclaimed entry count for `cache prune`.
 
 ### Refusals and repair
@@ -226,7 +226,7 @@ Use the command index to find a command, then read its help:
 sparkwing commands --search status
 sparkwing runs status --help
 sparkwing pipeline list -o json
-sparkwing pipeline describe --pipeline fictional-build -o json
+sparkwing pipeline show --pipeline fictional-build -o json
 sparkwing pipeline list --search fictional-build -o json
 ```
 
@@ -236,7 +236,7 @@ Help supplies descriptions, flags, and examples. Hidden commands require
 
 The describe schema uses the shared protocol v2 pipeline description. Project
 metadata comes from the `pipelines:` block in `.sparkwing/sparkwing.yaml`.
-Named `pipeline describe` reads the selected SDK's current protocol response,
+Named `pipeline show` reads the selected SDK's current protocol response,
 including with `--secrets`. A failed source build or protocol read fails the
 command. Pipeline listings can use cached metadata. Named describe always reads
 the selected SDK.

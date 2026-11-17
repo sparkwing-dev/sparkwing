@@ -19,7 +19,7 @@ func TestUserMistakesAreNotReportedAsInternal(t *testing.T) {
 	empty := t.TempDir()
 	t.Chdir(empty)
 	for _, args := range [][]string{
-		{"pipeline", "describe", "--pipeline", "x"},
+		{"pipeline", "show", "--pipeline", "x"},
 		{"run", "x"},
 		{"docs", "read", "--topic", "nosuch"},
 		{"profiles", "show", "--profile", "nosuch"},

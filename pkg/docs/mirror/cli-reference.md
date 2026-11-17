@@ -58,7 +58,7 @@ Run pipelines locally with run, or submit them to a controller with pipeline tri
 sparkwing run build
 
 # Inspect a pipeline
-sparkwing pipeline describe --pipeline build
+sparkwing pipeline show --pipeline build
 
 # Sign in to the local dashboard
 sparkwing dashboard open

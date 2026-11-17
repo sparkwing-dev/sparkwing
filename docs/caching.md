@@ -344,8 +344,8 @@ before admitting more work because concurrent activity can change free space.
 Inspect and reclaim on demand:
 
 ```bash
-sparkwing cache info                      # size, ceilings, recent entries
-sparkwing cache info --all-entries -o json        # every entry, machine-readable
+sparkwing cache status                      # size, ceilings, recent entries
+sparkwing cache status --all-entries -o json        # every entry, machine-readable
 sparkwing cache prune                     # trim to the configured ceilings
 sparkwing cache prune --max-bytes 512MiB  # trim to a smaller budget
 sparkwing cache prune --all-entries               # reclaim everything

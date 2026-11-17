@@ -271,7 +271,7 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"  side; `sparkwing docs read --topic sdk-typescript-reference` lists every TypeScript export\n" +
 	"- `sparkwing examples --language typescript` (or `go`) -- complete working pipelines;\n" +
 	"  `sparkwing examples --example <name> --body` prints one in full\n" +
-	"- Go: `sparkwing pipeline lint` then `sparkwing run <n>`. TypeScript: describe,\n" +
+	"- Go: `sparkwing pipeline lint` then `sparkwing run <n>`. TypeScript: pipeline show,\n" +
 	"  plan and run; use your TypeScript checker for source validation.\n"
 
 const agentBlockBody = "- `sparkwing commands --search <task>` -- bounded command index; `--path <prefix>` to\n" +
@@ -675,7 +675,7 @@ func nextStepsFor(info Info) []InfoNextStep {
 	}
 	steps := []InfoNextStep{
 		{Command: "sparkwing pipeline list", Purpose: "see every pipeline this repo defines"},
-		{Command: "sparkwing pipeline describe --pipeline <name>", Purpose: "full metadata for one pipeline"},
+		{Command: "sparkwing pipeline show --pipeline <name>", Purpose: "full metadata for one pipeline"},
 		{Command: "sparkwing run <name>", Purpose: "run a pipeline"},
 		{Command: "sparkwing examples", Purpose: "browse curated starter templates for `pipeline new --template`"},
 		{Command: "sparkwing pipeline new --pipeline <name>", Purpose: "scaffold a new pipeline"},

@@ -11,7 +11,7 @@ The machine's fleet of sparkwing repos and their SDK pins
 ### Subcommands
 
 - `add` -- Register a checkout
-- `info` -- Inspect repository versions, worktrees, and pipelines
+- `show` -- Inspect repository versions, worktrees, and pipelines
 - `list` -- List the machine's fleet of sparkwing repos
 - `prune` -- Remove checkouts whose pipeline directory is gone
 - `delete` -- Remove a registered checkout
@@ -60,23 +60,6 @@ Remove a local checkout from Sparkwing's repository inventory. Pass its path wit
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 
-## `sparkwing repos info`
-
-Inspect repository versions, worktrees, and pipelines
-
-Show the registered repository and checkout selected by --checkout.
-
---checkout is required; repository identity is distinct from local checkout.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
-| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
-| `-h, --help` | Show command help without executing. |
-| `--help-all` | Include uncommon flags in command help. |
-
 ## `sparkwing repos list`
 
 List the machine's fleet of sparkwing repos
@@ -108,6 +91,23 @@ sparkwing repos list --checkouts
 Remove checkouts whose pipeline directory is gone
 
 Remove repository inventory entries for checkouts that no longer contain a .sparkwing directory.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+
+## `sparkwing repos show`
+
+Inspect repository versions, worktrees, and pipelines
+
+Show the registered repository and checkout selected by --checkout.
+
+--checkout is required; repository identity is distinct from local checkout.
 
 ### Flags
 
