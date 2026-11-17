@@ -133,8 +133,9 @@ Readiness does not wait for pipeline compilation or source preparation.
 Ordinary local runs start or wait for the controller while preparing their
 source. Submission waits for source validation and rechecks controller readiness,
 including when the controller retired during preparation.
-A preparation failure cancels and joins the startup request before cleanup;
-a controller already started remains eligible for private-home idle retirement.
+A preparation failure or an interrupt cancels and joins the startup request
+before cleanup. A controller and runner that already started keep running and
+retire after 20 idle minutes, like any private-home controller.
 Standalone runs start their in-process controller after source preparation.
 Other local API commands, doctor and schedule timers use the same startup operation. A startup failure reports why the local
 controller could not start before any request is submitted.
