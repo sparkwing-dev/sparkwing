@@ -23,6 +23,8 @@ done
 while IFS= read -r -d '' file; do
   name="${file#docs/}"
   [[ "$name" != */* ]] || continue
+  # safety: the caller supplies a filename pattern, so quoting would disable stale-page matching.
+  # shellcheck disable=SC2254
   case "$name" in $glob) ;; *) continue ;; esac
   f="$REPO_ROOT/$file"
   if [ ! -e "$generated/$name" ] && head -n1 "$f" | grep -q "$header"; then
