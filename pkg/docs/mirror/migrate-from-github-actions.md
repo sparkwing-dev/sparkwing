@@ -119,19 +119,30 @@ repository root. For history or tags, as with `fetch-depth: 0`, call `plan.Check
 
 Sparkwing Cloud runners ship one Go and one Node version, and nothing else. Your own runners have whatever their
 machines have installed. To pin another version, fetch it into a directory the job caches. This script installs Node
-20, checks its published SHA-256, and stops the job if the download, the check or the extraction fails:
+20 on Linux amd64 or arm64, checks its published SHA-256, and uses a private download directory:
 
 ```bash
 # scripts/setup-node.sh, sourced by a job
 NODE_VERSION=20.19.5
-NODE_SHA256=315046739a513a70e03a4a55a8afda8cf979f30852e576075c340084e3f8ac0f
-if [ ! -x .tools/node/bin/node ]; then
-  curl -fsSLo /tmp/node.tar.xz "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-x64.tar.xz" || return 1
-  echo "$NODE_SHA256  /tmp/node.tar.xz" | sha256sum -c - || { rm -f /tmp/node.tar.xz; return 1; }
-  mkdir -p .tools/node || return 1
-  tar -xJf /tmp/node.tar.xz -C .tools/node --strip-components=1 || { rm -rf .tools/node; return 1; }
-fi
-export PATH="$PWD/.tools/node/bin:$PATH"
+case "$(uname -m)" in
+  x86_64) NODE_ARCH=x64; NODE_SHA256=315046739a513a70e03a4a55a8afda8cf979f30852e576075c340084e3f8ac0f ;;
+  aarch64|arm64) NODE_ARCH=arm64; NODE_SHA256=d462267863ae8ee556039ebdf559055a8ec562c633889ef1403f3adb449ba1dd ;;
+  *) echo "unsupported Node architecture" >&2; return 1 ;;
+esac
+[ "$(uname -s)" = Linux ] || { echo "this recipe requires Linux" >&2; return 1; }
+NODE_HOME="$PWD/.tools/node-$NODE_VERSION-linux-$NODE_ARCH"
+setup_node() (
+  download=$(mktemp -d "${TMPDIR:-/tmp}/sparkwing-node.XXXXXX") || exit 1
+  trap 'rm -rf "$download"' EXIT
+  curl -fsSLo "$download/node.tar.xz" "https://nodejs.org/dist/v$NODE_VERSION/node-v$NODE_VERSION-linux-$NODE_ARCH.tar.xz" || exit 1
+  echo "$NODE_SHA256  $download/node.tar.xz" | sha256sum -c - || exit 1
+  mkdir "$download/node" || exit 1
+  tar -xJf "$download/node.tar.xz" -C "$download/node" --strip-components=1 || exit 1
+  mkdir -p .tools || exit 1
+  mv "$download/node" "$NODE_HOME"
+)
+[ -x "$NODE_HOME/bin/node" ] || setup_node || return 1
+export PATH="$NODE_HOME/bin:$PATH"
 ```
 
 ```go
@@ -147,6 +158,51 @@ plan.job("test", async (ctx) => {
   await ctx.bash(". scripts/setup-node.sh && npm ci && npm test").run();
 }).cache(dir(".tools", "scripts/setup-node.sh"));
 ```
+
+For `actions/setup-go`, pin the Go version and its archive checksums in the same way:
+
+```bash
+# scripts/setup-go.sh, sourced by a job
+GO_VERSION=1.26.11
+case "$(uname -m)" in
+  x86_64) GO_ARCH=amd64; GO_SHA256=9849f4e04ee35303714e34fbc3ac8ab44ea3e448a95aa182f91e3b9b79c710ec ;;
+  aarch64|arm64) GO_ARCH=arm64; GO_SHA256=6c2f29b458b5add0835f18b776f69c8881a6d88428f1484a6da55755e620757e ;;
+  *) echo "unsupported Go architecture" >&2; return 1 ;;
+esac
+[ "$(uname -s)" = Linux ] || { echo "this recipe requires Linux" >&2; return 1; }
+GO_HOME="$PWD/.tools/go-$GO_VERSION-linux-$GO_ARCH"
+setup_go() (
+  download=$(mktemp -d "${TMPDIR:-/tmp}/sparkwing-go.XXXXXX") || exit 1
+  trap 'rm -rf "$download"' EXIT
+  curl -fsSLo "$download/go.tar.gz" "https://go.dev/dl/go$GO_VERSION.linux-$GO_ARCH.tar.gz" || exit 1
+  echo "$GO_SHA256  $download/go.tar.gz" | sha256sum -c - || exit 1
+  tar -xzf "$download/go.tar.gz" -C "$download" || exit 1
+  mkdir -p .tools || exit 1
+  mv "$download/go" "$GO_HOME"
+)
+[ -x "$GO_HOME/bin/go" ] || setup_go || return 1
+export PATH="$GO_HOME/bin:$PATH"
+export GOTOOLCHAIN=local
+```
+
+```go
+sw.Job(plan, "test-go", func(ctx context.Context) error {
+    _, err := sw.Bash(ctx, ". scripts/setup-go.sh && go test ./...").Run()
+    return err
+}).Cache(sw.Dir(".tools", sw.KeyFromFile("scripts/setup-go.sh")))
+```
+
+```ts
+// import { dir } from "@sparkwing/sdk";
+plan.job("test-go", async (ctx) => {
+  await ctx.bash(". scripts/setup-go.sh && go test ./...").run();
+}).cache(dir(".tools", "scripts/setup-go.sh"));
+```
+
+Get new checksum values from [Go downloads](https://go.dev/dl/) or
+[Node's release checksums](https://nodejs.org/dist/v20.19.5/SHASUMS256.txt) when changing versions.
+The cache paths include the version and architecture. Keep these setup jobs sequential on a local checkout,
+because local jobs share its `.tools` directory. `GOTOOLCHAIN=local` prevents Go from downloading a different toolchain.
 
 Python, Java and other toolchains follow the same pattern, or run inside `docker run <image>` where Docker is
 available. Changing the script changes the cache key, so a version bump downloads once and is cached again.

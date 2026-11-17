@@ -125,7 +125,7 @@ will use before you depend on them, and report what breaks.
 ### TypeScript reference
 
 Most [SDK](sdk.md) pages show Go. The [migration guide](migrate-from-github-actions.md) shows every common feature in
-both languages, and the SDK's `index.d.ts` in `.sparkwing/node_modules/@sparkwing/sdk` lists the full API.
+both languages. The generated [TypeScript reference](sdk-typescript-reference.md) lists every exported API.
 
 ### `pipeline lint` does not check TypeScript
 
