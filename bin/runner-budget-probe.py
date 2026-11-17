@@ -10,7 +10,18 @@ import sys
 import time
 
 
-def measure(output):
+def read_cpu_max(group, mode):
+    try:
+        return (group / 'cpu.max').read_text().strip()
+    except FileNotFoundError:
+        if mode != 'control':
+            raise
+        return 'max'
+
+
+def measure(output, mode):
+    if mode not in ('enforce', 'control'):
+        raise ValueError('expected enforce or control measurement')
     relative = next(line[3:] for line in Path('/proc/self/cgroup').read_text().splitlines()
                     if line.startswith('0::'))
     group = Path('/sys/fs/cgroup') / relative.lstrip('/')
@@ -31,7 +42,7 @@ def measure(output):
         assert all(p.poll() is None for p in burners), 'a burner exited early'
         seconds = (end - start) / 1e9
         result = dict(unit=unit, cgroup=relative, pid=os.getpid(), nice=os.getpriority(os.PRIO_PROCESS, 0),
-                      cpu_max=(group / 'cpu.max').read_text().strip(), before=before, after=after,
+                      cpu_max=read_cpu_max(group, mode), before=before, after=after,
                       seconds=seconds, cores=(after['usage_usec'] - before['usage_usec']) / seconds / 1e6,
                       burners=[p.pid for p in burners])
         Path(output).write_text(json.dumps(result, indent=2) + '\n')
@@ -49,7 +60,7 @@ def judge(enforced, control):
         assert math.isfinite(row['seconds']) and 19 <= row['seconds'] <= 25, 'invalid measurement interval'
         measured = (row['after']['usage_usec'] - row['before']['usage_usec']) / row['seconds'] / 1e6
         assert math.isclose(measured, row['cores']), 'CPU result disagrees with raw counters'
-        assert len(set(row['burners'])) == 6, 'expected six burners'
+        assert len(row['burners']) == 6 and len(set(row['burners'])) == 6, 'expected six burners'
         assert row['unit'].startswith('sparkwing-runner-') and row['unit'].endswith('.service'), 'not a local runner'
     quota, period = enforced['cpu_max'].split()
     assert quota != 'max' and int(quota) / int(period) == 2, 'kernel quota is not two cores'
@@ -64,7 +75,7 @@ def judge(enforced, control):
 if __name__ == '__main__':
     try:
         if sys.argv[1] == 'measure':
-            measure(sys.argv[2])
+            measure(sys.argv[2], sys.argv[3])
         elif sys.argv[1] == 'judge':
             judge(*(json.loads(Path(path).read_text()) for path in sys.argv[2:4]))
         else:

@@ -74,7 +74,7 @@ import("context";"os";"os/exec";sw "github.com/sparkwing-dev/sparkwing/sparkwing
 type pipeline struct{sw.Base}
 func(pipeline) Plan(_ context.Context,p *sw.Plan,_ sw.NoInputs,_ sw.RunContext)error{
  sw.Job(p,"burn",func(ctx context.Context)error{
-  c:=exec.CommandContext(ctx,"python3","-I","$REPO/bin/runner-budget-probe.py","measure","$EVIDENCE/$case_name.json")
+  c:=exec.CommandContext(ctx,"python3","-I","$REPO/bin/runner-budget-probe.py","measure","$EVIDENCE/$case_name.json","$case_name")
   c.Stdout=os.Stdout;c.Stderr=os.Stderr;return c.Run()
  }).Cores(2);return nil
 }

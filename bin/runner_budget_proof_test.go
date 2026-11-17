@@ -16,6 +16,17 @@ func TestRunnerBudgetProofWorkflowIsManualReadOnlyAndSecretFree(t *testing.T) {
 	testProofWorkflow(t, "runner-budget-proof")
 }
 
+func TestRunnerBudgetProbe(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 unavailable")
+	}
+	output, err := exec.Command("python3", "-I", "runner_budget_probe_test.py", "-v").CombinedOutput()
+	if err != nil {
+		t.Fatalf("probe tests: %v\n%s", err, output)
+	}
+	t.Logf("%s", output)
+}
+
 func TestRunnerBudgetProofVerdict(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
 		t.Skip("python3 unavailable")
