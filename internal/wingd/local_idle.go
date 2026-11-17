@@ -50,6 +50,8 @@ func (d *Daemon) watchPrivateIdle(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-d.quit:
+			return
 		case <-tick.C:
 		}
 		d.mu.Lock()
@@ -88,22 +90,15 @@ func (d *Daemon) watchPrivateIdle(ctx context.Context) {
 		} else {
 			slog.Info("private controller idle exit", "home", d.layout.home, "idle", privateControllerIdle)
 		}
-		for {
-			if err := d.retireLocalRunner(ctx); err != nil {
-				var held *runnerHoldsWork
-				if errors.As(err, &held) {
-					d.finishDrainAfterRunner(context.WithoutCancel(ctx), held.instance)
-					return
-				}
-				d.cfg.logf("private controller runner retirement failed: %v", err)
-				select {
-				case <-ctx.Done():
-					return
-				case <-tick.C:
-					continue
-				}
+		if err := d.retireLocalRunner(ctx); err != nil {
+			var held *runnerHoldsWork
+			if errors.As(err, &held) {
+				d.finishDrainAfterRunner(context.WithoutCancel(ctx), held.instance)
+				return
 			}
-			break
+			d.cfg.logf("private controller runner retirement failed: %v", err)
+			d.resumePrivateIdle()
+			continue
 		}
 		d.shutdownWithReason("private home idle")
 		return
@@ -172,4 +167,16 @@ func localAccountHome() (string, error) {
 		return "", err
 	}
 	return account.HomeDir, nil
+}
+
+func (d *Daemon) resumePrivateIdle() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.idleRetiring || d.shuttingDown {
+		return false
+	}
+	d.draining = false
+	d.idleRetiring = false
+	d.idleSince = time.Now()
+	return true
 }

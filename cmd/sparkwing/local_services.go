@@ -255,18 +255,7 @@ func composeLocalServices(ctx context.Context, config wingd.LocalRuntimeConfig, 
 	if err != nil {
 		return dashboardServices{}, err
 	}
-	config.Installed = func(ctx context.Context) (bool, error) {
-		units, err := result.units.Inspect(ctx)
-		if err != nil {
-			return false, err
-		}
-		for _, unit := range units {
-			if unit.Kind == wingd.ManagedController && unit.Home == home {
-				return true, nil
-			}
-		}
-		return false, nil
-	}
+	config.Installed = result.units.ControllerInstalled
 	result.runtime, err = wingd.NewLocalRuntime(config)
 	if err != nil {
 		return dashboardServices{}, err

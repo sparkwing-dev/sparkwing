@@ -239,7 +239,10 @@ work, connected clients or runner-held work, and retires its supervised runner.
 Runner control polling and socket liveness probes do not count as client activity. The controller log
 records the home and idle duration. The next CLI call starts a fresh controller.
 A `.sparkwing` directory under an overridden `HOME` counts as a private home.
-If the OS account home cannot be identified, automatic exit is disabled.
+Symlink aliases of the account default remain persistent. Account-home lookup
+uses the OS account record. On pure-Go builds, LDAP/NSS accounts absent from the
+local passwd file may fall back to `HOME`; that home then remains persistent.
+If the account home cannot be identified, automatic exit is disabled.
 Installed login services remain running while idle. `sparkwing daemon stop`
 stops a controller explicitly.
 Linux and macOS support an installed login service through `daemon install`.

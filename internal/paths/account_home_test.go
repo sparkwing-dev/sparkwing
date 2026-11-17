@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -19,5 +20,23 @@ func TestDefaultForHomeIgnoresAmbientSelectors(t *testing.T) {
 	}
 	if PathsAt(".sparkwing").IsDefaultForHome("") {
 		t.Fatal("empty account home matched a default")
+	}
+}
+
+func TestDefaultForHomeRecognizesSymlink(t *testing.T) {
+	account := t.TempDir()
+	state := filepath.Join(account, ".sparkwing")
+	if err := os.Mkdir(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(account, alias); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if !PathsAt(filepath.Join(alias, ".sparkwing")).IsDefaultForHome(account) {
+		t.Fatal("symlinked account default counted as private")
+	}
+	if !PathsAt(state).IsDefaultForHome(alias) {
+		t.Fatal("symlinked account home counted as private")
 	}
 }

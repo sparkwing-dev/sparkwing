@@ -278,7 +278,16 @@ func (d *Daemon) finishDrainAfterRunner(ctx context.Context, instance localhostw
 	go func() {
 		for {
 			changed := d.runnerWake.subscribe()
-			if alive, err := LocalRunnerProcessAlive(instance); err == nil && !alive {
+			alive, err := LocalRunnerProcessAlive(instance)
+			if err != nil && d.resumePrivateIdle() {
+				d.runnerChanges.lock()
+				d.finishingDrain = false
+				d.runnerChanges.unlock()
+				d.cfg.logf("private controller runner retirement failed: %v", err)
+				go d.watchPrivateIdle(ctx)
+				return
+			}
+			if err == nil && !alive {
 				break
 			}
 			select {
@@ -293,6 +302,9 @@ func (d *Daemon) finishDrainAfterRunner(ctx context.Context, instance localhostw
 			d.finishingDrain = false
 			d.runnerChanges.unlock()
 			d.cfg.logf("local controller stop is incomplete after runner %s exited: %v", instance.ID, err)
+			if d.resumePrivateIdle() {
+				go d.watchPrivateIdle(ctx)
+			}
 			return
 		}
 		d.shutdownWithReason("drain")

@@ -3,6 +3,8 @@ package paths
 import (
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
@@ -48,7 +50,19 @@ func (p Paths) IsOperatorHome() bool {
 
 // IsDefaultForHome reports whether p is the default state directory beneath userHome.
 func (p Paths) IsDefaultForHome(userHome string) bool {
-	return userHome != "" && filepath.Clean(p.Root) == filepath.Join(userHome, ".sparkwing")
+	if userHome == "" {
+		return false
+	}
+	root, defaultRoot := filepath.Clean(p.Root), filepath.Join(userHome, ".sparkwing")
+	actual, actualErr := os.Stat(root)
+	expected, expectedErr := os.Stat(defaultRoot)
+	if actualErr == nil && expectedErr == nil {
+		return os.SameFile(actual, expected)
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(root, defaultRoot)
+	}
+	return root == defaultRoot
 }
 
 // SandboxHome reports the sparkwing home in use when it is not the operator's

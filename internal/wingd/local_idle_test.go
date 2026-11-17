@@ -8,9 +8,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -221,6 +223,19 @@ func TestPrivateIdleAPIConnections(t *testing.T) {
 					}
 				}
 				if idleRunnerRequest(path) {
+					if _, err := fmt.Fprint(client, "POST /api/v1/runners/claim HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n"); err != nil {
+						t.Fatal(err)
+					}
+					claim, err := http.ReadResponse(reader, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					claim.Body.Close()
+					if claim.StatusCode != http.StatusServiceUnavailable {
+						t.Fatalf("retiring controller accepted claim: %d", claim.StatusCode)
+					}
+				}
+				if idleRunnerRequest(path) {
 					if _, err := fmt.Fprint(client, "POST /api/v1/claims/work/finish HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n"); err != nil {
 						t.Fatal(err)
 					}
@@ -259,10 +274,11 @@ func TestPrivateIdleFreshActivityRefusesErrorsAndWork(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f := &runtimeControllerFixture{}
 				r := newRuntimeFixture(t, f)
-				busy := true
+				var busy atomic.Bool
+				busy.Store(true)
 				r.cfg.Open = func(context.Context, string) (LocalController, error) {
 					return &idleActivityController{f, func(context.Context) (LocalActivity, error) {
-						if busy {
+						if busy.Load() {
 							if failure {
 								return LocalActivity{}, errors.New("snapshot unavailable")
 							}
@@ -279,7 +295,7 @@ func TestPrivateIdleFreshActivityRefusesErrorsAndWork(t *testing.T) {
 				if status, _ := r.Status(t.Context()); !status.Running {
 					t.Fatal("stale idle report retired controller")
 				}
-				busy = false
+				busy.Store(false)
 				time.Sleep(20 * time.Minute)
 				synctest.Wait()
 				if status, _ := r.Status(t.Context()); status.Running {
@@ -427,5 +443,148 @@ func TestSocketLivenessProbesDoNotResetPrivateIdle(t *testing.T) {
 		if err := <-serving; err != nil {
 			t.Fatal(err)
 		}
+	})
+}
+
+func TestPrivateIdleRechecksConcurrentActivity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		snapshot, release := make(chan struct{}, 1), make(chan struct{})
+		source := &idleActivityController{activity: func(context.Context) (LocalActivity, error) {
+			snapshot <- struct{}{}
+			<-release
+			return LocalActivity{}, nil
+		}}
+		d, err := New(Config{Home: t.TempDir(), Runs: source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.idleSince = time.Now()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		joined := make(chan struct{})
+		go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+		time.Sleep(privateControllerIdle)
+		<-snapshot
+		d.mu.Lock()
+		d.localActivity = LocalActivity{Runs: 1}
+		d.mu.Unlock()
+		close(release)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+			t.Fatal("retired despite activity arriving during snapshot")
+		default:
+		}
+		cancel()
+		<-joined
+	})
+}
+
+type idleRetirementStore struct {
+	runnerHTTPFixture
+	fail     atomic.Bool
+	attempts atomic.Int64
+}
+
+func (s *idleRetirementStore) DrainLocalRunner(ctx context.Context, subject, id string) error {
+	s.attempts.Add(1)
+	if s.fail.Load() {
+		return errors.New("retirement unavailable")
+	}
+	return s.runnerHTTPFixture.DrainLocalRunner(ctx, subject, id)
+}
+
+func TestPrivateIdleRetirementFailureResumesAndResetsClock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := &idleRetirementStore{runnerHTTPFixture: runnerHTTPFixture{instance: localhostwire.LocalRunnerInstance{ID: "runner", PID: os.Getpid(), ProcessBirth: "expired", State: "active"}}}
+		store.fail.Store(true)
+		d, err := New(Config{Home: t.TempDir(), Runs: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.idleSince = time.Now()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		joined := make(chan struct{})
+		go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+		time.Sleep(privateControllerIdle + time.Second)
+		synctest.Wait()
+		d.mu.Lock()
+		draining, retiring := d.draining, d.idleRetiring
+		d.mu.Unlock()
+		if draining || retiring || store.attempts.Load() != 1 {
+			t.Fatalf("failed retirement did not resume: draining=%v retiring=%v attempts=%d", draining, retiring, store.attempts.Load())
+		}
+		store.fail.Store(false)
+		time.Sleep(privateControllerIdle - 2*time.Second)
+		synctest.Wait()
+		if store.attempts.Load() != 1 {
+			t.Fatal("retried before full idle window")
+		}
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+		default:
+			t.Fatal("did not retry retirement after full window")
+		}
+		cancel()
+		<-joined
+	})
+}
+
+func TestPrivateIdleHeldRunnerFinishesAfterExit(t *testing.T) {
+	cat, err := exec.LookPath("cat")
+	if err != nil {
+		t.Skip("cat unavailable for held-process fixture")
+	}
+	cmd := exec.Command(cat)
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	birth, err := admissionProcessBirth(cmd.Process.Pid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	synctest.Test(t, func(t *testing.T) {
+		store := &idleRetirementStore{runnerHTTPFixture: runnerHTTPFixture{instance: localhostwire.LocalRunnerInstance{ID: "held", PID: cmd.Process.Pid, ProcessBirth: birth, State: "active"}}}
+		d, err := New(Config{Home: t.TempDir(), Runs: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.idleSince = time.Now()
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		joined := make(chan struct{})
+		go func() { defer close(joined); d.watchPrivateIdle(ctx) }()
+		time.Sleep(privateControllerIdle + LocalRunnerRetireWait + time.Second)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+			t.Fatal("controller exited while runner held work")
+		default:
+		}
+		if store.attempts.Load() != 1 {
+			t.Fatal("runner was not drained")
+		}
+		if err := cmd.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		_ = cmd.Wait()
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		select {
+		case <-d.quit:
+		default:
+			t.Fatal("runner exit did not finish idle retirement")
+		}
+		cancel()
+		<-joined
 	})
 }

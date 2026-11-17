@@ -114,6 +114,7 @@ type ManagedUnit struct {
 
 // ManagedUnitManager is shared by update, controller installation and schedule installation.
 type ManagedUnitManager interface {
+	ControllerInstalled(context.Context) (bool, error)
 	InstallController(context.Context, LocalStartOptions) error
 	UninstallController(context.Context) error
 	Refresh(context.Context, string, string) error
