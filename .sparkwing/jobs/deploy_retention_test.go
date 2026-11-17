@@ -97,3 +97,25 @@ func TestDeployRetentionRejectsConflictingTag(t *testing.T) {
 		t.Fatalf("conflicting retention tag: %v", err)
 	}
 }
+
+func TestDeployPrepullTagFollowsEachRunnerIndex(t *testing.T) {
+	in, host := publishFixture(t, "amd64", "arm64")
+	second := pushBase(t, host, "sparkwing-runner", "amd64", "arm64")
+	for _, base := range []string{in.RunnerBase, second, second} {
+		ref, err := name.NewDigest(base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pin := imagePin{Repository: ref.Context().Name(), Digest: ref.DigestStr()}
+		if err := (ecrRegistry{}).tag(t.Context(), "", pin, "cloud-prepull"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := remote.Head(ref.Context().Tag("cloud-prepull"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Digest.String() != ref.DigestStr() || !got.MediaType.IsIndex() {
+			t.Fatalf("cloud-prepull = %s %s, want index %s", got.MediaType, got.Digest, ref.DigestStr())
+		}
+	}
+}
