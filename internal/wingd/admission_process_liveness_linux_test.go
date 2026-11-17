@@ -5,8 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"syscall"
 	"testing"
- "syscall"
 
 	"golang.org/x/sys/unix"
 

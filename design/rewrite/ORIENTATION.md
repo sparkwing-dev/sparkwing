@@ -672,3 +672,7 @@ Linux process inspection treats ENOENT and ESRCH as absent processes. Owners:
 `internal/procgroup/session_linux.go` and
 `internal/wingd/admission_process_liveness_linux.go`. Guards:
 `TestSessionIdentityVanished` and `TestAdmissionProcessRunningVanished`.
+
+Runner claim dispatch rechecks cancellation after version policy validation.
+Owner: `internal/runners/loop.go`; guard:
+`TestLoopDoesNotClaimAfterPolicyCancelsContext`.
