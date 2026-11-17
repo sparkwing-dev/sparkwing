@@ -31,7 +31,11 @@ func (p groupProcess) Finish(ctx context.Context, grace time.Duration) error {
 }
 
 func (p groupProcess) Terminate(ctx context.Context, grace time.Duration) error {
-	return p.reapLeader(p.Group.Terminate(ctx, grace))
+	termination, err := p.Group.TerminateForCancellation(ctx, grace)
+	if termination.Caused(err) {
+		err = nil
+	}
+	return p.reapLeader(err)
 }
 
 // safety: the group reaps its leader only once no other session member

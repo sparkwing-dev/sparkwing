@@ -28,6 +28,9 @@ adds capacity from your own machines to Cloud.
 Coming from GitHub Actions? [Migrate from GitHub Actions](migrate-from-github-actions.md)
 maps each workflow feature to its Sparkwing equivalent, and
 [known limitations](known-limitations.md) lists what has none yet.
+If search does not find the guide, list matching topics with
+`sparkwing docs list --search github`, then read
+`sparkwing docs read --topic migrate-from-github-actions`.
 
 ## Install
 
@@ -556,7 +559,13 @@ confirms its revocation. A failed revocation leaves the connection saved.
 `--keep-token` removes only the connection and leaves its credential live.
 
 To run work on this machine for that controller, add it as a runner with
-`sparkwing runners add --profile prod --runner this-laptop`.
+`sparkwing runners add --profile prod --runner this-laptop --personal --team acme`.
+Replace `acme` with your team handle. Run this in a terminal, open the printed
+`/device` URL, sign in directly to your Cloud account, enter the code, check the
+runner name and team, and approve. You need team administration, or membership
+with `members_can_add_machines` enabled. A CLI bearer cannot approve enrollment.
+Each teammate repeats this under their own account for their workstation. For
+shared team capacity, follow the [dedicated-session recipe](self-hosting.md#shared-team-capacity).
 
 ### Start a run
 

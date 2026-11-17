@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
@@ -10,7 +11,7 @@ import (
 )
 
 // OIDCMint is the record of one signed ID token. Token is returned to the
-// caller and never stored; ID, Subject and ExpiresAt are audited.
+// caller and never stored; ID and ExpiresAt are audited alongside keyed identity digests.
 type OIDCMint struct {
 	Token     string
 	ID        string
@@ -23,6 +24,13 @@ type OIDCMint struct {
 // a token exists only if its audit row commits alongside the authority check
 // that allowed it.
 func (t *Tenant) MintOIDCToken(ctx context.Context, supplied capability.Authorized, audience string, sign func(capability.OIDCFacts) (OIDCMint, error)) (OIDCMint, error) {
+	if audience == "" || strings.ContainsAny(audience, "\r\n\t ") {
+		return OIDCMint{}, ErrInvalidInput
+	}
+	keyID, audienceDigest, err := t.s.oidcAuditDigest("", "audience", audience)
+	if err != nil {
+		return OIDCMint{}, err
+	}
 	return inTxResult(ctx, t.s, func(tx *storeTx) (OIDCMint, error) {
 		facts, err := t.oidcFactsTx(ctx, tx, supplied)
 		if err != nil {
@@ -35,7 +43,11 @@ func (t *Tenant) MintOIDCToken(ctx context.Context, supplied capability.Authoriz
 		if minted.Token == "" || minted.ID == "" || minted.Subject == "" || minted.ExpiresAt.IsZero() || minted.ExpiresAt.After(facts.NotAfter) {
 			return OIDCMint{}, authorityError(hosterr.IntegrityFailure, "signed OIDC token does not match its issuance facts")
 		}
-		event := auditOIDCMint{RunID: supplied.Target.RunID, Node: digestAudit(supplied.Principal.Capability.Binding.NodeID), Audience: audience, TokenID: minted.ID, Subject: minted.Subject, ExpiresAt: minted.ExpiresAt.UTC().Unix()}
+		_, subjectDigest, err := t.s.oidcAuditDigest(keyID, "subject", minted.Subject)
+		if err != nil {
+			return OIDCMint{}, err
+		}
+		event := auditOIDCMint{RunID: supplied.Target.RunID, Node: digestAudit(supplied.Principal.Capability.Binding.NodeID), Audience: audienceDigest, TokenID: minted.ID, Subject: subjectDigest, KeyID: keyID, ExpiresAt: minted.ExpiresAt.UTC().Unix()}
 		if err := tx.operator.recordAudit(ctx, tx, auditContext{At: tx.now(ctx), Team: t.team, Actor: auditPrincipalActor(supplied.Principal)}, event); err != nil {
 			return OIDCMint{}, err
 		}

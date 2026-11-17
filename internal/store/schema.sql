@@ -2011,3 +2011,9 @@ CREATE TABLE run_event_deliveries (
 
 CREATE INDEX idx_run_event_deliveries_due ON run_event_deliveries(next_at) WHERE state IN ('pending','sending');
 CREATE INDEX idx_run_event_deliveries_run ON run_event_deliveries(team,run_id);
+
+CREATE TABLE audit_privacy_migrations (
+    version BIGINT NOT NULL PRIMARY KEY CHECK(version=1),
+    completed BIGINT NOT NULL CHECK(completed IN (0,1))
+);
+INSERT INTO audit_privacy_migrations(version,completed) VALUES (1,1);

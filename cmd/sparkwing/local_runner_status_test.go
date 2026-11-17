@@ -24,10 +24,14 @@ func TestLocalRunRefusesIntakeWhenNoLocalRunnerCanStart(t *testing.T) {
 			var calls []string
 			deps := localRuntimeFor(t, localTestAward(t), detached, &calls)
 			resolve := deps.resolve
+			checks := 0
 			deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
 				runtime, err := resolve(ctx, options)
-				runtime.ensureController = func(context.Context) error { calls = append(calls, "ensure"); return nil }
+				runtime.ensureController = func(context.Context) error { checks++; return nil }
 				runtime.runner = func(context.Context) (*apierr.Error, error) {
+					if checks != 2 {
+						t.Fatalf("runner checked before both controller readiness checks: %d", checks)
+					}
 					calls = append(calls, "runner")
 					return unreachableManager, nil
 				}
@@ -38,7 +42,7 @@ func TestLocalRunRefusesIntakeWhenNoLocalRunnerCanStart(t *testing.T) {
 			if !errors.As(err, &failure) || failure.Message != unreachableManager.Message || failure.Hint != unreachableManager.Hint {
 				t.Fatalf("run without a local runner = %v", err)
 			}
-			if want := []string{"resolve", "prepare", "ensure", "runner", "close"}; !slices.Equal(calls, want) {
+			if want := []string{"resolve", "prepare", "runner", "close"}; !slices.Equal(calls, want) {
 				t.Fatalf("calls=%v, want %v", calls, want)
 			}
 		})

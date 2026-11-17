@@ -4,6 +4,9 @@ import io
 import json
 from pathlib import Path
 import runpy
+import shutil
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -18,11 +21,13 @@ globals_ = probe.measure.__globals__
 def row(cores, quota, nice):
     return dict(cores=cores, seconds=20, cpu_max=quota, nice=nice,
                 unit='sparkwing-runner-proof.service', burners=list(range(6)),
+                cgroup='/sparkwing-runner-proof.service',
+                burner_cgroups={str(pid): '/sparkwing-runner-proof.service' for pid in range(6)},
                 before=dict(usage_usec=1000), after=dict(usage_usec=1000 + cores * 20e6))
 
 
 class BudgetProbeTest(unittest.TestCase):
-    def measured(self, mode, quota=None):
+    def measured(self, mode, quota=None, foreign_pid=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             group = root / 'cgroup' / 'sparkwing-runner-proof.service'
@@ -31,12 +36,19 @@ class BudgetProbeTest(unittest.TestCase):
             (group / 'cpu.stat').write_text('usage_usec 1000\n')
             if quota is not None:
                 (group / 'cpu.max').write_text(quota)
+            for pid in range(6):
+                membership = root / f'pid-{pid}'
+                membership.write_text('0::/foreign.service\n' if pid == foreign_pid else
+                                      '0::/sparkwing-runner-proof.service\n')
             output = root / 'result.json'
             burners = [mock.Mock(pid=pid) for pid in range(6)]
             for burner in burners:
                 burner.poll.return_value = None
 
             def path(value):
+                for pid in range(6):
+                    if str(value) == f'/proc/{pid}/cgroup':
+                        return root / f'pid-{pid}'
                 return {'/proc/self/cgroup': root / 'membership',
                         '/sys/fs/cgroup': root / 'cgroup'}.get(str(value), Path(value))
 
@@ -58,6 +70,106 @@ class BudgetProbeTest(unittest.TestCase):
                         burner.terminate.assert_called_once()
                         burner.wait.assert_called_once()
             return json.loads(output.read_text())
+
+    @unittest.skipUnless(probe.sys.platform == "linux", "hosted runner proof requires Linux")
+    def test_both_runner_cases_reuse_the_build_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shims = root / 'shims'
+            shims.mkdir()
+            capture = root / 'capture'
+            capture.mkdir()
+            shim = shims / 'shim'
+            shim.write_text('''#!/usr/bin/python3
+import json
+import os
+from pathlib import Path
+import sys
+
+name = Path(sys.argv[0]).name
+args = sys.argv[1:]
+capture = Path(os.environ['BUDGET_TEST_CAPTURE'])
+if name == 'bash':
+    assert Path(args[0]).name == 'runner-isolation-proof.sh' and args[1:] == ['--preflight']
+    print('fixture: hosted VM preflight accepted')
+elif name == 'go':
+    if args == ['version']:
+        print('fixture Go')
+    elif args[:1] == ['env']:
+        print(os.environ[args[1]])
+    else:
+        assert 'build' in args
+        (capture / 'build.json').write_text(json.dumps({key: os.environ[key] for key in ('GOCACHE', 'GOPATH')}))
+        target = Path(args[args.index('-o') + 1])
+        target.write_bytes(Path(__file__).read_bytes())
+        target.chmod(0o700)
+elif name == 'systemctl':
+    if args[:2] == ['--user', 'set-environment']:
+        (capture / 'manager.json').write_text(json.dumps(dict(item.split('=', 1) for item in args[2:])))
+    else:
+        assert args in [['--version'], ['--user', 'show-environment']] or args[:2] == ['--user', 'show']
+        print('fixture manager')
+elif name == 'sudo':
+    assert args[:2] == ['-n', 'loginctl'] or args[:2] == ['-n', 'systemctl']
+elif name == 'loginctl':
+    assert args[0] == 'show-user'
+    print('Linger=yes')
+elif name == 'git':
+    if 'rev-parse' in args:
+        print('0123456789abcdef0123456789abcdef01234567')
+    else:
+        assert any(verb in args for verb in ('init', 'add', 'commit'))
+elif name == 'sparkwing':
+    if args[:1] == ['run']:
+        case = Path(os.environ['SPARKWING_HOME']).parent.name
+        manager = json.loads((capture / 'manager.json').read_text())
+        (capture / (case + '.json')).write_text(json.dumps(dict(
+            environment={key: os.environ[key] for key in ('HOME', 'GOCACHE', 'GOPATH')}, manager=manager)))
+        cores = 2 if case == 'enforce' else 4
+        group = '/sparkwing-runner-proof.service'
+        result = dict(unit='sparkwing-runner-proof.service', cgroup=group,
+                      burners=list(range(6)), burner_cgroups={str(pid): group for pid in range(6)},
+                      cores=cores, seconds=20, nice=10 if case == 'enforce' else 0,
+                      cpu_max='200000 100000' if case == 'enforce' else 'max',
+                      before=dict(usage_usec=1000), after=dict(usage_usec=1000 + cores * 20e6))
+        (Path(os.environ['BUDGET_TEST_EVIDENCE']) / (case + '.json')).write_text(json.dumps(result))
+    else:
+        assert args == ['queue', 'list', '-o', 'json'] or args == ['daemon', 'stop']
+else:
+    raise AssertionError('unexpected shim: ' + name)
+''')
+            shim.chmod(0o700)
+            for name in ('bash', 'go', 'systemctl', 'sudo', 'loginctl', 'git'):
+                (shims / name).symlink_to(shim)
+            expected = {'GOCACHE': str(root / 'build cache'), 'GOPATH': str(root / 'go path')}
+            evidence = root / 'evidence'
+            environment = dict(probe.os.environ, **expected,
+                               PATH=str(shims) + probe.os.pathsep + probe.os.environ['PATH'],
+                               HOME=str(root / 'home'), SPARKWING_HOME=str(root / 'state'),
+                               XDG_CONFIG_HOME=str(root / 'config'), XDG_DATA_HOME=str(root / 'data'),
+                               XDG_CACHE_HOME=str(root / 'cache'), XDG_STATE_HOME=str(root / 'state'),
+                               XDG_RUNTIME_DIR=str(root / 'runtime'),
+                               DBUS_SESSION_BUS_ADDRESS='unix:path=' + str(root / 'no-bus'),
+                               RUNNER_TEMP=str(root / 'runner temp'),
+                               BUDGET_TEST_CAPTURE=str(capture), BUDGET_TEST_EVIDENCE=str(evidence),
+                               GITHUB_STEP_SUMMARY=str(root / 'summary'))
+            script = Path(__file__).with_name('runner-budget-proof.sh')
+            result = probe.subprocess.run(['/bin/bash', str(script), str(evidence)],
+                                          env=environment, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('RESULT: PASS', (evidence / 'verdict.txt').read_text())
+            self.assertEqual(json.loads((capture / 'build.json').read_text()), expected)
+            for case in ('enforce', 'control'):
+                with self.subTest(case=case):
+                    received = json.loads((capture / (case + '.json')).read_text())
+                    self.assertEqual(received['manager'], expected)
+                    self.assertNotEqual(received['environment'].pop('HOME'), environment['HOME'])
+                    self.assertEqual(received['environment'], expected)
+
+    def test_each_burner_must_share_the_measured_cgroup(self):
+        for pid in range(6):
+            with self.subTest(pid=pid), self.assertRaisesRegex(AssertionError, 'burner.*cgroup'):
+                self.measured('enforce', '200000 100000', foreign_pid=pid)
 
     def test_control_without_cpu_max_measures_usage_and_passes_verdict(self):
         control = self.measured('control')
@@ -92,6 +204,8 @@ class BudgetProbeTest(unittest.TestCase):
             ('extra burner', 0, 'burners', list(range(7)), 'six burners'),
             ('extra duplicate burner', 1, 'burners', [0, 1, 2, 3, 4, 5, 5], 'six burners'),
             ('duplicate burner', 1, 'burners', [0, 1, 2, 3, 4, 4], 'six burners'),
+            ('missing burner evidence', 0, 'burner_cgroups', {}, 'burner cgroup evidence'),
+            ('foreign burner evidence', 1, 'burner_cgroups', {'0': '/other'}, 'burner cgroup evidence'),
             ('wrong unit prefix', 0, 'unit', 'other-proof.service', 'local runner'),
             ('wrong unit suffix', 1, 'unit', 'sparkwing-runner-proof.scope', 'local runner'),
         ]
@@ -109,6 +223,34 @@ class BudgetProbeTest(unittest.TestCase):
                 else:
                     with self.assertRaisesRegex(AssertionError, 'control lacks CPU headroom'):
                         probe.judge(enforced, candidate)
+
+
+    def test_verdict_tests_detect_disabled_checks(self):
+        source_path = Path(__file__).with_name('runner-budget-probe.py')
+        source = source_path.read_text()
+        checks = [
+            "enforced['nice'] == 10",
+            "control['nice'] == 0",
+            "control['cpu_max'].split()[0] == 'max'",
+            "control['cores'] > 1.5 * enforced['cores']",
+            "19 <= row['seconds'] <= 25",
+            "len(row['burners']) == 6",
+            "len(set(row['burners'])) == 6",
+            "row['unit'].startswith('sparkwing-runner-')",
+            "row['unit'].endswith('.service')",
+        ]
+        for check in checks:
+            with self.subTest(check=check), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.assertEqual(source.count(check), 1)
+                (root / source_path.name).write_text(source.replace(check, 'True'))
+                test_path = root / Path(__file__).name
+                shutil.copyfile(__file__, test_path)
+                result = subprocess.run([sys.executable, '-I', str(test_path),
+                                         'BudgetProbeTest.test_verdict_rejects_invalid_measurements'],
+                                        capture_output=True, text=True, check=False)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('FAIL:', result.stderr)
 
 
 if __name__ == '__main__':

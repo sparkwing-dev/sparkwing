@@ -237,7 +237,7 @@ func TestRunLogsTriggerFollowPreservesTransportAndBearer(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"records":[],"next_cursor":"","truncated":false,"complete":true}`)), Header: make(http.Header)}, nil
 	})}}
-	if err := followControllerRunLogs(t.Context(), options, "r1", "plain", &out, waitStatusPoll); err != nil || out.Len() != 0 {
+	if err := followControllerRunLogs(t.Context(), options, "r1", "plain", &out, waitStatusPoll, false); err != nil || out.Len() != 0 {
 		t.Fatalf("follow=%q err=%v", out.String(), err)
 	}
 }
@@ -517,10 +517,10 @@ func TestLocalFollowReadsAtOnceWhenHostingEndsThenPollsAgain(t *testing.T) {
 	})
 }
 
-func TestRunLogsKeeperDiagnosticsLeaveHumanOutputUnchanged(t *testing.T) {
+func TestRunLogsKeeperDiagnosticsLeaveDefaultOutputUnchanged(t *testing.T) {
 	diagnostic := jobLogRecord("r1", `{"ts":"2026-11-12T20:00:00Z","level":"debug","event":"lease_keeper","host_lease_keeper":true,"attrs":{"sequence":1}}`)
 	ordinary := jobLogRecord("r1", `{"level":"info","event":"exec_line","msg":"42"}`)
-	for _, format := range []string{"plain", "pretty"} {
+	for _, format := range []string{"plain", "pretty", "json"} {
 		var baseline, observed bytes.Buffer
 		if err := writeLogRecord(&baseline, ordinary, format, false); err != nil {
 			t.Fatal(err)
@@ -535,7 +535,7 @@ func TestRunLogsKeeperDiagnosticsLeaveHumanOutputUnchanged(t *testing.T) {
 		}
 	}
 	var out bytes.Buffer
-	if err := writeLogRecord(&out, diagnostic, "json", false); err != nil {
+	if err := writeLogRecord(&out, diagnostic, "json", true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "lease_keeper") {
@@ -545,7 +545,7 @@ func TestRunLogsKeeperDiagnosticsLeaveHumanOutputUnchanged(t *testing.T) {
 
 func TestRunLogsHidesMaskedKeeperDiagnostic(t *testing.T) {
 	record := jobLogRecord("r1", `{"level":"debug","event":"***","host_lease_keeper":true,"attrs":{"sequence":1}}`)
-	for _, format := range []string{"plain", "pretty"} {
+	for _, format := range []string{"plain", "pretty", "json"} {
 		var out bytes.Buffer
 		if err := writeLogRecord(&out, record, format, false); err != nil {
 			t.Fatal(err)
@@ -573,9 +573,9 @@ func TestRunsLogsWithoutRunOrGrepNamesBothChoices(t *testing.T) {
 	}
 }
 
-func TestRunLogsTimingDiagnosticsLeaveHumanOutputUnchanged(t *testing.T) {
+func TestRunLogsTimingDiagnosticsLeaveDefaultOutputUnchanged(t *testing.T) {
 	record := jobLogRecord("r1", `{"event":"***","host_request_timing":true,"attrs":{"operation":"nodehost.annotation","duration_ms":2000}}`)
-	for _, format := range []string{"plain", "pretty"} {
+	for _, format := range []string{"plain", "pretty", "json"} {
 		var out bytes.Buffer
 		if err := writeLogRecord(&out, record, format, false); err != nil {
 			t.Fatal(err)
@@ -585,10 +585,80 @@ func TestRunLogsTimingDiagnosticsLeaveHumanOutputUnchanged(t *testing.T) {
 		}
 	}
 	var out bytes.Buffer
-	if err := writeLogRecord(&out, record, "json", false); err != nil {
+	if err := writeLogRecord(&out, record, "json", true); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(out.String(), "host_request_timing") {
 		t.Fatal("JSON omitted host diagnostic")
+	}
+}
+
+func TestRunFollowDiagnosticsRequireVerboseOrSearch(t *testing.T) {
+	for _, verbose := range []bool{false, true} {
+		var out bytes.Buffer
+		page := controllerwire.LogPage{Complete: true, Records: []controllerwire.LogRecord{
+			jobLogRecord("r1", `{"level":"debug","event":"lease_keeper","host_lease_keeper":true}`),
+			jobLogRecord("r1", `{"level":"info","event":"log","msg":"hello user"}`),
+			{RunID: "r1", Event: "job_succeeded", JobID: "build"},
+		}}
+		body, err := json.Marshal(page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		options := client.EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: logRoundTrip(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
+		})}}
+		if err := followControllerRunLogs(t.Context(), options, "r1", "json", &out, waitStatusPoll, verbose); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "lease_keeper") != verbose || !strings.Contains(out.String(), "hello user") || !strings.Contains(out.String(), "job_succeeded") {
+			t.Fatalf("verbose=%v output=%s", verbose, &out)
+		}
+	}
+}
+
+func TestLocalRunVerboseReachesLogWriter(t *testing.T) {
+	for _, verbose := range []bool{false, true} {
+		name := "default"
+		if verbose {
+			name = "verbose"
+		}
+		t.Run(name, func(t *testing.T) {
+			page := controllerwire.LogPage{Complete: true, Records: []controllerwire.LogRecord{
+				jobLogRecord("local-run", `{"event":"lease_keeper","host_lease_keeper":true}`),
+				jobLogRecord("local-run", `{"event":"log","msg":"hello user"}`),
+				{RunID: "local-run", Event: "job_succeeded", JobID: "build"},
+			}}
+			body, err := json.Marshal(page)
+			if err != nil {
+				t.Fatal(err)
+			}
+			transport := client.EngineOptions{URL: "https://controller.example", HTTP: &http.Client{Transport: logRoundTrip(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(body)), Header: make(http.Header)}, nil
+			})}}
+			var calls []string
+			deps := localRuntimeFor(t, localTestAward(t), false, &calls)
+			resolve := deps.resolve
+			deps.resolve = func(ctx context.Context, options localRunOptions) (localRunRuntime, error) {
+				runtime, err := resolve(ctx, options)
+				runtime.follow = func(ctx context.Context, run, format string, out io.Writer, _ <-chan struct{}) error {
+					return followControllerRunLogs(ctx, transport, run, format, out, nil, options.verbose)
+				}
+				return runtime, err
+			}
+			arguments := []string{"-o=json"}
+			if verbose {
+				arguments = append(arguments, "--verbose")
+			}
+			arguments = append(arguments, "--", "--password", "private-value")
+			flags, args := parseRunFlagsArgs(arguments)
+			var out bytes.Buffer
+			if err := runLocalCommand(t.Context(), "ci", flags, args, &out, deps); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(out.String(), "lease_keeper") != verbose || !strings.Contains(out.String(), "hello user") || !strings.Contains(out.String(), "job_succeeded") {
+				t.Fatalf("verbose=%v output=%s", verbose, &out)
+			}
+		})
 	}
 }

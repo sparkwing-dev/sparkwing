@@ -44,3 +44,15 @@ func TestLaunchGuidesUseAvailableOnboardingAndModes(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateGuideDescribesPrivateControllerRefresh(t *testing.T) {
+	body, err := docs.ReadRaw("updates")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, promise := range []string{"even when no login service is", "A stopped controller stays stopped.", "Once the successor runner activates", "old runner stops taking new claims", "not for those jobs to finish", "`sparkwing daemon restart` once with the newly installed CLI"} {
+		if !strings.Contains(body, promise) {
+			t.Errorf("update guide omits %q", promise)
+		}
+	}
+}

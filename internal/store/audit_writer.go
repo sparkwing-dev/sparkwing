@@ -248,15 +248,21 @@ type auditSecretRelease struct {
 	Holder           auditDigest `json:"holder_digest"`
 }
 
-// safety: audiences are relying-party identifiers a pipeline names, not people, so
-// the audience is kept plain while the job is a digest like other release events.
-// The token id, subject and expiry trace a leaked token to its mint.
+type auditOIDCScrub struct {
+	Rows    int64  `json:"rows"`
+	KeyID   string `json:"digest_key_id,omitempty"`
+	Version int    `json:"version"`
+}
+
+func (auditOIDCScrub) isAuditPayload() {}
+
 type auditOIDCMint struct {
 	RunID     string      `json:"-"`
 	Node      auditDigest `json:"node_digest"`
-	Audience  string      `json:"audience"`
+	Audience  auditDigest `json:"audience_digest"`
 	TokenID   string      `json:"token_id"`
-	Subject   string      `json:"subject"`
+	Subject   auditDigest `json:"subject_digest"`
+	KeyID     string      `json:"digest_key_id"`
 	ExpiresAt int64       `json:"expires_at"`
 }
 
@@ -440,9 +446,13 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 		ev.Kind, ev.SubjectID = businessEventRefillOpened, p.RefillID
 	case auditSecretRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "secret.released", p.Name.String(), p.RunID, true
+	case auditOIDCScrub:
+		actorAllowed = c.Actor.system == auditController
+		ev.Kind, ev.SubjectID = "audit.oidc_scrubbed", "oidc-v1"
+		valid = p.Version == 1 && (p.Rows == 0 && p.KeyID == "" || p.Rows > 0 && len(p.KeyID) == 64)
 	case auditOIDCMint:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "oidc.minted", p.Node.String(), p.RunID, true
-		valid = p.Audience != "" && !strings.ContainsAny(p.Audience, "\r\n\t ") && p.TokenID != "" && p.Subject != "" && p.ExpiresAt > 0
+		valid = p.Audience != (auditDigest{}) && p.Subject != (auditDigest{}) && len(p.KeyID) == 64 && p.TokenID != "" && p.ExpiresAt > 0
 	case auditDeviceLogin:
 		ev.Kind, ev.SubjectID = "device_login.decided", p.LoginID
 		valid = auditOneOf(p.Decision, "approved", "denied") && p.LoginID != ""

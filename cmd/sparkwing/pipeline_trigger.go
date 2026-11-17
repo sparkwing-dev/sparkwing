@@ -118,7 +118,7 @@ func runTriggerCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 }
 
 func followTriggeredControllerRun(ctx context.Context, options client.EngineOptions, run, format string, out io.Writer) (string, error) {
-	followErr := followControllerRunLogs(ctx, options, run, format, out, waitStatusPoll)
+	followErr := followControllerRunLogs(ctx, options, run, format, out, waitStatusPoll, false)
 	reader, err := client.NewRunReader(options)
 	if err != nil {
 		return "", errors.Join(followErr, err)

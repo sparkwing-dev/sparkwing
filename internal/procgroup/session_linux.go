@@ -17,9 +17,13 @@ import (
 func guardedSessionSupport() error { return nil }
 
 func sessionIdentity(pid int) (int, string, error) {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	return sessionIdentityRead(pid, os.ReadFile)
+}
+
+func sessionIdentityRead(pid int, readFile func(string) ([]byte, error)) (int, string, error) {
+	data, err := readFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
 			return 0, "", fmt.Errorf("%w: process %d", ErrProcessAbsent, pid)
 		}
 		return 0, "", err
@@ -38,6 +42,9 @@ func sessionIdentity(pid int) (int, string, error) {
 		return 0, "", fmt.Errorf("process %d start time: %w", pid, err)
 	}
 	sid, err := unix.Getsid(pid)
+	if errors.Is(err, syscall.ESRCH) {
+		return 0, "", fmt.Errorf("%w: process %d", ErrProcessAbsent, pid)
+	}
 	if err != nil {
 		return 0, "", err
 	}

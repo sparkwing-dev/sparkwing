@@ -59,7 +59,8 @@ func (p Purpose) valid() bool {
 }
 
 type Cipher struct {
-	aead cipher.AEAD
+	aead          cipher.AEAD
+	oidcAuditKeys []oidcAuditKey
 	// safety: read-only keys an envelope may still carry; sealing always uses aead.
 	previous []cipher.AEAD
 }
@@ -69,7 +70,7 @@ func NewCipher(key []byte) (*Cipher, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Cipher{aead: aead}, nil
+	return &Cipher{aead: aead, oidcAuditKeys: []oidcAuditKey{newOIDCAuditKey(key)}}, nil
 }
 
 // NewCipherWithPrevious returns a cipher that seals under key and opens an
@@ -86,6 +87,7 @@ func NewCipherWithPrevious(key, previous []byte) (*Cipher, error) {
 		return nil, fmt.Errorf("previous key: %w", err)
 	}
 	c.previous = []cipher.AEAD{prev}
+	c.oidcAuditKeys = append(c.oidcAuditKeys, newOIDCAuditKey(previous))
 	return c, nil
 }
 
