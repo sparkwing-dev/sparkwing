@@ -186,7 +186,7 @@ func ExerciseOIDCScrubGuardForTest(t testing.TB, s *Store, check func(func(strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.prepareOIDCScrub(context.Background(), tx, keyID); err != nil {
+	if _, err := s.AsOperator().prepareOIDCScrub(context.Background(), tx, keyID); err != nil {
 		t.Fatal(err)
 	}
 	if err := replaceAuditUpdateGuard(context.Background(), tx, oidcScrubAllowance(s.dialect)); err != nil {

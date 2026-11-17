@@ -32,7 +32,8 @@ func (s *Store) oidcAuditDigest(keyID, field, value string) (string, auditDigest
 	return id, digest, nil
 }
 
-func (s *Store) reconcileOIDCAudit(ctx context.Context) error {
+func (op *Operator) reconcileOIDCAudit(ctx context.Context) error {
+	s := op.s
 	var done int
 	if err := s.queryRow(ctx, `SELECT completed FROM audit_privacy_migrations WHERE version=1`).Scan(&done); err != nil {
 		return err
@@ -73,7 +74,7 @@ func (s *Store) reconcileOIDCAudit(ctx context.Context) error {
 				return err
 			}
 		}
-		count, err := s.prepareOIDCScrub(ctx, tx, keyID)
+		count, err := op.prepareOIDCScrub(ctx, tx, keyID)
 		if err != nil {
 			return err
 		}
@@ -97,7 +98,8 @@ func (s *Store) reconcileOIDCAudit(ctx context.Context) error {
 	})
 }
 
-func (s *Store) prepareOIDCScrub(ctx context.Context, tx *storeTx, keyID string) (int64, error) {
+func (op *Operator) prepareOIDCScrub(ctx context.Context, tx *storeTx, keyID string) (int64, error) {
+	s := op.s
 	if _, err := tx.execContext(ctx, `CREATE TABLE oidc_audit_scrub_rows(id TEXT NOT NULL PRIMARY KEY,old_attrs TEXT NOT NULL,new_attrs TEXT NOT NULL)`); err != nil {
 		return 0, err
 	}

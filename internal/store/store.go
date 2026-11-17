@@ -310,7 +310,7 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, path stri
 		s.githubLocks.SetMaxIdleConns(2)
 		s.githubLocks.SetConnMaxIdleTime(5 * time.Minute)
 	}
-	if err := s.configurePolicyOptions(opts); err != nil {
+	if err := s.configurePolicyOptions(ctx, opts); err != nil {
 		return nil, errors.Join(err, s.Close())
 	}
 	return s, nil

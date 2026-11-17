@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -353,5 +354,35 @@ func TestOIDCAuditScrubCoversEveryPageAndEmptyID(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(receipt), &attrs); err != nil || attrs.Rows != 260 {
 		t.Fatalf("scrub count=%d: %v", attrs.Rows, err)
+	}
+}
+
+func TestOIDCAuditStartupCancellationPreservesPendingHistory(t *testing.T) {
+	target := storetest.NewPostgres(t)
+	st := target.Open(t)
+	seedHistoricalOIDCAudit(t, st, historicalOIDCAttrs)
+	prepareOIDCSchema39(t, st)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	cipher := drillCipher(t)
+	opened, err := store.OpenPostgres(ctx, target.DSN(), store.WithPolicies(func(*store.Store) (store.Policies, error) {
+		cancel()
+		return store.Policies{AuditDigests: cipher}, nil
+	}))
+	if err == nil {
+		_ = opened.Close()
+		t.Fatal("cancelled startup scrubbed and published a store")
+	}
+	st = target.Open(t)
+	var body string
+	if err := st.DB().QueryRow(`SELECT attrs FROM audit_events WHERE id='old'`).Scan(&body); err != nil || body != historicalOIDCAttrs {
+		t.Fatalf("cancelled startup changed history: %v", err)
+	}
+	var completed int
+	if err := st.DB().QueryRow(`SELECT completed FROM audit_privacy_migrations WHERE version=1`).Scan(&completed); err != nil || completed != 0 {
+		t.Fatalf("cancelled startup completed scrub: %v", err)
 	}
 }

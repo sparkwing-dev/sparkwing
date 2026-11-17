@@ -77,7 +77,7 @@ func WithCredentialEpoch(epoch string) Option {
 	return Option{apply: func(s *Store) { s.credentialEpoch = epoch }}
 }
 
-func (s *Store) configurePolicyOptions(opts []Option) error {
+func (s *Store) configurePolicyOptions(ctx context.Context, opts []Option) error {
 	for _, opt := range opts {
 		if opt.policies != nil {
 			policies, err := opt.policies(s)
@@ -88,7 +88,7 @@ func (s *Store) configurePolicyOptions(opts []Option) error {
 		}
 	}
 	if s.auditDigests != nil {
-		return s.reconcileOIDCAudit(context.Background())
+		return s.AsOperator().reconcileOIDCAudit(ctx)
 	}
 	return nil
 }
