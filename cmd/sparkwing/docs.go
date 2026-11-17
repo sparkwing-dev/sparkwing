@@ -310,7 +310,7 @@ func sectionSnippet(s docs.Section, query string) string {
 	lines := strings.Split(s.Body, "\n")
 	for _, line := range lines {
 		low := strings.ToLower(line)
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+		if trim := strings.TrimSpace(line); strings.HasPrefix(trim, "#") || strings.HasPrefix(trim, "<!--") {
 			continue
 		}
 		for _, tok := range tokens {
@@ -320,7 +320,7 @@ func sectionSnippet(s docs.Section, query string) string {
 		}
 	}
 	for _, line := range lines {
-		if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "#") {
+		if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "#") && !strings.HasPrefix(t, "<!--") {
 			return truncateLine(t)
 		}
 	}
