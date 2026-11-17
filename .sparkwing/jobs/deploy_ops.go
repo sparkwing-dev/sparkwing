@@ -1333,8 +1333,6 @@ func (r ecrRegistry) digest(ctx context.Context, password, ref string) (string, 
 	return desc.Digest.String(), nil
 }
 
-// safety: an index carries no config, so the label is read from its first
-// platform image; publish-images labels every platform the same way.
 func (r ecrRegistry) tag(ctx context.Context, password string, pin imagePin, tag string) error {
 	ref, err := name.NewDigest(pin.Repository + "@" + pin.Digest)
 	if err != nil {
@@ -1351,6 +1349,8 @@ func (r ecrRegistry) tag(ctx context.Context, password string, pin imagePin, tag
 	return remote.Put(target, desc, r.options(ctx, password)...)
 }
 
+// safety: an index carries no config, so the label is read from its first
+// platform image; publish-images labels every platform the same way.
 func (r ecrRegistry) revision(ctx context.Context, password, ref string) (string, error) {
 	parsed, err := name.ParseReference(ref)
 	if err != nil {
