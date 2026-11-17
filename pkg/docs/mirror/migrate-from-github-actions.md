@@ -165,6 +165,18 @@ plan.job("test", async (ctx) => {
 
 For `actions/setup-go`, pin the Go version and its archive checksums in the same way:
 
+```yaml
+- uses: actions/setup-go@v7
+  with:
+    go-version: '1.26.11'
+- run: go version && go test ./...
+```
+
+This recipe selects the Linux archive for the machine running the job. `x86_64` maps to Go's `amd64`,
+and `aarch64` or `arm64` maps to `arm64`. These checksums apply only to those two Linux archives.
+For macOS, Windows or another architecture, choose its archive and published checksum from
+[Go downloads](https://go.dev/dl/). `GOARCH` used for cross-compiling your application does not select the toolchain archive.
+
 ```bash
 # scripts/setup-go.sh, sourced by a job
 GO_VERSION=1.26.11
@@ -186,12 +198,13 @@ setup_go() (
 )
 [ -x "$GO_HOME/bin/go" ] || setup_go || return 1
 export PATH="$GO_HOME/bin:$PATH"
+export GOROOT="$GO_HOME"
 export GOTOOLCHAIN=local
 ```
 
 ```go
 sw.Job(plan, "test-go", func(ctx context.Context) error {
-    _, err := sw.Bash(ctx, ". scripts/setup-go.sh && go test ./...").Run()
+    _, err := sw.Bash(ctx, ". scripts/setup-go.sh && go version && go test ./...").Run()
     return err
 }).Cache(sw.Dir(".tools", sw.KeyFromFile("scripts/setup-go.sh")))
 ```
@@ -199,14 +212,18 @@ sw.Job(plan, "test-go", func(ctx context.Context) error {
 ```ts
 // import { dir } from "@sparkwing/sdk";
 plan.job("test-go", async (ctx) => {
-  await ctx.bash(". scripts/setup-go.sh && go test ./...").run();
+  await ctx.bash(". scripts/setup-go.sh && go version && go test ./...").run();
 }).cache(dir(".tools", "scripts/setup-go.sh"));
 ```
 
 Get new checksum values from [Go downloads](https://go.dev/dl/) or
 [Node's release checksums](https://nodejs.org/dist/v20.19.5/SHASUMS256.txt) when changing versions.
 The cache paths include the version and architecture. Keep these setup jobs sequential on a local checkout,
-because local jobs share its `.tools` directory. `GOTOOLCHAIN=local` prevents Go from downloading a different toolchain.
+because local jobs share its `.tools` directory. `GOROOT` points at the installed archive even when the runner inherited
+another Go installation. `GOTOOLCHAIN=local` prevents Go from downloading a different toolchain.
+To check the pin, look for `go version go1.26.11 linux/amd64` or `linux/arm64` in the job log.
+Both SDKs key the `.tools` cache on `scripts/setup-go.sh`, so changing the version or checksum invalidates it.
+Since `actions/setup-go` also caches Go modules by default, add [`GoModules()` (Go) or `goModules()` (TypeScript)](#cache) alongside the `.tools` cache for equivalent module caching.
 
 Python, Java and other toolchains follow the same pattern, or run inside `docker run <image>` where Docker is
 available. Changing the script changes the cache key, so a version bump downloads once and is cached again.
