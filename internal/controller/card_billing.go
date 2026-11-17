@@ -53,7 +53,7 @@ func (s *Server) handleTeamBillingPortal(w http.ResponseWriter, r *http.Request,
 	if spend.Card.Customer == "" {
 		return &apierr.Error{Code: apierr.Conflict, Message: store.ErrNoCard.Error(), Details: map[string]any{"reason": noCardCode}}
 	}
-	url, err := s.checkout.portal(r.Context(), s.paymentDeployment, a.Target.Team, spend.Card.Customer)
+	url, err := s.checkout.portal(r.Context(), s.checkoutPairing(), a.Target.Team, spend.Card.Customer)
 	if err != nil {
 		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "the card page could not be opened; try again"}, err)
 	}
@@ -156,7 +156,7 @@ func (s *Server) refillPass(ctx context.Context) {
 		if !s.checkout.due(r.ID) {
 			return
 		}
-		res, err := s.checkout.refill(ctx, s.paymentDeployment, r)
+		res, err := s.checkout.refill(ctx, s.checkoutPairing(), r)
 		s.alertCheckoutMisconfigured(err)
 		if !errors.Is(err, errCheckoutUnavailable) {
 			s.checkout.settled(r.ID)
@@ -216,7 +216,7 @@ func (s *Server) refundQueuedPayments(ctx context.Context) {
 		if !s.checkout.due(d.PaymentIntent) {
 			continue
 		}
-		refund, status, err := s.checkout.refund(ctx, s.paymentDeployment, d.Team, d.PaymentIntent, d.Reason)
+		refund, status, err := s.checkout.refund(ctx, s.checkoutPairing(), d.Team, d.PaymentIntent, d.Reason)
 		s.alertCheckoutMisconfigured(err)
 		if errors.Is(err, errCheckoutUnavailable) && !s.checkout.unavailable(d.PaymentIntent) {
 			s.logger.Error("refunding a queued card payment failed; it is retried", "team", string(d.Team),
