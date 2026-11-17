@@ -197,11 +197,52 @@ func TestKernelReadAcceptsNullDeviceButFailsReadableMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if !maskedKernelFile("/proc/kcore", f) {
-		t.Fatal("empty masked file rejected")
+	if maskedKernelFile("/proc/kcore", f) {
+		t.Fatal("empty regular file passed as the null device")
 	}
 	if r := openProbe(ContextJob, "/dev/null", os.O_WRONLY, "kernel control opens for writing"); r.Verdict != Breach {
 		t.Fatalf("write open is still a breach: %+v", r)
+	}
+}
+
+func TestDeviceBindChecksDeviceNumberMaskRootAndExactDestination(t *testing.T) {
+	empty := filepath.Join(t.TempDir(), "empty")
+	if err := os.WriteFile(empty, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, where, root, point, actual string
+		want                             bool
+	}{
+		{"standard null", ContextJob, "/null", "/dev/null", "/dev/null", true},
+		{"wrong device number", ContextJob, "/null", "/dev/null", "/dev/zero", false},
+		{"null mask", ContextJob, "/null", "/proc/kcore", "/dev/null", true},
+		{"wrong mask root", ContextJob, "/zero", "/proc/kcore", "/dev/null", false},
+		{"mask with readable data", ContextJob, "/null", "/proc/kcore", "/dev/zero", false},
+		{"mask with regular file", ContextJob, "/null", "/proc/kcore", empty, false},
+		{"sidecar null", ContextPrivileged, "/null", "/host/dev/null", "/dev/null", true},
+		{"sidecar mask", ContextPrivileged, "/null", "/host/proc/kcore", "/dev/null", true},
+		{"sidecar prefix lookalike", ContextPrivileged, "/null", "/hostnull", "/dev/null", false},
+		{"relative destination", ContextJob, "/null", "null", "/dev/null", false},
+		{"sidecar path in job", ContextJob, "/null", "/host/dev/null", "/dev/null", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			stat := func(path string) (fs.FileInfo, error) {
+				if path != c.point {
+					t.Fatalf("stat %q, want %q", path, c.point)
+				}
+				return os.Stat(c.actual)
+			}
+			open := func(path string) (*os.File, error) {
+				if path != c.point {
+					t.Fatalf("open %q, want %q", path, c.point)
+				}
+				return os.Open(c.actual)
+			}
+			if _, got := inspectDeviceBind(c.where, mount{root: c.root, point: c.point, fstype: "devtmpfs"}, stat, open); got != c.want {
+				t.Fatalf("accepted=%v, want %v", got, c.want)
+			}
+		})
 	}
 }
 

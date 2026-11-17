@@ -1510,9 +1510,10 @@ The mount audit accepts only their expected roots, destinations, character
 types and device numbers. The privileged DinD probe sees those same sidecar
 devices under `/host/dev`, because Docker resolves its read-only `/:/host`
 bind inside the sidecar. Standard masked proc files pass only when a bounded
-read reaches EOF without returning a byte and the file is regular or the null
-character device. A devtmpfs directory, an unexpected device or an actual host
-filesystem still fails the audit.
+read reaches EOF without returning a byte and the file is the null character
+device (1:3), with mount root `/null`. Empty regular files do not qualify.
+A devtmpfs directory, an unexpected device or an actual host filesystem still
+fails the audit. The sidecar path exception requires the exact `/host/` prefix.
 
 Placement rests on one assumption, which the report header states. Pod metadata
 cannot be authenticated from inside the cluster. Anyone able to create or
