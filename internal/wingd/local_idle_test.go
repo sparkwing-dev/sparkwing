@@ -19,9 +19,7 @@ import (
 )
 
 func TestPrivateControllerIdleExitAndNextClient(t *testing.T) {
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-	signal.Stop(interrupt)
+	initIdleTestSignals()
 	synctest.Test(t, func(t *testing.T) {
 		f := &runtimeControllerFixture{}
 		r := newRuntimeFixture(t, f)
@@ -58,6 +56,7 @@ func TestPrivateControllerIdleExitAndNextClient(t *testing.T) {
 }
 
 func TestPrivateControllerBusyResetsIdleBound(t *testing.T) {
+	initIdleTestSignals()
 	for _, kind := range []string{"run", "queue", "held", "dashboard", "cli", "admission"} {
 		t.Run(kind, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -118,12 +117,14 @@ func TestPrivateControllerBusyResetsIdleBound(t *testing.T) {
 }
 
 func TestDefaultControllerNeverIdleExits(t *testing.T) {
+	initIdleTestSignals()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	synctest.Test(t, func(t *testing.T) {
 		f := &runtimeControllerFixture{home: filepath.Join(home, ".sparkwing")}
 		r := newRuntimeFixture(t, f)
+		r.accountHome = func() (string, error) { return home, nil }
 		lifecycle := NewLocalLifecycle(r, nil)
 		if _, err := lifecycle.EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
 			t.Fatal(err)
@@ -137,6 +138,7 @@ func TestDefaultControllerNeverIdleExits(t *testing.T) {
 }
 
 func TestPrivateIdleRetiresRunnerAndLogsHome(t *testing.T) {
+	initIdleTestSignals()
 	synctest.Test(t, func(t *testing.T) {
 		f := &runtimeControllerFixture{}
 		r := newRuntimeFixture(t, f)
@@ -161,6 +163,7 @@ func TestPrivateIdleRetiresRunnerAndLogsHome(t *testing.T) {
 }
 
 func TestPrivateIdleAPIConnections(t *testing.T) {
+	initIdleTestSignals()
 	for _, path := range []string{"/api/v1/runs", "/api/v1/runners/claim", localRunnerPath + "/runner", controllerHTTPPath + "probe"} {
 		t.Run(path, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -250,6 +253,7 @@ func (c *idleActivityController) LocalIdleActivity(ctx context.Context) (LocalAc
 }
 
 func TestPrivateIdleFreshActivityRefusesErrorsAndWork(t *testing.T) {
+	initIdleTestSignals()
 	for _, failure := range []bool{true, false} {
 		t.Run(fmt.Sprint(failure), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -284,4 +288,48 @@ func TestPrivateIdleFreshActivityRefusesErrorsAndWork(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestOverriddenHomeControllerIdleExits(t *testing.T) {
+	initIdleTestSignals()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	synctest.Test(t, func(t *testing.T) {
+		f := &runtimeControllerFixture{home: filepath.Join(home, ".sparkwing")}
+		r := newRuntimeFixture(t, f)
+		r.accountHome = func() (string, error) { return filepath.Join(home, "account"), nil }
+		if _, err := NewLocalLifecycle(r, nil).EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(21 * time.Minute)
+		synctest.Wait()
+		if status, _ := r.Status(t.Context()); status.Running {
+			t.Fatal("overridden HOME/.sparkwing did not retire")
+		}
+	})
+}
+
+func TestUnknownAccountHomeKeepsController(t *testing.T) {
+	initIdleTestSignals()
+	synctest.Test(t, func(t *testing.T) {
+		f := &runtimeControllerFixture{}
+		r := newRuntimeFixture(t, f)
+		r.accountHome = func() (string, error) { return "", errors.New("account unavailable") }
+		if _, err := NewLocalLifecycle(r, nil).EnsureStarted(t.Context(), LocalStartOptions{Home: f.home, Version: "v1"}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Hour)
+		synctest.Wait()
+		if status, _ := r.Status(t.Context()); !status.Running {
+			t.Fatal("unknown account home permitted idle retirement")
+		}
+	})
+}
+
+// safety: process-wide signal handling must start outside a synctest bubble.
+func initIdleTestSignals() {
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	signal.Stop(interrupt)
 }

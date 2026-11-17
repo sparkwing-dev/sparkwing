@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,8 +20,8 @@ type idleClient struct{ background bool }
 type idleConnectionKey struct{}
 
 func (r *localRuntime) privateIdleExit(ctx context.Context, session *localRuntimeSession) bool {
-	home, err := os.UserHomeDir()
-	if err != nil || filepath.Clean(r.layout.home) == filepath.Join(home, ".sparkwing") || session.standalone {
+	home, err := r.accountHome()
+	if err != nil || home == "" || filepath.Clean(r.layout.home) == filepath.Join(home, ".sparkwing") || session.standalone {
 		return false
 	}
 	if r.cfg.Installed != nil {
@@ -160,4 +160,12 @@ func (d *Daemon) privateIdleBusyLocked() bool {
 		}
 	}
 	return false
+}
+
+func localAccountHome() (string, error) {
+	account, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	return account.HomeDir, nil
 }

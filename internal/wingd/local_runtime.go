@@ -35,13 +35,14 @@ type LocalRuntimeConfig struct {
 }
 
 type localRuntime struct {
-	cfg    LocalRuntimeConfig
-	layout layout
-	listen func(network, address string) (net.Listener, error)
-	now    func() time.Time
-	mu     sync.Mutex
-	change chan struct{}
-	run    *localRuntimeSession
+	cfg         LocalRuntimeConfig
+	layout      layout
+	listen      func(network, address string) (net.Listener, error)
+	accountHome func() (string, error)
+	now         func() time.Time
+	mu          sync.Mutex
+	change      chan struct{}
+	run         *localRuntimeSession
 }
 
 type localRuntimeSession struct {
@@ -71,7 +72,7 @@ func NewLocalRuntime(cfg LocalRuntimeConfig) (LocalRuntime, error) {
 	if cfg.Dashboard.Address == "" {
 		cfg.Dashboard.Address = DefaultDashboardAddress
 	}
-	return &localRuntime{cfg: cfg, layout: lay, change: make(chan struct{})}, nil
+	return &localRuntime{cfg: cfg, layout: lay, accountHome: localAccountHome, change: make(chan struct{})}, nil
 }
 
 func (r *localRuntime) Run(ctx context.Context, opts LocalStartOptions) (err error) {
