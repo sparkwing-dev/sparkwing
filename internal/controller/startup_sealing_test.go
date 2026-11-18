@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 type startupTestCipher struct {
@@ -42,7 +43,7 @@ func (c *startupTestCipher) SealBound(p secrets.Purpose, team, name, scope strin
 func startupController(t *testing.T, c *startupTestCipher) *Server {
 	t.Helper()
 	e, _ := engineRuntimeStore(t)
-	_, err := e.Store.DB().ExecContext(t.Context(), `INSERT INTO cron_schedules(team,id,repo_path,repo_key,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,args) VALUES ('a','startup','/repo','git:example.com/project','nightly','0 * * * *','UTC','skip',0,1,1,1,'{"secret":"controller-startup-canary"}')`)
+	_, err := teststore.Exec(t.Context(), e.Store, `INSERT INTO cron_schedules(team,id,repo_path,repo_key,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,args) VALUES ('a','startup','/repo','git:example.com/project','nightly','0 * * * *','UTC','skip',0,1,1,1,'{"secret":"controller-startup-canary"}')`)
 	if err != nil {
 		t.Fatal(err)
 	}

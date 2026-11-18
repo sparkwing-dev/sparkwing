@@ -34,7 +34,7 @@ func startupFixture(t *testing.T, count int) (*store.Store, *secrets.Cipher, *st
 	}
 	defer tx.Rollback()
 	for i := range count {
-		_, err = tx.ExecContext(t.Context(), storetest.Rebind(st, `INSERT INTO cron_schedules(team,id,repo_path,repo_key,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,args) VALUES (?,?, '/repo','git:example.com/project','nightly','0 * * * *','UTC','skip',0,1,1,1,?)`), store.DefaultTeam, fmt.Sprintf("schedule-%05d", i), `{"token":"startup-canary-739"}`)
+		_, err = tx.ExecContext(t.Context(), storetest.Rebind(st, `INSERT INTO cron_schedules(team,id,repo_path,repo_key,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,args) VALUES (?,?, ?,'git:example.com/project','nightly','0 * * * *','UTC','skip',0,1,1,1,?)`), store.DefaultTeam, fmt.Sprintf("schedule-%05d", i), fmt.Sprintf("/repo/%d", i), `{"token":"startup-canary-739"}`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,7 +214,7 @@ func TestStartupSealingCoversEveryArgumentColumn(t *testing.T) {
 	exec(`UPDATE cron_schedules SET override_args=?,override_base=?,consent_json=?`, body, body, body)
 	exec(`INSERT INTO cron_fires(team,id,schedule_id,due_at,decided_at,outcome,args) VALUES (?,'fire','schedule-00000',1,1,'missed',?)`, store.DefaultTeam, body)
 	cronRun(t, st, "startup-run")
-	exec(`UPDATE runs SET request_json=?,spec_json=?,plan_json=? WHERE id='startup-run'`, []byte(`{"request":{"requested_args":{"token":"startup-canary-739"}}}`), []byte(`{"resolved":{"args":{"token":"startup-canary-739"}}}`), []byte(`{"jobs":[{"arguments":[{"default":"startup-canary-739"}]}]}`))
+	exec(`UPDATE runs SET sealed_at=1,spec_hash='spec',plan_hash='plan',request_json=?,spec_json=?,plan_json=? WHERE id='startup-run'`, []byte(`{"request":{"requested_args":{"token":"startup-canary-739"}}}`), []byte(`{"resolved":{"args":{"token":"startup-canary-739"}}}`), []byte(`{"jobs":[{"arguments":[{"default":"startup-canary-739"}]}]}`))
 	exec(`INSERT INTO nodes(team,run_id,node_id,status,spec_json,expansion_body,expansion_registration) VALUES (?,'startup-run','job','pending',?,?,?)`, store.DefaultTeam, []byte(`{"arguments":[{"default":"startup-canary-739"}]}`), []byte(`{"jobs":[{"arguments":[{"default":"startup-canary-739"}]}]}`), []byte(`{"defaults":[{"raw":"startup-canary-739"}]}`))
 	result, err := st.AsOperator().SealPlaintextValues(ctx, cipher)
 	if err != nil || result.PlaintextRunArguments != 11 {
