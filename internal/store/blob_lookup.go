@@ -500,6 +500,9 @@ func (r *blobRecords) copyMemo(ctx context.Context, request blob.CopyMemoRequest
 	if err := tx.checkBlobBudget(ctx, request.Lookup.Budget); err != nil {
 		return blob.MemoHit{}, err
 	}
+	if err := recordMemoServedTx(ctx, tx, r.tenant.team, request.Destination, original, hit); err != nil {
+		return blob.MemoHit{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return blob.MemoHit{}, err
 	}

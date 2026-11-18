@@ -32,6 +32,7 @@ const (
 
 // NodeCommandExtra omits award and execution authority.
 type NodeCommandExtra struct {
+	BodySkipped string                    `json:"-"`
 	OwnerPolicy *OwnerPolicyResult        `json:"owner_policy,omitempty"`
 	Result      *NodeResult               `json:"result,omitempty"`
 	Materialize *MaterializeSource        `json:"materialize,omitempty"`

@@ -189,6 +189,7 @@ func (h *nodeExecutor) Execute(ctx context.Context, input NodeInput) (err error)
 			return h.report(ctx, input, h.failure(err), err)
 		}
 		if memoResult != nil {
+			input.bodySkipped = "memo"
 			return h.report(ctx, input, *memoResult, nil)
 		}
 	}
@@ -432,7 +433,10 @@ func (h *nodeExecutor) report(ctx context.Context, input NodeInput, result runst
 	// safety: a cancelled context cannot send the final fenced report; the store still verifies current authority.
 	reportCtx := lease.ExecutionContext(ctx)
 	result = recordNodeFailure(input.NodeID, result, h.deps.Masker.Mask)
-	_, err := h.transition(reportCtx, input, store.ReportNode{SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result, ExitedAt: input.exitedAt})
+	if result.Outcome != runstate.NodeMemoized && result.Outcome != runstate.NodeSkipped {
+		input.bodySkipped = ""
+	}
+	_, err := h.transition(reportCtx, input, store.ReportNode{BodySkipped: input.bodySkipped, SourceAttempt: &input.Attempt, Outcome: result.Outcome, Result: &result, ExitedAt: input.exitedAt})
 	if err == nil {
 		OutcomeNotify(ctx)(WorkOutcome{RunID: input.Accepted.RunID, JobID: input.NodeID, State: string(result.Outcome)})
 	}

@@ -3,6 +3,7 @@ package runstate
 // Event kinds a run's stream carries outside the job and run state rules. EventSecretPreflightRefused records the
 // plan a run's required secrets refused, with the scope each is missing from and the command that sets it.
 const (
+	EventMemoServed             = "memo_served"
 	EventAdmissionQueued        = "job_admission_queued"
 	EventAdmissionGranted       = "job_admission_granted"
 	EventDebugPaused            = "debug.paused"

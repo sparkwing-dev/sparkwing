@@ -293,6 +293,21 @@ func transitionNodeBillingTx(ctx context.Context, tx *storeTx, team Team, row ru
 		if change.Cause == runstate.CauseLeaseLapse && row.LeaseExpiresAt != nil && row.LeaseExpiresAt.Before(now) {
 			now = *row.LeaseExpiresAt
 		}
+		if change.Extra.BodySkipped == "memo" && row.ApplicationRetries == 0 {
+			verified, err := memoBillingVerifiedTx(ctx, tx, team, row)
+			if err != nil {
+				return err
+			}
+			if !verified {
+				return settleUnitBillingTx(ctx, tx, team, unit, int64(row.Generation), now)
+			}
+			a, err := unitBillingAwardTx(ctx, tx, team, unit, int64(row.Generation))
+			if err != nil || a == nil || a.settled.Valid {
+				return err
+			}
+			_, err = accountBillingAwardWithSkipTx(ctx, tx, team, a.provenance.ReservationID, now, true, true)
+			return err
+		}
 		return settleUnitBillingTx(ctx, tx, team, unit, int64(row.Generation), now)
 	}
 	return nil

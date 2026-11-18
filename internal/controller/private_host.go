@@ -209,6 +209,12 @@ func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request,
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
+	if values := r.Header.Values(controllerwire.NodeBodySkippedHeader); len(values) > 0 {
+		if len(values) != 1 || body.Cause != runstate.CauseReport || values[0] != "memo" && values[0] != "skip_if" {
+			return invalidEngineBody("body skip requires one executor reason on a report")
+		}
+		body.Extra.BodySkipped = values[0]
+	}
 	if err := observeNodeExit(r, &body); err != nil {
 		return err
 	}

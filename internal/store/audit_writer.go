@@ -354,6 +354,10 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 	valid, repeat := true, false
 	actorAllowed := c.Actor.system == ""
 	switch p := payload.(type) {
+	case auditMemoServed:
+		actorAllowed = c.Actor.system == auditController
+		ev.Kind, ev.SubjectID, ev.RunID = "memo_served", p.Attempt.String(), p.RunID
+		valid = c.Team != "" && p.RunID != "" && p.Attempt != (auditDigest{}) && p.Receipt != (auditDigest{})
 	case auditAdmission:
 		actorAllowed = actorAllowed || auditOneOf(c.Actor.system, string(auditController), string(auditBreakGlass))
 		ev.Kind, ev.SubjectID, ev.Account = BusinessEventAccountAdmitted, p.AccountID, p.AccountID

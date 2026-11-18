@@ -12,7 +12,7 @@ import (
 
 func commitTestBlob(t *testing.T, tenant *Tenant, intent blob.UploadIntent) (blob.Receipt, error) {
 	t.Helper()
-	rewriteSchemaExec(t, tenant.s.db, "INSERT INTO storage_quotas(team,updated_at) VALUES (?,1) ON CONFLICT(team) DO NOTHING", tenant.team)
+	tenant.s.testOnlyExec(t, "INSERT INTO storage_quotas(team,updated_at) VALUES (?,1) ON CONFLICT(team) DO NOTHING", tenant.team)
 	ticket, err := tenant.ReserveBlobUpload(t.Context(), UploadReservationRequest{ID: rand.Text(), Intent: intent, ExpiresAt: tenant.s.now().Add(time.Hour)})
 	if err != nil {
 		return blob.Receipt{}, err

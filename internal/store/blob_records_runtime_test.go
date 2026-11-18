@@ -54,7 +54,7 @@ func blobRecordFixture(t *testing.T) (*Store, *blobRecords, blob.UploadIntent) {
 func setBlobRecordRef(t *testing.T, s *Store, prefix string) {
 	t.Helper()
 	var body []byte
-	if err := s.db.QueryRow("SELECT authority_json FROM capabilities WHERE prefix=?", prefix).Scan(&body); err != nil {
+	if err := s.queryRow(t.Context(), "SELECT authority_json FROM capabilities WHERE prefix=?", prefix).Scan(&body); err != nil {
 		t.Fatal(err)
 	}
 	var record CapabilityRecord
@@ -68,8 +68,8 @@ func setBlobRecordRef(t *testing.T, s *Store, prefix string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rewriteSchemaExec(t, s.db, "UPDATE capabilities SET authority_json=?,ref_scope=? WHERE prefix=?", body, scope, prefix)
-	rewriteSchemaExec(t, s.db, "UPDATE runs SET request_json=? WHERE team='a' AND id='run'", []byte(`{"version":1,"request":{"git":{"ref":"main"}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`))
+	s.testOnlyExec(t, "UPDATE capabilities SET authority_json=?,ref_scope=? WHERE prefix=?", body, scope, prefix)
+	s.testOnlyExec(t, "UPDATE runs SET request_json=? WHERE team='a' AND id='run'", []byte(`{"version":1,"request":{"git":{"ref":"main"}},"provenance":{"trust":"asserted","ref":"main","pipeline":"ci","writer":"account/fixture"}}`))
 }
 
 func blobOutputRequest(intent blob.UploadIntent) blob.CommitRecordRequest {

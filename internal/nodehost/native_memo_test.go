@@ -151,6 +151,24 @@ func nativeExecutorMemoRuns(t *testing.T, repo runspec.RepoKey) {
 		if err != nil || row.Status != runstate.StatusDone || row.Outcome != want || row.Attempt != 1 || row.ClaimedBy != "" || row.OutputRecord == nil || row.ManifestRecord == nil || bodies != wantBodies {
 			t.Fatalf("run=%d row=%+v bodies=%d error=%v", run, row, bodies, err)
 		}
+		events, err := f.Tenant.ReadStateEvents(ctx, f.Input.RunID, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range events {
+			if event.Kind != "job_memoized" && event.Kind != "job_succeeded" {
+				continue
+			}
+			var report struct {
+				BodySkipped string `json:"body_skipped"`
+			}
+			if err := json.Unmarshal(event.Payload, &report); err != nil {
+				t.Fatal(err)
+			}
+			if (report.BodySkipped == "memo") != (run == 1) {
+				t.Fatalf("run=%d executor evidence=%q", run, report.BodySkipped)
+			}
+		}
 		attempt := runspec.AttemptIdentity{Team: request.Team, RunID: f.Input.RunID, NodeID: job.ID, Attempt: int64(row.Attempt), Generation: int64(row.Generation)}
 		// The scope the claim's grant sealed: its runner is a long-lived host.
 		granted, err := outputs.Bind(ctx, input)

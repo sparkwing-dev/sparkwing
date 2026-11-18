@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"math"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -50,6 +51,9 @@ const (
 // validateEventKind reports [errInvalidEventKind] unless kind is 1 to
 // [maxEventKindBytes] bytes of [A-Za-z0-9_.:-].
 func validateEventKind(kind string) error {
+	if kind == runstate.EventMemoServed {
+		return fmt.Errorf("%w: reserved controller event", errInvalidEventKind)
+	}
 	if kind == "" || len(kind) > maxEventKindBytes {
 		return fmt.Errorf("%w: length %d, want 1 to %d bytes", errInvalidEventKind, len(kind), maxEventKindBytes)
 	}

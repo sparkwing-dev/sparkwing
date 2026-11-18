@@ -79,6 +79,7 @@ type NodeInput struct {
 	Preparation   []source.Timing
 	processRevoke func() error
 	exitedAt      *time.Time
+	bodySkipped   string
 	Storage       StorageBinding
 	Engine        engine.Resolved
 	Accepted      AcceptedRun

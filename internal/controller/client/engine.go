@@ -70,6 +70,9 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 	if command, ok := input.(runstate.NodeCommandPayload); ok && command.Extra.ExitedAt != nil {
 		req.Header.Set(controllerwire.NodeExitedAtHeader, command.Extra.ExitedAt.UTC().Format(time.RFC3339Nano))
 	}
+	if command, ok := input.(runstate.NodeCommandPayload); ok && command.Extra.BodySkipped != "" {
+		req.Header.Set(controllerwire.NodeBodySkippedHeader, command.Extra.BodySkipped)
+	}
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

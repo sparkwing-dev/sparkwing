@@ -64,6 +64,7 @@ func (c RetryNode) nodeChange() nodeTransition {
 
 // ReportNode requests the report edge.
 type ReportNode struct {
+	BodySkipped   string
 	ExitedAt      *time.Time
 	Ref           runspec.NodeRef
 	Actor         runstate.Actor
@@ -73,7 +74,7 @@ type ReportNode struct {
 }
 
 func (c ReportNode) nodeChange() nodeTransition {
-	return nodeTransition{Ref: c.Ref, Actor: c.Actor, SourceAttempt: c.SourceAttempt, To: c.Outcome, Cause: runstate.CauseReport, Extra: transitionExtra{Result: c.Result, ExitedAt: c.ExitedAt}}
+	return nodeTransition{Ref: c.Ref, Actor: c.Actor, SourceAttempt: c.SourceAttempt, To: c.Outcome, Cause: runstate.CauseReport, Extra: transitionExtra{Result: c.Result, ExitedAt: c.ExitedAt, BodySkipped: c.BodySkipped}}
 }
 
 // ReadyNode requests the release edge.
@@ -226,7 +227,7 @@ func NodeCommandFromPayload(body runstate.NodeCommandPayload, ref runspec.NodeRe
 	case runstate.CauseRetry:
 		command = RetryNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt, Result: body.Extra.Result, RetryAt: body.Extra.RetryAt, ExitedAt: body.Extra.ExitedAt}
 	case runstate.CauseReport:
-		command = ReportNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt, Outcome: body.To, Result: body.Extra.Result, ExitedAt: body.Extra.ExitedAt}
+		command = ReportNode{Ref: ref, Actor: actor, SourceAttempt: body.SourceAttempt, Outcome: body.To, Result: body.Extra.Result, ExitedAt: body.Extra.ExitedAt, BodySkipped: body.Extra.BodySkipped}
 	case runstate.CauseRelease:
 		if body.To == runstate.NodeReady {
 			command = ReadyNode{Ref: ref, Actor: actor}
@@ -273,6 +274,6 @@ func NodeCommandPayloadFor(command NodeCommand) (runstate.NodeCommandPayload, er
 	}
 	c := command.nodeChange()
 	return runstate.NodeCommandPayload{To: c.To, Cause: c.Cause, SourceAttempt: c.SourceAttempt, Extra: runstate.NodeCommandExtra{
-		OwnerPolicy: c.Extra.OwnerPolicy, Result: c.Extra.Result, Materialize: c.Extra.Materialize, Approval: c.Extra.Approval, RetryAt: c.Extra.RetryAt, Publication: c.Extra.Publication, ExitedAt: c.Extra.ExitedAt,
+		BodySkipped: c.Extra.BodySkipped, OwnerPolicy: c.Extra.OwnerPolicy, Result: c.Extra.Result, Materialize: c.Extra.Materialize, Approval: c.Extra.Approval, RetryAt: c.Extra.RetryAt, Publication: c.Extra.Publication, ExitedAt: c.Extra.ExitedAt,
 	}}, nil
 }

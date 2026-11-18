@@ -61,6 +61,9 @@ const RunnerMaxConcurrentHeader = "X-Sparkwing-Max-Concurrent"
 // NodeExitedAtHeader carries the observed process exit without changing the node command body.
 const NodeExitedAtHeader = "X-Sparkwing-Exited-At"
 
+// NodeBodySkippedHeader carries executor evidence through the private host transport.
+const NodeBodySkippedHeader = "X-Sparkwing-Body-Skipped"
+
 // ClaimRequest proposes selectors, labels and free capacity for a server-authorized award.
 type ClaimRequest struct {
 	// MaxConcurrent reports configured capacity for inventory; it grants no slots.

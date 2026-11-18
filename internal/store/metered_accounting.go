@@ -227,6 +227,10 @@ func finishBillableIntervalTx(ctx context.Context, tx *storeTx, team Team, reser
 }
 
 func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservation string, through time.Time, final bool) (capability.BillingSettlement, error) {
+	return accountBillingAwardWithSkipTx(ctx, tx, team, reservation, through, final, false)
+}
+
+func accountBillingAwardWithSkipTx(ctx context.Context, tx *storeTx, team Team, reservation string, through time.Time, final, bodySkipped bool) (capability.BillingSettlement, error) {
 	l, err := lockLedgerTx(ctx, tx, team)
 	if err != nil {
 		return capability.BillingSettlement{}, err
@@ -250,6 +254,9 @@ func accountBillingAwardTx(ctx context.Context, tx *storeTx, team Team, reservat
 		result, err = capability.SettleBilling(a.provenance, intervals)
 		if err != nil {
 			return result, authorityError(hosterr.IntegrityFailure, "invalid persisted billing: "+err.Error())
+		}
+		if final && bodySkipped && a.provenance.ExecutorClass == TierCloud && a.provenance.Unit == capability.BillingJob && len(intervals) == 1 {
+			result.BillableSeconds = 0
 		}
 		if err := validateBillingCalculation(a, intervals, result); err != nil {
 			return result, err

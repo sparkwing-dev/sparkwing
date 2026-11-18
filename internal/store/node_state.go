@@ -120,6 +120,7 @@ func nodeTransitions() []nodeEdge {
 
 // transitionExtra carries only the columns owned by a particular edge; mismatched fields are refused.
 type transitionExtra struct {
+	BodySkipped string
 	Publication *runspec.PublishedAttempt
 	OwnerPolicy *runstate.OwnerPolicyResult
 	Result      *runstate.NodeResult
@@ -367,6 +368,12 @@ func transitionNodeStateTx(ctx context.Context, tx *storeTx, team Team, change n
 		return runstate.Applied{}, errors.New("job transition has no event")
 	}
 	var payload any = change.Extra.Result
+	if change.Extra.BodySkipped != "" {
+		payload = struct {
+			BodySkipped string `json:"body_skipped"`
+			*runstate.NodeResult
+		}{change.Extra.BodySkipped, change.Extra.Result}
+	}
 	if change.Cause == runstate.CauseRetry {
 		payload = struct {
 			Attempt runspec.AttemptOrdinal `json:"attempt"`
@@ -478,6 +485,9 @@ func stateHash(value any) (string, error) {
 }
 
 func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, change nodeTransition, edge nodeEdge, now time.Time) error {
+	if reason := change.Extra.BodySkipped; reason != "" && (change.Cause != runstate.CauseReport || reason != "memo" && reason != "skip_if" || reason == "memo" && change.To != runstate.NodeMemoized || reason == "skip_if" && change.To != runstate.NodeSkipped) {
+		return authorityError(apierr.BadRequest, "body skip evidence conflicts with report")
+	}
 	if change.Extra.Result != nil {
 		if change.Extra.Result.Failure != nil && change.Extra.Result.Outcome != runstate.NodeFailed {
 			return authorityError(apierr.BadRequest, "recorded failure requires a failed outcome")
