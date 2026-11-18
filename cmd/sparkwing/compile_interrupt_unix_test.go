@@ -20,13 +20,14 @@ import (
 // A fake `go` that records its own pid and a grandchild's, then waits. It
 // stands in for a real compile: the tree the toolchain leaves behind is what
 // this test is about, and a real `go build` cannot be paused mid-link.
+// Duplicate readiness records model overlapping Go commands without a scheduling race.
 const fakeGoScript = `#!/bin/sh
 if [ "$1" = env ]; then printf 'auto\ngo1.26.6\noff\n'; exit 0; fi
 exec 9> "$TEST_COMPILER_LIFETIME"
 sleep 600 &
 echo $! > "$TEST_GRANDCHILD_PID"
 echo $$ > "$TEST_GO_PID"
-printf 'ready\n' >&9
+printf 'ready\nready\n' >&9
 wait
 `
 
@@ -119,7 +120,8 @@ func TestMaterializeStopsTheToolchainOnTermination(t *testing.T) {
 	if err := lifetime.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := io.ReadAll(ready); err != nil || len(data) != 0 {
+	// safety: EOF requires every inherited writer to close, regardless of buffered readiness.
+	if data, err := io.ReadAll(ready); err != nil {
 		t.Fatalf("the compiler or its child outlived the CLI: data=%q err=%v", data, err)
 	}
 }

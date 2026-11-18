@@ -34,7 +34,7 @@ Arm a repo's declared schedules on this host and install the OS timer
 
 Install this repository's declared schedules locally or on the selected controller.
 
-Capture the installing environment; native timers on Linux/macOS invoke __tick. Windows schedules are daemon-run.
+Capture the installing environment; native timers on Linux/macOS invoke __tick. Windows records schedules without firing them automatically.
 
 ### Flags
 

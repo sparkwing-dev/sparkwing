@@ -34,6 +34,11 @@ step on either path.
 
 ## Install
 
+Native Windows is experimental and unsupported for production. WSL2 with
+systemd enabled is the supported way to run Sparkwing on Windows. Use the Linux
+installer below. See [known limitations](docs/known-limitations.md#windows-is-experimental)
+for native Windows limits.
+
 ```sh
 curl -fsSL https://sparkwing.dev/install.sh | sh
 ```
@@ -160,7 +165,8 @@ For scheduled local work, scaffold `--template scheduled-report`, review and
 commit the files, then run `sparkwing schedules install --profile=`. Installation
 pins the pipeline and arms its declared cadence through the native timer on
 Linux/macOS. Windows installation records schedules but does not fire them
-automatically. Windows support is experimental; use WSL2 with systemd. The machine must be awake for timer-started work.
+automatically. On Windows, use WSL2 with systemd for supported scheduling.
+The machine must be awake for timer-started work.
 Inspect it with `sparkwing schedules list --profile=`. See
 [`docs/schedules.md`](./docs/schedules.md).
 
