@@ -172,6 +172,9 @@ func TestStartupSealingBootCost(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if phase == "plaintext" && result.PlaintextRunArguments != 3000 || phase != "plaintext" && result.AlreadySealed != 3000 {
+			t.Fatalf("incomplete boot scan: %+v", result)
+		}
 		t.Logf("boot_scan phase=%s rows=3000 elapsed=%s sealed=%d already_sealed=%d", phase, elapsed, result.PlaintextRunArguments, result.AlreadySealed)
 	}
 }
@@ -186,7 +189,13 @@ func TestStartupSealingRacesOperator(t *testing.T) {
 	a.Access = route.Access[0]
 	start := make(chan struct{})
 	errs := make(chan error, 2)
-	go func() { <-start; _, err := st.AsOperator().SealPlaintextValues(t.Context(), cipher); errs <- err }()
+	startupResult := make(chan store.SealedRotation, 1)
+	go func() {
+		<-start
+		result, err := st.AsOperator().SealPlaintextValues(t.Context(), cipher)
+		startupResult <- result
+		errs <- err
+	}()
 	go func() {
 		<-start
 		_, err := st.AsOperator().RotateSealedValues(t.Context(), a, cipher, false)
@@ -197,6 +206,10 @@ func TestStartupSealingRacesOperator(t *testing.T) {
 		if err := <-errs; err != nil {
 			t.Fatal(err)
 		}
+	}
+	startup := <-startupResult
+	if startup.PlaintextRunArguments+startup.AlreadySealed != 201 {
+		t.Fatalf("startup did not scan every racing row: %+v", startup)
 	}
 	result, err := st.AsOperator().RotateSealedValues(t.Context(), a, cipher, true)
 	if err != nil || result.PlaintextRunArguments != 0 || len(result.Unreadable) != 0 || result.RunArguments != 201 {
