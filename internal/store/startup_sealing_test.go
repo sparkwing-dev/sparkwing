@@ -1,0 +1,240 @@
+package store_test
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
+	"os"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+)
+
+func startupFixture(t *testing.T, count int) (*store.Store, *secrets.Cipher, *storetest.Target) {
+	t.Helper()
+	target := storetest.NewSQLite(t)
+	if os.Getenv("SPARKWING_TEST_STORE") == "postgres" {
+		target = storetest.NewPostgres(t)
+	}
+	st := target.Open(t)
+	cipher, err := secrets.NewCipher(bytes.Repeat([]byte{7}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := st.DB().BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	for i := range count {
+		_, err = tx.ExecContext(t.Context(), storetest.Rebind(st, `INSERT INTO cron_schedules(team,id,repo_path,repo_key,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,args) VALUES (?,?, '/repo','git:example.com/project','nightly','0 * * * *','UTC','skip',0,1,1,1,?)`), store.DefaultTeam, fmt.Sprintf("schedule-%05d", i), `{"token":"startup-canary-739"}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return st, cipher, target
+}
+
+func startupRaw(t *testing.T, st *store.Store) string {
+	t.Helper()
+	var raw string
+	if err := st.DB().QueryRowContext(t.Context(), `SELECT args FROM cron_schedules ORDER BY id LIMIT 1`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestStartupSealingPlaintextAndSecondPass(t *testing.T) {
+	st, cipher, _ := startupFixture(t, 3)
+	result, err := st.AsOperator().SealPlaintextValues(t.Context(), cipher)
+	if err != nil || result.PlaintextRunArguments != 3 {
+		t.Fatalf("first pass: %+v %v", result, err)
+	}
+	first := startupRaw(t, st)
+	if bytes.Contains([]byte(first), []byte("startup-canary-739")) {
+		t.Fatal("plaintext persisted")
+	}
+	result, err = st.AsOperator().SealPlaintextValues(t.Context(), cipher)
+	if err != nil || result.PlaintextRunArguments != 0 || result.AlreadySealed != 3 || first != startupRaw(t, st) {
+		t.Fatalf("second pass changed rows: %+v %v", result, err)
+	}
+	if err := st.AsOperator().RecordStartupSealing(t.Context(), result, "success"); err != nil {
+		t.Fatal(err)
+	}
+	var attrs, actor string
+	if err := st.DB().QueryRowContext(t.Context(), `SELECT attrs,actor FROM audit_events WHERE kind='secrets.startup_sealed'`).Scan(&attrs, &actor); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains([]byte(attrs), []byte("startup-canary")) || actor != "controller" {
+		t.Fatalf("audit: %s %s", actor, attrs)
+	}
+}
+
+func TestStartupSealingConcurrentPasses(t *testing.T) {
+	st, cipher, target := startupFixture(t, 201)
+	second := target.Open(t)
+	start := make(chan struct{})
+	results := make(chan store.SealedRotation, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, instance := range []*store.Store{st, second} {
+		wg.Go(func() {
+			<-start
+			result, err := instance.AsOperator().SealPlaintextValues(t.Context(), cipher)
+			results <- result
+			errs <- err
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	sealed := 0
+	for result := range results {
+		sealed += result.PlaintextRunArguments
+	}
+	if sealed != 201 {
+		t.Fatalf("sealed %d documents, want 201", sealed)
+	}
+}
+
+func TestStartupSealingUnreadableAndPreviousKey(t *testing.T) {
+	st, old, _ := startupFixture(t, 3)
+	if _, err := st.AsOperator().SealPlaintextValues(t.Context(), old); err != nil {
+		t.Fatal(err)
+	}
+	current, err := secrets.NewCipherWithPrevious(bytes.Repeat([]byte{8}, secrets.KeySize), bytes.Repeat([]byte{7}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := startupRaw(t, st)
+	if _, err := st.DB().ExecContext(t.Context(), `UPDATE cron_schedules SET args='{' WHERE id='schedule-00002'`); err != nil {
+		t.Fatal(err)
+	}
+	result, err := st.AsOperator().SealPlaintextValues(t.Context(), current)
+	if err != nil || result.PreviousKeyOnly != 2 || len(result.Unreadable) != 1 || result.PlaintextRunArguments != 0 || before != startupRaw(t, st) {
+		t.Fatalf("result: %+v %v", result, err)
+	}
+}
+
+func TestStartupSealingCancelledPass(t *testing.T) {
+	st, cipher, _ := startupFixture(t, 201)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := st.AsOperator().SealPlaintextValues(ctx, cipher); err == nil {
+		t.Fatal("cancelled scan succeeded")
+	}
+	result, err := st.AsOperator().SealPlaintextValues(t.Context(), cipher)
+	if err != nil || result.PlaintextRunArguments != 201 {
+		t.Fatalf("cancelled pass changed rows: %+v %v", result, err)
+	}
+}
+
+func TestStartupSealingBootCost(t *testing.T) {
+	st, cipher, _ := startupFixture(t, 3000)
+	for _, phase := range []string{"plaintext", "sealed", "sealed-again"} {
+		start := time.Now()
+		result, err := st.AsOperator().SealPlaintextValues(t.Context(), cipher)
+		elapsed := time.Since(start)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("boot_scan phase=%s rows=3000 elapsed=%s sealed=%d already_sealed=%d", phase, elapsed, result.PlaintextRunArguments, result.AlreadySealed)
+	}
+}
+
+func TestStartupSealingRacesOperator(t *testing.T) {
+	st, cipher, _ := startupFixture(t, 201)
+	a := teststore.OperatorAuthorized(t, st, "")
+	route, ok := capability.LookupRoute("POST", "/api/v1/operator/secrets/rotate")
+	if !ok {
+		t.Fatal("rotation route missing")
+	}
+	a.Access = route.Access[0]
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	go func() { <-start; _, err := st.AsOperator().SealPlaintextValues(t.Context(), cipher); errs <- err }()
+	go func() {
+		<-start
+		_, err := st.AsOperator().RotateSealedValues(t.Context(), a, cipher, false)
+		errs <- err
+	}()
+	close(start)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := st.AsOperator().RotateSealedValues(t.Context(), a, cipher, true)
+	if err != nil || result.PlaintextRunArguments != 0 || len(result.Unreadable) != 0 || result.RunArguments != 201 {
+		t.Fatalf("racing rotation damaged rows: %+v %v", result, err)
+	}
+}
+
+func TestStartupSealingCoversEveryArgumentColumn(t *testing.T) {
+	st, cipher, _ := startupFixture(t, 1)
+	ctx := t.Context()
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, query), args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := `{"token":"startup-canary-739"}`
+	exec(`UPDATE cron_schedules SET override_args=?,override_base=?,consent_json=?`, body, body, body)
+	exec(`INSERT INTO cron_fires(team,id,schedule_id,due_at,decided_at,outcome,args) VALUES (?,'fire','schedule-00000',1,1,'missed',?)`, store.DefaultTeam, body)
+	cronRun(t, st, "startup-run")
+	exec(`UPDATE runs SET request_json=?,spec_json=?,plan_json=? WHERE id='startup-run'`, []byte(`{"request":{"requested_args":{"token":"startup-canary-739"}}}`), []byte(`{"resolved":{"args":{"token":"startup-canary-739"}}}`), []byte(`{"jobs":[{"arguments":[{"default":"startup-canary-739"}]}]}`))
+	exec(`INSERT INTO nodes(team,run_id,node_id,status,spec_json,expansion_body,expansion_registration) VALUES (?,'startup-run','job','pending',?,?,?)`, store.DefaultTeam, []byte(`{"arguments":[{"default":"startup-canary-739"}]}`), []byte(`{"jobs":[{"arguments":[{"default":"startup-canary-739"}]}]}`), []byte(`{"defaults":[{"raw":"startup-canary-739"}]}`))
+	result, err := st.AsOperator().SealPlaintextValues(ctx, cipher)
+	if err != nil || result.PlaintextRunArguments != 11 {
+		t.Fatalf("all columns: %+v %v", result, err)
+	}
+	for _, query := range []string{`SELECT args,override_args,override_base,consent_json FROM cron_schedules`, `SELECT args FROM cron_fires`, `SELECT request_json,spec_json,plan_json FROM runs`, `SELECT spec_json,expansion_body,expansion_registration FROM nodes`} {
+		rows, err := st.DB().QueryContext(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			values := make([][]byte, len(columns))
+			dest := make([]any, len(columns))
+			for i := range dest {
+				dest[i] = &values[i]
+			}
+			if err := rows.Scan(dest...); err != nil {
+				t.Fatal(err)
+			}
+			for _, value := range values {
+				if bytes.Contains(value, []byte("startup-canary-739")) {
+					t.Fatalf("plaintext remains: %s", query)
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		rows.Close()
+	}
+	result, err = st.AsOperator().SealPlaintextValues(ctx, cipher)
+	if err != nil || result.PlaintextRunArguments != 0 || result.AlreadySealed != 11 {
+		t.Fatalf("all columns second pass: %+v %v", result, err)
+	}
+}

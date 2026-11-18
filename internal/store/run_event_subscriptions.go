@@ -267,7 +267,7 @@ func (r *sealedRotationTx) runEventSubscriptions(ctx context.Context, team Team)
 	}
 	for _, sub := range subs {
 		value, err := r.reseal(secrets.PurposeEventSigning, team, RunEventSecretName(sub.ID), "", false, true, sub.Secret)
-		if errors.Is(err, errSealedUnreadable) {
+		if errors.Is(err, errSealedUnreadable) || errors.Is(err, errSealedUnchanged) {
 			continue
 		}
 		if err != nil {

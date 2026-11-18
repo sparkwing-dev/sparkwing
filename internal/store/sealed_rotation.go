@@ -16,6 +16,7 @@ const sealedRotationRunPage = 200
 
 // SealedRotation counts the envelopes an operator rotation resealed and names those no configured key opened.
 type SealedRotation struct {
+	AlreadySealed   int `json:"already_sealed"`
 	Secrets         int `json:"secrets"`
 	GitCredentials  int `json:"git_credentials"`
 	RunEnvironments int `json:"run_environments"`
@@ -45,20 +46,30 @@ type SealedRowName struct {
 }
 
 type sealedRotationTx struct {
-	tx     *storeTx
-	cipher SealedRotationCipher
-	verify bool
-	out    SealedRotation
+	tx            *storeTx
+	cipher        SealedRotationCipher
+	verify        bool
+	plaintextOnly bool
+	out           SealedRotation
 }
+
+var errSealedUnchanged = errors.New("sealed value left unchanged")
 
 var errSealedUnreadable = errors.New("sealed value opens under no configured key")
 
 func (r *sealedRotationTx) reseal(purpose secrets.Purpose, team Team, name, scope string, shared, masked bool, envelope string) (string, error) {
 	plain, err := r.cipher.OpenBoundCurrent(purpose, string(team), name, scope, shared, masked, envelope)
+	if err == nil && r.plaintextOnly {
+		r.out.AlreadySealed++
+		return "", errSealedUnchanged
+	}
 	if err != nil && !errors.Is(err, secrets.ErrKeyRefused) {
 		plain, err = r.cipher.OpenBound(purpose, string(team), name, scope, shared, masked, envelope)
 		if err == nil {
 			r.out.PreviousKeyOnly++
+			if r.plaintextOnly {
+				return "", errSealedUnchanged
+			}
 		}
 	}
 	if err != nil && !errors.Is(err, secrets.ErrKeyRefused) {
@@ -82,6 +93,15 @@ func scopeName(purpose secrets.Purpose, scope string) string {
 // signing keys, under the cipher's current key. Each step commits on its own and repeats safely.
 // Verify only counts, reporting how many rows still open under the previous key alone.
 func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authorized, cipher SealedRotationCipher, verify bool) (SealedRotation, error) {
+	return o.rotateSealedValues(ctx, &a, cipher, verify, false)
+}
+
+// SealPlaintextValues seals legacy argument documents without rotating existing envelopes.
+func (o *Operator) SealPlaintextValues(ctx context.Context, cipher SealedRotationCipher) (SealedRotation, error) {
+	return o.rotateSealedValues(ctx, nil, cipher, false, true)
+}
+
+func (o *Operator) rotateSealedValues(ctx context.Context, a *capability.Authorized, cipher SealedRotationCipher, verify, plaintextOnly bool) (SealedRotation, error) {
 	if cipher == nil {
 		return SealedRotation{}, authorityError(hosterr.Unavailable, "bound secret encryption is unavailable")
 	}
@@ -90,7 +110,10 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 		var done SealedRotation
 		err := o.s.inTx(ctx, func(tx *storeTx) error {
 			if err := acquireLockSet(ctx, tx, func() lockSet {
-				set := discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+				set := lockSet{}
+				if a != nil {
+					set = discoverAuthorityLocks(ctx, tx, []capability.AuthorityRef{a.Principal.Authority})
+				}
 				for _, team := range teams {
 					set.add(lockTeam, true, string(team))
 				}
@@ -98,10 +121,12 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 			}); err != nil {
 				return err
 			}
-			if err := sealedRotationAuthorityTx(ctx, tx, a); err != nil {
-				return err
+			if a != nil {
+				if err := sealedRotationAuthorityTx(ctx, tx, *a); err != nil {
+					return err
+				}
 			}
-			r := &sealedRotationTx{tx: tx, cipher: cipher, verify: verify}
+			r := &sealedRotationTx{tx: tx, cipher: cipher, verify: verify, plaintextOnly: plaintextOnly}
 			if err := fn(r); err != nil {
 				return err
 			}
@@ -111,6 +136,7 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 		if err != nil {
 			return err
 		}
+		total.AlreadySealed += done.AlreadySealed
 		total.Secrets += done.Secrets
 		total.GitCredentials += done.GitCredentials
 		total.RunEnvironments += done.RunEnvironments
@@ -127,14 +153,14 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 		teams, err = rotationTeamsTx(ctx, r.tx)
 		return err
 	}); err != nil {
-		return SealedRotation{}, err
+		return total, err
 	}
 	for _, team := range teams {
 		if err := step(func(r *sealedRotationTx) error { return r.tenantCredentials(ctx, &Tenant{s: o.s, team: team}) }, team); err != nil {
-			return SealedRotation{}, err
+			return total, err
 		}
 		if err := step(func(r *sealedRotationTx) error { return r.runEventSubscriptions(ctx, team) }, team); err != nil {
-			return SealedRotation{}, err
+			return total, err
 		}
 		for _, fires := range []bool{false, true} {
 			for after, more := "", true; more; {
@@ -142,7 +168,7 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 					after, more, err = r.scheduleArguments(ctx, team, after, fires)
 					return err
 				}, team); err != nil {
-					return SealedRotation{}, err
+					return total, err
 				}
 			}
 		}
@@ -151,7 +177,7 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 				after, more, err = r.runArguments(ctx, team, after)
 				return err
 			}); err != nil {
-				return SealedRotation{}, err
+				return total, err
 			}
 		}
 		for _, local := range []bool{false, true} {
@@ -160,14 +186,14 @@ func (o *Operator) RotateSealedValues(ctx context.Context, a capability.Authoriz
 					after, more, err = r.runEnvironments(ctx, team, after, local)
 					return err
 				}); err != nil {
-					return SealedRotation{}, err
+					return total, err
 				}
 			}
 		}
 	}
 	for _, key := range []string{metaKeySessionCSRFKey, metaKeyLocalObjects} {
 		if err := step(func(r *sealedRotationTx) error { return r.settingKey(ctx, key) }); err != nil {
-			return SealedRotation{}, err
+			return total, err
 		}
 	}
 	return total, nil
@@ -225,7 +251,7 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 	}
 	for _, row := range rows {
 		value, err := r.reseal(secrets.PurposeSecret, t.team, row.Name, row.SealScope(), row.Shared, row.Masked, row.Value)
-		if errors.Is(err, errSealedUnreadable) {
+		if errors.Is(err, errSealedUnreadable) || errors.Is(err, errSealedUnchanged) {
 			continue
 		}
 		if err != nil {
@@ -245,7 +271,7 @@ func (r *sealedRotationTx) tenantCredentials(ctx context.Context, t *Tenant) err
 	}
 	for _, row := range credentials {
 		value, err := r.reseal(secrets.PurposeGitCredential, t.team, "git-credential:"+row.Host, row.CredentialScope(), false, true, row.Secret)
-		if errors.Is(err, errSealedUnreadable) {
+		if errors.Is(err, errSealedUnreadable) || errors.Is(err, errSealedUnchanged) {
 			continue
 		}
 		if err != nil {
@@ -289,7 +315,7 @@ func (r *sealedRotationTx) runEnvironments(ctx context.Context, team Team, after
 	}
 	for _, e := range page {
 		value, err := r.reseal(secrets.PurposeRunEnvironment, team, e.run, scope, false, true, e.value)
-		if errors.Is(err, errSealedUnreadable) {
+		if errors.Is(err, errSealedUnreadable) || errors.Is(err, errSealedUnchanged) {
 			continue
 		}
 		if err != nil {
@@ -323,7 +349,7 @@ func (r *sealedRotationTx) settingKey(ctx context.Context, key string) error {
 		return err
 	}
 	value, err := r.reseal(secrets.PurposeSetting, "", key, "settings", false, true, string(envelope))
-	if errors.Is(err, errSealedUnreadable) {
+	if errors.Is(err, errSealedUnreadable) || errors.Is(err, errSealedUnchanged) {
 		return nil
 	}
 	if err != nil {
@@ -375,7 +401,7 @@ func (r *sealedRotationTx) runArguments(ctx context.Context, team Team, after st
 			}},
 		} {
 			value, err := column.next()
-			if errors.Is(err, errSealedUnreadable) || err == nil && value == nil {
+			if (errors.Is(err, errSealedUnreadable) || errors.Is(err, errSealedUnchanged)) || err == nil && value == nil {
 				continue
 			}
 			if err != nil {
@@ -430,7 +456,7 @@ func (r *sealedRotationTx) expansionArguments(ctx context.Context, team Team, ru
 			} else {
 				value, err = r.argumentBody(team, run, column.scope, column.raw, true)
 			}
-			if errors.Is(err, errSealedUnreadable) || err == nil && value == nil {
+			if (errors.Is(err, errSealedUnreadable) || errors.Is(err, errSealedUnchanged)) || err == nil && value == nil {
 				continue
 			}
 			if err != nil {
@@ -441,7 +467,7 @@ func (r *sealedRotationTx) expansionArguments(ctx context.Context, team Team, ru
 			}
 		}
 		value, err := rotateRunDocument(r, team, run, expansionArgumentsScope(e.node), e.raw, registrationArgumentSlots)
-		if errors.Is(err, errSealedUnreadable) || err == nil && value == nil {
+		if (errors.Is(err, errSealedUnreadable) || errors.Is(err, errSealedUnchanged)) || err == nil && value == nil {
 			continue
 		}
 		if err != nil {
@@ -456,12 +482,15 @@ func (r *sealedRotationTx) expansionArguments(ctx context.Context, team Team, ru
 
 // safety: a nil replacement leaves raw as stored, which verify relies on.
 func rotateRunDocument[T any](r *sealedRotationTx, team Team, run, scope string, raw []byte, slots func(*T) argumentSlots) ([]byte, error) {
+	if err := r.checkArgumentJSON(team, run, raw); err != nil {
+		return nil, err
+	}
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
 	}
 	envelope, err := sealedArgumentsEnvelope(raw)
 	if err != nil {
-		return nil, err
+		return nil, r.unreadableArgument(team, run)
 	}
 	if envelope != "" {
 		value, err := r.reseal(secrets.PurposeRunArguments, team, run, scope, false, true, envelope)
@@ -476,7 +505,7 @@ func rotateRunDocument[T any](r *sealedRotationTx, team Team, run, scope string,
 	}
 	var doc T
 	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, err
+		return nil, r.unreadableArgument(team, run)
 	}
 	stored, sealed, err := encodeRunDocument(r.cipher, team, run, scope, doc, slots)
 	if err != nil || !sealed {
@@ -487,4 +516,17 @@ func rotateRunDocument[T any](r *sealedRotationTx, team Team, run, scope string,
 		return nil, nil
 	}
 	return stored, nil
+}
+
+func (r *sealedRotationTx) checkArgumentJSON(team Team, name string, raw []byte) error {
+	if len(raw) != 0 && !json.Valid(raw) {
+		r.out.Unreadable = append(r.out.Unreadable, SealedRowName{Purpose: secrets.PurposeRunArguments, Team: team, Name: name})
+		return errSealedUnreadable
+	}
+	return nil
+}
+
+func (r *sealedRotationTx) unreadableArgument(team Team, name string) error {
+	r.out.Unreadable = append(r.out.Unreadable, SealedRowName{Purpose: secrets.PurposeRunArguments, Team: team, Name: name})
+	return errSealedUnreadable
 }

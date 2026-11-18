@@ -6,12 +6,15 @@ import (
 )
 
 func (r *sealedRotationTx) argumentBody(team Team, name, scope string, raw []byte, job bool) ([]byte, error) {
+	if err := r.checkArgumentJSON(team, name, raw); err != nil {
+		return nil, err
+	}
 	if len(raw) == 0 || string(raw) == "null" {
 		return nil, nil
 	}
 	envelope, err := bodyArgumentsEnvelope(raw)
 	if err != nil {
-		return nil, corruptRunArguments()
+		return nil, r.unreadableArgument(team, name)
 	}
 	if envelope != "" {
 		return rotateRunDocument(r, team, name, scope, raw, bodyArgumentSlots)
@@ -75,7 +78,7 @@ func (r *sealedRotationTx) scheduleArguments(ctx context.Context, team Team, aft
 				update = `UPDATE cron_fires SET args=? WHERE team=? AND id=?`
 			}
 			value, err := r.argumentBody(team, d.id, scope, column.raw, false)
-			if errors.Is(err, errSealedUnreadable) || err == nil && value == nil {
+			if (errors.Is(err, errSealedUnreadable) || errors.Is(err, errSealedUnchanged)) || err == nil && value == nil {
 				continue
 			}
 			if err != nil {

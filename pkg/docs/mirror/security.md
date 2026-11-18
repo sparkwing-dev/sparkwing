@@ -462,10 +462,16 @@ retry, fails for that run alone. A keyed store whose key cannot be used refuses 
 rather than store the values in plaintext. A PostgreSQL controller started
 without a `secrets-key` credential has no key: it refuses every secret write,
 stores argument values, including schedules and job defaults, unencrypted, and says so
-in a startup warning. Run and schedule documents stored before argument sealing keep their plaintext
-values and still read as written. `sparkwing operator secrets rotate` seals them in
-place and reports the count as `plaintext_run_arguments`; `--verify` only
-counts them. A keyless store must receive a secrets key before rotation can seal its rows.
+in a startup warning. With a usable secrets key configured, each controller start seals legacy plaintext
+run and schedule documents in the background after migrations. No manual upgrade
+step is needed. Readiness remains available while the pass runs; operational
+failures retry with bounded backoff. Each attempt reports sanitized sealed,
+already-sealed, previous-key-only and unreadable counts in a structured log and
+system audit event. Unreadable documents remain unchanged. Previous-key envelopes
+remain for operator key rotation, so rolling back a key configuration does not
+make automatically rewritten envelopes unreadable. `sparkwing operator secrets
+rotate --verify` reports remaining plaintext and unreadable documents. A keyless
+store must receive a secrets key and restart before startup can seal its rows.
 Local sealing offers limited protection because `secrets.key` sits beside
 `state.db` with the same file permissions. Someone who can read that directory
 can read both the database and its key. Database-only backups remain protected

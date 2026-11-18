@@ -453,7 +453,11 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 		ev.Kind, ev.SubjectID = businessEventRefillOpened, p.RefillID
 	case auditSecretRelease:
 		ev.Kind, ev.SubjectID, ev.RunID, repeat = "secret.released", p.Name.String(), p.RunID, true
-	case auditOIDCScrub:
+	case auditStartupSealing:
+        actorAllowed = c.Actor.system == auditController
+        ev.Kind, ev.SubjectID, repeat = "secrets.startup_sealed", "startup", true
+        valid = p.Source == "startup" && auditOneOf(p.Outcome, "success", "failed", "cancelled") && p.Sealed >= 0 && p.AlreadySealed >= 0 && p.Unreadable >= 0 && p.PreviousKeyOnly >= 0
+    case auditOIDCScrub:
 		actorAllowed = c.Actor.system == auditController
 		ev.Kind, ev.SubjectID = "audit.oidc_scrubbed", "oidc-v1"
 		valid = p.Version == 1 && (p.Rows == 0 && p.KeyID == "" || p.Rows > 0 && len(p.KeyID) == 64)
