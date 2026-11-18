@@ -3,6 +3,7 @@ package store_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -251,5 +252,30 @@ func TestStartupSealingCoversEveryArgumentColumn(t *testing.T) {
 	result, err = st.AsOperator().SealPlaintextValues(ctx, cipher)
 	if err != nil || result.PlaintextRunArguments != 0 || result.AlreadySealed != 11 {
 		t.Fatalf("all columns second pass: %+v %v", result, err)
+	}
+}
+
+type failingStartupCipher struct {
+	*secrets.Cipher
+	calls int
+}
+
+func (c *failingStartupCipher) SealBound(p secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error) {
+	c.calls++
+	if c.calls == 201 {
+		return "", errors.New("injected batch failure")
+	}
+	return c.Cipher.SealBound(p, team, name, scope, shared, masked, plain)
+}
+
+func TestStartupSealingFailurePreservesCommittedCounts(t *testing.T) {
+	st, cipher, _ := startupFixture(t, 201)
+	result, err := st.AsOperator().SealPlaintextValues(t.Context(), &failingStartupCipher{Cipher: cipher})
+	if err == nil || result.PlaintextRunArguments != 200 {
+		t.Fatalf("partial counts: %+v %v", result, err)
+	}
+	result, err = st.AsOperator().SealPlaintextValues(t.Context(), cipher)
+	if err != nil || result.PlaintextRunArguments != 1 || result.AlreadySealed != 200 {
+		t.Fatalf("retry: %+v %v", result, err)
 	}
 }
