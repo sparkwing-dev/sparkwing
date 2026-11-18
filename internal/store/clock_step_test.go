@@ -1,13 +1,56 @@
 package store
 
 import (
+	"bytes"
+	"fmt"
+	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 )
+
+func TestBillingClockRestoreWarnsWhenFarAhead(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		for _, ahead := range []time.Duration{0, time.Minute, time.Minute + time.Nanosecond} {
+			t.Run(fmt.Sprintf("existing=%t/ahead=%s", existing, ahead), func(t *testing.T) {
+				now := time.Unix(1000, 0).UTC()
+				path := filepath.Join(t.TempDir(), "billing.db")
+				s, err := Open(path, WithTestWallClock(func() time.Time { return now }))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = s.Close() })
+				rewriteSchemaExec(t, s.db, `INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)`)
+				rewriteSchemaExec(t, s.db, `INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000,1)`)
+				reserveMetering(t, s, meteringAward("plan", "at_award"))
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+				now = now.Add(-ahead)
+				var logs bytes.Buffer
+				previous := slog.Default()
+				slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+				t.Cleanup(func() { slog.SetDefault(previous) })
+				if existing {
+					s, err = OpenExisting(t.Context(), DialectSQLite, path, WithTestWallClock(func() time.Time { return now }))
+				} else {
+					s, err = Open(path, WithTestWallClock(func() time.Time { return now }))
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				warned := strings.Contains(logs.String(), "level=WARN") && strings.Contains(logs.String(), "restored billing clock is ahead of wall time")
+				if warned != (ahead > time.Minute) {
+					t.Fatalf("ahead=%s, logs=%s", ahead, logs.String())
+				}
+			})
+		}
+	}
+}
 
 // safety: matches WSL time sync, which steps the wall clock back about 3.3 seconds every half minute.
 const backwardClockStep = 3300 * time.Millisecond

@@ -103,7 +103,7 @@ func checkStoreLauncherSync(t *testing.T, clock func() time.Time, step func()) (
 		return fmt.Errorf("release exchanged claim: %w", err)
 	}
 	var awarded, settled int64
-	if err := s.DB().QueryRowContext(ctx, `SELECT awarded_at,settled_at FROM billing_awards WHERE capability_prefix=?`, p.Capability.Prefix).Scan(&awarded, &settled); err != nil {
+	if err := s.DB().QueryRowContext(ctx, `SELECT awarded_at,settled_at FROM billing_awards WHERE capability_prefix=$1`, p.Capability.Prefix).Scan(&awarded, &settled); err != nil {
 		return err
 	}
 	if settled < awarded {

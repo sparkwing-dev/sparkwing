@@ -370,6 +370,9 @@ funds does not resume the stopped job.
 Billing checkpoints retain their last recorded time across controller restarts
 and backward clock steps. Time that was not recorded before a restart is not
 reconstructed or charged while the wall clock catches up.
+If the restored billing clock is more than one minute ahead of wall time, the
+controller logs a startup warning. Leases and billing time stay at that floor
+until wall time catches up.
 Final settlement refunds the unused part of the last slice. A later Cloud award
 can start if the remaining balance covers its first slice and the team has no
 hold. A funding refusal alone does not hold the team.

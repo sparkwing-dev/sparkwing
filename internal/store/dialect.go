@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -238,6 +239,24 @@ func (o *Operator) restoreBillingClock(ctx context.Context) error {
 		return fmt.Errorf("restore billing clock: %w", err)
 	}
 	o.s.monotonic(time.Unix(0, floor).UTC())
+	if floor > 0 && o.s.pinnedClock == nil {
+		var wall time.Time
+		switch {
+		case o.s.clock != nil && o.s.dialect == DialectSQLite:
+			wall = o.s.now()
+		case o.s.wallClock != nil:
+			wall = o.s.wallClock()
+		default:
+			var ns int64
+			if err := o.s.sqlRunner().QueryRowContext(ctx, databaseTimeSQL(o.s.dialect)).Scan(&ns); err != nil {
+				return fmt.Errorf("read restored billing clock skew: %w", err)
+			}
+			wall = time.Unix(0, ns)
+		}
+		if ahead := time.Unix(0, floor).Sub(wall); ahead > time.Minute {
+			slog.WarnContext(ctx, "restored billing clock is ahead of wall time", "ahead_by", ahead, "billing_clock", time.Unix(0, floor).UTC(), "wall_time", wall.UTC())
+		}
+	}
 	return nil
 }
 
