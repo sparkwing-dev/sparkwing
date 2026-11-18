@@ -491,6 +491,17 @@ submitted run environments, and the session signing key. To replace it:
    that needed the previous key), `plaintext_run_arguments` (run and schedule documents it
    sealed for the first time) and any row neither key opens. It is safe to
    repeat, including after an interruption.
+
+   In the operator console, open **Re-encrypt secrets**. Click **Verify
+   secrets** for a dry run and review the counts. If there are no unreadable
+   rows, type `RE-ENCRYPT` and click **Re-encrypt now**. The console re-encrypts,
+   verifies again, and shows the before, write-operation and after counts.
+   Confirm a current database backup and the controller key configuration
+   before starting. Both verification and re-encryption require a direct
+   `operator.console` session signed in within the last 10 minutes and CSRF
+   proof. If asked, sign out and sign in again, then rerun verification.
+   Key material, argument values and unreadable row details are never shown.
+
 4. Run `sparkwing operator secrets rotate --verify` (`?verify=1`). It writes
    nothing and reports how many rows still open only under the previous key and
    how many run and schedule documents still hold plaintext arguments. Run the rotation again
