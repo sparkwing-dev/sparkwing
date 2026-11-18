@@ -23,7 +23,7 @@ func TestFilesystemLogSigningUsesTheLogSlotClock(t *testing.T) {
 	logNow := now.Add(5 * time.Second)
 	backend, err := NewFilesystem(FilesystemOptions{
 		Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: []byte(strings.Repeat("x", 32)),
-		Now: func() time.Time { return now }, LogNow: func() time.Time { return logNow },
+		Now: func() time.Time { return now }, LogNow: func(context.Context) (time.Time, error) { return logNow, nil },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -332,5 +332,21 @@ func TestFilesystemConcurrentLogWritesKeepOnePayload(t *testing.T) {
 	files, err := os.ReadDir(filepath.Join(dir, filepath.FromSlash(key[:strings.LastIndex(key, "/")])))
 	if err != nil || len(files) != 1 {
 		t.Fatalf("upload files = %v, %v", files, err)
+	}
+}
+
+func TestFilesystemLogSigningPropagatesClockFailure(t *testing.T) {
+	clockErr := errors.New("clock unavailable")
+	backend, err := NewFilesystem(FilesystemOptions{
+		Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32),
+		LogNow: func(context.Context) (time.Time, error) { return time.Time{}, clockErr },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	_, _, err = backend.SignLogPut(t.Context(), "logs/r90/teams/acme/runs/run-1/units/plan/g1/manifest.json", 1, digest("x"), time.Now().Add(time.Minute))
+	if !errors.Is(err, clockErr) {
+		t.Fatalf("signing error = %v, want clock failure", err)
 	}
 }

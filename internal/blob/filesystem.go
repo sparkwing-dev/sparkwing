@@ -31,7 +31,7 @@ type FilesystemOptions struct {
 	SigningKey []byte
 	Now        func() time.Time
 	// LogNow reads the clock that sets log-slot deadlines; Now when nil.
-	LogNow func() time.Time
+	LogNow func(context.Context) (time.Time, error)
 }
 
 // Filesystem serves signed transfers without granting record or read-set authority.
@@ -40,7 +40,7 @@ type Filesystem struct {
 	endpoint *url.URL
 	key      []byte
 	now      func() time.Time
-	logNow   func() time.Time
+	logNow   func(context.Context) (time.Time, error)
 }
 
 // NewFilesystem opens the data directory without consulting process credentials.
@@ -60,7 +60,7 @@ func NewFilesystem(options FilesystemOptions) (*Filesystem, error) {
 		options.Now = time.Now
 	}
 	if options.LogNow == nil {
-		options.LogNow = options.Now
+		options.LogNow = func(context.Context) (time.Time, error) { return options.Now(), nil }
 	}
 	return &Filesystem{root: root, endpoint: u, key: append([]byte(nil), options.SigningKey...), now: options.Now, logNow: options.LogNow}, nil
 }

@@ -178,7 +178,10 @@ that one deleted an object. Overcounting happens only when a client signs for
 more bytes than it uploads.
 
 A slot's upload authority has one fixed lifetime: it ends at first signing plus
-`limits.LogUploadURLTTL` (fifteen minutes). Re-signing returns a URL with that
+`limits.LogUploadURLTTL` (fifteen minutes). Filesystem upload signing reads
+the same store-authoritative clock through `Store.LogUploadNow`, including
+SQLite’s process-local clock floor, and retains the strict lifetime ceiling.
+Re-signing returns a URL with that
 same absolute expiry and is refused (`409`) after it unless the slot is
 committed, which still reports committed. Expiry never retires a slot before
 its deadline, and explicit run deletion is refused (`409`, "this run's logs are

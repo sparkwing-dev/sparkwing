@@ -28,7 +28,7 @@ func TestLogSubmissionRoutesReplayLostPutAndCommit(t *testing.T) {
 	clock := func() time.Time { return started.Add(time.Duration(elapsed.Load())) }
 	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim}, teststore.WithClock(clock))
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{
-		Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{43}, 32), LogNow: clock,
+		Directory: t.TempDir(), Endpoint: "https://controller.invalid", SigningKey: bytes.Repeat([]byte{43}, 32), LogNow: e.Store.LogUploadNow,
 	})
 	if err != nil {
 		t.Fatal(err)

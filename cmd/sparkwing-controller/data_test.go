@@ -16,7 +16,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func TestFilesystemDataStartup(t *testing.T) {
@@ -28,7 +30,7 @@ func TestFilesystemDataStartup(t *testing.T) {
 	} {
 		t.Run(fixture.host+fixture.address, func(t *testing.T) {
 			root := t.TempDir()
-			objects, err := openFilesystemData(root, fixture.external, fixture.address)
+			objects, err := openFilesystemData(root, fixture.external, fixture.address, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -74,7 +76,7 @@ func TestFilesystemDataStartup(t *testing.T) {
 
 func TestFilesystemDataStartupRefusesInvalidConfiguration(t *testing.T) {
 	for _, fixture := range []struct{ external, address string }{{"", "invalid"}, {"ftp://controller.invalid", "127.0.0.1:4344"}, {"https://controller.invalid?query=1", "127.0.0.1:4344"}} {
-		objects, err := openFilesystemData(t.TempDir(), fixture.external, fixture.address)
+		objects, err := openFilesystemData(t.TempDir(), fixture.external, fixture.address, nil)
 		if err == nil {
 			if closeErr := objects.Close(); closeErr != nil {
 				t.Error(closeErr)
@@ -118,7 +120,7 @@ func TestFilesystemDataStartupRequiresOriginForWildcard(t *testing.T) {
 	for _, address := range []string{":4344", "0.0.0.0:4344", "[::]:4344", "[0:0:0:0:0:0:0:0]:4344"} {
 		t.Run(address, func(t *testing.T) {
 			root := t.TempDir()
-			objects, err := openFilesystemData(root, "", address)
+			objects, err := openFilesystemData(root, "", address, nil)
 			if err == nil {
 				_ = objects.Close()
 				t.Fatal("wildcard listener advertised a local transfer URL")
@@ -144,5 +146,27 @@ func TestFilesystemWildcardRefusesBeforeOpeningStore(t *testing.T) {
 	}
 	if _, err := os.Stat(p.StateDB()); !os.IsNotExist(err) {
 		t.Fatalf("wildcard listener opened the store: %v", err)
+	}
+}
+
+func TestFilesystemDataUsesStoreLogClock(t *testing.T) {
+	now := time.Now().Add(time.Hour)
+	st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"), teststore.WithClock(func() time.Time { return now }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	objects, err := openFilesystemData(t.TempDir(), "http://local", "", st.LogUploadNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer objects.Close()
+	key := "logs/r90/teams/acme/runs/run-1/units/plan/g1/manifest.json"
+	digest := blob.Digest(fmt.Sprintf("%x", sha256.Sum256([]byte("x"))))
+	if _, _, err := objects.SignLogPut(t.Context(), key, 1, digest, now.Add(limits.LogUploadURLTTL)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := objects.SignLogPut(t.Context(), key, 1, digest, now.Add(limits.LogUploadURLTTL+time.Nanosecond)); err == nil {
+		t.Fatal("signed beyond lifetime ceiling")
 	}
 }

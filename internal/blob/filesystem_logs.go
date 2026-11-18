@@ -23,7 +23,10 @@ func (f *Filesystem) SignLogPut(ctx context.Context, key string, size int64, dig
 		return "", nil, err
 	}
 	object := capability.ObjectToSign{Method: http.MethodPut, Key: key, Size: size, SHA256: string(digest), ExpiresAt: expiry}
-	now := f.logNow()
+	now, err := f.logNow(ctx)
+	if err != nil {
+		return "", nil, err
+	}
 	if err := validateFilesystemLog(object, now); err != nil {
 		return "", nil, err
 	}

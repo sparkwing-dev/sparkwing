@@ -583,7 +583,7 @@ func run(args []string) error {
 			}
 			srv = srv.WithDataObjects(backend)
 		} else {
-			objects, err := openFilesystemData(p.Root, *externalURL, listeners.API.Addr().String())
+			objects, err := openFilesystemData(p.Root, *externalURL, listeners.API.Addr().String(), st.LogUploadNow)
 			if err != nil {
 				return store.Policies{}, fmt.Errorf("filesystem data: %w", err)
 			}
