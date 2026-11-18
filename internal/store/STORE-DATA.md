@@ -338,6 +338,14 @@ transition and accounting in one transaction. They apply the existing spend
 policy to the resulting balance. A pause cannot precede the interval's last
 charged checkpoint.
 
+Transaction time never moves backward within a store instance. On open, both
+SQLite and PostgreSQL restore its floor from unsettled awards and their latest
+charged or finished compute. A backward wall-clock step therefore cannot place
+a generated checkpoint before its award or rewind billed compute after restart.
+The floor does not reconstruct unrecorded elapsed time. Explicit checkpoints
+outside the award-to-current-time range remain invalid, and reapers still use
+the persisted lease lapse.
+
 The unused expired-claim settlement adapter is removed. Reapers must use the
 immutable award and interval helpers in their state transaction. Generated
 SQLite tests settle through an earlier persisted lapse after database reopening,

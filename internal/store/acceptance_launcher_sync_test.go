@@ -14,10 +14,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
-func checkStoreLauncherSync(t *testing.T) (err error) {
+func checkStoreLauncherSync(t *testing.T, clock func() time.Time, step func()) (err error) {
 	ctx := t.Context()
-	target := storetest.NewSQLite(t)
-	s, err := target.TryOpen(store.WithPolicies(sealStorePolicies))
+	target := storetest.New(t)
+	s, err := target.TryOpen(store.WithPolicies(sealStorePolicies), store.WithTestWallClock(clock))
 	if err != nil {
 		return err
 	}
@@ -52,7 +52,7 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 			return err
 		}
 		var err error
-		s, err = target.TryOpen(store.WithPolicies(sealStorePolicies))
+		s, err = target.TryOpen(store.WithPolicies(sealStorePolicies), store.WithTestWallClock(clock))
 		if err != nil {
 			return err
 		}
@@ -70,6 +70,9 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 		return err
 	}
 	old := capability.LauncherObservation{Award: capability.LeaseRef{Kind: capability.UnitNode, ID: p.Capability.UnitID, Holder: first.Award.Holder, Generation: int64(first.Award.Generation)}}
+	if step != nil {
+		step()
+	}
 	for exchange := range 2 {
 		if err := reopen(); err != nil {
 			return err
@@ -89,8 +92,22 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 			first.Award.CapabilityPrefix = issued.Capability.Prefix
 		}
 	}
+	if step != nil {
+		forged := first
+		forged.Award.Generation++
+		if err := s.ReleaseUnit(ctx, forged, forged.Award.CapabilityPrefix); err == nil {
+			return errors.New("forged generation released the exchanged claim")
+		}
+	}
 	if err := s.ReleaseUnit(ctx, first, first.Award.CapabilityPrefix); err != nil {
 		return fmt.Errorf("release exchanged claim: %w", err)
+	}
+	var awarded, settled int64
+	if err := s.DB().QueryRowContext(ctx, `SELECT awarded_at,settled_at FROM billing_awards WHERE capability_prefix=?`, p.Capability.Prefix).Scan(&awarded, &settled); err != nil {
+		return err
+	}
+	if settled < awarded {
+		return fmt.Errorf("settlement %d precedes award %d", settled, awarded)
 	}
 	if _, err := tenant.TransitionNode(ctx, store.ReadyNode{Ref: runspec.NodeRef{RunID: runspec.RunID(runID), NodeID: "alpha"}, Actor: plan.Actor}); err != nil {
 		return fmt.Errorf("owner redispatch: %w", err)
@@ -98,6 +115,11 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 	second, err := s.AsOperator().ClaimUnit(ctx, demand)
 	if err != nil {
 		return fmt.Errorf("claim replacement: %w", err)
+	}
+	if step != nil {
+		if err := s.ReleaseUnit(ctx, first, first.Award.CapabilityPrefix); err == nil {
+			return errors.New("stale claim released its replacement")
+		}
 	}
 	current := old
 	current.Award.Generation = int64(second.Award.Generation)
@@ -123,7 +145,18 @@ func checkStoreLauncherSync(t *testing.T) (err error) {
 }
 
 func TestStoreLauncherSync(t *testing.T) {
-	if err := checkStoreLauncherSync(t); err != nil {
+	if err := checkStoreLauncherSync(t, nil, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStoreLauncherSyncAfterBackwardClockReopen(t *testing.T) {
+	for _, back := range []time.Duration{57 * time.Millisecond, 414 * time.Millisecond, 3300 * time.Millisecond} {
+		t.Run(back.String(), func(t *testing.T) {
+			now := time.Now().UTC()
+			if err := checkStoreLauncherSync(t, func() time.Time { return now }, func() { now = now.Add(-back) }); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

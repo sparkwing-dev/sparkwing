@@ -29,6 +29,13 @@ func (s *Store) SetTestClock(t testing.TB, clock func() time.Time) {
 	s.clock, s.pinnedClock = clock, s.now
 }
 
+// WithTestWallClock injects wall time without bypassing the production clock floor.
+func WithTestWallClock(clock func() time.Time) Option {
+	return Option{apply: func(s *Store) {
+		s.clock, s.pinnedClock, s.wallClock = nil, nil, clock
+	}}
+}
+
 // SetTestBusyTimeout makes every SQLite store this process opens use ms as
 // its busy_timeout until the test ends.
 func SetTestBusyTimeout(t testing.TB, ms int) {

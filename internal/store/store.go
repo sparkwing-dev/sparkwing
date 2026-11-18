@@ -92,7 +92,7 @@ type Store struct {
 	clock              func() time.Time
 	pinnedClock        func() time.Time // safety: PostgreSQL time stays authoritative outside clock-pinned fixtures.
 	clockFloor         atomic.Int64
-	wallClock          func() time.Time // safety: replaces only SQLite's wall-clock read, so fixtures still pass through the floor.
+	wallClock          func() time.Time // safety: fixtures replace wall time while retaining the production clock floor.
 	db                 *sql.DB
 	conn               *sql.Conn // safety: break-glass writes must use the verified session.
 	githubLocks        *sql.DB
@@ -299,6 +299,9 @@ func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, path stri
 		}
 	}
 	if err := s.migrate(ctx, path); err != nil {
+		return nil, errors.Join(err, db.Close())
+	}
+	if err := s.AsOperator().restoreBillingClock(ctx); err != nil {
 		return nil, errors.Join(err, db.Close())
 	}
 	if dialect == DialectPostgres {
