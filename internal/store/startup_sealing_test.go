@@ -338,7 +338,10 @@ func startupServePass(t *testing.T, st *store.Store, cipher *secrets.Cipher) (st
 		return result.counts, nil
 	case err := <-done:
 		cancel()
-		return store.SealedRotation{}, fmt.Errorf("controller exited before startup sealing: %v", err)
+		if err == nil {
+			err = errors.New("controller exited before startup sealing")
+		}
+		return store.SealedRotation{}, err
 	case <-t.Context().Done():
 		cancel()
 		<-done
