@@ -23,7 +23,6 @@ func TestLogSlotSigningSurvivesBackwardWallClock(t *testing.T) {
 		name string
 		skew time.Duration
 	}{
-
 		{name: "backward_1ms", skew: -time.Millisecond},
 		{name: "backward_3300ms", skew: -3300 * time.Millisecond},
 	} {
