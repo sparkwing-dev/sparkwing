@@ -85,7 +85,7 @@ for (const width of [1440, 390]) {
     await confirmation.fill("RE-ENCRYPT");
     await expect(rotate).toBeEnabled();
     expect(calls).toHaveLength(1);
-    await expect(page.getByRole("row", { name: "Previous key only 5 — —" })).toBeVisible();
+    await expect(page.getByRole("row", { name: "Previous key only 5 - -" })).toBeVisible();
     await capture(page, `verified-${width}`);
     expect([await verify.boundingBox(), await rotate.boundingBox()]).toEqual(positions);
     await page.keyboard.press("Tab");
@@ -140,7 +140,7 @@ test("unreadable inventory blocks re-encryption and hides row details", async ({
   await page.goto("/operator?view=secrets");
   await page.getByRole("button", { name: "Verify secrets", exact: true }).click();
   await expect(page.getByRole("main").getByRole("alert")).toContainText("Unreadable rows found");
-  await expect(page.getByRole("row", { name: "Unreadable rows 1 — —" })).toBeVisible();
+  await expect(page.getByRole("row", { name: "Unreadable rows 1 - -" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Re-encrypt now", exact: true })).toBeDisabled();
   await expect(page.locator("body")).not.toContainText(marker);
   expect(calls).toHaveLength(1);

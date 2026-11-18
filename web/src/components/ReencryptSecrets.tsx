@@ -134,9 +134,9 @@ export function ReencryptSecrets() {
             {resealCounts.map(([key, label]) => (
               <tr key={key} className="border-t border-[var(--border)]">
                 <th scope="row" className="font-normal text-left py-2 pr-2">{label}</th>
-                <td className="text-right px-1">{before?.[key] ?? "—"}</td>
-                <td className="text-right px-1">{rotated?.[key] ?? "—"}</td>
-                <td className="text-right pl-1">{after?.[key] ?? "—"}</td>
+                <td className="text-right px-1">{before?.[key] ?? "-"}</td>
+                <td className="text-right px-1">{rotated?.[key] ?? "-"}</td>
+                <td className="text-right pl-1">{after?.[key] ?? "-"}</td>
               </tr>
             ))}
           </tbody>
