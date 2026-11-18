@@ -94,6 +94,20 @@ func TestStartupSealingCancellationRollsBackBatch(t *testing.T) {
 	}
 }
 
+type startupBarrierLog struct {
+	slog.Handler
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (h startupBarrierLog) Handle(ctx context.Context, record slog.Record) error {
+	if record.Message == "startup plaintext sealing" {
+		close(h.entered)
+		<-h.release
+	}
+	return h.Handler.Handle(ctx, record)
+}
+
 func TestStartupSealingRunsFromServeWith(t *testing.T) {
 	key, err := secrets.NewCipher(bytes.Repeat([]byte{4}, secrets.KeySize))
 	if err != nil {
@@ -101,6 +115,11 @@ func TestStartupSealingRunsFromServeWith(t *testing.T) {
 	}
 	cipher := &startupTestCipher{Cipher: key, entered: make(chan struct{}), release: make(chan struct{})}
 	s := startupController(t, cipher)
+	summaryEntered, summaryRelease := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	releaseSummary := func() { releaseOnce.Do(func() { close(summaryRelease) }) }
+	defer releaseSummary()
+	s.logger = slog.New(startupBarrierLog{Handler: s.logger.Handler(), entered: summaryEntered, release: summaryRelease})
 	s.engineController.RunnerPolicy = &SignedRunnerAdmission{}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -119,6 +138,7 @@ func TestStartupSealingRunsFromServeWith(t *testing.T) {
 		t.Fatal("startup pass never ran")
 	}
 	close(cipher.release)
+	<-summaryEntered
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+ln.Addr().String()+"/api/v1/health", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -131,6 +151,7 @@ func TestStartupSealingRunsFromServeWith(t *testing.T) {
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("health status=%d", response.StatusCode)
 	}
+	releaseSummary()
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
