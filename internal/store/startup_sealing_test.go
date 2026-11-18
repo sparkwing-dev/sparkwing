@@ -5,12 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
+	"net"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
@@ -56,7 +60,7 @@ func startupRaw(t *testing.T, st *store.Store) string {
 
 func TestStartupSealingPlaintextAndSecondPass(t *testing.T) {
 	st, cipher, _ := startupFixture(t, 3)
-	result, err := st.AsOperator().SealPlaintextValues(t.Context(), cipher)
+	result, err := startupServePass(t, st, cipher)
 	if err != nil || result.PlaintextRunArguments != 3 {
 		t.Fatalf("first pass: %+v %v", result, err)
 	}
@@ -64,7 +68,7 @@ func TestStartupSealingPlaintextAndSecondPass(t *testing.T) {
 	if bytes.Contains([]byte(first), []byte("startup-canary-739")) {
 		t.Fatal("plaintext persisted")
 	}
-	result, err = st.AsOperator().SealPlaintextValues(t.Context(), cipher)
+	result, err = startupServePass(t, st, cipher)
 	if err != nil || result.PlaintextRunArguments != 0 || result.AlreadySealed != 3 || first != startupRaw(t, st) {
 		t.Fatalf("second pass changed rows: %+v %v", result, err)
 	}
@@ -276,5 +280,68 @@ func TestStartupSealingFailurePreservesCommittedCounts(t *testing.T) {
 	result, err = st.AsOperator().SealPlaintextValues(t.Context(), cipher)
 	if err != nil || result.PlaintextRunArguments != 1 || result.AlreadySealed != 200 {
 		t.Fatalf("retry: %+v %v", result, err)
+	}
+}
+
+type startupPassLog struct {
+	slog.Handler
+	results chan startupPassResult
+}
+
+type startupPassResult struct {
+	counts  store.SealedRotation
+	outcome string
+}
+
+func (h startupPassLog) Handle(_ context.Context, record slog.Record) error {
+	if record.Message != "startup plaintext sealing" {
+		return nil
+	}
+	var result startupPassResult
+	record.Attrs(func(attr slog.Attr) bool {
+		switch attr.Key {
+		case "sealed":
+			result.counts.PlaintextRunArguments = int(attr.Value.Int64())
+		case "already_sealed":
+			result.counts.AlreadySealed = int(attr.Value.Int64())
+		case "outcome":
+			result.outcome = attr.Value.String()
+		}
+		return true
+	})
+	h.results <- result
+	return nil
+}
+
+func startupServePass(t *testing.T, st *store.Store, cipher *secrets.Cipher) (store.SealedRotation, error) {
+	t.Helper()
+	results := make(chan startupPassResult, 1)
+	logger := slog.New(startupPassLog{Handler: slog.NewTextHandler(io.Discard, nil), results: results})
+	server := controller.New(st, logger).WithSecretsCipher(cipher).WithEngineController(controller.NewEngineController(st, controller.EngineController{RunnerPolicy: &controller.SignedRunnerAdmission{}}))
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return store.SealedRotation{}, err
+	}
+	defer ln.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- controller.ServeWith(ctx, server, controller.Listeners{API: ln}) }()
+	select {
+	case result := <-results:
+		cancel()
+		if err := <-done; err != nil {
+			return result.counts, err
+		}
+		if result.outcome != "success" {
+			return result.counts, fmt.Errorf("startup outcome: %s", result.outcome)
+		}
+		return result.counts, nil
+	case err := <-done:
+		cancel()
+		return store.SealedRotation{}, fmt.Errorf("controller exited before startup sealing: %v", err)
+	case <-t.Context().Done():
+		cancel()
+		<-done
+		return store.SealedRotation{}, t.Context().Err()
 	}
 }
