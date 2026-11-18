@@ -5,16 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"os"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
+	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
 
 func startupFixture(t *testing.T, count int) (*store.Store, *secrets.Cipher, *storetest.Target) {

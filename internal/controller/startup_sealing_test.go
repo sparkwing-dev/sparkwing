@@ -119,7 +119,7 @@ func TestStartupSealingRunsFromServeWith(t *testing.T) {
 		t.Fatal("startup pass never ran")
 	}
 	close(cipher.release)
-	request, err := http.NewRequestWithContext(t.Context(), "GET", "http://"+ln.Addr().String()+"/api/v1/health", nil)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+ln.Addr().String()+"/api/v1/health", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
