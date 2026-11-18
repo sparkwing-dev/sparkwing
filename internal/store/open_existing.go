@@ -57,6 +57,9 @@ func OpenExisting(ctx context.Context, dialect Dialect, target string, opts ...O
 			opt.apply(st)
 		}
 	}
+	if err := st.AsOperator().restoreBillingClock(ctx); err != nil {
+		return nil, errors.Join(err, st.Close())
+	}
 	if err := st.configurePolicyOptions(ctx, opts); err != nil {
 		return nil, errors.Join(err, st.Close())
 	}

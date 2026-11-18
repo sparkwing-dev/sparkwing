@@ -49,7 +49,7 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 | Native annotation and fresh-authority timings use credential-free spans; slow requests use bounded host-only JSON diagnostics hidden by human log views. Runner trace export is inactive without an existing OTEL endpoint, and long-lived runners give each request its own trace | `internal/otelutil/operation.go`; `internal/nodehost/annotation_timing.go`, `request_diagnostics.go`; `internal/controller/client/request_timing.go`; `internal/cluster/telemetry.go` | `TestControllerRequestTimingPropagatesWithoutSecrets`, `TestSlowControllerResponsePhasesWithoutCollector`, `TestAnnotationTimingIncludesFreshAuthorizationAndAcknowledgement`, `TestSlowAnnotationAuthorizationAttribution`, `TestRequestDiagnosticsCannotBlockTheCaller`, `TestRequestTimingWriterKeepsItsAttemptFence`, `TestRequestDiagnosticsDrainQueuedRecordsAtClose`, `TestRunnerExportsAndFlushesConfiguredTracing`, `TestLongLivedRunnerRequestsStartTheirOwnTraces`, `TestTraceFlushPreservesReturnedFailure`, `TestTracesOnlyExporterFailuresNeverEchoEndpointSecrets` |
 | Only a released baseline named by version and digest upgrades forward, in the open transaction, to a schema identical to a fresh one; every other store is refused unchanged (decision 90) | `internal/store/schema_upgrade.go`: `schemaUpgrades`, `upgradeSchemaTx` | `internal/store/schema_upgrade_test.go`: `TestSchemaUpgradeAddsMachineAdmissionToVersion30`, `TestSchemaUpgrade36PreservesActionsRows`, `TestSchemaUpgradeRemovesBuildTrustFromVersion36AndPreservesConfiguredInstall`, `TestSchemaUpgradeRefusesEveryOtherStore`, `TestPostgresSchemaUpgradeRunsOnceUnderConcurrentOpens`, `TestPostgresSchemaUpgradeKeepsWarmViewGrants` |
 | A SQLite store is copied to `<store>.schema-<N>-<time>.bak` under the upgrade's write lock before its first upgrade step; a failed copy refuses the upgrade and leaves the store unchanged | `internal/store/schema_backup.go`: `backupSQLiteBeforeUpgrade`; `schema_upgrade.go`: `upgradeSchemaTx` | `internal/store/schema_backup_test.go`: `TestSQLiteUpgradeKeepsABackupTheOlderBinaryCanOpen`, `TestSQLiteRefusedUpgradeTakesNoBackup`; `schema_backup_linux_test.go`: `TestBackupWriteFailureRefusesUpgradeAndLeavesNothing` |
-| A SQLite store clock never moves backward within its controller process, so wall-clock steps cannot order a finish before its start or a checkpoint before its award | `internal/store/dialect.go`: `Store.monotonic` | `internal/store/clock_step_test.go`: `TestStepFinishSurvivesBackwardClockStep`, `TestPlanSettlesAfterBackwardClockStep` |
+| Transaction clocks never move backward within a store instance. SQLite and PostgreSQL restore the floor from unsettled billing facts on open, keeping generated billing checkpoints after their award and charged compute across restarts. Other timestamps may move backward across restart | `internal/store/dialect.go`: `Store.monotonic`, `Operator.restoreBillingClock` | `internal/store/clock_step_test.go`: `TestStepFinishSurvivesBackwardClockStep`, `TestPlanSettlesAfterBackwardClockStep`, `TestMeteredCheckpointSurvivesBackwardClockReopen`; `acceptance_launcher_sync_test.go`: `TestStoreLauncherSyncAfterBackwardClockReopen`; `metered_accounting_test.go`: `TestBillingCheckpointBoundsRemainStrict` |
 
 ### Tenancy
 
@@ -699,3 +699,20 @@ Linux process inspection treats ENOENT and ESRCH as absent processes. Owners:
 Runner claim dispatch rechecks cancellation after version policy validation.
 Owner: `internal/runners/loop.go`; guard:
 `TestLoopDoesNotClaimAfterPolicyCancelsContext`.
+
+Controller startup plaintext sealing shares `internal/store/sealed_rotation.go`
+with operator key rotation. `internal/controller/startup_sealing.go` owns the
+background lifecycle, bounded retry and sanitized summaries. Existing envelopes
+stay unchanged at startup, including previous-key envelopes. Guards:
+`TestStartupSealingCoversEveryArgumentColumn`,
+`TestStartupSealingPlaintextAndSecondPass`,
+`TestStartupSealingConcurrentPasses`, `TestStartupSealingRacesOperator`,
+`TestStartupSealingRetriesAndSanitizes`,
+`TestStartupSealingCancellationRollsBackBatch` and
+`TestStartupSealingRunsFromServeWith`. `TestStartupSealingBootCost` measures the
+per-boot scan against 3,000 rows on either configured store backend.
+
+The local controller calls the same startup worker through
+`localcontroller.Services.SealPlaintext`; `localController.Run` owns cancellation
+and joins it before closing the store. Guard:
+`TestLocalStartupSealingRunsAndJoinsWithoutEndingController`.

@@ -97,12 +97,19 @@ func replaceNodeDefaults(raw []byte, defaults []nodeArgumentDefault, envelope st
 }
 
 func (r *sealedRotationTx) nodeArguments(team Team, run, node string, raw []byte) ([]byte, error) {
+	if err := r.checkArgumentJSON(team, run, raw); err != nil {
+		return nil, err
+	}
 	envelope, err := sealedArgumentsEnvelope(raw)
 	if err != nil {
-		return nil, corruptRunArguments()
+		return nil, r.unreadableArgument(team, run)
 	}
 	if envelope != "" {
 		return rotateRunDocument(r, team, run, nodeArgumentsScope(node), raw, nodeArgumentSlots)
+	}
+	var document nodeArgumentDocument
+	if json.Unmarshal(raw, &document) != nil {
+		return nil, r.unreadableArgument(team, run)
 	}
 	stored, err := encodeNodeSpec(r.cipher, team, run, node, raw)
 	if err != nil {
