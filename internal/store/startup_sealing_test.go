@@ -348,3 +348,27 @@ func startupServePass(t *testing.T, st *store.Store, cipher *secrets.Cipher) (st
 		return store.SealedRotation{}, t.Context().Err()
 	}
 }
+
+type cancellingStartupCipher struct {
+	*secrets.Cipher
+	cancel context.CancelFunc
+}
+
+func (c cancellingStartupCipher) SealBound(p secrets.Purpose, team, name, scope string, shared, masked bool, plain string) (string, error) {
+	c.cancel()
+	return c.Cipher.SealBound(p, team, name, scope, shared, masked, plain)
+}
+
+func TestStartupSealingCancellationDuringBatch(t *testing.T) {
+	st, cipher, _ := startupFixture(t, 201)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	result, err := st.AsOperator().SealPlaintextValues(ctx, cancellingStartupCipher{Cipher: cipher, cancel: cancel})
+	if err == nil || result.PlaintextRunArguments != 0 {
+		t.Fatalf("cancelled batch committed: %+v %v", result, err)
+	}
+	result, err = st.AsOperator().SealPlaintextValues(t.Context(), cipher)
+	if err != nil || result.PlaintextRunArguments != 201 {
+		t.Fatalf("cancelled batch lost plaintext: %+v %v", result, err)
+	}
+}
