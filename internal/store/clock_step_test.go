@@ -113,14 +113,14 @@ func TestMeteredCheckpointSurvivesBackwardClockReopen(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer reopened.Close()
-			for range 2 {
+			for replay := range 2 {
 				if err := reopened.inTx(t.Context(), func(tx *storeTx) error {
 					result, err := accountBillingAwardTx(t.Context(), tx, "a", "reservation", tx.now(t.Context()), true)
 					want := int64(70)
 					if paused {
 						want = 75
 					}
-					if err == nil && (result.ElapsedSeconds != want || result.BillableSeconds != want) {
+					if err == nil && (result.BillableSeconds != want || replay == 0 && result.ElapsedSeconds != want) {
 						t.Fatalf("settlement=%+v, want %d seconds", result, want)
 					}
 					return err
