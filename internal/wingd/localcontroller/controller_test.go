@@ -1,10 +1,12 @@
 package localcontroller
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"sync/atomic"
@@ -14,8 +16,10 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
+	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -385,4 +389,63 @@ func TestLocalStartupSealingRunsAndJoinsWithoutEndingController(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestLocalStartupSealingMissingKeyStops(t *testing.T) {
+	t.Setenv("SPARKWING_SECRETS_KEY", "")
+	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "missing.key"))
+	synctest.Test(t, func(t *testing.T) {
+		var logs bytes.Buffer
+		returned := make(chan struct{})
+		var b Binding
+		c := openFixture(t, func(ctx context.Context, binding Binding) (Services, error) {
+			b = binding
+			services := serviceFixture(b)
+			ring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Home: b.Home})
+			if err != nil {
+				return Services{}, err
+			}
+			server := controller.New(b.Store, slog.New(slog.NewJSONHandler(&logs, nil))).WithSecretsCipher(ring.For(b.Store.AsOperator()))
+			services.SealPlaintext = func(ctx context.Context) { defer close(returned); server.RunStartupSealing(ctx) }
+			return services, nil
+		})
+		db := stateSQL(t, b)
+		foreign, err := secrets.NewCipher(bytes.Repeat([]byte{7}, secrets.KeySize))
+		if err != nil {
+			t.Fatal(err)
+		}
+		envelope, err := foreign.SealBound(secrets.PurposeRunArguments, "default", "startup", "schedule:args", false, true, `{"strings":["canary"]}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := fmt.Sprintf(`{"argument_document_version":1,"body":"","sealed_arguments":%q}`, envelope)
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO cron_schedules(team,id,repo_path,repo_key,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,args) VALUES ('default','startup','/repo','git:example.com/project','nightly','0 * * * *','UTC','skip',0,1,1,1,?)`, raw); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() {
+			done <- c.Run(ctx, wingd.LocalReports{Activity: func(wingd.LocalActivity) error { return nil }, Runner: func(error) {}})
+		}()
+		defer func() { cancel(); <-done }()
+		synctest.Wait()
+		select {
+		case <-returned:
+		default:
+			t.Fatal("missing-key local worker kept retrying")
+		}
+		if err := c.Ready(); err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Count(logs.Bytes(), []byte(`"source":"startup"`)) != 1 || !bytes.Contains(logs.Bytes(), []byte(`"outcome":"skipped"`)) || !bytes.Contains(logs.Bytes(), []byte(`"reason":"no_key"`)) {
+			t.Fatalf("summary: %s", logs.String())
+		}
+		var count int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE kind='secrets.startup_sealed' AND attrs LIKE '%"outcome":"skipped"%'`).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("audit count=%d err=%v", count, err)
+		}
+	})
 }

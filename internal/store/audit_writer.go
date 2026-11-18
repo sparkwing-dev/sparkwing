@@ -456,7 +456,7 @@ func (op *Operator) recordAudit(ctx context.Context, tx *storeTx, c auditContext
 	case auditStartupSealing:
 		actorAllowed = c.Actor.system == auditController
 		ev.Kind, ev.SubjectID, repeat = "secrets.startup_sealed", "startup", true
-		valid = p.Source == "startup" && auditOneOf(p.Outcome, "success", "failed", "cancelled") && p.Sealed >= 0 && p.AlreadySealed >= 0 && p.Unreadable >= 0 && p.PreviousKeyOnly >= 0
+		valid = p.Source == "startup" && auditOneOf(p.Outcome, "success", "failed", "cancelled", "skipped") && p.Sealed >= 0 && p.AlreadySealed >= 0 && p.Unreadable >= 0 && p.PreviousKeyOnly >= 0
 	case auditOIDCScrub:
 		actorAllowed = c.Actor.system == auditController
 		ev.Kind, ev.SubjectID = "audit.oidc_scrubbed", "oidc-v1"

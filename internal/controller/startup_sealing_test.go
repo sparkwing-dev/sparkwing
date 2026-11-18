@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -21,6 +22,7 @@ type startupTestCipher struct {
 	mu       sync.Mutex
 	attempts int
 	fail     bool
+	refused  bool
 	entered  chan struct{}
 	release  chan struct{}
 }
@@ -33,6 +35,9 @@ func (c *startupTestCipher) SealBound(p secrets.Purpose, team, name, scope strin
 	if c.entered != nil && attempt == 1 {
 		close(c.entered)
 		<-c.release
+	}
+	if c.refused {
+		return "", secrets.ErrKeyRefused
 	}
 	if c.fail && attempt == 1 {
 		return "", errors.New("transient injected failure")
@@ -68,7 +73,7 @@ func TestStartupSealingRetriesAndSanitizes(t *testing.T) {
 		if cipher.attempts != 2 {
 			t.Fatalf("attempts=%d", cipher.attempts)
 		}
-		if bytes.Count(logs.Bytes(), []byte(`"source":"startup"`)) != 2 || bytes.Contains(logs.Bytes(), []byte("controller-startup-canary")) || bytes.Contains(logs.Bytes(), []byte("transient injected")) {
+		if !bytes.Contains(logs.Bytes(), []byte(`"reason":"store_error"`)) || bytes.Count(logs.Bytes(), []byte(`"source":"startup"`)) != 2 || bytes.Contains(logs.Bytes(), []byte("controller-startup-canary")) || bytes.Contains(logs.Bytes(), []byte("transient injected")) {
 			t.Fatalf("unsafe or missing summaries: %s", logs.String())
 		}
 	})
@@ -126,7 +131,7 @@ func TestStartupSealingRunsFromServeWith(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- ServeWith(ctx, s, Listeners{API: ln}) }()
@@ -134,12 +139,16 @@ func TestStartupSealingRunsFromServeWith(t *testing.T) {
 	case <-cipher.entered:
 	case err := <-done:
 		t.Fatalf("server exited before sealing: %v", err)
-	case <-t.Context().Done():
+	case <-ctx.Done():
 		t.Fatal("startup pass never ran")
 	}
 	close(cipher.release)
-	<-summaryEntered
-	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+ln.Addr().String()+"/api/v1/health", nil)
+	select {
+	case <-summaryEntered:
+	case <-ctx.Done():
+		t.Fatal("startup summary never ran")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+ln.Addr().String()+"/api/v1/health", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,5 +164,102 @@ func TestStartupSealingRunsFromServeWith(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStartupSealingNoKeyStops(t *testing.T) {
+	for _, refused := range []bool{false, true} {
+		t.Run(fmt.Sprint(refused), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				key, err := secrets.NewCipher(bytes.Repeat([]byte{4}, secrets.KeySize))
+				if err != nil {
+					t.Fatal(err)
+				}
+				cipher := &startupTestCipher{Cipher: key, refused: refused}
+				e, _ := engineRuntimeStore(t)
+				s := startupController(t, cipher)
+				s.operator = e.Store.AsOperator()
+				if refused {
+					if _, err := teststore.Exec(t.Context(), e.Store, `INSERT INTO cron_schedules(team,id,repo_path,repo_key,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,args) VALUES ('a','startup','/repo','git:example.com/project','nightly','0 * * * *','UTC','skip',0,1,1,1,'{"secret":"canary"}')`); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					s.secretsCipher = nil
+				}
+				var logs bytes.Buffer
+				s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				done := make(chan struct{})
+				go func() { defer close(done); s.RunStartupSealing(ctx) }()
+				synctest.Wait()
+				select {
+				case <-done:
+				default:
+					cancel()
+					t.Fatal("no-key worker kept retrying")
+				}
+				if bytes.Count(logs.Bytes(), []byte(`"source":"startup"`)) != 1 || !bytes.Contains(logs.Bytes(), []byte(`"outcome":"skipped"`)) || !bytes.Contains(logs.Bytes(), []byte(`"reason":"no_key"`)) {
+					t.Fatalf("summary: %s", logs.String())
+				}
+				var count int
+				if err := teststore.SQL(t, e.Store).QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE kind='secrets.startup_sealed' AND attrs LIKE '%"outcome":"skipped"%'`).Scan(&count); err != nil || count != 1 {
+					t.Fatalf("audit count=%d err=%v", count, err)
+				}
+			})
+		})
+	}
+}
+
+func TestStartupSealingKeylessServeWithStaysReady(t *testing.T) {
+	e, _ := engineRuntimeStore(t)
+	s := e.Server
+	s.secretsCipher = nil
+	s.engineController.RunnerPolicy = &SignedRunnerAdmission{}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock()
+	var logs bytes.Buffer
+	s.logger = slog.New(startupBarrierLog{Handler: slog.NewJSONHandler(&logs, nil), entered: entered, release: release})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- ServeWith(ctx, s, Listeners{API: ln}) }()
+	select {
+	case <-entered:
+	case err := <-done:
+		t.Fatalf("server exited before summary: %v", err)
+	case <-ctx.Done():
+		t.Fatal("keyless startup worker never ran")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+ln.Addr().String()+"/api/v1/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("health status=%d", response.StatusCode)
+	}
+	unblock()
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Count(logs.Bytes(), []byte(`"source":"startup"`)) != 1 || !bytes.Contains(logs.Bytes(), []byte(`"outcome":"skipped"`)) {
+		t.Fatalf("summary: %s", logs.String())
+	}
+	var count int
+	if err := teststore.SQL(t, e.Store).QueryRowContext(t.Context(), `SELECT count(*) FROM audit_events WHERE kind='secrets.startup_sealed' AND attrs LIKE '%"outcome":"skipped"%'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("audit count=%d err=%v", count, err)
 	}
 }
