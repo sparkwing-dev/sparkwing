@@ -2,12 +2,13 @@ package store
 
 import (
 	"encoding/json"
+	"testing"
+	"time"
+
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
-	"testing"
-	"time"
 )
 
 func TestCloudMemoBilling(t *testing.T) { CloudMemoBilling(t, authorityStore) }
