@@ -21,12 +21,12 @@ import (
 
 func TestLauncherShutdownPreservesIndependentFaults(t *testing.T) {
 	for _, phase := range []string{"claim", "warm report", "reconciliation", "retirement", "breaker"} {
-		for _, kind := range []string{"wrapped cancellation", "joined cancellations", "parent deadline", "mixed fault", "unrelated fault", "live parent"} {
+		for _, kind := range []string{"wrapped cancellation", "joined cancellations", "parent deadline", "parent deadline mixed fault", "mixed fault", "unrelated fault", "live parent"} {
 			t.Run(phase+"/"+kind, func(t *testing.T) {
 				synctest.Test(t, func(t *testing.T) {
 					l, kube, boundary, control := fixture()
 					ctx, cancel := context.WithCancel(t.Context())
-					if kind == "parent deadline" {
+					if strings.HasPrefix(kind, "parent deadline") {
 						cancel()
 						ctx, cancel = context.WithTimeout(t.Context(), time.Second)
 					}
@@ -37,8 +37,10 @@ func TestLauncherShutdownPreservesIndependentFaults(t *testing.T) {
 						switch kind {
 						case "live parent":
 							time.AfterFunc(time.Second, cancel)
-						case "parent deadline":
+						case "parent deadline", "parent deadline mixed fault":
 							<-ctx.Done()
+							// safety: Done closes before child cancellation; join propagation before returning the fake error.
+							cancel()
 						default:
 							cancel()
 						}
@@ -49,6 +51,8 @@ func TestLauncherShutdownPreservesIndependentFaults(t *testing.T) {
 							return fmt.Errorf("operation: %w", errors.Join(context.Canceled, errors.New("independent cleanup failure")))
 						case "unrelated fault":
 							return errors.New("independent cleanup failure")
+						case "parent deadline mixed fault":
+							return fmt.Errorf("operation: %w", errors.Join(context.DeadlineExceeded, errors.New("independent cleanup failure")))
 						case "parent deadline":
 							return fmt.Errorf("operation: %w", context.DeadlineExceeded)
 						default:
@@ -96,7 +100,7 @@ func TestLauncherShutdownPreservesIndependentFaults(t *testing.T) {
 					var logs strings.Builder
 					l.Poll, l.Logger = 2*time.Second, slog.New(slog.NewTextHandler(&logs, nil))
 					var err error
-					if phase == "retirement" && kind == "parent deadline" {
+					if phase == "retirement" && strings.HasPrefix(kind, "parent deadline") {
 						// safety: fake reactors hold the client mutex; Sync avoids concurrent calls while fake time advances.
 						err = l.Sync(ctx)
 					} else {
@@ -105,12 +109,12 @@ func TestLauncherShutdownPreservesIndependentFaults(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					wantWarn := kind == "mixed fault" || kind == "unrelated fault" || kind == "live parent"
+					wantWarn := kind == "mixed fault" || kind == "parent deadline mixed fault" || kind == "unrelated fault" || kind == "live parent"
 					warned := strings.Contains(logs.String(), "level=WARN") || strings.Contains(logs.String(), "level=ERROR")
 					if calls != 1 || warned != wantWarn {
 						t.Fatalf("calls=%d warn=%v want=%v logs=%s", calls, warned, wantWarn, logs.String())
 					}
-					if (kind == "mixed fault" || kind == "unrelated fault") && !strings.Contains(logs.String(), "independent cleanup failure") {
+					if (kind == "mixed fault" || kind == "parent deadline mixed fault" || kind == "unrelated fault") && !strings.Contains(logs.String(), "independent cleanup failure") {
 						t.Fatal(logs.String())
 					}
 				})
