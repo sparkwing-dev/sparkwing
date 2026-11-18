@@ -144,7 +144,6 @@ func TestStartupSealingUnreadableAndPreviousKey(t *testing.T) {
 	if err != nil || len(verified.Unreadable) != len(result.Unreadable) || verified.PreviousKeyOnly != 2 {
 		t.Fatalf("verify disagrees: %+v %v", verified, err)
 	}
-
 }
 
 func TestStartupSealingCancelledPass(t *testing.T) {

@@ -359,11 +359,11 @@ func TestLocalStartupSealingRunsAndJoinsWithoutEndingController(t *testing.T) {
 					t.Fatal(err)
 				}
 				ctx, cancel := context.WithCancel(t.Context())
-				defer cancel()
 				done := make(chan error, 1)
 				go func() {
 					done <- c.Run(ctx, wingd.LocalReports{Activity: func(wingd.LocalActivity) error { return nil }, Runner: func(error) {}})
 				}()
+				defer func() { cancel(); <-done }()
 				synctest.Wait()
 				select {
 				case <-entered:
@@ -376,7 +376,7 @@ func TestLocalStartupSealingRunsAndJoinsWithoutEndingController(t *testing.T) {
 				default:
 				}
 				cancel()
-				<-done
+				synctest.Wait()
 				select {
 				case <-returned:
 				default:
