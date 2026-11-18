@@ -20,6 +20,276 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.76.0] - 2026-11-18
+
+### Added
+
+- **controller + cli:** Delete your own account from Account settings or `sparkwing account delete`
+  Preview and confirm every sole-member team removed with the account. Deletion
+  revokes all account sessions and tokens. Sole owners of teams with other
+  members must transfer ownership or delete those teams first. Shared-team
+  history remains with its execution actors relabeled as "deleted user".
+  Financial records remain, and account IDs stay in audit records for 400 days
+  on Sparkwing Cloud. Accounts which existed on or before 2026-10-02 may remain
+  in encrypted operator archives. The SQLite archive from
+  2026-09-15 follows a 365-day lifecycle plus 30 noncurrent days, ending around
+  2027-10-15. PostgreSQL archive copies are removed within about 70 days of being
+  taken:
+  they expire after 35 days, then S3 permanently deletes the old version up to
+  35 days later. For dumps taken before the rule took effect, count from the
+  date the rule was applied. S3 rounds expiry up to midnight UTC and deletes
+  asynchronously, so these timings are approximate. Accounts created after
+  2026-10-02 are not in the 2026-09-15 or 2026-10-02 archives.
+
+
+- **runner:** Split Cloud bootstrap and launcher startup operation timings in process logs
+
+
+- **docs:** Find the GitHub Actions migration guide with `gha`, `runs-on`, `convert workflow` or `github actions yaml`
+  Documents can declare search aliases without changing their titles.
+
+
+- **auth:** `sparkwing login --admin` gives a team owner an hour of administration
+  An owner who signed in with `sparkwing login` can now run `secrets set`,
+  `team settings set` and other team-admin commands without minting a token by
+  hand. The request is sent with the profile's member token, so
+  only the same account can approve it, only an owner can, and only from a
+  browser sign-in made in the last 10 minutes. Approval saves a `team.admin` token
+  that expires after one hour beside a re-issued member token with the same
+  grants and expiry as the one it replaces. The profile uses it
+  until it expires and then falls back to the member token. Ordinary
+  `sparkwing login` tokens still never carry `team.admin`. `sparkwing login`,
+  `profiles add --force` and `profiles set` revoke a replaced administration
+  token at the controller that issued it, even when they point the profile at
+  another controller, and fail when that revocation cannot be confirmed.
+
+
+- **runners:** `runners pause` and `runners resume` take `--service-user`
+  A runner enrolled with `runners add --service-user` keeps its config in the
+  service account's home, which `--config` could not reach. `--service-user`
+  targets it the way `runners delete --service-user` does: sudo runs the step
+  as that OS user, which sets or clears the pause beside its own credential.
+
+### Changed
+
+- **runner:** Cloud launchers wake on ready work and Pod changes
+  Held claims and Pod watches avoid waiting for the next launcher poll. Coalesced signals keep reconciliation and claim searches bounded, and a missing watch permission warns. The safety poll still recovers missed signals, and placement keeps the same reservation, award and admission checks.
+
+
+- **auth:** Team-admin refusals name the step-up
+  A `missing_grant` refusal for `team.admin` now tells owners to run
+  `sparkwing login --admin` and other members to ask a team owner.
+
+### Fixed
+
+- **web:** Reach Account from the waitlist and before joining a team
+  The top navigation keeps an Account link available for both states.
+
+- **cli:** Explain account deletion before listing confirmation requirements
+  Account deletion help includes the plain introduction shown by other commands.
+
+- **controller + cli:** Compare confirmed team slugs independently of database collation
+  Missing confirmation flags identify the required list. Plain preview includes
+  blocked teams and fails when deletion is blocked. Previews warn that runner
+  and CI credentials created in shared teams are revoked too.
+
+
+- **docs:** Find the GitHub Actions migration guide with migrate, migrating and migration searches
+
+
+- **runner:** Request fresh capacity for up to eight ready Cloud awards in one burst
+  Successful capacity requests no longer add a claim poll between ready awards.
+  Clean Pod watch timeouts reconnect immediately.
+
+
+- **runner:** Reopen the Cloud Pod watch immediately when draining consumes a clean timeout
+  A pending controller claim no longer leaves the watch disconnected for an
+  extra safety poll. Error events and early closes keep their retry delay.
+
+
+- **cli:** Hide internal lease diagnostics from default JSON run logs
+  Use verbose local-run JSON or an explicit JSON log search to inspect them.
+
+
+- **controller:** Name ingress, billing URL and token causes when checkout responses omit the payment mode
+
+
+- **cli:** Failed Plans on Go SDK v0.1.0 and v0.2.0 explain its Git discovery limitation and suggest `sparkwing pipeline upgrade`; new pipelines already pin Go SDK v0.3.0
+
+
+- **cli:** Overlap local controller startup with source preparation after idle retirement
+  Run submission still waits for source validation and controller readiness.
+
+
+- **local runner:** A local runner exits when its controller is gone
+  A runner whose controller died kept retrying the controller's socket
+  forever, so private and release homes left `sparkwing-runner-*` user units
+  running long after their run ended. The runner now exits once no controller
+  has accepted a connection on the home's socket for 10 minutes, or for 1 minute
+  when its state home is also missing on every check. A controller replacement
+  rebinds the socket within seconds, so it keeps reusing the live runner. When
+  the runner exits, its service stops and kills the jobs it still holds.
+
+
+- **cli:** Cold local runs keep the installed CLI's controller across pipeline engine pins
+  An older pinned pipeline can run after an upgrade migrates the store and the
+  daemon stops. Burst runs also start the local controller before handoff so
+  local fallback uses the installed CLI. A CLI that cannot open the store
+  refuses with `sparkwing update` advice before any backup restore remedy.
+
+
+- **cli:** Withheld Plan errors name `sparkwing pipeline show --pipeline NAME --show-withheld` so local users can inspect the cause
+
+
+- **controller:** Private on-demand controllers exit after 20 idle minutes and retire their supervised runner
+  Active runs, queued work, connected clients and held leases keep the controller alive.
+  The OS account's default home and installed login services remain running.
+  A `.sparkwing` directory under an overridden `HOME` counts as private when the account lookup identifies another home. Symlink aliases of the account default stay persistent. The next CLI call restarts a private controller.
+  Failed runner retirement resumes serving and waits another full idle window.
+  Unrelated schedule registrations do not disable private-home retirement.
+
+
+- **runner:** Treat processes that vanish during Linux inspection as exited when checking session identity and admission holders
+
+
+- **cli:** Restart reloads same-version on-demand controllers
+  `sparkwing daemon restart` now replaces an on-demand controller even when its
+  CLI version matches. Machine budget changes apply to the successor runner,
+  while the old runner finishes held jobs under its previous limits. The
+  restart receipt reports `restarted: true` after the replacement is ready.
+
+
+- **sdk + cli:** Forward step bounds to RunContext so Land refuses runs that skip checks before pushing
+
+
+- **runner:** Stop dispatching new claims when cancellation is observed before the controller call
+
+
+- **cli:** Reject `runners add --team` with `--session-stdin` because the browser session selects runner ownership
+
+
+- **runners:** `runners delete --service-user` deletes the root-only enrollment record
+  The privileged step used to leave `<home root>/.enrollments/<account>.json`
+  behind after it stopped the service. `runners delete` now deletes the record
+  through a second privileged step, `runners uninstall-service --revoked`, once
+  the controller confirms the runner token is revoked. A failed revoke keeps
+  the record, names the token, and asks you to rerun `runners delete`.
+
+
+- **runner:** Accept owner-caused SDK termination during session cleanup while preserving other exit and cleanup errors
+
+
+- **cli:** Suggest an old Go SDK upgrade only for its nil-pointer Plan panic and print the withheld-details command once when discovery fails
+
+
+- **delivery:** Land policy ignores untracked scratch when checking source formatting, documentation, comments, and test waits
+
+
+- **cli:** TypeScript pipeline scaffolds include pinned Node 22 type declarations so Node API imports pass the upgrade type check
+
+
+- **cli:** Retain the withheld-details command for unregistered entrypoints while pipeline discovery is incomplete
+
+
+- **cli:** Update also replaces running on-demand controllers
+  `sparkwing update` now drains and replaces a running controller even when no
+  login service is installed. Held local jobs keep running under the old runner,
+  which stops taking new claims once its successor activates and exits after
+  acknowledging its results.
+  A stopped controller stays stopped.
+
+### Removed
+
+- **cli (Breaking):** Read selected details with `pipeline show`, `repos show`, `secrets show` and `debug show`, and cache state with `cache status`
+  The former spellings fail with a usage error naming the replacement. Flags,
+  output fields and exit codes keep their meaning. See the
+  [migration guide](docs/migrations/v0.76.0.md#read-verbs-use-list-show-and-status).
+
+### Security
+
+- **controller:** Require a sign-in from the last ten minutes before account deletion
+  The dashboard and CLI request a new sign-in when the session is older.
+
+
+- **billing:** Pair the controller and the checkout service on their Stripe mode
+  Every `--billing-url` call carries the controller's `--payment-mode` in the
+  `Sparkwing-Payment-Mode` header, and the controller refuses an answer naming
+  another mode or none. Checkout, card setup, the card portal, refills and
+  refunds are all covered. Successes and final refusals require a matching
+  response mode. Background refills and refunds retry an unpaired answer and
+  log one `alert=checkout_misconfigured` naming `payment_mode`. Payment pages
+  fail without that alert, so its absence does not prove the pairing is correct.
+  A refill or refund never completes across modes. The checkout service must send the
+  header: deploy the checkout service first, then the controller, both in
+  test mode. The cutover runbook in `docs/billing.md` lists the prerequisites,
+  including each restricted key's Stripe permissions, switches the checkout
+  service before the one-way controller start, verifies the switch, recovers
+  a failed check in live mode, and lists the credentials to rotate.
+
+
+- **web + deps:** Update Next.js to 16.4.5 for upstream cache disclosure fixes
+
+
+- **controller (Breaking):** Schema 40 replaces retained OIDC audience and subject text with keyed digests
+  The schema baseline advances to version 40. Startup scrubs historical rows
+  before serving, using the external secrets
+  keyring and a one-time audited append-only exception. Audit consumers must use
+  `audience_digest`, `subject_digest` and `digest_key_id`. Retention stays unchanged.
+  PostgreSQL startup requires a `secrets-key` credential when OIDC history needs
+  scrubbing. Empty history completes without a key. OIDC issuance requires the
+  key in either case. Startup refuses raw OIDC fields found after completion.
+  See the [migration guide](docs/migrations/v0.76.0.md#upgrade-the-store-in-place-to-schema-baseline-40).
+
+
+- **controller (Breaking):** Encrypt schedule arguments and job defaults at rest
+  Keyed stores seal schedule declarations, overrides, consent and fire history,
+  and `WithArgs` defaults in plans, node specs and expansion bodies. Existing
+  plaintext rows remain readable and the operator secrets rotation seals them.
+  The schema baseline advances to version 41 so older binaries refuse the
+  changed argument format.
+  Dependency, memo, child-pipeline and declared-step metadata stay readable
+  without the argument key. Full job specs require the key to restore defaults.
+  Upgrade all controller readers before resuming writes. See the
+  [migration guide](docs/migrations/v0.76.0.md#schedule-and-job-argument-encryption).
+
+### Docs
+
+- **docs:** Clarify that core requests reserve admission capacity and jobs share the runner-wide OS cap
+
+
+- **docs:** Complete Cloud workstation and shared team runner enrollment recipes
+
+
+- **cli:** Explain common run, pipeline, secret, runner, profile, cache and documentation commands in help, with more ready-to-run examples
+
+
+- **docs:** Link dashboard and cache settings to the private machine-config recipe
+
+
+- **docs:** Put the GitHub Actions topic-list fallback in getting started
+
+
+- **cli:** Add plain introductions to every leaf command and examples for 25 more commands
+
+
+- **docs:** Explain how older TypeScript projects add Node types before SDK upgrade verification
+
+
+- **docs:** Prepare owner-only machine settings before applying an admission budget
+
+
+- **docs:** Add checksum-pinned, cached Go setup examples for both SDKs and make Node downloads unique per invocation with amd64 and arm64 support
+- **docs:** Link the generated TypeScript API reference from known limitations
+
+
+- **docs:** Clarify pinned Go setup for both SDKs, including Linux archive selection, checksum sources, cache keys and version verification
+
+
+- **docs:** Point setup-go migrations at the Go module cache helpers in both SDKs
+
+
+- **docs:** Stage Go and Node recipe downloads inside `.tools` so publishing a toolchain uses a rename on the same filesystem
+
 ## [v0.74.0] - 2026-11-16
 
 ### Added
