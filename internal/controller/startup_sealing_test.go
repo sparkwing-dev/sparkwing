@@ -61,7 +61,7 @@ func TestStartupSealingRetriesAndSanitizes(t *testing.T) {
 		var logs bytes.Buffer
 		s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 		start := time.Now()
-		s.runStartupSealing(t.Context())
+		s.RunStartupSealing(t.Context())
 		if elapsed := time.Since(start); elapsed != time.Second {
 			t.Fatalf("retry delay=%s", elapsed)
 		}
@@ -83,7 +83,7 @@ func TestStartupSealingCancellationRollsBackBatch(t *testing.T) {
 	s := startupController(t, cipher)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
-	go func() { defer close(done); s.runStartupSealing(ctx) }()
+	go func() { defer close(done); s.RunStartupSealing(ctx) }()
 	<-cipher.entered
 	cancel()
 	close(cipher.release)

@@ -441,7 +441,7 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	s.reconcileOwnedRuns(ctx)
 
 	sealingDone := make(chan struct{})
-	go func() { defer close(sealingDone); s.runStartupSealing(ctx) }()
+	go func() { defer close(sealingDone); s.RunStartupSealing(ctx) }()
 	go s.runReaper(ctx, 10*time.Second)
 	go s.runCreditSampler(ctx, creditSampleInterval)
 	go s.runCronTick(ctx, cronTickOffer)

@@ -7,7 +7,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-func (s *Server) runStartupSealing(ctx context.Context) {
+// RunStartupSealing seals legacy plaintext in the background lifecycle owned by its caller.
+// It returns after a successful pass or cancellation; operational failures retry.
+func (s *Server) RunStartupSealing(ctx context.Context) {
 	cipher, _ := s.secretsCipher.(store.SealedRotationCipher)
 	if s.operator == nil {
 		return

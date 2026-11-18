@@ -337,3 +337,42 @@ func TestCompositionJoinsQueueAndActivityBeforeStoreClose(t *testing.T) {
 		}
 	})
 }
+
+func TestLocalStartupSealingRunsAndJoinsWithoutEndingController(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		entered := make(chan struct{})
+		returned := make(chan struct{})
+		c := openFixture(t, func(_ context.Context, b Binding) (Services, error) {
+			services := serviceFixture(b)
+			services.SealPlaintext = func(ctx context.Context) { close(entered); <-ctx.Done(); close(returned) }
+			return services, nil
+		})
+		if _, err := c.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			done <- c.Run(ctx, wingd.LocalReports{Activity: func(wingd.LocalActivity) error { return nil }, Runner: func(error) {}})
+		}()
+		synctest.Wait()
+		select {
+		case <-entered:
+		default:
+			t.Fatal("local lifecycle did not start sealing")
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("sealing stopped controller: %v", err)
+		default:
+		}
+		cancel()
+		<-done
+		select {
+		case <-returned:
+		default:
+			t.Fatal("controller failed to join startup sealing")
+		}
+	})
+}
