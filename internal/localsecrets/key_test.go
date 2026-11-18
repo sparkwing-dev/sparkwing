@@ -660,3 +660,24 @@ func TestStartupSealingUnloadedSQLiteKey(t *testing.T) {
 		})
 	}
 }
+
+func TestStartupSealingKeepsFreshSQLiteKeyLazy(t *testing.T) {
+	for _, standalone := range []bool{false, true} {
+		t.Run(fmt.Sprintf("standalone=%t", standalone), func(t *testing.T) {
+			path := keyFileIn(t, t.TempDir())
+			st := openStore(t)
+			ring := loadRing(t)
+			if standalone {
+				var err error
+				ring, err = NewStoreKeyring(path, nil, "restore the original key")
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(ring.For(st.AsOperator())).RunStartupSealing(t.Context())
+			if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("key after empty startup: %v, want absent", err)
+			}
+		})
+	}
+}

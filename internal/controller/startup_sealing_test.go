@@ -320,3 +320,41 @@ func TestStartupSealingNoKeyAuditCancellation(t *testing.T) {
 		<-done
 	})
 }
+
+func TestStartupSealingNoKeyAuditWarnsEachFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e, _ := engineRuntimeStore(t)
+		s := e.Server
+		s.secretsCipher = nil
+		db := teststore.SQL(t, e.Store)
+		if _, err := db.ExecContext(t.Context(), `CREATE TRIGGER reject_startup_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(FAIL,'private-audit-error-canary'); END`); err != nil {
+			t.Fatal(err)
+		}
+		var logs bytes.Buffer
+		s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan struct{})
+		go func() { defer close(done); s.RunStartupSealing(ctx) }()
+		synctest.Wait()
+		if bytes.Count(logs.Bytes(), []byte(`"level":"WARN"`)) != 1 {
+			cancel()
+			<-done
+			t.Fatalf("first warning: %s", logs.String())
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if bytes.Count(logs.Bytes(), []byte(`"level":"WARN"`)) != 2 {
+			cancel()
+			<-done
+			t.Fatalf("second warning: %s", logs.String())
+		}
+		if _, err := db.ExecContext(ctx, `DROP TRIGGER reject_startup_audit`); err != nil {
+			t.Fatal(err)
+		}
+		<-done
+		if bytes.Count(logs.Bytes(), []byte(`"reason":"audit_error"`)) != 2 || bytes.Contains(logs.Bytes(), []byte("private-audit-error-canary")) || bytes.Count(logs.Bytes(), []byte(`"outcome":"skipped"`)) != 1 {
+			t.Fatalf("unsafe or missing logs: %s", logs.String())
+		}
+	})
+}

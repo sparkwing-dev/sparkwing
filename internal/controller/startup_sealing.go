@@ -43,6 +43,9 @@ func (s *Server) RunStartupSealing(ctx context.Context) {
 		if auditErr != nil && outcome == "success" {
 			outcome, reason = "failed", "audit_error"
 		}
+		if noKey && auditErr != nil {
+			s.logger.Warn("startup plaintext sealing audit retry", "reason", "audit_error")
+		}
 		if !noKey || auditErr == nil {
 			s.logger.Info("startup plaintext sealing", "source", "startup", "outcome", outcome, "reason", reason, "sealed", result.PlaintextRunArguments, "already_sealed", result.AlreadySealed, "unreadable", len(result.Unreadable), "previous_key_only", result.PreviousKeyOnly, "audit_recorded", auditErr == nil)
 		}
