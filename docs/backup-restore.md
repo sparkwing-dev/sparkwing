@@ -18,7 +18,7 @@ rows. Existing previous-key envelopes stay unchanged; use operator rotation when
 retiring a key and require zero previous-key-only rows before removing it. Database free pages, WAL, dead tuples and backups from before the rewrite
 can retain plaintext. Keep retired keys for encrypted older backups and protect
 older plaintext backups through their retention period. See
-[argument encryption migration](migrations/_unreleased.md#schedule-and-job-argument-encryption).
+[argument encryption migration](migrations/v0.76.0.md#schedule-and-job-argument-encryption).
 
 ## Recovery inventory
 
