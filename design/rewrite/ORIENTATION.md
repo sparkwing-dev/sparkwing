@@ -710,3 +710,8 @@ stay unchanged at startup, including previous-key envelopes. Guards:
 `TestStartupSealingCancellationRollsBackBatch` and
 `TestStartupSealingRunsFromServeWith`. `TestStartupSealingBootCost` measures the
 per-boot scan against 3,000 rows on either configured store backend.
+
+The local controller calls the same startup worker through
+`localcontroller.Services.SealPlaintext`; `localController.Run` owns cancellation
+and joins it before closing the store. Guard:
+`TestLocalStartupSealingRunsAndJoinsWithoutEndingController`.
