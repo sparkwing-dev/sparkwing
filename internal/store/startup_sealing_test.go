@@ -215,7 +215,7 @@ func TestStartupSealingCoversEveryArgumentColumn(t *testing.T) {
 	exec(`INSERT INTO cron_fires(team,id,schedule_id,due_at,decided_at,outcome,args) VALUES (?,'fire','schedule-00000',1,1,'missed',?)`, store.DefaultTeam, body)
 	cronRun(t, st, "startup-run")
 	exec(`UPDATE runs SET sealed_at=1,spec_hash='spec',plan_hash='plan',request_json=?,spec_json=?,plan_json=? WHERE id='startup-run'`, []byte(`{"request":{"requested_args":{"token":"startup-canary-739"}}}`), []byte(`{"resolved":{"args":{"token":"startup-canary-739"}}}`), []byte(`{"jobs":[{"arguments":[{"default":"startup-canary-739"}]}]}`))
-	exec(`INSERT INTO nodes(team,run_id,node_id,status,spec_json,expansion_body,expansion_registration) VALUES (?,'startup-run','job','pending',?,?,?)`, store.DefaultTeam, []byte(`{"arguments":[{"default":"startup-canary-739"}]}`), []byte(`{"jobs":[{"arguments":[{"default":"startup-canary-739"}]}]}`), []byte(`{"defaults":[{"raw":"startup-canary-739"}]}`))
+	exec(`INSERT INTO nodes(team,run_id,node_id,status,execution_json,spec_json,expansion_body,expansion_registration) VALUES (?,'startup-run','job','pending',?, ?,?,?)`, store.DefaultTeam, []byte(`{}`), []byte(`{"arguments":[{"default":"startup-canary-739"}]}`), []byte(`{"jobs":[{"arguments":[{"default":"startup-canary-739"}]}]}`), []byte(`{"defaults":[{"raw":"startup-canary-739"}]}`))
 	result, err := st.AsOperator().SealPlaintextValues(ctx, cipher)
 	if err != nil || result.PlaintextRunArguments != 11 {
 		t.Fatalf("all columns: %+v %v", result, err)
