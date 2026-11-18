@@ -39,6 +39,9 @@ func openFilesystemData(root, externalURL, address string, logNow func(context.C
 	if err != nil {
 		return nil, err
 	}
+	if logNow == nil {
+		return nil, errors.New("filesystem data requires a log clock")
+	}
 	key, err := dataSigningKey(filepath.Join(root, "data-signing.key"))
 	if err != nil {
 		return nil, err

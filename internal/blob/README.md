@@ -198,6 +198,10 @@ and grant no log download access. The filesystem path
 enforces the shared segment or manifest size bound and reuses the immutable
 writer. The first payload wins, an identical retry succeeds, and different bytes
 cannot replace it.
+S3 caps each presigned log upload at fifteen minutes of host time when the
+store deadline is further ahead, and refuses deadlines already expired on the
+host clock. Shorter remaining lifetimes stay shorter.
+
 S3 signs `If-None-Match: *` because future slots have no known payload digest or
 length. The batch and uploader carry that header through the PUT. S3 refuses
 every existing object with HTTP 412, including an identical retry. The native

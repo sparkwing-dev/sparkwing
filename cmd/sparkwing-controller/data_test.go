@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"net/http"
@@ -30,7 +31,7 @@ func TestFilesystemDataStartup(t *testing.T) {
 	} {
 		t.Run(fixture.host+fixture.address, func(t *testing.T) {
 			root := t.TempDir()
-			objects, err := openFilesystemData(root, fixture.external, fixture.address, nil)
+			objects, err := openFilesystemData(root, fixture.external, fixture.address, filesystemTestLogNow)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,7 +77,7 @@ func TestFilesystemDataStartup(t *testing.T) {
 
 func TestFilesystemDataStartupRefusesInvalidConfiguration(t *testing.T) {
 	for _, fixture := range []struct{ external, address string }{{"", "invalid"}, {"ftp://controller.invalid", "127.0.0.1:4344"}, {"https://controller.invalid?query=1", "127.0.0.1:4344"}} {
-		objects, err := openFilesystemData(t.TempDir(), fixture.external, fixture.address, nil)
+		objects, err := openFilesystemData(t.TempDir(), fixture.external, fixture.address, filesystemTestLogNow)
 		if err == nil {
 			if closeErr := objects.Close(); closeErr != nil {
 				t.Error(closeErr)
@@ -120,7 +121,7 @@ func TestFilesystemDataStartupRequiresOriginForWildcard(t *testing.T) {
 	for _, address := range []string{":4344", "0.0.0.0:4344", "[::]:4344", "[0:0:0:0:0:0:0:0]:4344"} {
 		t.Run(address, func(t *testing.T) {
 			root := t.TempDir()
-			objects, err := openFilesystemData(root, "", address, nil)
+			objects, err := openFilesystemData(root, "", address, filesystemTestLogNow)
 			if err == nil {
 				_ = objects.Close()
 				t.Fatal("wildcard listener advertised a local transfer URL")
@@ -169,4 +170,22 @@ func TestFilesystemDataUsesStoreLogClock(t *testing.T) {
 	if _, _, err := objects.SignLogPut(t.Context(), key, 1, digest, now.Add(limits.LogUploadURLTTL+time.Nanosecond)); err == nil {
 		t.Fatal("signed beyond lifetime ceiling")
 	}
+}
+
+func TestFilesystemDataRequiresLogClock(t *testing.T) {
+	root := t.TempDir()
+	objects, err := openFilesystemData(root, "http://local", "", nil)
+	if objects != nil {
+		_ = objects.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "log clock") {
+		t.Fatalf("nil log clock = %v, want clock configuration error", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "data-signing.key")); !os.IsNotExist(err) {
+		t.Fatalf("refused clock configuration changed signing key: %v", err)
+	}
+}
+
+func filesystemTestLogNow(context.Context) (time.Time, error) {
+	return time.Now(), nil
 }
