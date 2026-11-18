@@ -56,7 +56,7 @@ func checkStoreLauncherSync(t *testing.T, clock func() time.Time, step func()) (
 		if err != nil {
 			return err
 		}
-		tenant, err = s.ForTeam(ctx, store.Team(plan.Seal.Request.Request.Team))
+		tenant, err = s.ForTeam(t.Context(), store.Team(plan.Seal.Request.Request.Team))
 		return err
 	}
 	a := capability.Authorized{Principal: capability.Principal{Authority: ref}}
