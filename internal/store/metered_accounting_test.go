@@ -13,6 +13,10 @@ func meteringFixture(t *testing.T, unit capability.UnitKind, start capability.Bi
 	s := authorityStore(t)
 	s.clock = func() time.Time { return time.Unix(1000, 0).UTC() }
 	rewriteSchemaExec(t, s.db, "INSERT INTO credit_grants(reference,id,team,kind,amount_micro,created_at) VALUES ('fund','fund','a','paid',1000000,1)")
+	return s, meteringAward(unit, start)
+}
+
+func meteringAward(unit capability.UnitKind, start capability.BillingStart) capability.Capability {
 	b := capability.BillingJob
 	switch unit {
 	case capability.UnitTrigger:
@@ -27,7 +31,7 @@ func meteringFixture(t *testing.T, unit capability.UnitKind, start capability.Bi
 	c.Unit = unit
 	c.Binding = capability.Binding{RunID: "run", NodeID: "job", Generation: 7, Holder: "machine"}
 	c.Billing = &capability.BillingProvenance{PayerTeam: "a", Metered: true, ExecutorClass: "cloud", ReservationID: "reservation", Start: start, Unit: b}
-	return s, c
+	return c
 }
 
 func reserveMetering(t *testing.T, s *Store, c capability.Capability) {
@@ -283,5 +287,27 @@ func TestStoreDataUnmeteredSettlementNeedsNoCalculator(t *testing.T) {
 				rewriteSchemaCount(t, s.db, "billable_intervals", 0)
 			})
 		}
+	}
+}
+
+func TestBillingCheckpointBoundsRemainStrict(t *testing.T) {
+	for _, offset := range []time.Duration{-time.Nanosecond, time.Nanosecond} {
+		t.Run(offset.String(), func(t *testing.T) {
+			s, c := meteringFixture(t, capability.UnitNode, capability.BillingAtStart)
+			at := s.now()
+			now := at
+			steppingWallClock(s, &now)
+			reserveMetering(t, s, c)
+			now = now.Add(-backwardClockStep)
+			err := s.inTx(t.Context(), func(tx *storeTx) error {
+				_, err := accountBillingAwardTx(t.Context(), tx, "a", c.Billing.ReservationID, at.Add(offset), true)
+				return err
+			})
+			if err == nil || err.Error() != "billing checkpoint is outside its awarded time range" {
+				t.Fatalf("out-of-range checkpoint: %v", err)
+			}
+			rewriteSchemaCount(t, s.db, "billing_awards WHERE settled_at IS NOT NULL", 0)
+			rewriteSchemaCount(t, s.db, "credit_charges", 1)
+		})
 	}
 }

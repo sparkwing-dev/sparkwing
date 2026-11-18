@@ -52,6 +52,7 @@ SDKs declare and relay only. Policy and security behavior live in the host behin
 | Filesystem log signing validates its strict fifteen-minute lifetime with the store clock that assigns slot deadlines, so backward wall-clock steps cannot reject fresh slots | `internal/store/controller_reporting.go`: `Store.LogUploadNow`; `internal/blob/filesystem_logs.go`: `SignLogPut`; `cmd/sparkwing/local_services.go`: `bindLocalController`; `cmd/sparkwing-controller/data.go`: `openFilesystemData` | `internal/controller/log_clock_test.go`: `TestLogSlotSigningSurvivesBackwardWallClock`; `internal/store/clock_step_test.go`: `TestLogUploadClockSurvivesBackwardStep`; `cmd/sparkwing-controller/data_test.go`: `TestFilesystemDataUsesStoreLogClock` |
 | S3 log upload URLs cap remaining store deadlines at fifteen minutes of host time and refuse expired deadlines | `internal/blob/s3_logs.go`: `SignLogPut` | `internal/blob/s3_log_signing_test.go`: `TestS3LogSigningCapsStoreClockSkew`, `TestS3LogSigningRejectsBeforeSigning` |
 | A SQLite store clock never moves backward within its controller process, so wall-clock steps cannot order a finish before its start or a checkpoint before its award | `internal/store/dialect.go`: `Store.monotonic` | `internal/store/clock_step_test.go`: `TestStepFinishSurvivesBackwardClockStep`, `TestPlanSettlesAfterBackwardClockStep` |
+| Transaction clocks never move backward within a store instance. SQLite and PostgreSQL restore the floor from unsettled billing facts on open, keeping generated billing checkpoints after their award and charged compute across restarts. Other timestamps may move backward across restart | `internal/store/dialect.go`: `Store.monotonic`, `Operator.restoreBillingClock` | `internal/store/clock_step_test.go`: `TestStepFinishSurvivesBackwardClockStep`, `TestPlanSettlesAfterBackwardClockStep`, `TestMeteredCheckpointSurvivesBackwardClockReopen`; `acceptance_launcher_sync_test.go`: `TestStoreLauncherSyncAfterBackwardClockReopen`; `metered_accounting_test.go`: `TestBillingCheckpointBoundsRemainStrict` |
 
 ### Tenancy
 
@@ -700,3 +701,20 @@ Linux process inspection treats ENOENT and ESRCH as absent processes. Owners:
 Runner claim dispatch rechecks cancellation after version policy validation.
 Owner: `internal/runners/loop.go`; guard:
 `TestLoopDoesNotClaimAfterPolicyCancelsContext`.
+
+Controller startup plaintext sealing shares `internal/store/sealed_rotation.go`
+with operator key rotation. `internal/controller/startup_sealing.go` owns the
+background lifecycle, bounded retry and sanitized summaries. Existing envelopes
+stay unchanged at startup, including previous-key envelopes. Guards:
+`TestStartupSealingCoversEveryArgumentColumn`,
+`TestStartupSealingPlaintextAndSecondPass`,
+`TestStartupSealingConcurrentPasses`, `TestStartupSealingRacesOperator`,
+`TestStartupSealingRetriesAndSanitizes`,
+`TestStartupSealingCancellationRollsBackBatch` and
+`TestStartupSealingRunsFromServeWith`. `TestStartupSealingBootCost` measures the
+per-boot scan against 3,000 rows on either configured store backend.
+
+The local controller calls the same startup worker through
+`localcontroller.Services.SealPlaintext`; `localController.Run` owns cancellation
+and joins it before closing the store. Guard:
+`TestLocalStartupSealingRunsAndJoinsWithoutEndingController`.

@@ -682,7 +682,7 @@ func Registry() []Command {
 			{Name: "profile", Argument: "NAME"},
 		}},
 		{Path: "sparkwing schedules", Flags: []Flag{}},
-		{Path: "sparkwing schedules install", Rules: []string{"Capture the installing environment; native timers on Linux/macOS invoke __tick. Windows schedules are daemon-run."}, Flags: []Flag{
+		{Path: "sparkwing schedules install", Rules: []string{"Capture the installing environment; native timers on Linux/macOS invoke __tick. Windows records schedules without firing them automatically."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME"},
 			{Name: "schedule", Argument: "SCHEDULE", Repeatable: true, CommaList: true},
 			{Name: "unpinned"},

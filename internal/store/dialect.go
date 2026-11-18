@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -200,22 +201,19 @@ func (t *storeTx) readClock(ctx context.Context) (time.Time, error) {
 	if s.dialect == DialectSQLite && s.clock != nil {
 		return s.now(), nil
 	}
-	if s.dialect == DialectSQLite && s.wallClock != nil {
+	if s.wallClock != nil {
 		return s.monotonic(s.wallClock().UTC()), nil
 	}
 	var ns int64
 	if err := t.QueryRowContext(ctx, databaseTimeSQL(s.dialect)).Scan(&ns); err != nil {
 		return time.Time{}, err
 	}
-	if s.dialect == DialectSQLite {
-		return s.monotonic(time.Unix(0, ns).UTC()), nil
-	}
-	return time.Unix(0, ns).UTC(), nil
+	return s.monotonic(time.Unix(0, ns).UTC()), nil
 }
 
 // bug: time sync and VM resume step the wall clock backward, which would
-// order a finish before its start; the local controller is the only writer of
-// its SQLite store, so its clock never moves backward within a process.
+// order a finish before its start. Controller time retains its high-water
+// mark, including unsettled billing facts restored when the store opens.
 func (s *Store) monotonic(now time.Time) time.Time {
 	for {
 		floor := s.clockFloor.Load()
@@ -226,6 +224,40 @@ func (s *Store) monotonic(now time.Time) time.Time {
 			return now
 		}
 	}
+}
+
+// bug: reopening loses the in-memory floor while awards and charged compute survive.
+func (o *Operator) restoreBillingClock(ctx context.Context) error {
+	var floor int64
+	if err := o.s.sqlRunner().QueryRowContext(ctx, `SELECT COALESCE(MAX(at),0) FROM (
+ SELECT awarded_at AS at FROM billing_awards WHERE settled_at IS NULL
+ UNION ALL
+ SELECT CASE WHEN i.finished_at>i.charged_through THEN i.finished_at ELSE i.charged_through END AS at
+ FROM billable_intervals i JOIN billing_awards a ON a.team=i.team AND a.reservation_id=i.reservation_id
+ WHERE a.settled_at IS NULL
+) billing_clock`).Scan(&floor); err != nil {
+		return fmt.Errorf("restore billing clock: %w", err)
+	}
+	o.s.monotonic(time.Unix(0, floor).UTC())
+	if floor > 0 && o.s.pinnedClock == nil {
+		var wall time.Time
+		switch {
+		case o.s.clock != nil && o.s.dialect == DialectSQLite:
+			wall = o.s.now()
+		case o.s.wallClock != nil:
+			wall = o.s.wallClock()
+		default:
+			var ns int64
+			if err := o.s.sqlRunner().QueryRowContext(ctx, databaseTimeSQL(o.s.dialect)).Scan(&ns); err != nil {
+				return fmt.Errorf("read restored billing clock skew: %w", err)
+			}
+			wall = time.Unix(0, ns)
+		}
+		if ahead := time.Unix(0, floor).Sub(wall); ahead > time.Minute {
+			slog.WarnContext(ctx, "restored billing clock is ahead of wall time", "ahead_by", ahead, "billing_clock", time.Unix(0, floor).UTC(), "wall_time", wall.UTC())
+		}
+	}
+	return nil
 }
 
 func databaseTimeSQL(d Dialect) string {

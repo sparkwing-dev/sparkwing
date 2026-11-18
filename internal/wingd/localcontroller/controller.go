@@ -44,6 +44,8 @@ type Services struct {
 	// Deliver sends run event deliveries until its context ends. It runs in
 	// its own worker so a slow receiver never stalls maintenance.
 	Deliver func(context.Context) error
+	// SealPlaintext runs startup sealing without delaying readiness or ending the controller on completion.
+	SealPlaintext func(context.Context)
 }
 
 // Config supplies shared service constructors without opening another store.
@@ -175,6 +177,14 @@ func (c *localController) Run(ctx context.Context, reports wingd.LocalReports) e
 	}()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	sealingDone := make(chan struct{})
+	go func() {
+		defer close(sealingDone)
+		if c.services.SealPlaintext != nil {
+			c.services.SealPlaintext(ctx)
+		}
+	}()
+	defer func() { cancel(); <-sealingDone }()
 	workers := 3
 	if c.services.Deliver != nil {
 		workers++

@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { ReencryptSecrets } from "@/components/ReencryptSecrets";
+import { useTeamState } from "@/lib/useTeam";
 import { WarmCapacityView } from "@/components/WarmCapacity";
 import { useSearchParams } from "next/navigation";
 import { type ReactNode, Suspense, useCallback, useEffect, useState } from "react";
@@ -62,6 +64,9 @@ function OperatorConsole() {
   const waitlist = view === "waitlist";
   const standing = view === "standing";
   const warm = view === "warm";
+  const secrets = view === "secrets";
+  const state = useTeamState();
+  const operator = (state.status === "ready" || state.status === "no-team" || state.status === "waitlisted") && state.me.operator_console === true;
   const [waiting, setWaiting] = useState<number | null>(null);
   useEffect(() => {
     getWaitlist(0, 1).then(
@@ -74,8 +79,8 @@ function OperatorConsole() {
   return (
     <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full">
       <h1 className="text-xl font-bold mb-4">Operator console</h1>
-      <nav aria-label="Operator console" className="flex gap-2 mb-6 text-sm">
-        <Link className={tab(!waitlist && !standing && !warm)} href="/operator">
+      <nav aria-label="Operator console" className="flex flex-wrap gap-2 mb-6 text-sm">
+        <Link className={tab(!waitlist && !standing && !warm && !secrets)} href="/operator">
           Teams
         </Link>
         <Link className={tab(standing)} href="/operator?view=standing">
@@ -87,8 +92,11 @@ function OperatorConsole() {
         <Link className={tab(warm)} href="/operator?view=warm">
           Warm capacity
         </Link>
+        {operator ? <Link className={tab(secrets)} href="/operator?view=secrets">Re-encrypt secrets</Link> : null}
       </nav>
-      {warm ? (
+      {secrets ? (
+        operator ? <ReencryptSecrets /> : <p role="status" className="text-sm text-[var(--muted)]">{state.status === "loading" ? "Checking operator session…" : "This action requires an operator console session."}</p>
+      ) : warm ? (
         <WarmCapacityView />
       ) : waitlist ? (
         <WaitlistView onTotal={setWaiting} />

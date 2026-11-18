@@ -19,6 +19,15 @@ type Cipher struct {
 
 var _ controller.BoundCipher = (*Cipher)(nil)
 
+// PrepareSealing checks the store before a rotation holds its connection and returns
+// a cipher that creates a key only when that rotation seals its first value.
+func (c *Cipher) PrepareSealing(ctx context.Context) (store.SealedRotationCipher, error) {
+	if err := c.ring.MissingKey(ctx, c.st); err != nil {
+		return nil, err
+	}
+	return c.ring.For(nil), nil
+}
+
 func (c *Cipher) Seal(plain string) (string, error) {
 	inner, err := c.ring.ensure(context.Background(), c.st)
 	if err != nil {

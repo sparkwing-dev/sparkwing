@@ -127,8 +127,10 @@ both admin / inspection (`sparkwing dashboard open`,
 
 ### Windows
 
-Windows support is experimental. Use WSL2 with systemd enabled and the Linux
-installer above; see [known limitations](known-limitations.md#windows-is-experimental).
+Native Windows is experimental and unsupported for production. WSL2 with
+systemd enabled is the supported way to run Sparkwing on Windows. Use the Linux
+installer above. See [known limitations](known-limitations.md#windows-is-experimental)
+for native runner, scheduling, update drain and process limits.
 
 Prebuilt Windows binaries are published to GitHub Releases:
 `sparkwing-windows-amd64.exe` and `sparkwing-windows-arm64.exe`. They
@@ -152,8 +154,10 @@ you run `bash bin/build-web.sh` from a repo checkout first. The prebuilt
 release binary has no such limitation.
 
 The bundled `sparkwing-runner` service installer supports Linux and macOS.
-On Windows, supervise `sparkwing-runner.exe agent` yourself or use the Linux
-installer inside WSL when systemd user services are enabled.
+For an experimental native Windows team runner, start and supervise
+`sparkwing-runner.exe start --config <config-path>` yourself, using the runner
+configuration written during enrollment. For supported Windows execution, use
+the Linux installer inside WSL2 with systemd user services enabled.
 
 ### If the wrong sparkwing runs
 

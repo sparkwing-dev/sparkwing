@@ -10,14 +10,15 @@ refuse it. Restore a matching pre-upgrade backup before downgrading.
 
 Argument encryption covers schedule declarations, overrides, consent requests,
 fire history and job defaults in plan, node and expansion documents. Restore
-the matching secrets keys before reading or resuming that work. After upgrading
-all controller readers, run `sparkwing operator secrets rotate` to seal legacy
-plaintext rows, then `sparkwing operator secrets rotate --verify`. Require zero
-plaintext argument documents and zero previous-key-only rows, with no unreadable
-rows. Database free pages, WAL, dead tuples and backups from before the rewrite
+the matching secrets keys before reading or resuming that work. On controller startup, a background pass automatically seals legacy plaintext
+rows with the configured secrets key. No manual reseal is required for this
+upgrade. Wait for a successful startup sealing summary, then use `sparkwing
+operator secrets rotate --verify` to inspect remaining plaintext and unreadable
+rows. Existing previous-key envelopes stay unchanged; use operator rotation when
+retiring a key and require zero previous-key-only rows before removing it. Database free pages, WAL, dead tuples and backups from before the rewrite
 can retain plaintext. Keep retired keys for encrypted older backups and protect
 older plaintext backups through their retention period. See
-[argument encryption migration](migrations/_unreleased.md#schedule-and-job-argument-encryption).
+[argument encryption migration](migrations/v0.76.0.md#schedule-and-job-argument-encryption).
 
 ## Recovery inventory
 

@@ -467,6 +467,18 @@
       "kind": "page",
       "exempt": "Requires the remote dashboard, a signed-in account session and a pending device code, absent from the local dashboard corpus. The Playwright spec covers the page against a mocked controller. Page latency, the approve action, cold start and response bytes remain unmeasured.",
       "baselines": {}
+    },
+    {
+      "route": "/operator",
+      "kind": "page",
+      "exempt": "The Secrets tab and its Verify secrets and Re-encrypt interactions require an operator.console grant, a direct console session signed in within the last 10 minutes and a CSRF token, absent from the local dashboard corpus. Re-encrypt rewrites every team's sealed secrets, so a scheduled probe must not run it against a real deployment. Playwright specs cover the tab against a mocked controller. Page latency, interaction INP, cold start and response bytes remain unmeasured.",
+      "baselines": {}
+    },
+    {
+      "route": "/api/v1/operator/secrets/rotate",
+      "kind": "api",
+      "exempt": "Verify and re-encrypt require operator authority, a fresh direct console session, CSRF and the deployment's sealed-secret keys, absent from the dashboard corpus. The write re-encrypts every team's secrets and must not be probed against a real deployment. In-process tests verify authorization, counts and refusals. Authorized latency, cold start and response bytes are unmeasured.",
+      "baselines": {}
     }
   ]
 }
