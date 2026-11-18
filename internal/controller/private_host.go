@@ -204,16 +204,23 @@ func observeNodeExit(r *http.Request, body *runstate.NodeCommandPayload) error {
 	return nil
 }
 
+func observeNodeBodySkip(r *http.Request, body *runstate.NodeCommandPayload) error {
+	if values := r.Header.Values(controllerwire.NodeBodySkippedHeader); len(values) > 0 {
+		if len(values) != 1 || body.Cause != runstate.CauseReport || body.To != runstate.NodeMemoized || values[0] != "memo" {
+			return invalidEngineBody("body skip requires one memo value on a memoized report")
+		}
+		body.Extra.BodySkipped = values[0]
+	}
+	return nil
+}
+
 func (s *Server) localHostNodeTransition(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
 	var body runstate.NodeCommandPayload
 	if err := decodeEngineRequest(r, &body); err != nil {
 		return err
 	}
-	if values := r.Header.Values(controllerwire.NodeBodySkippedHeader); len(values) > 0 {
-		if len(values) != 1 || body.Cause != runstate.CauseReport || values[0] != "memo" && values[0] != "skip_if" {
-			return invalidEngineBody("body skip requires one executor reason on a report")
-		}
-		body.Extra.BodySkipped = values[0]
+	if err := observeNodeBodySkip(r, &body); err != nil {
+		return err
 	}
 	if err := observeNodeExit(r, &body); err != nil {
 		return err

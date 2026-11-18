@@ -255,7 +255,7 @@ func accountBillingAwardWithSkipTx(ctx context.Context, tx *storeTx, team Team, 
 		if err != nil {
 			return result, authorityError(hosterr.IntegrityFailure, "invalid persisted billing: "+err.Error())
 		}
-		if final && bodySkipped && a.provenance.ExecutorClass == TierCloud && a.provenance.Unit == capability.BillingJob && len(intervals) == 1 {
+		if final && bodySkipped && a.provenance.ExecutorClass == TierCloud && a.provenance.Unit == capability.BillingJob && len(intervals) == 1 && intervals[0].End.Sub(intervals[0].Start) <= SliceSeconds*time.Second {
 			result.BillableSeconds = 0
 		}
 		if err := validateBillingCalculation(a, intervals, result); err != nil {

@@ -485,7 +485,7 @@ func stateHash(value any) (string, error) {
 }
 
 func guardNodeEdgeTx(ctx context.Context, tx *storeTx, team Team, row runstate.NodeRow, change nodeTransition, edge nodeEdge, now time.Time) error {
-	if reason := change.Extra.BodySkipped; reason != "" && (change.Cause != runstate.CauseReport || reason != "memo" && reason != "skip_if" || reason == "memo" && change.To != runstate.NodeMemoized || reason == "skip_if" && change.To != runstate.NodeSkipped) {
+	if reason := change.Extra.BodySkipped; reason != "" && (change.Cause != runstate.CauseReport || reason != "memo" || change.To != runstate.NodeMemoized) {
 		return authorityError(apierr.BadRequest, "body skip evidence conflicts with report")
 	}
 	if change.Extra.Result != nil {

@@ -20,12 +20,18 @@ func CloudMemoBilling(t *testing.T, open func(*testing.T) *Store) {
 		want           int64
 	}{
 		{"memo", "memo", runstate.NodeMemoized, 0},
+		{"memo_60s", "memo", runstate.NodeMemoized, 0},
+		{"memo_61s", "memo", runstate.NodeMemoized, 610},
+		{"long_start", "memo", runstate.NodeMemoized, 18010},
+		{"long_end", "memo", runstate.NodeMemoized, 18010},
+		{"prior_application_retry", "memo", runstate.NodeMemoized, 600},
+		{"receipt_attempt_guard", "memo", runstate.NodeMemoized, 0},
 		{"historical_forged_event", "memo", runstate.NodeMemoized, 600},
 		{"retry_after_memo", "memo", runstate.NodeMemoized, 600},
 		{"body_after_memo", "memo", runstate.NodeMemoized, 600},
 		{"wrong_attempt", "memo", runstate.NodeMemoized, 600},
 		{"missing_source", "memo", runstate.NodeMemoized, 600},
-		{"skip_if", "skip_if", runstate.NodeSkipped, 600},
+		{"skip_if", "", runstate.NodeSkipped, 600},
 		{"forged_header", "memo", runstate.NodeMemoized, 600},
 		{"memo_without_copy", "memo", runstate.NodeMemoized, 600},
 		{"reported_memo", "", runstate.NodeMemoized, 600},
@@ -41,6 +47,8 @@ func CloudMemoBilling(t *testing.T, open func(*testing.T) *Store) {
 			if _, err := tenant.TransitionNode(t.Context(), StartNode{Ref: ref, Actor: actor, SourceAttempt: sourceAttempt(0)}); err != nil {
 				t.Fatal(err)
 			}
+			started := *now
+			var delayedCopy func()
 			ordinal := int64(1)
 			var output *blob.RecordKey
 			if test.evidence == "memo" && test.name != "forged_header" {
@@ -82,11 +90,36 @@ func CloudMemoBilling(t *testing.T, open func(*testing.T) *Store) {
 				}
 				if test.name != "memo_without_copy" && test.name != "historical_forged_event" {
 					lookup := blob.MemoLookup{Authority: intent.Authority, Key: blob.MemoKey{Repo: "gh:1", Ref: intent.Authority.Ref.Scope, Pipeline: "ci", Job: "job", Hash: fixtureMemoHash}}
-					if hit, err := records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: lookup, Destination: intent.Identity.Attempt.Value}); err != nil || !hit.Found {
-						t.Fatalf("copy hit=%+v: %v", hit, err)
+					copyMemo := func() {
+						if hit, err := records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: lookup, Destination: intent.Identity.Attempt.Value}); err != nil || !hit.Found {
+							t.Fatalf("copy hit=%+v: %v", hit, err)
+						}
+					}
+					if test.name == "long_end" {
+						delayedCopy = copyMemo
+					} else {
+						copyMemo()
 					}
 					key := blobOutputRequest(intent).Key
 					output = &key
+					if test.name == "receipt_attempt_guard" {
+						row, err := tenant.ReadNode(t.Context(), ref)
+						if err != nil {
+							t.Fatal(err)
+						}
+						row.Attempt++
+						s.testOnlyExec(t, `UPDATE blob_records SET attempt=2 WHERE team='a' AND kind='output'`)
+						if err := s.inTx(t.Context(), func(tx *storeTx) error {
+							verified, err := memoBillingVerifiedTx(t.Context(), tx, tenant.team, row)
+							if err == nil && verified {
+								t.Fatal("earlier receipt authorized a later attempt with matching copied output")
+							}
+							return err
+						}); err != nil {
+							t.Fatal(err)
+						}
+						s.testOnlyExec(t, `UPDATE blob_records SET attempt=1 WHERE team='a' AND kind='output'`)
+					}
 					if test.name == "memo" {
 						if hit, err := records.CopyMemo(t.Context(), blob.CopyMemoRequest{Lookup: lookup, Destination: intent.Identity.Attempt.Value}); err != nil || !hit.Found {
 							t.Fatalf("copy replay=%+v: %v", hit, err)
@@ -128,11 +161,38 @@ func CloudMemoBilling(t *testing.T, open func(*testing.T) *Store) {
 
 				}
 			}
-			*now = now.Add(5 * time.Second)
-			if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
-				t.Fatal(err)
+			duration := 6 * time.Second
+			switch test.name {
+			case "memo_60s":
+				duration = 60 * time.Second
+			case "memo_61s":
+				duration = 61 * time.Second
+			case "long_start", "long_end":
+				duration = 1801 * time.Second
+			}
+			beforeReport := started.Add(duration - time.Second)
+			for now.Before(beforeReport) {
+				*now = now.Add(min(30*time.Second, beforeReport.Sub(*now)))
+				if _, err := s.AsOperator().RenewUnit(t.Context(), claim.Award.CapabilityPrefix, true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if delayedCopy != nil {
+				delayedCopy()
 			}
 			*now = now.Add(time.Second)
+			if test.name == "prior_application_retry" {
+				row, err := tenant.ReadNode(t.Context(), ref)
+				if err != nil {
+					t.Fatal(err)
+				}
+				row.ApplicationRetries = 1
+				if err := s.inTx(t.Context(), func(tx *storeTx) error {
+					return transitionNodeBillingTx(t.Context(), tx, tenant.team, row, nodeTransition{To: runstate.NodeMemoized, Extra: transitionExtra{BodySkipped: "memo"}}, nodeEdge{}, tx.now(t.Context()))
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
 			command := ReportNode{Ref: ref, Actor: actor, SourceAttempt: sourceAttempt(ordinal), Outcome: test.outcome, Result: &runstate.NodeResult{Outcome: test.outcome, OutputRecord: output}, BodySkipped: test.evidence}
 			if _, err := tenant.TransitionNode(t.Context(), command); err != nil {
 				t.Fatal(err)

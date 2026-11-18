@@ -345,7 +345,9 @@ funds payment does not block refills again. A failure from a newer refill does.
 ## Metering
 
 Controller-verified Cloud memo hits have zero billed job seconds and zero job compute cost, with no
-60-second minimum. The controller records a served memo hit in the same
+60-second minimum, when their single billable interval lasts at most 60 seconds.
+Longer intervals bill normally for their elapsed time, including the job minimum.
+The controller records a served memo hit in the same
 transaction that copies its output for the current job attempt. Settlement
 verifies the controller-only audit fact, that receipt, the source memo and the copied records before refunding
 reserved or checkpointed charges. A reported outcome or skip header alone never
