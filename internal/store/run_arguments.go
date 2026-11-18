@@ -141,7 +141,11 @@ func encodeRunDocument[T any](cipher SessionKeyCipher, team Team, run, scope str
 	}
 	envelope, err := cipher.SealBound(secrets.PurposeRunArguments, string(team), run, scope, false, true, string(plain))
 	if err != nil || !secrets.IsBound(envelope) {
-		return nil, false, authorityError(hosterr.Unavailable, "run argument encryption failed")
+		failure := authorityError(hosterr.Unavailable, "run argument encryption failed")
+		if errors.Is(err, secrets.ErrKeyRefused) {
+			failure = errors.Join(failure, secrets.ErrKeyRefused)
+		}
+		return nil, false, failure
 	}
 	stored, err = withSealedArguments(blank, envelope)
 	return stored, err == nil, err

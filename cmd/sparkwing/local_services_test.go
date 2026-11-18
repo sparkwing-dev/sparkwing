@@ -226,6 +226,9 @@ func TestProductionLocalQueueBindsRunnerPolicy(t *testing.T) {
 				t.Fatal("local and controller runner policy bindings are incomplete")
 			}
 		}
+		if services.SealPlaintext == nil {
+			t.Fatal("local daemon has no startup sealing worker")
+		}
 		runner = services.Runner
 		return services, err
 	}}).Open(t.Context(), t.TempDir())

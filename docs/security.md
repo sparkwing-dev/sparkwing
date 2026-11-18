@@ -462,10 +462,16 @@ retry, fails for that run alone. A keyed store whose key cannot be used refuses 
 rather than store the values in plaintext. A PostgreSQL controller started
 without a `secrets-key` credential has no key: it refuses every secret write,
 stores argument values, including schedules and job defaults, unencrypted, and says so
-in a startup warning. Run and schedule documents stored before argument sealing keep their plaintext
-values and still read as written. `sparkwing operator secrets rotate` seals them in
-place and reports the count as `plaintext_run_arguments`; `--verify` only
-counts them. A keyless store must receive a secrets key before rotation can seal its rows.
+in a startup warning. With a usable secrets key configured, each controller start seals legacy plaintext
+run and schedule documents in the background after migrations. No manual upgrade
+step is needed. Readiness remains available while the pass runs; operational
+failures retry with bounded backoff. Each attempt reports sanitized sealed,
+already-sealed, previous-key-only and unreadable counts in a structured log and
+system audit event. Unreadable documents remain unchanged. Previous-key envelopes
+remain for operator key rotation, so rolling back a key configuration does not
+make automatically rewritten envelopes unreadable. `sparkwing operator secrets
+rotate --verify` reports remaining plaintext and unreadable documents. A keyless
+store must receive a secrets key and restart before startup can seal its rows.
 Local sealing offers limited protection because `secrets.key` sits beside
 `state.db` with the same file permissions. Someone who can read that directory
 can read both the database and its key. Database-only backups remain protected
@@ -491,6 +497,21 @@ submitted run environments, and the session signing key. To replace it:
    that needed the previous key), `plaintext_run_arguments` (run and schedule documents it
    sealed for the first time) and any row neither key opens. It is safe to
    repeat, including after an interruption.
+
+   In the operator console, open **Re-encrypt secrets**. Click **Verify
+   secrets** for a dry run and review the counts. If there are no unreadable
+   rows, type `RE-ENCRYPT` and click **Re-encrypt now**. The console re-encrypts,
+   verifies again, and shows the before, write-operation and after counts.
+   A later verification keeps the last completed run's counts visible alongside
+   its new result. An authorization refusal changes nothing; sign in again and
+   verify before retrying. A network or server failure can leave the write's
+   outcome unknown; verify before retrying.
+   Confirm a current database backup and the controller key configuration
+   before starting. Both verification and re-encryption require a direct
+   `operator.console` session signed in within the last 10 minutes and CSRF
+   proof. If asked, sign out and sign in again, then rerun verification.
+   Key material, argument values and unreadable row details are never shown.
+
 4. Run `sparkwing operator secrets rotate --verify` (`?verify=1`). It writes
    nothing and reports how many rows still open only under the previous key and
    how many run and schedule documents still hold plaintext arguments. Run the rotation again

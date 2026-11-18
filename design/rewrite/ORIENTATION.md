@@ -698,3 +698,20 @@ Linux process inspection treats ENOENT and ESRCH as absent processes. Owners:
 Runner claim dispatch rechecks cancellation after version policy validation.
 Owner: `internal/runners/loop.go`; guard:
 `TestLoopDoesNotClaimAfterPolicyCancelsContext`.
+
+Controller startup plaintext sealing shares `internal/store/sealed_rotation.go`
+with operator key rotation. `internal/controller/startup_sealing.go` owns the
+background lifecycle, bounded retry and sanitized summaries. Existing envelopes
+stay unchanged at startup, including previous-key envelopes. Guards:
+`TestStartupSealingCoversEveryArgumentColumn`,
+`TestStartupSealingPlaintextAndSecondPass`,
+`TestStartupSealingConcurrentPasses`, `TestStartupSealingRacesOperator`,
+`TestStartupSealingRetriesAndSanitizes`,
+`TestStartupSealingCancellationRollsBackBatch` and
+`TestStartupSealingRunsFromServeWith`. `TestStartupSealingBootCost` measures the
+per-boot scan against 3,000 rows on either configured store backend.
+
+The local controller calls the same startup worker through
+`localcontroller.Services.SealPlaintext`; `localController.Run` owns cancellation
+and joins it before closing the store. Guard:
+`TestLocalStartupSealingRunsAndJoinsWithoutEndingController`.
