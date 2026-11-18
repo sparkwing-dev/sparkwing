@@ -496,6 +496,10 @@ submitted run environments, and the session signing key. To replace it:
    secrets** for a dry run and review the counts. If there are no unreadable
    rows, type `RE-ENCRYPT` and click **Re-encrypt now**. The console re-encrypts,
    verifies again, and shows the before, write-operation and after counts.
+   A later verification keeps the last completed run's counts visible alongside
+   its new result. An authorization refusal changes nothing; sign in again and
+   verify before retrying. A network or server failure can leave the write's
+   outcome unknown; verify before retrying.
    Confirm a current database backup and the controller key configuration
    before starting. Both verification and re-encryption require a direct
    `operator.console` session signed in within the last 10 minutes and CSRF

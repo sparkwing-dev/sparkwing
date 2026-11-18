@@ -64,12 +64,12 @@ describe("operator reseal API", () => {
 
   it("explains stale sign-in without showing the backend error text", async () => {
     response = () => Response.json({ error: { message: "private", details: { reason: "reauth_required" } } }, { status: 403 });
-    await assert.rejects(lib.requestReseal(true), { message: "Sign out, sign in again, then retry within 10 minutes." });
+    await assert.rejects(lib.requestReseal(true), { message: "Sign in again, then run Verify secrets within 10 minutes." });
   });
 
   it("handles missing authority, unavailable encryption and server errors without raw values", async () => {
     for (const [status, reason, message] of [
-      [401, "", /Sign out, sign in again/],
+      [401, "", /Sign in again/],
       [403, "", /operator console session and valid CSRF proof/],
       [503, "secrets_key_required", /Secret encryption is unavailable/],
       [500, "", /HTTP 500/],
@@ -77,6 +77,17 @@ describe("operator reseal API", () => {
       response = () => Response.json({ error: { message: "private", details: { reason } } }, { status });
       await assert.rejects(lib.requestReseal(true), (err: Error) => message.test(err.message) && !err.message.includes("private"));
     }
+  });
+
+  it("distinguishes rejected writes from uncertain transport and server outcomes", async () => {
+    for (const status of [401, 403, 400, 500]) {
+      response = () => Response.json({ error: { message: "private" } }, { status });
+      await assert.rejects(lib.requestReseal(false), (err: Error) =>
+        err instanceof lib.ResealRequestError && err.status === status && !err.message.includes("private"));
+    }
+    response = () => { throw new Error("private"); };
+    await assert.rejects(lib.requestReseal(false), (err: Error) =>
+      err instanceof lib.ResealRequestError && err.status === null);
   });
 
   it("reports an unknown outcome when the connection fails", async () => {

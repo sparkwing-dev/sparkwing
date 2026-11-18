@@ -15,6 +15,7 @@ type Options = {
   unreadable?: boolean;
   failure?: number;
   remaining?: boolean;
+  writeFailure?: number | "network";
 };
 async function mockReseal(page: Page, options: Options = {}) {
   const calls: { method: string; verify: boolean; csrf: string | undefined; body: string | null }[] = [];
@@ -38,11 +39,14 @@ async function mockReseal(page: Page, options: Options = {}) {
       await route.fulfill({ json: { accounts: [], total: 0 } });
     } else if (url.pathname === "/api/v1/operator/secrets/rotate") {
       calls.push({ method: request.method(), verify: url.search === "?verify=1", csrf: request.headers()["x-csrf-token"], body: request.postData() });
-      if (options.failure === calls.length) {
+      if (options.writeFailure && !url.search) {
+        if (options.writeFailure === "network") await route.abort("failed");
+        else await route.fulfill({ status: options.writeFailure, json: { error: { message: marker } } });
+      } else if (options.failure === calls.length) {
         await route.fulfill({ status: 403, json: { error: { code: "forbidden", message: marker, details: { reason: "reauth_required" } } } });
       } else {
         await route.fulfill({ json: {
-          ...(calls.length === 3 && !options.remaining ? sealed : inventory),
+          ...(calls.length >= 3 && !options.remaining ? sealed : inventory),
           unreadable: options.unreadable ? [{ name: marker, purpose: marker, team: marker }] : null,
         } });
       }
@@ -74,8 +78,8 @@ for (const width of [1440, 390]) {
     await page.keyboard.press("Enter");
     await expect(page.getByText("Verification passed. Review the counts, then type the confirmation.")).toBeVisible();
     await expect(rotate).toBeDisabled();
-    await page.keyboard.press("Tab");
-    await expect(confirmation).toBeFocused();
+    await expect(page.getByRole("region", { name: "Re-encryption result" })).toBeFocused();
+    await confirmation.focus();
     await confirmation.fill("re-encrypt");
     await expect(rotate).toBeDisabled();
     await confirmation.fill("RE-ENCRYPT");
@@ -98,11 +102,19 @@ for (const width of [1440, 390]) {
     await expect(rotate).toBeDisabled();
     expect([await verify.boundingBox(), await rotate.boundingBox()]).toEqual(positions);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await expect(page.getByRole("region", { name: "Re-encryption result" })).toBeFocused();
+    await expect(page.getByText("Requires a sign-in from the last 10 minutes.", { exact: false })).toBeVisible();
     await capture(page, `complete-${width}`);
-    if (width === 390) {
-      await page.getByRole("row", { name: "Unreadable rows 0 0 0" }).scrollIntoViewIfNeeded();
-      await capture(page, "complete-counts-390");
-    }
+    await verify.click();
+    await expect(page.getByText("Verification passed. Review the counts, then type the confirmation.")).toBeVisible();
+    const previous = page.getByRole("table", { name: /Last completed re-encryption/ });
+    await expect(previous.getByRole("row", { name: "Previous key only 5 5 0" })).toBeVisible();
+    await expect(page.getByRole("table", { name: /Latest verification/ }).getByRole("row", { name: "Previous key only 0" })).toBeVisible();
+    await verify.scrollIntoViewIfNeeded();
+    expect([await verify.boundingBox(), await rotate.boundingBox()]).toEqual(positions);
+    await capture(page, `reverified-${width}`);
+    await page.getByRole("table", { name: /Latest verification/ }).getByRole("row", { name: "Unreadable rows 0" }).scrollIntoViewIfNeeded();
+    await capture(page, `reverified-counts-${width}`);
   });
 }
 
@@ -115,7 +127,7 @@ for (const failure of [1, 2, 3]) {
       await page.getByRole("textbox", { name: "Type RE-ENCRYPT to confirm" }).fill("RE-ENCRYPT");
       await page.getByRole("button", { name: "Re-encrypt now", exact: true }).click();
     }
-    await expect(page.getByRole("main").getByRole("alert")).toContainText("Sign out, sign in again, then retry within 10 minutes.");
+    await expect(page.getByRole("main").getByRole("alert")).toContainText("Sign in again, then run Verify secrets within 10 minutes.");
     await expect(page.getByRole("button", { name: "Re-encrypt now", exact: true })).toBeDisabled();
     expect(calls).toHaveLength(failure);
     await expect(page.locator("body")).not.toContainText(marker);
@@ -182,4 +194,48 @@ test("pending requests lock the controls and a failed recheck consumes the earli
   await expect(rotate).toBeDisabled();
   await expect(confirmation).toHaveValue("");
   expect(calls).toHaveLength(1);
+});
+
+for (const width of [1440, 390]) {
+  for (const failure of [401, 403, 500, "network"] as const) {
+    test(`write ${failure} reports the correct outcome at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 });
+      const calls = await mockReseal(page, { writeFailure: failure });
+      await page.goto("/operator?view=secrets");
+      await page.getByRole("button", { name: "Verify secrets", exact: true }).click();
+      const confirmation = page.getByRole("textbox", { name: "Type RE-ENCRYPT to confirm" });
+      await confirmation.fill("RE-ENCRYPT");
+      await confirmation.press("Enter");
+      const error = page.getByRole("main").getByRole("alert");
+      if (failure === 401 || failure === 403) {
+        await expect(error).toContainText("Nothing was changed.");
+        await expect(error).toContainText("Sign in again");
+        await expect(error).toContainText("Verify secrets");
+        await expect(error).not.toContainText("Some rows may have changed");
+      } else {
+        await expect(error).toContainText("Some rows may have changed.");
+        await expect(error).toContainText("Verify secrets");
+        await expect(error).not.toContainText("Nothing was changed");
+      }
+      await expect(page.getByRole("region", { name: "Re-encryption result" })).toBeFocused();
+      await expect(page.getByRole("button", { name: "Re-encrypt now", exact: true })).toBeDisabled();
+      await expect(page.locator("body")).not.toContainText(marker);
+      expect(calls).toHaveLength(2);
+      await capture(page, `write-${failure}-${width}`);
+    });
+  }
+}
+
+test("a new verification retains the completed re-encryption counts", async ({ page }) => {
+  await mockReseal(page);
+  await page.goto("/operator?view=secrets");
+  const verify = page.getByRole("button", { name: "Verify secrets", exact: true });
+  await verify.click();
+  await page.getByRole("textbox", { name: "Type RE-ENCRYPT to confirm" }).fill("RE-ENCRYPT");
+  await page.getByRole("button", { name: "Re-encrypt now", exact: true }).click();
+  await expect(page.getByText(/Re-encryption complete\./)).toBeVisible();
+  await verify.click();
+  await expect(page.getByText("Verification passed. Review the counts, then type the confirmation.")).toBeVisible();
+  await expect(page.getByRole("row", { name: "Previous key only 5 5 0" })).toBeVisible();
+  await expect(page.getByRole("table", { name: /Latest verification/ }).getByRole("row", { name: "Previous key only 0" })).toBeVisible();
 });

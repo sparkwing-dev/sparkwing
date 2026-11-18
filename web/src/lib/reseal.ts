@@ -34,6 +34,12 @@ export function resealVerified(counts: ResealCounts): boolean {
   return counts.unreadable === 0 && counts.previous_key_only === 0 && counts.plaintext_run_arguments === 0;
 }
 
+export class ResealRequestError extends Error {
+  constructor(message: string, readonly status: number | null) {
+    super(message);
+  }
+}
+
 export async function requestReseal(verify: boolean): Promise<ResealCounts> {
   let response: Response;
   try {
@@ -43,18 +49,18 @@ export async function requestReseal(verify: boolean): Promise<ResealCounts> {
       { speaksForSession: false, timeoutMs: null },
     );
   } catch {
-    throw new Error("The request did not finish. Its outcome is unknown. Run Verify secrets before trying again.");
+    throw new ResealRequestError("The request did not finish. Its outcome is unknown. Run Verify secrets before trying again.", null);
   }
   const body = await response.json().catch(() => null);
   if (!response.ok) {
     if (response.status === 401 || body?.error?.details?.reason === "reauth_required") {
-      throw new Error("Sign out, sign in again, then retry within 10 minutes.");
+      throw new ResealRequestError("Sign in again, then run Verify secrets within 10 minutes.", response.status);
     }
-    if (response.status === 403) throw new Error("This action requires an operator console session and valid CSRF proof. Sign in again and retry.");
+    if (response.status === 403) throw new ResealRequestError("This action requires an operator console session and valid CSRF proof. Sign in again, then run Verify secrets.", response.status);
     if (body?.error?.details?.reason === "secrets_key_required") {
-      throw new Error("Secret encryption is unavailable. Check the controller key configuration before retrying.");
+      throw new ResealRequestError("Secret encryption is unavailable. Check the controller key configuration, then run Verify secrets before retrying.", response.status);
     }
-    throw new Error(`The controller could not complete the request (HTTP ${response.status}). Run Verify secrets before trying again.`);
+    throw new ResealRequestError(`The controller could not complete the request (HTTP ${response.status}). Run Verify secrets before trying again.`, response.status);
   }
   return countsFrom(body);
 }
