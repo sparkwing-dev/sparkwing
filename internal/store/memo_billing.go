@@ -31,19 +31,16 @@ func recordMemoServedTx(ctx context.Context, tx *storeTx, team Team, attempt run
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
-			_ = rows.Close()
-			return err
+			return errors.Join(err, rows.Close())
 		}
 		var previous memoServedReceipt
 		if err := json.Unmarshal(raw, &previous); err != nil {
-			_ = rows.Close()
-			return err
+			return errors.Join(err, rows.Close())
 		}
 		exists = exists || previous.Attempt == attempt
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
+		return errors.Join(err, rows.Close())
 	}
 	if err := rows.Close(); err != nil {
 		return err
@@ -52,7 +49,16 @@ func recordMemoServedTx(ctx context.Context, tx *storeTx, team Team, attempt run
 		return nil
 	}
 	receipt := memoServedReceipt{Attempt: attempt, Source: original.Key, Digest: original.Digest, Output: hit.Output, Manifest: hit.Manifest}
-	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditController}}, auditMemoServed{RunID: attempt.RunID, Attempt: memoAttemptDigest(attempt), Receipt: memoReceiptDigest(receipt)}); err != nil {
+	audit := auditMemoServed{RunID: attempt.RunID}
+	audit.Attempt, err = memoAttemptDigest(attempt)
+	if err != nil {
+		return err
+	}
+	audit.Receipt, err = memoReceiptDigest(receipt)
+	if err != nil {
+		return err
+	}
+	if err := tx.operator.recordAudit(ctx, tx, auditContext{Team: team, Actor: auditActor{system: auditController}}, audit); err != nil {
 		return err
 	}
 	_, err = appendEventTx(ctx, tx, team, attempt.RunID, attempt.NodeID, runstate.EventMemoServed, receipt, tx.now(ctx), true)
@@ -76,28 +82,29 @@ func memoBillingVerifiedTx(ctx context.Context, tx *storeTx, team Team, row runs
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
-			_ = rows.Close()
-			return false, err
+			return false, errors.Join(err, rows.Close())
 		}
 		var receipt memoServedReceipt
 		if err := json.Unmarshal(raw, &receipt); err != nil {
-			_ = rows.Close()
-			return false, err
+			return false, errors.Join(err, rows.Close())
 		}
 		if receipt.Attempt.Team == string(team) && receipt.Attempt.RunID == string(row.Ref.RunID) && receipt.Attempt.NodeID == string(row.Ref.NodeID) && receipt.Attempt.Generation == int64(row.Generation) && receipt.Attempt.Attempt == int64(row.Attempt) {
 			receipts = append(receipts, receipt)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return false, err
+		return false, errors.Join(err, rows.Close())
 	}
 	if err := rows.Close(); err != nil {
 		return false, err
 	}
 	for _, receipt := range receipts {
+		attemptDigest, err := memoAttemptDigest(receipt.Attempt)
+		if err != nil {
+			return false, err
+		}
 		var raw string
-		err := tx.QueryRowContext(ctx, `SELECT attrs FROM audit_events WHERE team=? AND kind=? AND subject_id=? AND run_id=?`, team, runstate.EventMemoServed, memoAttemptDigest(receipt.Attempt).String(), receipt.Attempt.RunID).Scan(&raw)
+		err = tx.QueryRowContext(ctx, `SELECT attrs FROM audit_events WHERE team=? AND kind=? AND subject_id=? AND run_id=?`, team, runstate.EventMemoServed, attemptDigest.String(), receipt.Attempt.RunID).Scan(&raw)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
 		}
@@ -108,7 +115,11 @@ func memoBillingVerifiedTx(ctx context.Context, tx *storeTx, team Team, row runs
 		if err := json.Unmarshal([]byte(raw), &audit); err != nil {
 			return false, err
 		}
-		if audit.Receipt != memoReceiptDigest(receipt) {
+		receiptDigest, err := memoReceiptDigest(receipt)
+		if err != nil {
+			return false, err
+		}
+		if audit.Receipt != receiptDigest {
 			continue
 		}
 		scope, err := blob.RecordNamespace(receipt.Source)
@@ -150,11 +161,12 @@ type auditMemoServed struct {
 
 func (auditMemoServed) isAuditPayload() {}
 
-func memoAttemptDigest(attempt runspec.AttemptIdentity) auditDigest {
-	raw, _ := json.Marshal(attempt)
-	return digestAudit(string(raw))
+func memoAttemptDigest(attempt runspec.AttemptIdentity) (auditDigest, error) {
+	raw, err := json.Marshal(attempt)
+	return digestAudit(string(raw)), err
 }
-func memoReceiptDigest(receipt memoServedReceipt) auditDigest {
-	raw, _ := json.Marshal(receipt)
-	return digestAudit(string(raw))
+
+func memoReceiptDigest(receipt memoServedReceipt) (auditDigest, error) {
+	raw, err := json.Marshal(receipt)
+	return digestAudit(string(raw)), err
 }
