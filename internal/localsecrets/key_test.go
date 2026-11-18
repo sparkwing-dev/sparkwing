@@ -5,6 +5,9 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -626,5 +629,34 @@ func TestOIDCAuditDigestCreatesOnlyAnExternalKey(t *testing.T) {
 	actualID, actual, err := direct.OIDCAuditDigest(id, "audience", "person@example.test")
 	if err != nil || actualID != id || actual != digest {
 		t.Fatalf("external key did not reproduce digest: %v", err)
+	}
+}
+
+func TestStartupSealingUnloadedSQLiteKey(t *testing.T) {
+	for _, create := range []bool{true, false} {
+		t.Run(fmt.Sprint(create), func(t *testing.T) {
+			keyFileIn(t, t.TempDir())
+			st := openStore(t)
+			ring, err := LoadKeyring(KeyringOptions{Create: create})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := teststore.Exec(t.Context(), st, `INSERT INTO cron_schedules(team,id,repo_path,repo_key,pipeline,cron,tz,overlap,catch_up_ns,armed_at,updated_at,cursor_at,args) VALUES ('default','startup','/repo','git:example.com/project','nightly','0 * * * *','UTC','skip',0,1,1,1,'{"secret":"canary"}')`); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			controller.New(st, slog.New(slog.NewTextHandler(io.Discard, nil))).WithSecretsCipher(ring.For(st.AsOperator())).RunStartupSealing(ctx)
+			if ctx.Err() != nil {
+				t.Fatal("startup stalled on unloaded SQLite key")
+			}
+			var raw string
+			if err := teststore.SQL(t, st).QueryRowContext(t.Context(), `SELECT args FROM cron_schedules WHERE id='startup'`).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(raw, "canary") == create {
+				t.Fatalf("create=%t args=%s", create, raw)
+			}
+		})
 	}
 }

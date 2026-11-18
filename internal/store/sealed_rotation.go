@@ -105,6 +105,13 @@ func (o *Operator) rotateSealedValues(ctx context.Context, a *capability.Authori
 	if cipher == nil {
 		return SealedRotation{}, authorityError(hosterr.Unavailable, "bound secret encryption is unavailable")
 	}
+	// safety: lazy key creation probes the store and cannot borrow a connection held by rotation.
+	if lazy, ok := cipher.(interface{ PrepareSealing(context.Context) error }); ok && !verify {
+		if err := lazy.PrepareSealing(ctx); err != nil {
+			return SealedRotation{}, err
+		}
+	}
+
 	total := SealedRotation{Unreadable: []SealedRowName{}}
 	step := func(fn func(*sealedRotationTx) error, teams ...Team) error {
 		var done SealedRotation

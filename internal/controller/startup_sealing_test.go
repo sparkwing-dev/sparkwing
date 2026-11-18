@@ -263,3 +263,60 @@ func TestStartupSealingKeylessServeWithStaysReady(t *testing.T) {
 		t.Fatalf("audit count=%d err=%v", count, err)
 	}
 }
+
+func TestStartupSealingNoKeyRetriesAudit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e, _ := engineRuntimeStore(t)
+		s := e.Server
+		s.secretsCipher = nil
+		db := teststore.SQL(t, e.Store)
+		if _, err := db.ExecContext(t.Context(), `CREATE TRIGGER reject_startup_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(FAIL,'injected'); END`); err != nil {
+			t.Fatal(err)
+		}
+		var logs bytes.Buffer
+		s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan struct{})
+		go func() { defer close(done); s.RunStartupSealing(ctx) }()
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Fatal("worker stopped before recording skipped audit")
+		default:
+		}
+		if _, err := db.ExecContext(t.Context(), `DROP TRIGGER reject_startup_audit`); err != nil {
+			t.Fatal(err)
+		}
+		<-done
+		var count int
+		if err := db.QueryRowContext(ctx, `SELECT count(*) FROM audit_events WHERE kind='secrets.startup_sealed' AND attrs LIKE '%"outcome":"skipped"%'`).Scan(&count); err != nil || count != 1 {
+			t.Fatalf("count=%d err=%v", count, err)
+		}
+		if bytes.Count(logs.Bytes(), []byte(`"outcome":"skipped"`)) != 1 {
+			t.Fatalf("summaries: %s", logs.String())
+		}
+	})
+}
+
+func TestStartupSealingNoKeyAuditCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		e, _ := engineRuntimeStore(t)
+		s := e.Server
+		s.secretsCipher = nil
+		if _, err := teststore.SQL(t, e.Store).ExecContext(t.Context(), `CREATE TRIGGER reject_startup_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(FAIL,'injected'); END`); err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() { defer close(done); s.RunStartupSealing(ctx) }()
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Fatal("worker stopped before cancellation")
+		default:
+		}
+		cancel()
+		<-done
+	})
+}
