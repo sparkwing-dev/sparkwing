@@ -113,7 +113,7 @@ func TestStartupSealingConcurrentPasses(t *testing.T) {
 }
 
 func TestStartupSealingUnreadableAndPreviousKey(t *testing.T) {
-	st, old, _ := startupFixture(t, 3)
+	st, old, _ := startupFixture(t, 5)
 	if _, err := st.AsOperator().SealPlaintextValues(t.Context(), old); err != nil {
 		t.Fatal(err)
 	}
@@ -125,10 +125,25 @@ func TestStartupSealingUnreadableAndPreviousKey(t *testing.T) {
 	if _, err := st.DB().ExecContext(t.Context(), `UPDATE cron_schedules SET args='{' WHERE id='schedule-00002'`); err != nil {
 		t.Fatal(err)
 	}
+
+	if _, err := st.DB().ExecContext(t.Context(), `UPDATE cron_schedules SET args='{"argument_document_version":1,"body":"","sealed_arguments":"enc:v3:AAAA"}' WHERE id='schedule-00003'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(t.Context(), `UPDATE cron_schedules SET args='{"token":"startup-canary-739"}' WHERE id='schedule-00004'`); err != nil {
+		t.Fatal(err)
+	}
 	result, err := st.AsOperator().SealPlaintextValues(t.Context(), current)
-	if err != nil || result.PreviousKeyOnly != 2 || len(result.Unreadable) != 1 || result.PlaintextRunArguments != 0 || before != startupRaw(t, st) {
+	if err != nil || result.PreviousKeyOnly != 2 || len(result.Unreadable) != 2 || result.PlaintextRunArguments != 1 || before != startupRaw(t, st) {
 		t.Fatalf("result: %+v %v", result, err)
 	}
+	a := teststore.OperatorAuthorized(t, st, "")
+	route, _ := capability.LookupRoute("POST", "/api/v1/operator/secrets/rotate")
+	a.Access = route.Access[0]
+	verified, err := st.AsOperator().RotateSealedValues(t.Context(), a, current, true)
+	if err != nil || len(verified.Unreadable) != len(result.Unreadable) || verified.PreviousKeyOnly != 2 {
+		t.Fatalf("verify disagrees: %+v %v", verified, err)
+	}
+
 }
 
 func TestStartupSealingCancelledPass(t *testing.T) {
