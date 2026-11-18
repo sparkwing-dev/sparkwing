@@ -117,3 +117,16 @@ func TestS3LogSigningCapsStoreClockSkew(t *testing.T) {
 		}
 	})
 }
+
+func TestS3LogSigningRejectsExactlyExpiredSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		backend := logS3(t, func(*http.Request) (*http.Response, error) {
+			t.Fatal("expired signing contacted the object store")
+			return nil, errors.New("unexpected request")
+		})
+		key := "logs/r90/teams/acme/runs/run-1/units/plan/g1/manifest.json"
+		if _, _, err := backend.SignLogPut(t.Context(), key, 1, digest("x"), time.Now()); err == nil {
+			t.Fatal("signed an exactly expired slot")
+		}
+	})
+}
