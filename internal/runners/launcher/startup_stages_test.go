@@ -26,18 +26,26 @@ import (
 func TestLauncherStartupStagesSurvivePublicationFailure(t *testing.T) {
 	for _, fail := range []bool{false, true} {
 		t.Run(map[bool]string{false: "success", true: "job_create_failure"}[fail], func(t *testing.T) {
-			l, kube, _, control := fixture()
-			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: capacityName(control.award.Binding), Namespace: l.Config.Namespace, UID: "capacity-uid"}, Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "capacity", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(time.Now().Add(-time.Second))}}}}}}
+			l, kube, _, control := capacityLauncherFixture(t)
+			pod, err := capacityPod(l.Config, demandFor(*control.award))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pod.UID, pod.Spec.NodeName = "capacity-uid", "node"
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "capacity", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.NewTime(time.Now().Add(-time.Second))}}}}
 			if _, err := kube.CoreV1().Pods(l.Config.Namespace).Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
 			var logs bytes.Buffer
 			l.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			previous := slog.Default()
+			slog.SetDefault(l.Logger)
+			t.Cleanup(func() { slog.SetDefault(previous) })
 			failure := errors.New("private publication failure")
 			if fail {
 				kube.PrependReactor("create", "jobs", func(ktesting.Action) (bool, runtime.Object, error) { return true, nil, failure })
 			}
-			_, err := l.LaunchOne(t.Context())
+			_, err = l.LaunchOne(t.Context())
 			if fail && !errors.Is(err, failure) || !fail && err != nil {
 				t.Fatal(err)
 			}
@@ -62,7 +70,7 @@ func TestLauncherStartupStagesSurvivePublicationFailure(t *testing.T) {
 					t.Fatalf("wrong result: %s", line)
 				}
 			}
-			want := []string{"launcher_preparation", "launcher_reservation", "launcher_capacity_release", "launcher_job_create"}
+			want := []string{"launcher_claim_received", "launcher_claim_applied", "launcher_preparation", "launcher_capacity_delete", "launcher_capacity_removal", "launcher_reservation", "launcher_capacity_release", "launcher_job_create"}
 			if !fail {
 				want = append(want, "launcher_capacity_observed")
 			}

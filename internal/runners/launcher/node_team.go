@@ -367,7 +367,7 @@ func (b *KubernetesBoundary) Retire(ctx context.Context, r CloudNodeReservation)
 	}
 	// safety: the node may now hold another award, so it is left untouched.
 	var held CloudNodeReservation
-	if json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held) != nil || held != r || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
+	if json.Unmarshal([]byte(node.Annotations[reservationAnnotation]), &held) != nil || !sameReservationFence(held, r) || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
 		return &nodeFault{node: r.NodeName, cause: "reservation changed before retirement"}
 	}
 	claim, claimErr := b.nodeClaim(ctx, node)

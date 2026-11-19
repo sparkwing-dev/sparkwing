@@ -418,14 +418,16 @@ func (l *Launcher) releaseCapacityWithStart(ctx context.Context, b CloudJobBindi
 	if err != nil {
 		return time.Time{}, err
 	}
-	var started time.Time
+	return capacityContainerStarted(pod), l.deleteCapacityPod(ctx, pod)
+}
+
+func capacityContainerStarted(pod *corev1.Pod) time.Time {
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name == "capacity" && status.State.Running != nil && !status.State.Running.StartedAt.IsZero() {
-			started = status.State.Running.StartedAt.Time
-			break
+			return status.State.Running.StartedAt.Time
 		}
 	}
-	return started, l.deleteCapacityPod(ctx, pod)
+	return time.Time{}
 }
 
 // capacitySecurity drops every capability and privilege escalation and keeps

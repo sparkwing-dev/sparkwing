@@ -196,8 +196,11 @@ func (l *Launcher) Run(ctx context.Context) error {
 	nextReconcile := time.Now()
 	claimed := 0
 	for ctx.Err() == nil {
+		claims.receive()
 		reconcile = reconcile || !time.Now().Before(nextReconcile)
-		if pods == nil && !time.Now().Before(reconnect) {
+		// perf: consume a ready award before slow reconciliation; the burst bound still yields to safety work.
+		applyClaim := claims.result != nil && claims.result.award != nil && claimed < maxClaimsPerCycle && blocking(synced) == nil && !time.Now().Before(cooldown)
+		if pods == nil && !time.Now().Before(reconnect) && !applyClaim {
 			options := metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher, Limit: 1}
 			// perf: one row supplies the collection revision without replaying every Pod.
 			snapshot, err := l.Kube.CoreV1().Pods(l.Config.Namespace).List(ctx, options)
@@ -218,7 +221,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 				reconcile = true
 			}
 		}
-		if reconcile {
+		if reconcile && !applyClaim {
 		drainWatch:
 			for {
 				select {
@@ -266,7 +269,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 		if blocking(synced) == nil {
 			// safety: held awards without a Job or capacity Pod renew only here, so claim backoff must not skip them.
 			var err error
-			if reconcile {
+			if reconcile && !applyClaim {
 				err = l.placeWaiting(ctx)
 			}
 			startupRateLimit := false
@@ -316,6 +319,9 @@ func (l *Launcher) Run(ctx context.Context) error {
 		}
 		if claimImmediately {
 			claims.start(ctx, poll)
+		}
+		if applyClaim && reconcile {
+			continue
 		}
 		wait := min(poll, max(time.Until(nextReconcile), 0))
 		if pods == nil {
@@ -461,6 +467,7 @@ func (l *Launcher) claim(ctx context.Context) (bool, time.Duration, error) {
 	if err != nil || award == nil {
 		return false, pollAfter, err
 	}
+	l.receiveClaim(ctx, award)
 	launched, err := l.launch(ctx, award)
 	return launched, pollAfter, err
 }
@@ -484,6 +491,10 @@ func (l *Launcher) placeWaiting(ctx context.Context) error {
 }
 
 func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched bool, err error) {
+	if !award.claimReceivedAt.IsZero() && !award.claimApplied {
+		award.claimApplied = true
+		l.recordStartupStage(ctx, award.Binding, "launcher_claim_applied", award.claimReceivedAt, true)
+	}
 	started := time.Now()
 	prepared, stop, expires, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
 	if !errors.Is(err, ErrNoDedicatedNode) && !errors.Is(err, errCapacityUnconfigured) {
@@ -540,6 +551,9 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	}
 	started = time.Now()
 	capacityStarted, releaseErr := l.releaseCapacityWithStart(ctx, award.Binding)
+	if !r.Reservation.capacityStarted.IsZero() {
+		capacityStarted = r.Reservation.capacityStarted
+	}
 	l.recordStartupStage(ctx, award.Binding, "launcher_capacity_release", started, releaseErr == nil)
 	if err := releaseErr; err != nil {
 		return true, errors.Join(err, l.Boundary.Release(ctx, r.Reservation))
