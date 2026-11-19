@@ -20,6 +20,9 @@ func CloudMemoBilling(t *testing.T, open func(*testing.T) *Store) {
 		want           int64
 	}{
 		{"memo", "memo", runstate.NodeMemoized, 0},
+		{"garbage_before_copy", "memo", runstate.NodeMemoized, 0},
+		{"forged_before_copy", "memo", runstate.NodeMemoized, 0},
+		{"garbage_at_settlement", "memo", runstate.NodeMemoized, 0},
 		{"memo_60s", "memo", runstate.NodeMemoized, 0},
 		{"memo_61s", "memo", runstate.NodeMemoized, 610},
 		{"long_start", "memo", runstate.NodeMemoized, 18010},
@@ -74,6 +77,21 @@ func CloudMemoBilling(t *testing.T, open func(*testing.T) *Store) {
 					t.Fatal(err)
 				}
 				activateMemoFixture(t, s)
+				appendHistorical := func(payload any) {
+					t.Helper()
+					if err := s.inTx(t.Context(), func(tx *storeTx) error {
+						_, err := appendEventTx(t.Context(), tx, tenant.team, "run", "job", runstate.EventMemoServed, payload, tx.now(t.Context()), true)
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if test.name == "garbage_before_copy" {
+					appendHistorical([]byte("cache hit"))
+				}
+				if test.name == "forged_before_copy" {
+					appendHistorical(memoServedReceipt{Attempt: intent.Identity.Attempt.Value, Source: original.Key, Digest: original.Digest, Output: runspec.Optional[blob.Digest]{Set: true, Value: intent.Digest}})
+				}
 				if test.name == "historical_forged_event" {
 					own := blobOutputRequest(intent)
 					if _, err := records.CommitRecord(t.Context(), own); err != nil {
@@ -99,6 +117,9 @@ func CloudMemoBilling(t *testing.T, open func(*testing.T) *Store) {
 						delayedCopy = copyMemo
 					} else {
 						copyMemo()
+					}
+					if test.name == "garbage_at_settlement" {
+						appendHistorical([]byte("cache hit"))
 					}
 					key := blobOutputRequest(intent).Key
 					output = &key

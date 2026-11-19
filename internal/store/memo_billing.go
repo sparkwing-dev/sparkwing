@@ -27,7 +27,7 @@ func recordMemoServedTx(ctx context.Context, tx *storeTx, team Team, attempt run
 	if err != nil {
 		return err
 	}
-	exists := false
+	var receipts []memoServedReceipt
 	for rows.Next() {
 		var raw []byte
 		if err := rows.Scan(&raw); err != nil {
@@ -35,9 +35,11 @@ func recordMemoServedTx(ctx context.Context, tx *storeTx, team Team, attempt run
 		}
 		var previous memoServedReceipt
 		if err := json.Unmarshal(raw, &previous); err != nil {
-			return errors.Join(err, rows.Close())
+			continue
 		}
-		exists = exists || previous.Attempt == attempt
+		if previous.Attempt == attempt {
+			receipts = append(receipts, previous)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return errors.Join(err, rows.Close())
@@ -45,8 +47,14 @@ func recordMemoServedTx(ctx context.Context, tx *storeTx, team Team, attempt run
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	if exists {
-		return nil
+	for _, previous := range receipts {
+		authenticated, err := memoReceiptAuthenticatedTx(ctx, tx, team, previous)
+		if err != nil {
+			return err
+		}
+		if authenticated {
+			return nil
+		}
 	}
 	receipt := memoServedReceipt{Attempt: attempt, Source: original.Key, Digest: original.Digest, Output: hit.Output, Manifest: hit.Manifest}
 	audit := auditMemoServed{RunID: attempt.RunID}
@@ -86,7 +94,7 @@ func memoBillingVerifiedTx(ctx context.Context, tx *storeTx, team Team, row runs
 		}
 		var receipt memoServedReceipt
 		if err := json.Unmarshal(raw, &receipt); err != nil {
-			return false, errors.Join(err, rows.Close())
+			continue
 		}
 		if receipt.Attempt.Team == string(team) && receipt.Attempt.RunID == string(row.Ref.RunID) && receipt.Attempt.NodeID == string(row.Ref.NodeID) && receipt.Attempt.Generation == int64(row.Generation) && receipt.Attempt.Attempt == int64(row.Attempt) {
 			receipts = append(receipts, receipt)
@@ -99,27 +107,11 @@ func memoBillingVerifiedTx(ctx context.Context, tx *storeTx, team Team, row runs
 		return false, err
 	}
 	for _, receipt := range receipts {
-		attemptDigest, err := memoAttemptDigest(receipt.Attempt)
+		authenticated, err := memoReceiptAuthenticatedTx(ctx, tx, team, receipt)
 		if err != nil {
 			return false, err
 		}
-		var raw string
-		err = tx.QueryRowContext(ctx, `SELECT attrs FROM audit_events WHERE team=? AND kind=? AND subject_id=? AND run_id=?`, team, runstate.EventMemoServed, attemptDigest.String(), receipt.Attempt.RunID).Scan(&raw)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return false, err
-		}
-		var audit auditMemoServed
-		if err := json.Unmarshal([]byte(raw), &audit); err != nil {
-			return false, err
-		}
-		receiptDigest, err := memoReceiptDigest(receipt)
-		if err != nil {
-			return false, err
-		}
-		if audit.Receipt != receiptDigest {
+		if !authenticated {
 			continue
 		}
 		scope, err := blob.RecordNamespace(receipt.Source)
@@ -151,6 +143,30 @@ func memoBillingVerifiedTx(ctx context.Context, tx *storeTx, team Team, row runs
 		}
 	}
 	return false, nil
+}
+
+func memoReceiptAuthenticatedTx(ctx context.Context, tx *storeTx, team Team, receipt memoServedReceipt) (bool, error) {
+	attemptDigest, err := memoAttemptDigest(receipt.Attempt)
+	if err != nil {
+		return false, err
+	}
+	var raw string
+	err = tx.QueryRowContext(ctx, `SELECT attrs FROM audit_events WHERE team=? AND kind=? AND subject_id=? AND run_id=?`, team, runstate.EventMemoServed, attemptDigest.String(), receipt.Attempt.RunID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var audit auditMemoServed
+	if json.Unmarshal([]byte(raw), &audit) != nil {
+		return false, nil //nolint:nilerr // safety: malformed audit data cannot authenticate a receipt.
+	}
+	receiptDigest, err := memoReceiptDigest(receipt)
+	if err != nil {
+		return false, err
+	}
+	return audit.Receipt == receiptDigest, nil
 }
 
 type auditMemoServed struct {
