@@ -21,6 +21,72 @@ import (
 	ktesting "k8s.io/client-go/testing"
 )
 
+type pausedStopWatch struct {
+	watch.Interface
+	once    sync.Once
+	stopped chan struct{}
+	resume  <-chan struct{}
+}
+
+func (w *pausedStopWatch) Stop() {
+	w.once.Do(func() {
+		close(w.stopped)
+		<-w.resume
+		w.Interface.Stop()
+	})
+}
+
+func TestLauncherPodWatchReconcileSurvivesReadyClaim(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, _, base := fixture()
+		l.Poll = time.Minute
+		control := &applicationControl{controlFake: base, deliveries: make(chan *CloudJobAward)}
+		l.Control = control
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		stream := watch.NewRaceFreeFake()
+		resume := make(chan struct{}, 1)
+		defer close(resume)
+		pods := &pausedStopWatch{Interface: stream, stopped: make(chan struct{}), resume: resume}
+		kube.PrependWatchReactor("pods", func(ktesting.Action) (bool, watch.Interface, error) { return true, pods, nil })
+		var passes, publications atomic.Int32
+		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+			if passes.Add(1) == 2 && publications.Load() != 1 {
+				t.Error("pending reconcile ran before the ready award was applied")
+			}
+			return false, nil, nil
+		})
+		kube.PrependReactor("create", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+			publications.Add(1)
+			return false, nil, nil
+		})
+		done := make(chan error, 1)
+		go func() { done <- l.Run(ctx) }()
+		synctest.Wait()
+		if got := passes.Load(); got != 1 {
+			t.Fatalf("initial reconciliation passes=%d want=1", got)
+		}
+		stream.Error(&metav1.Status{Status: metav1.StatusFailure, Reason: metav1.StatusReasonExpired, Code: 410})
+		<-pods.stopped
+		// safety: Stop proves the watch case was selected before a claim can become ready.
+		control.deliveries <- fanOut(base.award, 1)[0]
+		synctest.Wait()
+		resume <- struct{}{}
+		synctest.Wait()
+		immediate := passes.Load()
+		<-time.NewTimer(l.Poll / 2).C
+		synctest.Wait()
+		later := passes.Load()
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+		if publications.Load() != 1 || immediate != 2 || later != 2 {
+			t.Fatalf("watch reconcile lost after claim: publications=%d immediate passes=%d after half poll=%d", publications.Load(), immediate, later)
+		}
+	})
+}
+
 func TestLauncherCoalescesPodWatchReplay(t *testing.T) {
 	for _, reconnect := range []bool{false, true} {
 		t.Run(map[bool]string{false: "initial replay", true: "reconnect replay"}[reconnect], func(t *testing.T) {

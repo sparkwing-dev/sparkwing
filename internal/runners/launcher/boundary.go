@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -110,7 +111,8 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 			if err != nil {
 				return CloudNodeReservation{}, err
 			}
-			if err = b.consumeCapacity(ctx, node.Name, binding.Team); err != nil {
+			reservation.capacityStarted, err = b.consumeCapacity(ctx, node.Name, binding)
+			if err != nil {
 				return CloudNodeReservation{}, errors.Join(err, b.Release(ctx, reservation))
 			}
 			return reservation, nil
@@ -207,7 +209,7 @@ func (b *KubernetesBoundary) release(ctx context.Context, reservation CloudNodeR
 	}
 	// safety: the node may now hold another award, so it is left untouched.
 	var held CloudNodeReservation
-	if json.Unmarshal([]byte(raw), &held) != nil || held != reservation || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
+	if json.Unmarshal([]byte(raw), &held) != nil || !sameReservationFence(held, reservation) || node.Annotations[reservationNamespaceAnnotation] != b.Namespace {
 		return &nodeFault{node: reservation.NodeName, cause: "reservation changed before teardown"}
 	}
 	if err = b.vacant(ctx, node.Name); err != nil {
@@ -271,17 +273,24 @@ func (b *KubernetesBoundary) occupants(ctx context.Context, node, team string) (
 // so no other award can take the node. consolidateAfter must outlast the empty
 // gap before the Job lands. Waiting for removal frees the requests' resources
 // before Job placement.
-func (b *KubernetesBoundary) consumeCapacity(ctx context.Context, node, team string) error {
-	requests, err := b.occupants(ctx, node, team)
+func (b *KubernetesBoundary) consumeCapacity(ctx context.Context, node string, binding CloudJobBinding) (time.Time, error) {
+	requests, err := b.occupants(ctx, node, binding.Team)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
+	var capacityStarted time.Time
 	for _, pod := range requests {
-		pods := b.Kube.CoreV1().Pods(pod.Namespace)
-		err := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID}})
-		if err != nil && !apierrors.IsNotFound(err) {
-			return err
+		if pod.Namespace == b.Namespace && pod.Name == capacityName(binding) {
+			capacityStarted = capacityContainerStarted(&pod)
 		}
+		pods := b.Kube.CoreV1().Pods(pod.Namespace)
+		started := time.Now()
+		err := pods.Delete(ctx, pod.Name, metav1.DeleteOptions{Preconditions: &metav1.Preconditions{UID: &pod.UID}})
+		recordStartupStage(ctx, slog.Default(), binding, "launcher_capacity_delete", started, err == nil || apierrors.IsNotFound(err))
+		if err != nil && !apierrors.IsNotFound(err) {
+			return capacityStarted, err
+		}
+		started = time.Now()
 		err = wait.PollUntilContextTimeout(ctx, 250*time.Millisecond, capacityRemoval, true, func(ctx context.Context) (bool, error) {
 			current, err := pods.Get(ctx, pod.Name, metav1.GetOptions{})
 			if apierrors.IsNotFound(err) {
@@ -289,11 +298,12 @@ func (b *KubernetesBoundary) consumeCapacity(ctx context.Context, node, team str
 			}
 			return err == nil && current.UID != pod.UID, err
 		})
+		recordStartupStage(ctx, slog.Default(), binding, "launcher_capacity_removal", started, err == nil)
 		if err != nil {
-			return fmt.Errorf("capacity request %s did not leave node %s: %w", pod.Name, node, err)
+			return capacityStarted, fmt.Errorf("capacity request %s did not leave node %s: %w", pod.Name, node, err)
 		}
 	}
-	return nil
+	return capacityStarted, nil
 }
 
 func nodeReady(node corev1.Node) bool {

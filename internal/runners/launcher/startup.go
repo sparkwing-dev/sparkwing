@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"log/slog"
 	"reflect"
 	"strings"
 	"time"
@@ -139,5 +140,14 @@ func (l *Launcher) probeStartupImage(pod types.UID, started bool) bool {
 }
 
 func (l *Launcher) recordStartupStage(ctx context.Context, binding CloudJobBinding, stage string, started time.Time, success bool) {
-	l.logger().InfoContext(ctx, "Cloud startup", "stage", stage, "duration_ms", max(0, time.Since(started).Milliseconds()), "success", success, "run", binding.RunID, "unit", binding.UnitID, "generation", binding.Generation)
+	recordStartupStage(ctx, l.logger(), binding, stage, started, success)
+}
+
+func recordStartupStage(ctx context.Context, logger *slog.Logger, binding CloudJobBinding, stage string, started time.Time, success bool) {
+	logger.InfoContext(ctx, "Cloud startup", "stage", stage, "duration_ms", max(0, time.Since(started).Milliseconds()), "success", success, "run", binding.RunID, "unit", binding.UnitID, "generation", binding.Generation)
+}
+
+func (l *Launcher) receiveClaim(ctx context.Context, award *CloudJobAward) {
+	award.claimReceivedAt = time.Now()
+	l.recordStartupStage(ctx, award.Binding, "launcher_claim_received", award.claimReceivedAt, true)
 }

@@ -65,6 +65,8 @@ func (binding CloudJobBinding) LeaseRef() capability.LeaseRef {
 // CloudJobAward carries only a single-use bootstrap, never the launcher's root credential.
 type CloudJobAward struct {
 	teardownDeadline   time.Time
+	claimReceivedAt    time.Time
+	claimApplied       bool
 	LeaseExpiresAt     time.Time          `json:"lease_expires_at"`
 	Engine             *engineid.Identity `json:"engine,omitempty"`
 	Source             source.Spec        `json:"source"`
@@ -78,10 +80,18 @@ type CloudJobAward struct {
 
 // CloudNodeReservation is an exclusive placement fact held until the Job and DinD have stopped.
 type CloudNodeReservation struct {
+	capacityStarted                                 time.Time
 	NodeName, NodeUID, Team, JobName, ReservationID string
 	Award                                           capability.LeaseRef
 	RequestedClass, GrantedClass                    string
 	WaitedForFreshNode                              bool
+}
+
+func sameReservationFence(a, b CloudNodeReservation) bool {
+	// safety: startup timing is not persisted with the ownership fence.
+	a.capacityStarted = time.Time{}
+	b.capacityStarted = time.Time{}
+	return a == b
 }
 
 type CloudPlacement struct {
