@@ -32,8 +32,9 @@ func defaultEventLimits() eventLimits {
 }
 
 // eventLimits caps what a run stores as events. An event's bytes are its
-// kind plus its payload. The caps hold whether or not a storage quota tier is
-// configured, because an unconfigured controller is exactly the one with
+// kind plus its payload; controller billing receipts carry no customer storage bytes.
+// The caps hold whether or not a storage quota tier is configured, because
+// an unconfigured controller is exactly the one with
 // nothing else between a runner token and the database's disk. Zero lifts
 // that cap; a negative value is invalid and fails event admission.
 type eventLimits struct {
@@ -70,6 +71,10 @@ func validateEventKind(kind string) error {
 }
 
 func eventBytes(kind string, payload []byte) int64 {
+	// safety: controller billing receipts are accounting metadata, not customer storage.
+	if kind == runstate.EventMemoServed {
+		return 0
+	}
 	return int64(len(kind) + len(payload))
 }
 
