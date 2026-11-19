@@ -24,9 +24,10 @@ func (s *S3) SignLogPut(ctx context.Context, key string, size int64, digest Dige
 		return "", nil, err
 	}
 	lifetime := time.Until(expiry)
-	if lifetime <= 0 || lifetime > limits.LogUploadURLTTL {
+	if lifetime <= 0 {
 		return "", nil, fmt.Errorf("invalid log upload expiry")
 	}
+	lifetime = min(lifetime, limits.LogUploadURLTTL)
 	raw, err := hex.DecodeString(string(digest))
 	if err != nil {
 		return "", nil, err

@@ -185,3 +185,25 @@ func TestMeteredCheckpointSurvivesBackwardClockReopen(t *testing.T) {
 		})
 	}
 }
+
+func TestLogUploadClockSurvivesBackwardStep(t *testing.T) {
+	for _, step := range []time.Duration{time.Millisecond, backwardClockStep} {
+		t.Run(step.String(), func(t *testing.T) {
+			s, _, _, _ := resultFixture(t)
+			now := s.now()
+			steppingWallClock(s, &now)
+			first, err := s.LogUploadNow(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			now = now.Add(-step)
+			after, err := s.LogUploadNow(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !after.Equal(first) {
+				t.Fatalf("clock moved backward: %s -> %s", first, after)
+			}
+		})
+	}
+}

@@ -359,7 +359,7 @@ func burstIntakeDeploymentController(t *testing.T, endpoint string, cfg deployme
 	options = append(options, store.WithPolicies(func(state *store.Store) (store.Policies, error) {
 		objects, err := blob.NewFilesystem(blob.FilesystemOptions{
 			Directory: t.TempDir(), Endpoint: endpoint, SigningKey: []byte(strings.Repeat("k", 32)),
-			LogNow: func() time.Time { return teststore.Now(state) },
+			LogNow: state.LogUploadNow,
 		})
 		if err != nil {
 			return store.Policies{}, err

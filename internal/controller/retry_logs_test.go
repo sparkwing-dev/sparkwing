@@ -38,7 +38,7 @@ func TestRetryLogUploadsUseTheirAwardedWriter(t *testing.T) {
 func retryLogUploads(t *testing.T, timing string, cloud bool, outcome string) {
 	t.Helper()
 	e, _, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32)})
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "http://local", SigningKey: bytes.Repeat([]byte{42}, 32), LogNow: e.Store.LogUploadNow})
 	if err != nil {
 		t.Fatal(err)
 	}

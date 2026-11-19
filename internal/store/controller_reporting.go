@@ -120,3 +120,9 @@ func (t *Tenant) WriteActivity(ctx context.Context, ref runspec.NodeRef, actor r
 		return nil
 	})
 }
+
+// LogUploadNow reads the authoritative clock used to assign log-slot deadlines.
+// Filesystem signers use it to enforce the upload lifetime against the same clock.
+func (s *Store) LogUploadNow(ctx context.Context) (time.Time, error) {
+	return s.databaseNow(ctx)
+}

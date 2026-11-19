@@ -70,7 +70,7 @@ func productionLocalPolicyClientAt(t *testing.T, home string, opts ...store.Opti
 	t.Setenv("SPARKWING_CONFIG", filepath.Join(t.TempDir(), "config.yaml"))
 	t.Setenv("SPARKWING_SECRETS_KEY_FILE", filepath.Join(t.TempDir(), "secrets.key"))
 	bind := func(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
-		return bindLocalControllerWithClock(ctx, b, func() time.Time { return teststore.Now(b.Store) })
+		return bindLocalController(ctx, b)
 	}
 	owner, err := (localcontroller.Config{Bind: bind, StoreOptions: opts}).Open(t.Context(), home)
 	if err != nil {

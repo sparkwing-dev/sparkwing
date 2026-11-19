@@ -134,17 +134,13 @@ func openLocalController(ctx context.Context, home string) (wingd.LocalControlle
 	return (localcontroller.Config{Bind: bindLocalController}).Open(ctx, home)
 }
 
-func bindLocalController(ctx context.Context, b localcontroller.Binding) (localcontroller.Services, error) {
-	return bindLocalControllerWithClock(ctx, b, nil)
-}
-
 // perf: idle claim advice sheds fleet polling load, which one machine's runner on a private socket
 // does not produce. Advised, the runner waited up to 6.25 s after a pause before starting a new run.
 func newLocalServer(b localcontroller.Binding) *controller.Server {
 	return controller.New(b.Store, nil).WithEngineController(b.Controller).WithIdleClaimPoll(0)
 }
 
-func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding, now func() time.Time) (_ localcontroller.Services, err error) {
+func bindLocalController(ctx context.Context, b localcontroller.Binding) (_ localcontroller.Services, err error) {
 	keyring, err := localsecrets.LoadKeyring(localsecrets.KeyringOptions{Home: b.Home, Create: true})
 	if err != nil {
 		return localcontroller.Services{}, err
@@ -172,7 +168,7 @@ func bindLocalControllerWithClock(ctx context.Context, b localcontroller.Binding
 	if err != nil {
 		return localcontroller.Services{}, err
 	}
-	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(b.Home, "data"), Endpoint: wingdclient.APIBaseURL, SigningKey: key, LogNow: now})
+	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(b.Home, "data"), Endpoint: wingdclient.APIBaseURL, SigningKey: key, LogNow: b.Store.LogUploadNow})
 	if err != nil {
 		return localcontroller.Services{}, err
 	}

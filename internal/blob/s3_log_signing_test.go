@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
@@ -65,7 +66,7 @@ func TestS3LogSigningRejectsBeforeSigning(t *testing.T) {
 	key := "logs/r30/teams/acme/runs/run-1/units/trigger/g1/manifest.json"
 	segment := "logs/r30/teams/acme/runs/run-1/units/trigger/g1/seg-000001.ndjson.gz"
 	now := time.Now()
-	for _, expiry := range []time.Time{now, now.Add(-time.Second), now.Add(limits.LogUploadURLTTL + time.Minute)} {
+	for _, expiry := range []time.Time{now, now.Add(-time.Second)} {
 		if _, _, err := backend.SignLogPut(t.Context(), key, 1, digest, expiry); err == nil {
 			t.Errorf("signed invalid expiry %v", expiry)
 		}
@@ -84,4 +85,48 @@ func TestS3LogSigningRejectsBeforeSigning(t *testing.T) {
 	if _, _, err := backend.SignLogPut(ctx, key, 1, digest, now.Add(time.Minute)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled sign = %v", err)
 	}
+}
+
+func TestS3LogSigningCapsStoreClockSkew(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		backend := logS3(t, func(*http.Request) (*http.Response, error) {
+			t.Fatal("presigning contacted the object store")
+			return nil, errors.New("unexpected request")
+		})
+		key := "logs/r90/teams/acme/runs/run-1/units/plan/g1/manifest.json"
+		for _, fixture := range []struct {
+			name     string
+			lifetime time.Duration
+			seconds  string
+		}{
+			{"store ahead three seconds", limits.LogUploadURLTTL + 3*time.Second, "900"},
+			{"short remaining lifetime", time.Minute, "60"},
+		} {
+
+			raw, _, err := backend.SignLogPut(t.Context(), key, 1, digest("x"), time.Now().Add(fixture.lifetime))
+			if err != nil {
+				t.Fatalf("%s: %v", fixture.name, err)
+			}
+			u, err := url.Parse(raw)
+			if err != nil {
+				t.Fatalf("%s: %v", fixture.name, err)
+			}
+			if got := u.Query().Get("X-Amz-Expires"); got != fixture.seconds {
+				t.Fatalf("presign lifetime = %q, want %q", got, fixture.seconds)
+			}
+		}
+	})
+}
+
+func TestS3LogSigningRejectsExactlyExpiredSlot(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		backend := logS3(t, func(*http.Request) (*http.Response, error) {
+			t.Fatal("expired signing contacted the object store")
+			return nil, errors.New("unexpected request")
+		})
+		key := "logs/r90/teams/acme/runs/run-1/units/plan/g1/manifest.json"
+		if _, _, err := backend.SignLogPut(t.Context(), key, 1, digest("x"), time.Now()); err == nil {
+			t.Fatal("signed an exactly expired slot")
+		}
+	})
 }

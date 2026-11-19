@@ -34,16 +34,19 @@ func warnLogLifecycle(ctx context.Context, objects *blob.S3, overrides map[store
 	}
 }
 
-func openFilesystemData(root, externalURL, address string) (*blob.Filesystem, error) {
+func openFilesystemData(root, externalURL, address string, logNow func(context.Context) (time.Time, error)) (*blob.Filesystem, error) {
 	endpoint, err := filesystemDataEndpoint(externalURL, address)
 	if err != nil {
 		return nil, err
+	}
+	if logNow == nil {
+		return nil, errors.New("filesystem data requires a log clock")
 	}
 	key, err := dataSigningKey(filepath.Join(root, "data-signing.key"))
 	if err != nil {
 		return nil, err
 	}
-	return blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(root, "data"), Endpoint: endpoint, SigningKey: key})
+	return blob.NewFilesystem(blob.FilesystemOptions{Directory: filepath.Join(root, "data"), Endpoint: endpoint, SigningKey: key, LogNow: logNow})
 }
 
 func openS3Data(ctx context.Context, storageURL string) (*blob.S3, error) {
