@@ -20,6 +20,52 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.77.0] - 2026-11-19
+
+### Added
+
+- **runner:** Record Cloud claim receipt, first application, capacity deletion and removal wait timing
+
+
+- **web:** Re-encrypt secrets from the operator console
+  Verify stored values, type a confirmation, then re-encrypt and verify again
+  with before and after counts retained during later verification.
+  Refused writes report that nothing changed; network and server failures
+  request verification before retrying. Requires a recent operator sign-in.
+
+### Fixed
+
+- **controller:** Keep billing checkpoints within their awarded range after a restart or backward clock step, so valid claim releases and settlement can finish
+  Log a startup warning when the restored billing clock is more than one minute ahead of wall time.
+
+
+- **runner:** Apply completed Cloud awards before another full reconciliation while preserving pending Pod watch work within the bounded claim burst
+- **runner:** Preserve capacity container startup timing when node reservation consumes the capacity Pod
+
+
+- **Logs:** Filesystem controllers use the log-slot clock when signing uploads, preventing upload failures after a backward system clock step while retaining the fifteen-minute lifetime limit.
+
+- **Logs:** S3 upload signing caps URLs at fifteen minutes when the store clock runs ahead of the controller host, preventing clock-skew failures
+
+### Security
+
+- **controller:** Seal legacy plaintext run and schedule arguments automatically on startup
+  A background pass retries operational failures, reports unreadable rows, and
+  leaves existing envelopes unchanged. Upgrades need no manual reseal step;
+  retiring a secrets key still requires operator rotation.
+  Missing keys produce one skipped summary and audit event until restart.
+  Operator rotation and verification skip malformed argument documents and
+  count them as unreadable instead of aborting the pass.
+
+
+- **deps:** Update OpenTelemetry Go to v1.47.0 and golang.org/x/net to v0.62.0 to address GHSA-rrfc-gjm9-cgrj, GHSA-q7gw-24fr-5p69, GO-2026-6860 and GO-2026-6866
+
+### Docs
+
+- **docs:** Clarify that native Windows is experimental and unsupported for production.
+  WSL2 with systemd is the supported Windows setup. List native runner,
+  scheduling, update drain and process limits.
+
 ## [v0.76.0] - 2026-11-18
 
 ### Added
