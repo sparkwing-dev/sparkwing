@@ -5,8 +5,3 @@
   for the attempt and its single compute interval lasts at most 60 seconds. Longer
   intervals bill normally. Usage and audit facts remain recorded. User-condition skips,
   body execution, retries, orchestration and storage keep their normal billing.
-
-### Fixed
-
-- **cache:** Historical application events cannot block memo hits or settlement
-  Only controller-authenticated receipts count as served memo hits.
