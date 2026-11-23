@@ -134,6 +134,7 @@ func withTrackedPolicyFiles(ctx context.Context, paths []string, check func(stri
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
 		}
+		// #nosec G703 -- target is a git ls-files path under a fresh MkdirTemp dir; git rejects absolute and .. paths.
 		if err := os.WriteFile(target, data, 0o600); err != nil {
 			return err
 		}

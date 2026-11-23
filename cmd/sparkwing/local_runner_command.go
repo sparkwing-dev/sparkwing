@@ -124,6 +124,7 @@ func awaitControllerGone(ctx context.Context, home string, reachable func(contex
 			if unreachableSince.IsZero() {
 				unreachableSince = now
 			}
+			// #nosec G703 -- home is the absolute state home wingd launched this runner with; Stat only tests existence.
 			if _, err := os.Stat(home); errors.Is(err, os.ErrNotExist) {
 				if homeGoneSince.IsZero() {
 					homeGoneSince = now
