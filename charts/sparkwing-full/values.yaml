@@ -90,10 +90,13 @@ controller:
   claimsPerRunnerMinute: ""
   heartbeatsPerRunnerMinute: ""
 
-  # Request budget on every route one token can reach, per rolling minute,
-  # keyed on the token prefix. It bounds a caller that varies the runner it
-  # says it is, which the per-runner budgets cannot. The agent liveness
-  # heartbeat is never budgeted. Empty is unlimited.
+  # Token bucket on every route a credential can reach, holding N requests and
+  # refilling N a minute. Every credential of one team shares the team's
+  # bucket, so issuing another token adds no capacity; a credential outside a
+  # team has its own. It bounds a caller that varies the runner it says it is,
+  # which the per-runner budgets cannot. A refused request gets 429 with a
+  # Retry-After. The deployment's Cloud launcher credential and the agent
+  # liveness heartbeat are never budgeted. Empty is unlimited.
   requestsPerTokenMinute: ""
 
   # Request rate, across every caller, past which the controller logs at warn
