@@ -20,6 +20,26 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.78.0] - 2026-11-23
+
+### Changed
+
+- **billing:** Verified Cloud memo hits cost no job compute credits
+  The controller refunds all job seconds and the minimum when it served the memo
+  for the attempt and its single compute interval lasts at most 60 seconds. Longer
+  intervals bill normally. Usage and audit facts remain recorded. User-condition skips,
+  body execution, retries, orchestration and storage keep their normal billing.
+
+### Fixed
+
+- **billing:** Memo billing receipts do not add customer storage usage
+  Copying a cached result preserves upload usage and blob reachability.
+
+### Security
+
+- **runner:** Record why the local runner's state-home existence check is not a path traversal
+  gosec's G703 taint rule flagged the check; the path is the absolute home wingd launches the runner with.
+
 ## [v0.77.0] - 2026-11-19
 
 ### Added
