@@ -65,7 +65,7 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor runstate.Actor, cha
 			}
 		}
 		if change.Role != nil && *change.Role == RoleOwner {
-			if err := tx.operator.checkUnpaidTeamLimitTx(ctx, tx, change.AccountID, t.team); err != nil {
+			if err := tx.operator.checkOwnerGrantTx(ctx, tx, change.AccountID, t.team); err != nil {
 				return err
 			}
 		}

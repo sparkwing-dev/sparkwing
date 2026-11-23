@@ -652,7 +652,7 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 	if waitlisted != 0 {
 		return TeamInfo{}, ErrWaitlisted
 	}
-	if err := tx.operator.checkUnpaidTeamLimitTx(ctx, tx, accountID, ""); err != nil {
+	if err := tx.operator.checkUnpaidTeamLimitTx(ctx, tx, accountID); err != nil {
 		return TeamInfo{}, err
 	}
 	if err := createTeamTx(ctx, tx, accountID, slug, displayName, auditAccountActor(accountID), now); err != nil {
@@ -663,26 +663,17 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 
 // safety: the caller locks the account row, and SQLite serializes writers, so concurrent creations and
 // owner grants for one account count each other's teams. A team whose paid grants were reversed to zero
-// counts as unpaid. An owner grant passes the granted team, which is admitted when it has paid and is
-// otherwise left out of the count, so the check holds whether or not its membership row exists yet.
-func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, accountID string, granted Team) error {
+// counts as unpaid. The caller runs it before writing the new ownership.
+func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, accountID string) error {
 	mode, err := creditPaymentMode(ctx, tx)
 	if err != nil {
 		return err
 	}
-	unpaidArgs := []any{mode, CreditGrantPaid, creditGrantReversal, CreditGrantPaid}
-	if granted != "" {
-		var grantUnpaid bool
-		if err := tx.QueryRowContext(ctx, `SELECT `+teamUnpaidSQL("?"), append([]any{string(granted)}, unpaidArgs...)...).Scan(&grantUnpaid); err != nil {
-			return err
-		}
-		if !grantUnpaid {
-			return nil
-		}
-	}
 	var unpaid int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memberships m WHERE m.account_id = ? AND m.role = ? AND m.team <> ? AND `+teamUnpaidSQL("m.team"),
-		append([]any{accountID, string(RoleOwner), string(granted)}, unpaidArgs...)...).Scan(&unpaid); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memberships m WHERE m.account_id = ? AND m.role = ? AND
+ COALESCE((SELECT SUM(g.amount_micro) FROM credit_grants g WHERE g.team = m.team AND g.payment_mode = ? AND
+ (g.kind = ? OR (g.kind = ? AND g.reverses_kind = ?))), 0) <= 0`,
+		accountID, string(RoleOwner), mode, CreditGrantPaid, creditGrantReversal, CreditGrantPaid).Scan(&unpaid); err != nil {
 		return err
 	}
 	if unpaid < maxUnpaidTeamsPerAccount {
@@ -697,11 +688,22 @@ func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, acc
 	}
 }
 
-// safety: billing standing uses the same net of settled paid grants and their reversals in the active mode,
-// and callers bind the mode, paid kind, reversal kind and paid kind after the team, in that order.
-func teamUnpaidSQL(team string) string {
-	return `COALESCE((SELECT SUM(g.amount_micro) FROM credit_grants g WHERE g.team = ` + team + ` AND g.payment_mode = ? AND
- (g.kind = ? OR (g.kind = ? AND g.reverses_kind = ?))), 0) <= 0`
+// safety: ownership of a team that has paid is always admitted, so only an unpaid grant meets the limit.
+func (op *Operator) checkOwnerGrantTx(ctx context.Context, tx *storeTx, accountID string, team Team) error {
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return err
+	}
+	var paid int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(g.amount_micro), 0) FROM credit_grants g WHERE g.team = ? AND g.payment_mode = ? AND
+ (g.kind = ? OR (g.kind = ? AND g.reverses_kind = ?))`,
+		string(team), mode, CreditGrantPaid, creditGrantReversal, CreditGrantPaid).Scan(&paid); err != nil {
+		return err
+	}
+	if paid > 0 {
+		return nil
+	}
+	return op.checkUnpaidTeamLimitTx(ctx, tx, accountID)
 }
 
 func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, actor auditActor, now time.Time) error {
@@ -874,6 +876,11 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return none, ErrInvitationClosed
 	}
+	if Role(role) == RoleOwner {
+		if err := op.checkOwnerGrantTx(ctx, tx, accountID, Team(team)); err != nil {
+			return none, err
+		}
+	}
 	if _, err := tx.execContext(ctx,
 		`INSERT INTO memberships (team, account_id, role, created_at) VALUES (?, ?, ?, ?)`,
 		team, accountID, role, at); err != nil {
@@ -881,11 +888,6 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 			return none, ErrAlreadyMember
 		}
 		return none, err
-	}
-	if Role(role) == RoleOwner {
-		if err := op.checkUnpaidTeamLimitTx(ctx, tx, accountID, Team(team)); err != nil {
-			return none, err
-		}
 	}
 	out := InvitationAcceptance{Team: Team(team)}
 	if acct.Waitlisted {
