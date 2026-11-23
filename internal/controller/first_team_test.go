@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
@@ -47,5 +48,31 @@ func TestApprovedAccountWithoutTeamCreatesFirstTeam(t *testing.T) {
 		if code := f.call("GET", path, auth, nil, nil); code != http.StatusOK {
 			t.Fatalf("created team GET %s = %d, want 200", path, code)
 		}
+	}
+}
+
+func TestFourthUnpaidTeamRefusalNamesTheLimitAndRemedy(t *testing.T) {
+	f := newIdentityFixture(t)
+	owner := f.signIn(person("unpaid-owner", "unpaid@example.com", "Unpaid"))
+	auth := sessionAuth(owner.SessionID)
+	for _, slug := range []string{"unpaid-two", "unpaid-three"} {
+		if code := f.call("POST", "/api/v1/teams", auth, map[string]string{"slug": slug}, nil); code != http.StatusCreated {
+			t.Fatalf("create %s = %d, want 201", slug, code)
+		}
+	}
+	var refusal struct {
+		Error struct {
+			Code    string         `json:"code"`
+			Message string         `json:"message"`
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if code := f.call("POST", "/api/v1/teams", auth, map[string]string{"slug": "unpaid-four"}, &refusal); code != http.StatusUnprocessableEntity {
+		t.Fatalf("fourth unpaid team = %d, want 422", code)
+	}
+	if refusal.Error.Code != "limit_exceeded" || refusal.Error.Details["reason"] != "unpaid_team_limit" ||
+		!strings.Contains(refusal.Error.Message, "unpaid team limit is 3 per account") ||
+		!strings.Contains(refusal.Error.Message, "add funds to one of them or contact support@sparkwing.dev") {
+		t.Fatalf("fourth unpaid team refusal = %+v", refusal.Error)
 	}
 }

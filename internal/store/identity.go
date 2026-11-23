@@ -12,6 +12,9 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 // Role is an account's authority inside one team. The set is closed: there
@@ -132,6 +135,10 @@ const (
 	maxInvitationsPerDay   = 100
 	maxOpenInvitations     = 50
 )
+
+// safety: every team carries its own free storage, download, token, invitation and request allowances,
+// so an account owns a bounded number of teams that have never paid.
+const maxUnpaidTeamsPerAccount = 3
 
 // Identity errors. Callers map these onto status codes.
 var (
@@ -645,10 +652,38 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 	if waitlisted != 0 {
 		return TeamInfo{}, ErrWaitlisted
 	}
+	if err := tx.operator.checkUnpaidTeamLimitTx(ctx, tx, accountID); err != nil {
+		return TeamInfo{}, err
+	}
 	if err := createTeamTx(ctx, tx, accountID, slug, displayName, auditAccountActor(accountID), now); err != nil {
 		return TeamInfo{}, err
 	}
 	return TeamInfo{Slug: slug, DisplayName: displayName, CreatedBy: accountID}, nil
+}
+
+// safety: the caller locks the account row, and SQLite serializes writers, so concurrent creations by
+// one account count each other's teams. A team whose paid grants were reversed to zero counts as unpaid.
+func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, accountID string) error {
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return err
+	}
+	var unpaid int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memberships m WHERE m.account_id = ? AND m.role = ? AND
+ COALESCE((SELECT SUM(g.amount_micro) FROM credit_grants g WHERE g.team = m.team AND g.payment_mode = ? AND
+ (g.kind = ? OR (g.kind = ? AND g.reverses_kind = ?))), 0) <= 0`,
+		accountID, string(RoleOwner), mode, CreditGrantPaid, creditGrantReversal, CreditGrantPaid).Scan(&unpaid); err != nil {
+		return err
+	}
+	if unpaid < maxUnpaidTeamsPerAccount {
+		return nil
+	}
+	return &apierr.Error{
+		Code: hosterr.LimitExceeded,
+		Message: fmt.Sprintf("unpaid team limit is %d per account, and you own %d teams that have never paid; add funds to one of them or contact support@sparkwing.dev to raise this limit",
+			maxUnpaidTeamsPerAccount, unpaid),
+		Details: map[string]any{"reason": "unpaid_team_limit"},
+	}
 }
 
 func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, actor auditActor, now time.Time) error {

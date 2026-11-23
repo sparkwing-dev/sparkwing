@@ -31,8 +31,16 @@ The operator's minimum cron interval still applies.
 Each claim and run may mint 30 OIDC tokens, refilled over five minutes on the
 controller. A refusal includes `Retry-After`. See [OIDC](oidc.md).
 
-Accounts may create teams without a lifetime count limit. Slug uniqueness,
-reserved names and the signup waitlist still apply.
+An account may own at most 3 teams that have never paid, because each team
+receives its own free storage, download and request allowances. A team counts
+as paid while its settled payments, less refunds and reversals, are above zero,
+so adding funds to any team you own lifts it out of the count. Teams you belong
+to without owning them do not count, and deleting a team frees its place.
+The fourth unpaid team is refused with `422 limit_exceeded`, detail
+`reason: unpaid_team_limit`. Add funds to one of your teams or contact
+support@sparkwing.dev to raise the limit. Teams the operator creates with
+`sparkwing operator teams create` are not counted. Slug uniqueness, reserved
+names and the signup waitlist still apply.
 
 Quota refusals name the limit, usage and a remedy. Contact
 support@sparkwing.dev to request a higher limit.

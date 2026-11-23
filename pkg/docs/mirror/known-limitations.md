@@ -165,6 +165,14 @@ example there.
 List and download artifacts with `sparkwing runs artifacts`. Artifacts are kept for 30 days, with no per-artifact
 retention.
 
+## Teams
+
+### Three unpaid teams per account
+
+An account can own at most three teams that have never paid. Each team gets its own free storage and download
+allowances, so the limit keeps one person from multiplying them. Add funds to one of your teams to create more, or
+contact support@sparkwing.dev; see [team resource limits](limits.md#team-resource-limits).
+
 ## Stability
 
 ### The API is pre-1.0

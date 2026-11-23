@@ -2,6 +2,7 @@ package store
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"testing"
 	"testing/quick"
 
@@ -54,5 +55,22 @@ func TestOperatorTeamAdminExpiresLikeOtherAdminTokens(t *testing.T) {
 	}
 	if want := s.now().Add(adminTokenLifetime); issued.Capability.ExpiresAt == nil || !issued.Capability.ExpiresAt.Equal(want) {
 		t.Fatalf("operator team admin expiry = %v, want %v", issued.Capability.ExpiresAt, want)
+	}
+}
+
+func TestOperatorTeamsBypassTheUnpaidTeamLimit(t *testing.T) {
+	s := authorityStore(t)
+	spec := bootstrapSpec(sha256.Sum256([]byte(t.Name())))
+	if _, err := s.AsOperator().EnsureBootstrapCapability(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	operator, err := s.AsOperator().LookupCapability(t.Context(), sha256.Sum256([]byte(spec.Seed)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range maxUnpaidTeamsPerAccount + 2 {
+		if _, err := s.AsOperator().CreateOperatorTeam(t.Context(), capability.Authorized{Principal: operator}, fmt.Sprintf("synthetic-%d", i), ""); err != nil {
+			t.Fatalf("operator team %d: %v", i, err)
+		}
 	}
 }

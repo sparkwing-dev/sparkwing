@@ -315,17 +315,6 @@ func TestIdentityConcurrentFirstSignInsShareALocalPart(t *testing.T) {
 	}
 }
 
-func TestIdentityTeamCreationHasNoLifetimeCap(t *testing.T) {
-	st := storetest.Open(t)
-	ctx := context.Background()
-	u := signIn(t, st, "s", "busy@example.com")
-	for i := 2; i <= 12; i++ {
-		if _, err := st.AsOperator().CreateAccountTeam(ctx, storetest.AccountAuthority(t, st, u.Account.ID), store.TeamInfo{Slug: store.Team(fmt.Sprintf("busy-team-%d", i))}); err != nil {
-			t.Fatalf("team %d: %v", i, err)
-		}
-	}
-}
-
 func TestIdentityReservedSlugs(t *testing.T) {
 	for _, slug := range []string{"app", "login", "auth", "sparkwing", "cache", "logs", "demo", "demo-acme", "default"} {
 		if err := store.ValidateSlug(slug); !errors.Is(err, store.ErrInvalidSlug) {
