@@ -2,6 +2,11 @@ package controller
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -208,4 +213,76 @@ func TestIdlePollBudgetSeparatesPersonalAndHereClaimants(t *testing.T) {
 			t.Fatal("early repeated poll admitted")
 		}
 	}
+}
+
+func TestTokenRequestBudgetExemptsOnlyTheCloudLauncher(t *testing.T) {
+	engine, _ := engineRuntimeStore(t)
+	engine.claimProfiles = engineProfileFake{}
+	engine.RunnerPolicy = runnerAdmissionFunc(func(context.Context, string) error { return nil })
+	launcher := engineHTTPRoot(t, engine, "", "launcher", []capability.Grant{capability.ClaimsLaunch})
+	customer := engineHTTPRoot(t, engine, "a", "customer", []capability.Grant{capability.NodesClaim})
+	poolLauncher := teamPoolLauncherRoot(t, engine, "a", "pool-launcher")
+	operator := engineHTTPRoot(t, engine, "", "operator", []capability.Grant{capability.OperatorLimits})
+	var logs bytes.Buffer
+	s := New(engine.Store, slog.New(slog.NewJSONHandler(&logs, nil))).WithEngineController(engine.EngineController).
+		WithTokenRequestBudget(TokenRequestBudget{PerTokenMinute: 1, AlarmPerMinute: 3})
+	h := s.Handler()
+	refusals := func(raw, method, path, body string) int {
+		refused := 0
+		for range 4 {
+			r := httptest.NewRequest(method, path, strings.NewReader(body))
+			r.Header.Set("Authorization", "Bearer "+raw)
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set(store.RunnerIdentityHeader, "launcher")
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code == http.StatusTooManyRequests {
+				refused++
+			} else if w.Code >= 400 {
+				t.Fatalf("%s %s: %d %s", method, path, w.Code, w.Body)
+			}
+		}
+		return refused
+	}
+	claim := `{"runner_version":"v1","kinds":["node"]}`
+	if got := refusals(launcher, http.MethodPost, "/api/v1/launcher/claim", claim); got != 0 {
+		t.Fatalf("Cloud launcher claims refused %d times past the budget", got)
+	}
+	if got := refusals(launcher, http.MethodPost, "/api/v1/launcher/sync", `{}`); got != 0 {
+		t.Fatalf("Cloud launcher syncs refused %d times past the budget", got)
+	}
+	if !strings.Contains(logs.String(), "controller request rate above its alarm") {
+		t.Fatalf("Cloud launcher requests left the aggregate alarm: %s", &logs)
+	}
+	for name, tc := range map[string]struct{ raw, method, path, body string }{
+		"customer naming itself launcher": {customer, http.MethodPost, "/api/v1/runners/claim", claim},
+		"team pool launcher":              {poolLauncher, http.MethodPost, "/api/v1/launcher/claim", claim},
+		"teamless operator service":       {operator, http.MethodGet, "/api/v1/operator/limits", ""},
+	} {
+		if got := refusals(tc.raw, tc.method, tc.path, tc.body); got == 0 {
+			t.Errorf("%s: never refused past the budget", name)
+		}
+	}
+}
+
+func teamPoolLauncherRoot(t *testing.T, e *engineFixture, team, prefix string) string {
+	t.Helper()
+	secret := sha256.Sum256([]byte(prefix))
+	raw := "swk_" + base64.RawURLEncoding.EncodeToString(secret[:])
+	digest := sha256.Sum256([]byte(raw))
+	c := capability.Capability{
+		Prefix: prefix, Team: team, Subject: capability.Subject{Kind: capability.SubjectMachine, ID: prefix},
+		Audience: capability.Controller, Grants: []capability.Grant{capability.ClaimsLaunch}, Binding: capability.Binding{Kind: capability.BindingNone},
+		Issuance: capability.Delegate, ReservedPools: []string{"pool"}, IssuedAt: time.Unix(0, 1).UTC(),
+	}
+	if !capability.Launcher(c) || capability.CloudLauncher(c) {
+		t.Fatal("fixture is not a team-pool launcher")
+	}
+	envelope, err := json.Marshal(store.CapabilityRecord{Version: 1, Value: c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engineSQL(t, e.Store, `INSERT INTO capabilities(digest,prefix,team,subject_kind,subject_id,audience,grants,issuance,authority_version,authority_json,bind_kind,reserved_pools,repo_scope,created_at,created_by) VALUES (?,?,?,'machine',?,'controller',?,'delegate',1,?,'none',?,?,1,?)`,
+		hex.EncodeToString(digest[:]), prefix, team, prefix, []byte(`["claims.launch"]`), envelope, []byte(`["pool"]`), []byte(`null`), prefix)
+	return raw
 }

@@ -6,12 +6,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 )
 
 // TokenRequestBudget bounds authorized capability requests and their aggregate rate.
 type TokenRequestBudget struct {
-	// PerTokenMinute caps authorized requests per team or operator token.
+	// PerTokenMinute sizes the token bucket each team, or each teamless
+	// authority, spends authorized requests from.
 	PerTokenMinute int
 
 	// AlarmPerMinute triggers operator warnings for the aggregate authorized request rate.
@@ -51,7 +53,7 @@ func (t *tokenBudget) values() TokenRequestBudget {
 	return t.policy
 }
 
-func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, key string) bool {
+func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, p capability.Principal) bool {
 	t := s.tokenBudget
 	if t == nil {
 		return true
@@ -63,16 +65,21 @@ func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, key s
 			"requests_per_minute", t.policy.AlarmPerMinute,
 			"reason", "one controller is serving more requests a minute than it was sized for")
 	}
-	if t.requests == nil {
+	// safety: the deployment's Cloud launcher claims and reconciles every
+	// customer's Cloud Jobs under one operator-provisioned credential, so a
+	// shared bucket would let load from all teams stall placement and renewal.
+	// The alarm above still counts its requests.
+	if t.requests == nil || capability.CloudLauncher(p.Capability) {
 		return true
 	}
+	key := credentialBudgetKey(p)
 	allowed, wait := t.requests.AllowWithRetry(key, now)
 	if !allowed {
 		observePrincipalThrottled(budgetClassToken)
 		s.logger.Warn("request shed",
 			"principal", key, "route_class", budgetClassToken, "retry_after", wait,
-			"reason", "per-token request budget exhausted")
-		writeRetryAfter(w, wait, fmt.Sprintf("token request limit is %d per minute; current budget usage is at least %d requests; wait for Retry-After or ask the operator to raise the per-token request budget", t.policy.PerTokenMinute, t.policy.PerTokenMinute))
+			"reason", "team or authority request budget exhausted")
+		writeRetryAfter(w, wait, fmt.Sprintf("team or authority request limit is %d per minute; current budget usage is at least %d requests; wait for Retry-After or ask the operator to raise --requests-per-token-minute", t.policy.PerTokenMinute, t.policy.PerTokenMinute))
 		return false
 	}
 	return true

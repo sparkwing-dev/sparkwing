@@ -211,7 +211,7 @@ func (s *Server) budgetEndpoint(endpoint controllerwire.Endpoint) controllerwire
 	}
 	next := endpoint.Handle
 	endpoint.Handle = func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-		if !s.allowTokenRequest(w, r, credentialBudgetKey(a.Principal)) {
+		if !s.allowTokenRequest(w, r, a.Principal) {
 			return nil
 		}
 		switch endpoint.Pattern {

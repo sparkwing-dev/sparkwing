@@ -161,11 +161,13 @@ func run(args []string) error {
 			"cadence the shipped runners heartbeat at.",
 			controller.RecommendedHeartbeatsPerMinute))
 	requestsPerTokenMinute := fs.Int(flagRequestsPerTokenMinute, 0,
-		"request budget on every route one token can reach, per rolling minute, "+
-			"keyed on the token prefix. It bounds a caller that varies the runner "+
-			"it says it is, which the per-runner budgets above cannot. "+
-			"Past the budget a request is answered 429 with a Retry-After naming "+
-			"the refill delay. Zero is unlimited.")
+		"token bucket on every route a credential can reach, holding N requests "+
+			"and refilling N a minute. Every credential of one team shares the "+
+			"team's bucket; a credential outside a team has its own. It bounds a "+
+			"caller that varies the runner it says it is, which the per-runner "+
+			"budgets above cannot. The deployment's Cloud launcher credential is "+
+			"exempt. Past the bucket a request is answered 429 with a Retry-After "+
+			"naming the refill delay. Zero is unlimited.")
 	requestsPerMinuteAlarm := fs.Int(flagRequestsPerMinuteAlarm, 0,
 		"request rate, across every caller, past which this controller logs at "+
 			"warn and counts sparkwing_request_rate_alarm_total. It refuses "+
@@ -775,7 +777,8 @@ func checkIdleClaimPoll(idle, hold, liveness time.Duration) error {
 			return fmt.Errorf(
 				"--idle-claim-poll %s stretches to %s once a runner spreads it, and %d of those do not fit in %s %s; "+
 					"lower the suggestion or raise that window",
-				idle, longest, idleClaimPollMargin, w.flag, w.value)
+				idle, longest, idleClaimPollMargin, w.flag, w.value,
+			)
 		}
 	}
 	return nil
