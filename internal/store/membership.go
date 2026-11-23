@@ -64,6 +64,11 @@ func (t *Tenant) UpdateMembership(ctx context.Context, actor runstate.Actor, cha
 				return err
 			}
 		}
+		if change.Role != nil && *change.Role == RoleOwner {
+			if err := tx.operator.checkUnpaidTeamLimitTx(ctx, tx, change.AccountID, t.team); err != nil {
+				return err
+			}
+		}
 		if change.Role == nil || !change.Role.AtLeast(current) {
 			if _, err := tx.execContext(ctx, `INSERT INTO membership_epochs(team,account_id,epoch) VALUES (?,?,1) ON CONFLICT(team,account_id) DO UPDATE SET epoch=membership_epochs.epoch+1`, t.team, change.AccountID); err != nil {
 				return err

@@ -137,7 +137,7 @@ const (
 )
 
 // safety: every team carries its own free storage, download, token, invitation and request allowances,
-// so an account owns a bounded number of teams that have never paid.
+// so an account is admitted to own a bounded number of unpaid teams.
 const maxUnpaidTeamsPerAccount = 3
 
 // Identity errors. Callers map these onto status codes.
@@ -652,7 +652,7 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 	if waitlisted != 0 {
 		return TeamInfo{}, ErrWaitlisted
 	}
-	if err := tx.operator.checkUnpaidTeamLimitTx(ctx, tx, accountID); err != nil {
+	if err := tx.operator.checkUnpaidTeamLimitTx(ctx, tx, accountID, ""); err != nil {
 		return TeamInfo{}, err
 	}
 	if err := createTeamTx(ctx, tx, accountID, slug, displayName, auditAccountActor(accountID), now); err != nil {
@@ -661,18 +661,28 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 	return TeamInfo{Slug: slug, DisplayName: displayName, CreatedBy: accountID}, nil
 }
 
-// safety: the caller locks the account row, and SQLite serializes writers, so concurrent creations by
-// one account count each other's teams. A team whose paid grants were reversed to zero counts as unpaid.
-func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, accountID string) error {
+// safety: the caller locks the account row, and SQLite serializes writers, so concurrent creations and
+// owner grants for one account count each other's teams. A team whose paid grants were reversed to zero
+// counts as unpaid. An owner grant passes the granted team, which is admitted when it has paid and is
+// otherwise left out of the count, so the check holds whether or not its membership row exists yet.
+func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, accountID string, granted Team) error {
 	mode, err := creditPaymentMode(ctx, tx)
 	if err != nil {
 		return err
 	}
+	unpaidArgs := []any{mode, CreditGrantPaid, creditGrantReversal, CreditGrantPaid}
+	if granted != "" {
+		var grantUnpaid bool
+		if err := tx.QueryRowContext(ctx, `SELECT `+teamUnpaidSQL("?"), append([]any{string(granted)}, unpaidArgs...)...).Scan(&grantUnpaid); err != nil {
+			return err
+		}
+		if !grantUnpaid {
+			return nil
+		}
+	}
 	var unpaid int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memberships m WHERE m.account_id = ? AND m.role = ? AND
- COALESCE((SELECT SUM(g.amount_micro) FROM credit_grants g WHERE g.team = m.team AND g.payment_mode = ? AND
- (g.kind = ? OR (g.kind = ? AND g.reverses_kind = ?))), 0) <= 0`,
-		accountID, string(RoleOwner), mode, CreditGrantPaid, creditGrantReversal, CreditGrantPaid).Scan(&unpaid); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memberships m WHERE m.account_id = ? AND m.role = ? AND m.team <> ? AND `+teamUnpaidSQL("m.team"),
+		append([]any{accountID, string(RoleOwner), string(granted)}, unpaidArgs...)...).Scan(&unpaid); err != nil {
 		return err
 	}
 	if unpaid < maxUnpaidTeamsPerAccount {
@@ -680,10 +690,18 @@ func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, acc
 	}
 	return &apierr.Error{
 		Code: hosterr.LimitExceeded,
-		Message: fmt.Sprintf("unpaid team limit is %d per account, and you own %d teams that have never paid; add funds to one of them or contact support@sparkwing.dev to raise this limit",
-			maxUnpaidTeamsPerAccount, unpaid),
+		Message: fmt.Sprintf("unpaid team limit is %d per account, and you own %d teams that are unpaid in the current payment mode; "+
+			"to create or take ownership of another unpaid team, bring that count below %d by adding funds to one of them or by deleting or leaving one, or contact support@sparkwing.dev for help",
+			maxUnpaidTeamsPerAccount, unpaid, maxUnpaidTeamsPerAccount),
 		Details: map[string]any{"reason": "unpaid_team_limit"},
 	}
+}
+
+// safety: billing standing uses the same net of settled paid grants and their reversals in the active mode,
+// and callers bind the mode, paid kind, reversal kind and paid kind after the team, in that order.
+func teamUnpaidSQL(team string) string {
+	return `COALESCE((SELECT SUM(g.amount_micro) FROM credit_grants g WHERE g.team = ` + team + ` AND g.payment_mode = ? AND
+ (g.kind = ? OR (g.kind = ? AND g.reverses_kind = ?))), 0) <= 0`
 }
 
 func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, actor auditActor, now time.Time) error {
@@ -863,6 +881,11 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 			return none, ErrAlreadyMember
 		}
 		return none, err
+	}
+	if Role(role) == RoleOwner {
+		if err := op.checkUnpaidTeamLimitTx(ctx, tx, accountID, Team(team)); err != nil {
+			return none, err
+		}
 	}
 	out := InvitationAcceptance{Team: Team(team)}
 	if acct.Waitlisted {

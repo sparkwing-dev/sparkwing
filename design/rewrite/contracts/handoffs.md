@@ -1460,21 +1460,32 @@ Each team receives its own free allowances: storage, daily downloads, runner
 tokens, invitations, queue depth and request budget. Unlimited free teams
 therefore multiply all of them.
 
-- An account may own at most 3 teams that have never paid. Teams it belongs to
-  without the owner role do not count. Deleted teams no longer count.
+- An account may own at most 3 teams that are unpaid in the current payment
+  mode. Teams it belongs to without the owner role do not count. Deleted teams
+  no longer count.
+- The limit is an admission rule. It is checked when an account creates a
+  team, accepts an owner invitation or is promoted to owner, and a grant of
+  ownership over a team that has paid is always admitted. Teams already owned
+  above the limit keep working and keep their free allowances. A full refund
+  or reversal, or the switch from test to live payments, can leave an account
+  owning more than 3 unpaid teams; it then cannot create or take ownership of
+  another unpaid team until the count falls below 3.
 - A team has paid while its settled paid grants in the active payment mode,
   less their refunds and reversals, are above zero. A team refunded to zero
   counts as unpaid again, so a pay-and-refund cycle cannot lift the limit.
   This is the same sum that earns billing standing history, and the store
   reads it in the creating transaction.
-- The creating transaction holds the account row lock, so concurrent
-  creations by one account cannot exceed the limit.
+- The creating or granting transaction holds the recipient account's row
+  lock, so concurrent creations and owner grants for one account cannot exceed
+  the limit.
 - Teams created by `operator teams create`, such as the `synthetic` team, and
   the personal team made for an account with no team are not checked.
 - The refusal is `limit_exceeded` (HTTP 422) with detail
   `reason: unpaid_team_limit`. It names the limit and the account's usage, and
-  tells the person to add funds to one of their teams or contact
-  support@sparkwing.dev, as decision 73 requires of every limit refusal.
+  tells the person to bring the count below 3 by adding funds to one of those
+  teams or by deleting or leaving one. The limit is a constant with no
+  per-account setting, so the refusal offers support@sparkwing.dev for help
+  rather than a limit increase.
 
 A team deleted and recreated frees its place, so the limit bounds concurrent
 free teams rather than their lifetime count. Per-account free allowances would

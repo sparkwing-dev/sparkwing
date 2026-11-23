@@ -169,9 +169,10 @@ retention.
 
 ### Three unpaid teams per account
 
-An account can own at most three teams that have never paid. Each team gets its own free storage and download
-allowances, so the limit keeps one person from multiplying them. Add funds to one of your teams to create more, or
-contact support@sparkwing.dev; see [team resource limits](limits.md#team-resource-limits).
+An account can own at most three teams that are unpaid in the current payment mode. Each team gets its own free
+storage and download allowances, so the limit keeps one person from multiplying them. The limit applies when you
+create a team or take ownership of an unpaid one. To own another unpaid team, add funds to one of your unpaid teams
+or delete or leave one; see [team resource limits](limits.md#team-resource-limits).
 
 ## Stability
 

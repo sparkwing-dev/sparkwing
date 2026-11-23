@@ -64,7 +64,7 @@ func TestAuditNamesTheCredentialNotTheBudgetKey(t *testing.T) {
 	h, logs := auditHarness(t, "/api/v1/data/uploads", func(w http.ResponseWriter, r *http.Request) {
 		principal := capability.Principal{Capability: capability.Capability{Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "acct-1"}, Team: "acme"}}
 		notePolicyPrincipal(r.Context(), principal)
-		s.allowTokenRequest(w, r, principal)
+		s.allowTokenRequest(w, r, principal, false)
 		w.WriteHeader(http.StatusCreated)
 	})
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/api/v1/data/uploads", nil))

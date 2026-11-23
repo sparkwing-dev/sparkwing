@@ -72,7 +72,9 @@ func TestFourthUnpaidTeamRefusalNamesTheLimitAndRemedy(t *testing.T) {
 	}
 	if refusal.Error.Code != "limit_exceeded" || refusal.Error.Details["reason"] != "unpaid_team_limit" ||
 		!strings.Contains(refusal.Error.Message, "unpaid team limit is 3 per account") ||
-		!strings.Contains(refusal.Error.Message, "add funds to one of them or contact support@sparkwing.dev") {
+		!strings.Contains(refusal.Error.Message, "you own 3 teams that are unpaid in the current payment mode") ||
+		!strings.Contains(refusal.Error.Message, "adding funds to one of them or by deleting or leaving one") ||
+		strings.Contains(refusal.Error.Message, "raise") {
 		t.Fatalf("fourth unpaid team refusal = %+v", refusal.Error)
 	}
 }
