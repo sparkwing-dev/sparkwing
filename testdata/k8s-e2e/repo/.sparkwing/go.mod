@@ -2,7 +2,7 @@ module sparkwing-k8s-e2e-pipelines
 
 go 1.26.0
 
-toolchain go1.26.11
+toolchain go1.27.4
 
 require (
 	github.com/sparkwing-dev/sparkwing v0.72.0

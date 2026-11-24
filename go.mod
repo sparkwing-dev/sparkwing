@@ -2,7 +2,7 @@ module github.com/sparkwing-dev/sparkwing
 
 go 1.26.0
 
-toolchain go1.26.11
+toolchain go1.27.4
 
 // Pre-launch artifacts. The project hadn't shipped publicly when the
 // v1 line was tagged; it was a misstep that committed us to v1+ semver

@@ -78,17 +78,19 @@ func TestLocalRuntimeConstructionRetainsAdmissionPolicyAndBudget(t *testing.T) {
 func localServicesFixture(t testing.TB, home string) (wingd.LocalRuntimeConfig, crontimer.Host) {
 	t.Helper()
 	userHome := t.TempDir()
-	return wingd.LocalRuntimeConfig{
-			Admission: wingd.Config{Home: home},
-			Open: func(context.Context, string) (wingd.LocalController, error) {
-				t.Fatal("composition opened the controller before election")
-				return nil, errors.New("unexpected controller open")
-			},
-		}, crontimer.Host{
-			GOOS: runtime.GOOS, Home: userHome,
-			ConfigHome: filepath.Join(userHome, ".config"), SparkwingHome: home,
-			Binary: filepath.Join(userHome, "sparkwing"), Version: "test",
-		}
+	config := wingd.LocalRuntimeConfig{
+		Admission: wingd.Config{Home: home},
+		Open: func(context.Context, string) (wingd.LocalController, error) {
+			t.Fatal("composition opened the controller before election")
+			return nil, errors.New("unexpected controller open")
+		},
+	}
+	host := crontimer.Host{
+		GOOS: runtime.GOOS, Home: userHome,
+		ConfigHome: filepath.Join(userHome, ".config"), SparkwingHome: home,
+		Binary: filepath.Join(userHome, "sparkwing"), Version: "test",
+	}
+	return config, host
 }
 
 func TestLocalServicesComposeRuntimeUnitsAndPrivateLogs(t *testing.T) {
