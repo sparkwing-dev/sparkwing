@@ -32,8 +32,8 @@ func productionLauncher(version string) LauncherFactory {
 		if err != nil {
 			return nil, fmt.Errorf("load launcher Kubernetes configuration: %w", err)
 		}
-		// perf: in-cluster configuration leaves client-go at 5 requests/s per API group, and one
-		// reconciliation pass drains that, so each placement call on the first-job handoff waited ~200 ms.
+		// perf: in-cluster configuration leaves client-go at 5 requests/s with a burst of 10 per API
+		// group. Reconciliation drains that burst, so first-job placement calls queued behind its refill.
 		config.QPS, config.Burst = launcherKubeQPS, launcherKubeBurst
 		kube, err := kubernetes.NewForConfig(config)
 		if err != nil {
