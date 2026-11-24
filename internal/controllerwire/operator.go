@@ -115,6 +115,7 @@ type OperatorManager interface {
 	ReadWarmCapacity(context.Context) (WarmCapacity, error)
 	WriteWarmCapacity(context.Context, WarmCapacitySettings) (WarmCapacity, error)
 	CreateOperatorTeam(context.Context, OperatorTeamCreate) (OperatorTeamCreated, error)
+	ReissueOperatorTeamAdmin(ctx context.Context, team string, input OperatorTeamAdminReissue) (OperatorTeamAdminReissued, error)
 	ReadOperatorTeam(context.Context, string) (OperatorTeam, error)
 	ReadOperatorLimits(context.Context) (OperatorLimits, error)
 	WriteOperatorLimits(context.Context, OperatorLimitsWrite) (OperatorLimits, error)
@@ -160,6 +161,19 @@ type OperatorTeamCreated struct {
 	Capability string             `json:"capability"`
 	Prefix     string             `json:"prefix"`
 	Grants     []capability.Grant `json:"grants"`
+}
+
+// OperatorTeamAdminReissue asks for a fresh administrator credential for a team nobody signs in to.
+type OperatorTeamAdminReissue struct {
+	RevokePrevious bool `json:"revoke_previous,omitempty"`
+}
+
+// OperatorTeamAdminReissued carries the new administrator's one-time presentation and the
+// capability prefixes it revoked.
+type OperatorTeamAdminReissued struct {
+	OperatorTeamCreated
+	ExpiresAt time.Time `json:"expires_at"`
+	Revoked   []string  `json:"revoked"`
 }
 
 // OperatorTeam reports the persisted team identity for infrastructure setup.

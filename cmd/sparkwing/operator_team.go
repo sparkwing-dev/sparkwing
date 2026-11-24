@@ -50,6 +50,17 @@ func runOperatorTeamsCommand(ctx context.Context, inv clisurface.Invocation, out
 		_, err = fmt.Fprintf(out, "%s\n%s=%s\n", team.Team, result.NodeLabelKey, result.NodeLabelValue)
 		return err
 	}
+	if inv.Command.Path == "sparkwing operator teams reissue-admin" {
+		reissued, err := manager.ReissueOperatorTeamAdmin(ctx, inv.Value("team"), controllerwire.OperatorTeamAdminReissue{RevokePrevious: inv.Bool("revoke-previous")})
+		if err != nil {
+			return err
+		}
+		if format == "json" {
+			return json.NewEncoder(out).Encode(reissued)
+		}
+		_, err = fmt.Fprintln(out, reissued.Capability)
+		return err
+	}
 	created, err := manager.CreateOperatorTeam(ctx, controllerwire.OperatorTeamCreate{Slug: inv.Value("team"), DisplayName: inv.Value("display-name")})
 	if err != nil {
 		return err

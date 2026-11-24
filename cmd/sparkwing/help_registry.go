@@ -179,6 +179,8 @@ var commandFlagDescriptions = map[string]string{
 	"sparkwing operator secrets rotate --verify":               "Change nothing and count the rows that still open only under the previous key; retire that key once this reports zero and nothing unreadable.",
 	"sparkwing operator teams create --display-name":           "Human-readable name for the new team, the slug by default.",
 	"sparkwing operator teams create --team":                   "Slug for the new team; a slug that exists or was retired is refused.",
+	"sparkwing operator teams reissue-admin --team":            "Slug of an existing team that nobody signs in to.",
+	"sparkwing operator teams reissue-admin --revoke-previous": "Also revoke the team's earlier administrator credentials, and every token and session derived from them, in the same transaction.",
 	"sparkwing operator teams show --job-namespace":            "Kubernetes namespace this deployment runs Cloud Jobs in; the team's node label value is derived from it and the team.",
 	"sparkwing operator teams show --team":                     "Slug of the team to show.",
 	"sparkwing operator tokens create --principal":             operatorTokensCreatePrincipalDescription,
@@ -489,9 +491,10 @@ const tokensRevokeSynopsis = "Mark a token revoked"
 const tokensSynopsis = "Manage team credentials"
 
 var commandSynopses = map[string]string{
-	"sparkwing operator teams":                      "Create teams under operator authority",
+	"sparkwing operator teams":                      "Create teams and renew their administrators under operator authority",
 	"sparkwing operator teams show":                 "Show a team and its protected node label",
 	"sparkwing operator teams create":               "Create a team and issue its first administrator credential",
+	"sparkwing operator teams reissue-admin":        "Issue a fresh administrator credential for a team nobody signs in to",
 	"sparkwing":                                     "Run and inspect pipelines",
 	"sparkwing __complete":                          "Print completion candidates for the shell scripts",
 	"sparkwing __runner-account-write":              "Write a dedicated runner account's config (runs as that account)",
@@ -796,6 +799,7 @@ var commandIntros = map[string]string{
 	"sparkwing operator object-store status":        "Show the controller's object-store request budget and breaker state.",
 	"sparkwing operator secrets rotate":             "Reseal the controller's stored secrets and keys under its current encryption key. Use --verify to check remaining old-key rows without writing.",
 	"sparkwing operator teams create":               "Create a team and print its first administrator credential once. Existing or retired slugs are refused.",
+	"sparkwing operator teams reissue-admin":        "Print a fresh administrator credential once for a team nobody signs in to. Teams with members who sign in are refused.",
 	"sparkwing operator teams show":                 "Show a team and the protected node label used for its Cloud capacity.",
 	"sparkwing operator tokens create":              "Issue a deployment service credential and print its bearer once.",
 	"sparkwing operator tokens list":                "List deployment service credential metadata without revealing bearers.",

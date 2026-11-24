@@ -10,7 +10,7 @@ Manage deployment operations
 
 ### Subcommands
 
-- `teams` -- Create teams under operator authority
+- `teams` -- Create teams and renew their administrators under operator authority
 - `warm-capacity` -- Manage warm Cloud capacity per hardware class
 - `limits` -- Manage deployment operational ceilings
 - `object-store` -- Operate the controller's object-store request budget
@@ -172,12 +172,13 @@ Repeats safely. JSON retains the counts, previous_key_only, plaintext_run_argume
 
 ## `sparkwing operator teams`
 
-Create teams under operator authority
+Create teams and renew their administrators under operator authority
 
 ### Subcommands
 
 - `show` -- Show a team and its protected node label
 - `create` -- Create a team and issue its first administrator credential
+- `reissue-admin` -- Issue a fresh administrator credential for a team nobody signs in to
 
 ### Flags
 
@@ -208,6 +209,32 @@ JSON includes the one-time capability and account metadata. Plain and pretty pri
 | `--help-all` | Include uncommon flags in command help. |
 | `--team SLUG` | Slug for the new team; a slug that exists or was retired is refused. (required) |
 | `--display-name NAME` | Human-readable name for the new team, the slug by default. |
+| `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
+
+## `sparkwing operator teams reissue-admin`
+
+Issue a fresh administrator credential for a team nobody signs in to
+
+Print a fresh administrator credential once for a team nobody signs in to. Teams with members who sign in are refused.
+
+Issue a new team-admin credential for an existing team under operator authority. It serves a team nobody signs in to, such as a monitoring team made with operator teams create, whose only administrator is a credential with a fixed 30-day lifetime. The new credential has the same owner grants and the same 30-day lifetime.
+
+The team must have no member with an email or a sign-in identity, and the account it was created with must still own it; otherwise the request is refused with conflict and nothing changes. A team that people sign in to renews credentials through its own owners.
+
+Earlier administrator credentials stay valid until they expire. --revoke-previous revokes them, with every token and session derived from them, in the same transaction, so mint and deploy replacements from the new credential first.
+
+JSON includes the one-time capability, its expiry and the revoked capability prefixes. Plain and pretty print the capability once. This operation is never retried automatically.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--team SLUG` | Slug of an existing team that nobody signs in to. (required) |
+| `--revoke-previous` | Also revoke the team's earlier administrator credentials, and every token and session derived from them, in the same transaction. |
 | `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing operator teams show`

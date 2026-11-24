@@ -2946,6 +2946,49 @@ components:
         - history
       type: object
       x-sparkwing-go-type: controllerwire.OperatorStandingRequest
+    internal.controllerwire.OperatorTeamAdminReissue:
+      additionalProperties: true
+      properties:
+        revoke_previous:
+          type: boolean
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorTeamAdminReissue
+    internal.controllerwire.OperatorTeamAdminReissued:
+      additionalProperties: true
+      properties:
+        account_id:
+          type: string
+        capability:
+          type: string
+        expires_at:
+          format: date-time
+          type: string
+        grants:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        prefix:
+          type: string
+        revoked:
+          anyOf:
+            - items:
+                type: string
+              type: array
+            - type: "null"
+        team:
+          type: string
+      required:
+        - team
+        - account_id
+        - capability
+        - prefix
+        - grants
+        - expires_at
+        - revoked
+      type: object
+      x-sparkwing-go-type: controllerwire.OperatorTeamAdminReissued
     internal.controllerwire.OperatorTeamCreate:
       additionalProperties: true
       properties:
@@ -10667,6 +10710,52 @@ paths:
             liveness: credential
         retry: never
       x-sparkwing-wire: undocumented
+  /api/v1/operator/teams/{team}/admin-credentials:
+    post:
+      parameters:
+        - in: path
+          name: team
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.OperatorTeamAdminReissue'
+        required: true
+      responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.OperatorTeamAdminReissued'
+          description: Successful response.
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.apierr.Envelope'
+          description: Canonical API failure.
+      summary: Issue a fresh administrator credential for a team nobody signs in to
+      x-sparkwing-policy:
+        method: POST
+        path: /api/v1/operator/teams/{team}/admin-credentials
+        audience: controller
+        owner: deployment
+        authentication: capability
+        access:
+          - credential: deployment_admin
+            grants:
+              - operator.tokens
+            binding: operator_settings
+            liveness: credential
+          - credential: operator_console_session
+            grants:
+              - operator.console
+            binding: none
+            liveness: credential
+        retry: never
   /api/v1/operator/teams/{team}/freeze:
     post:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

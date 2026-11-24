@@ -151,6 +151,11 @@ func Registry() []Command {
 			{Name: "display-name", Argument: "NAME"},
 			{Name: "profile", Argument: "NAME"},
 		}},
+		{Path: "sparkwing operator teams reissue-admin", Authority: deploymentAdmin, Rules: []string{"Issue a new team-admin credential for an existing team under operator authority. It serves a team nobody signs in to, such as a monitoring team made with operator teams create, whose only administrator is a credential with a fixed 30-day lifetime. The new credential has the same owner grants and the same 30-day lifetime.", "The team must have no member with an email or a sign-in identity, and the account it was created with must still own it; otherwise the request is refused with conflict and nothing changes. A team that people sign in to renews credentials through its own owners.", "Earlier administrator credentials stay valid until they expire. --revoke-previous revokes them, with every token and session derived from them, in the same transaction, so mint and deploy replacements from the new credential first.", "JSON includes the one-time capability, its expiry and the revoked capability prefixes. Plain and pretty print the capability once. This operation is never retried automatically."}, Flags: []Flag{
+			{Name: "team", Argument: "SLUG", Required: true},
+			{Name: "revoke-previous"},
+			{Name: "profile", Argument: "NAME"},
+		}},
 		{Path: "sparkwing operator warm-capacity", Authority: deploymentAdmin, Flags: []Flag{}},
 		{Path: "sparkwing operator warm-capacity show", Authority: deploymentAdmin, Flags: []Flag{{Name: "profile", Argument: "NAME"}}},
 		{Path: "sparkwing operator warm-capacity set", Authority: deploymentAdmin, Rules: []string{"Replace one class policy. Off is the default. Counts default to zero and the start-time target to 20s.", "Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 when the hourly median exceeds the target, clamped to min/max."}, Flags: []Flag{

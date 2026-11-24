@@ -42,6 +42,8 @@ var reviewedUnscopedSQL = map[string]string{
 	"(*Operator).recordSessionMembershipsTx":     "sign-in discovers all current memberships of its authenticated session before recording each through a tenant handle",
 	"(*Operator).lookupSessionTx":                "a global session digest identifies the one session being validated and renewed before its team is known",
 	"(*Operator).setupAuthorityRefsTx":           "bootstrap completion discovers the deployment seed and its complete descendant graph across teams before locking them",
+	"(*Operator).authorityLineageTx":             "seed completion and operator team-admin reissue follow globally unique parent prefixes and session hashes to every descendant before locking them",
+	"(*Operator).liveAuthorityTx":                "operator team-admin reissue rechecks one globally unique capability prefix or session hash from a locked lineage before revoking it",
 	"(*Operator).acquireRowLock":                 "the complete ordered lock set contains verified global authority hashes and installation IDs whose tenant is discovered by the mutation",
 	"(*Operator).discoverAccountTeams":           "account session creation discovers every current membership before acquiring the complete ordered team and account lock set",
 	"(*Operator).discoverAccountSessionLocks":    "account mutations discover every session and its selected team before locking account ancestry",

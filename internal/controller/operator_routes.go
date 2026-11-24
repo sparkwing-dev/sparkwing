@@ -41,6 +41,7 @@ func (s *Server) operatorEndpoints() []controllerwire.Endpoint {
 		{Method: "POST", Pattern: "/api/v1/operator/teams", Handle: s.handleOperatorCreateTeam},
 		{Method: "GET", Pattern: "/api/v1/operator/teams/{team}", Handle: s.handleOperatorTeam},
 		{Method: "DELETE", Pattern: "/api/v1/operator/teams/{team}", Handle: s.handleOperatorDeleteTeam},
+		{Method: "POST", Pattern: "/api/v1/operator/teams/{team}/admin-credentials", Handle: s.handleOperatorReissueTeamAdmin},
 		{Method: "POST", Pattern: "/api/v1/operator/teams/{team}/trust", Handle: s.handleBillingTrustSet},
 		{Method: "POST", Pattern: "/api/v1/operator/teams/{team}/grants", Handle: s.handleOperatorGrant},
 		{Method: "POST", Pattern: "/api/v1/operator/teams/{team}/freeze", Handle: s.handleOperatorFreeze},

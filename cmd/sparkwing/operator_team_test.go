@@ -115,3 +115,81 @@ func TestOperatorTeamsCreateCLIValidatesBeforeConnecting(t *testing.T) {
 		}
 	}
 }
+
+func TestOperatorTeamsReissueAdminCLIThroughStore(t *testing.T) {
+	for _, format := range []string{"plain", "json", "pretty"} {
+		t.Run(format, func(t *testing.T) {
+			st, err := teststore.Open(t, filepath.Join(t.TempDir(), "state.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := st.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			raw := teststore.BootstrapSeed()
+			if _, err := controller.EnsureBootstrapAdminToken(t.Context(), st.AsOperator(), raw); err != nil {
+				t.Fatal(err)
+			}
+			h := controller.New(st, nil).Handler()
+			status := func(credential string) int {
+				r := httptest.NewRequest(http.MethodGet, "https://controller.test/api/v1/team/members", nil)
+				r.Header.Set("Authorization", "Bearer "+credential)
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, r)
+				return w.Code
+			}
+			connect := func(_ context.Context, profile string) (controllerwire.OperatorManager, func(), error) {
+				manager, err := client.NewOperatorManager(client.EngineOptions{URL: "https://controller.test", Bearer: func(context.Context) (string, error) { return raw, nil }, HTTP: &http.Client{Transport: logRoundTrip(func(r *http.Request) (*http.Response, error) {
+					w := httptest.NewRecorder()
+					h.ServeHTTP(w, r)
+					return w.Result(), nil
+				})}})
+				return manager, func() {}, err
+			}
+			var out bytes.Buffer
+			if err := runOperatorTeamsCommandArgs(t.Context(), []string{"create", "--team", "synthetic", "--profile", "deployment", "-o", "plain"}, &out, connect); err != nil {
+				t.Fatal(err)
+			}
+			previous := strings.TrimSpace(out.String())
+			out.Reset()
+			if err := runOperatorTeamsCommandArgs(t.Context(), []string{"reissue-admin", "--team", "synthetic", "--revoke-previous", "--profile", "deployment", "-o", format}, &out, connect); err != nil {
+				t.Fatal(err)
+			}
+			credential := strings.TrimSpace(out.String())
+			if format == "json" {
+				var reissued controllerwire.OperatorTeamAdminReissued
+				if err := json.Unmarshal(out.Bytes(), &reissued); err != nil {
+					t.Fatal(err)
+				}
+				if reissued.Team != "synthetic" || len(reissued.Revoked) != 1 || !strings.HasPrefix(previous, reissued.Revoked[0]) || reissued.ExpiresAt.IsZero() {
+					t.Fatalf("reissued=%+v", reissued)
+				}
+				credential = reissued.Capability
+			}
+			if !strings.HasPrefix(credential, "swk_") || strings.ContainsAny(credential, "\n\t ") || credential == previous {
+				t.Fatalf("credential output=%q", out.String())
+			}
+			if got := status(credential); got != 200 {
+				t.Fatalf("reissued admin: %d", got)
+			}
+			if got := status(previous); got != 401 {
+				t.Fatalf("--revoke-previous left the old admin answering %d", got)
+			}
+		})
+	}
+}
+
+func TestOperatorTeamsReissueAdminCLIValidatesBeforeConnecting(t *testing.T) {
+	for _, args := range [][]string{{"reissue-admin"}, {"reissue-admin", "--team", "INVALID"}, {"reissue-admin", "--team", "ok-team", "--revoke-previous=maybe"}, {"reissue-admin", "--team", "ok-team", "--ttl", "90d"}} {
+		var out bytes.Buffer
+		connect := func(context.Context, string) (controllerwire.OperatorManager, func(), error) {
+			t.Fatal("invalid command connected")
+			return nil, nil, io.EOF
+		}
+		if err := runOperatorTeamsCommandArgs(t.Context(), args, &out, connect); err == nil || exitCodeFor(err) != 2 || out.Len() != 0 {
+			t.Fatalf("args=%v err=%v output=%q", args, err, out.String())
+		}
+	}
+}

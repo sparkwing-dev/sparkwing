@@ -26,6 +26,15 @@ func (c *engineClient) CreateOperatorTeam(ctx context.Context, input controllerw
 	return out, err
 }
 
+func (c *engineClient) ReissueOperatorTeamAdmin(ctx context.Context, team string, input controllerwire.OperatorTeamAdminReissue) (controllerwire.OperatorTeamAdminReissued, error) {
+	var out controllerwire.OperatorTeamAdminReissued
+	err := c.request(ctx, "POST", "/api/v1/operator/teams/{team}/admin-credentials", "/api/v1/operator/teams/"+url.PathEscape(team)+"/admin-credentials", "", input, &out)
+	if err == nil && (out.Team != team || out.AccountID == "" || out.Capability == "" || out.Prefix == "" || out.ExpiresAt.IsZero() || out.Revoked == nil || !slices.Contains(out.Grants, capability.TeamAdmin)) {
+		err = &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned incomplete team administration"}
+	}
+	return out, err
+}
+
 func (c *engineClient) ReadOperatorLimits(ctx context.Context) (controllerwire.OperatorLimits, error) {
 	var out controllerwire.OperatorLimits
 	err := c.request(ctx, "GET", "/api/v1/operator/limits", "/api/v1/operator/limits", "", nil, &out)

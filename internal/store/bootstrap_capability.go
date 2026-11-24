@@ -210,6 +210,11 @@ func (op *Operator) setupAuthorityRefsTx(ctx context.Context, tx *storeTx) ([]ca
 	for _, prefix := range prefixes {
 		refs = append(refs, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: prefix})
 	}
+	return op.authorityLineageTx(ctx, tx, refs)
+}
+
+// safety: parents precede children, so a caller revoking in reverse resolves each chain it locked.
+func (op *Operator) authorityLineageTx(ctx context.Context, tx *storeTx, refs []capability.AuthorityRef) ([]capability.AuthorityRef, error) {
 	seen := map[capability.AuthorityRef]bool{}
 	for _, ref := range refs {
 		seen[ref] = true

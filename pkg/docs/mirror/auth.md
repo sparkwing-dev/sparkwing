@@ -31,6 +31,26 @@ expires after 30 days, and rotation keeps that expiry. Use it to invite a real
 owner, who signs in with their own identity, before the 30 days end. Revoke it
 through the team token commands.
 
+A team that nobody signs in to, such as a synthetic monitoring team, renews
+under the same operator authority instead:
+
+```bash
+sparkwing operator teams reissue-admin --team synthetic --profile deployment -o json
+```
+
+The matching HTTP operation is `POST /api/v1/operator/teams/{team}/admin-credentials`
+with `{}` or `{"revoke_previous":true}`. It issues a new credential for the
+account the team was created with, with the same owner grants and 30-day
+lifetime, and records `token.minted` and a `ReissueOperatorTeamAdmin` mutation
+naming the operator. The operation refuses with `conflict` and changes nothing
+when any member has an email or a sign-in identity, or when that account no
+longer owns the team, so operator authority cannot take over a team people use.
+Such a team renews through its own owners. Earlier credentials keep working
+until they expire. `--revoke-previous` also revokes them, and every token and
+session derived from them, in the same transaction and audits each revocation,
+so mint and deploy the replacement tokens from the new credential first. JSON
+adds `expires_at` and the `revoked` capability prefixes to the creation fields.
+
 JSON returns `team`, `account_id`, `capability`, `prefix` and `grants`.
 Plain and pretty output print the capability once. Store that credential in
 the recipient's private connection profile. The server persists its digest,
