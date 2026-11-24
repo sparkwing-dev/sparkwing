@@ -425,6 +425,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     newer: RunsPageRef | null;
   }>({ older: null, newer: null });
   const [runsError, setRunsError] = useState<string | null>(null);
+  const [runsErrorIsTimeout, setRunsErrorIsTimeout] = useState(false);
   const [loadedView, setLoadedView] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [missingRun, setMissingRun] = useState<string | null>(null);
@@ -471,6 +472,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     } catch (e) {
       if (runsRequest.current.viewKey === key && seq > runsSeq.current.applied) {
         const message = e instanceof Error ? e.message : String(e);
+        setRunsErrorIsTimeout(e instanceof RequestTimeoutError);
         setRunsError(
           e instanceof RequestTimeoutError
             ? `${message} ${ref.kind === "latest" ? "Retrying automatically." : "Use Refresh to try again."}`
@@ -1184,7 +1186,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           <>
           <div ref={runsPaneRef} className="pane-scrollbar flex-1 overflow-y-auto" tabIndex={0} aria-label="Runs pane" data-scrolling={runsScrollbar.scrolling} onScroll={runsScrollbar.onScroll}>
             {runsError && (
-              <div role="alert" className="px-3 py-2 text-xs font-mono text-red-400 border-b border-[var(--border)]">
+              <div role="alert" className={`px-3 py-2 text-xs font-mono border-b border-[var(--border)] ${runsErrorIsTimeout ? "text-[var(--warning)]" : "text-red-400"}`}>
                 {runsError}
               </div>
             )}
