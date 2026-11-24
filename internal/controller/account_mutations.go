@@ -44,6 +44,8 @@ func accountMutationError(err error) error {
 	switch {
 	case errors.Is(err, store.ErrNotMember):
 		return &apierr.Error{Code: apierr.NotFound, Message: "account resource not found"}
+	case errors.Is(err, store.ErrInvitationAddress):
+		return invalidEngineBody("enter a plain email address, such as name@example.com, without a display name or angle brackets")
 	case errors.Is(err, store.ErrInvalidSlug), errors.Is(err, store.ErrInvalidInput):
 		return invalidEngineBody("invalid account request")
 	case errors.Is(err, store.ErrSlugTaken), errors.Is(err, store.ErrAlreadyMember), errors.Is(err, store.ErrInvitationOpen):

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/mail"
 	"slices"
 	"strconv"
 	"strings"
@@ -142,16 +143,19 @@ const maxUnpaidTeamsPerAccount = 3
 
 // Identity errors. Callers map these onto status codes.
 var (
-	ErrInvalidSlug      = errors.New("store: invalid team slug")
-	ErrInvalidInput     = errors.New("store: invalid input")
-	ErrSlugTaken        = errors.New("store: that team slug is taken")
-	ErrLastOwner        = errors.New("store: a team keeps at least one owner")
-	ErrRoleAboveOwn     = errors.New("store: cannot grant or change a role above your own")
-	ErrNotMember        = errors.New("store: not a member of this team")
-	ErrAlreadyMember    = errors.New("store: already a member of this team")
-	ErrInvitationClosed = errors.New("store: invitation is expired or already used")
-	ErrInvitationOpen   = errors.New("store: that address already has an open invitation")
-	ErrUnverifiedEmail  = errors.New("store: a sign-in needs a verified email")
+	ErrInvalidSlug  = errors.New("store: invalid team slug")
+	ErrInvalidInput = errors.New("store: invalid input")
+	// ErrInvitationAddress refuses an invitation whose address is anything but
+	// a plain email address. It matches ErrInvalidInput.
+	ErrInvitationAddress = fmt.Errorf("%w: enter a plain email address, such as name@example.com", ErrInvalidInput)
+	ErrSlugTaken         = errors.New("store: that team slug is taken")
+	ErrLastOwner         = errors.New("store: a team keeps at least one owner")
+	ErrRoleAboveOwn      = errors.New("store: cannot grant or change a role above your own")
+	ErrNotMember         = errors.New("store: not a member of this team")
+	ErrAlreadyMember     = errors.New("store: already a member of this team")
+	ErrInvitationClosed  = errors.New("store: invitation is expired or already used")
+	ErrInvitationOpen    = errors.New("store: that address already has an open invitation")
+	ErrUnverifiedEmail   = errors.New("store: a sign-in needs a verified email")
 	// ErrAccountExists refuses a first sign-in whose verified address an
 	// existing account holds. It names none of that account's providers.
 	ErrAccountExists    = errors.New("store: an account with this email already exists")
@@ -268,6 +272,14 @@ func looksLikeEmail(email string) bool {
 		return false
 	}
 	return strings.Contains(email[at+1:], ".")
+}
+
+// plainEmailAddress accepts only a bare address. net/mail also accepts a
+// display name or angle brackets around one, and each such spelling of one
+// mailbox would carry its own per-recipient invitation allowance.
+func plainEmailAddress(email string) bool {
+	parsed, err := mail.ParseAddress(email)
+	return err == nil && parsed.Name == "" && parsed.Address == email
 }
 
 // ValidateSlug checks a proposed team slug against what a hostname label
