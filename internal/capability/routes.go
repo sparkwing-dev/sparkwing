@@ -226,6 +226,7 @@ var routes = []RoutePolicy{
 	route("POST", "/api/v1/operator/teams", OwnerDeployment, RetryNever, deployment(OperatorTokens), console()),
 	route("GET", "/api/v1/operator/teams/{team}", OwnerDeployment, RetrySafe, AccessRule{CredentialDeployment, []Grant{OperatorTokens}, BindOperatorSettings, LiveCredential}, console()),
 	route("DELETE", "/api/v1/operator/teams/{team}", OwnerDeployment, RetrySafe, console()),
+	route("POST", "/api/v1/operator/teams/{team}/admin-credentials", OwnerDeployment, RetryNever, AccessRule{CredentialDeployment, []Grant{OperatorTokens}, BindOperatorSettings, LiveCredential}, console()),
 	route("POST", "/api/v1/operator/teams/{team}/trust", OwnerDeployment, RetryIdempotencyKey, console()),
 	route("POST", "/api/v1/operator/teams/{team}/grants", OwnerDeployment, RetryIdempotencyKey, console()),
 	route("POST", "/api/v1/operator/teams/{team}/freeze", OwnerDeployment, RetryIdempotencyKey, console()),

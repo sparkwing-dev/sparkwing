@@ -231,6 +231,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"POST", "/api/v1/operator/teams", "controller", "deployment", "capability", []string{"deployment_admin|operator.tokens|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"GET", "/api/v1/operator/teams/{team}", "controller", "deployment", "capability", []string{"deployment_admin|operator.tokens|operator_settings|credential", "operator_console_session|operator.console|none|credential"}},
 		{"DELETE", "/api/v1/operator/teams/{team}", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
+		{"POST", "/api/v1/operator/teams/{team}/admin-credentials", "controller", "deployment", "capability", []string{"deployment_admin|operator.tokens|operator_settings|credential", "operator_console_session|operator.console|none|credential"}},
 		{"POST", "/api/v1/operator/teams/{team}/trust", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
 		{"POST", "/api/v1/operator/teams/{team}/grants", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},
 		{"POST", "/api/v1/operator/teams/{team}/freeze", "controller", "deployment", "capability", []string{"operator_console_session|operator.console|none|credential"}},

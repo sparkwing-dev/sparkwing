@@ -396,7 +396,8 @@ type meBody struct {
 		TeamSlug string `json:"team_slug"`
 		Role     string `json:"role"`
 	} `json:"invitations"`
-	Waitlisted bool `json:"waitlisted"`
+	Waitlisted     bool `json:"waitlisted"`
+	AdmissionEmail bool `json:"admission_email"`
 }
 
 type signedIn struct {

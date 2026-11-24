@@ -116,6 +116,14 @@ The deployment profile needs `operator.tokens`. The command returns the owner
 headless runner enrollment below. See [Deployment bootstrap](auth.md#deployment-bootstrap)
 and the [controller chart](../charts/sparkwing-full/README.md) for credential files.
 
+That credential expires after 30 days. A team that keeps no human member, such
+as one whose tokens feed monitoring, renews it before then with
+`sparkwing operator teams reissue-admin --team support-test --profile deployment`,
+then deploys tokens minted from the new credential and revokes the old one with
+`sparkwing tokens revoke`. The command refuses a team with any member who signs
+in or an open invitation; see
+[Cloud operations](auth.md#cloud-operations-and-test-environments).
+
 Team members save their credential with `profiles add --token-stdin`. The command
 checks health and authenticates through `/api/v1/auth/whoami`. A deployment
 credential can pass the probe while remaining unable to call team routes.

@@ -31,6 +31,41 @@ expires after 30 days, and rotation keeps that expiry. Use it to invite a real
 owner, who signs in with their own identity, before the 30 days end. Revoke it
 through the team token commands.
 
+A team that nobody signs in to, such as a synthetic monitoring team, renews
+under the same operator authority instead:
+
+```bash
+sparkwing operator teams reissue-admin --team synthetic --profile deployment -o json
+```
+
+The matching HTTP operation is `POST /api/v1/operator/teams/{team}/admin-credentials`
+with `{}` or `{"revoke_previous":true}`. It issues a new credential for the
+account the team was created with, with the same owner grants and 30-day
+lifetime, and records `token.minted` and a `ReissueOperatorTeamAdmin` mutation
+naming the operator. The operation refuses with `conflict` and changes nothing
+when any member has an email or a sign-in identity, when the team has an open
+invitation, or when that account no longer owns the team, so operator authority
+cannot take over a team people use or are joining. Such a team renews through
+its own owners. Eligibility is judged on current members and invitations: a
+team whose people have all left becomes eligible again while the
+operator-created account still owns it, so owners of a handed-over team should
+remove that account. JSON adds `expires_at` and the `revoked` capability
+prefixes to the creation fields.
+
+To renew without downtime, reissue without `--revoke-previous`, mint and deploy
+the replacement tokens from the new credential, then revoke each old
+administrator prefix with
+`sparkwing tokens revoke --token PREFIX --profile NEW-PROFILE`. Earlier
+credentials keep working until then or until they expire.
+
+`--revoke-previous` is the compromise response. In the same transaction it
+revokes every earlier administrator credential of that account, including
+credentials from earlier reissues, and every token and session derived from
+them, so tokens already deployed from any of them stop at once. It ends
+credentials and sessions only. Invitations, runner bindings, triggers and
+secrets made with an old credential survive, so review the team's audit
+records for them after a compromise.
+
 JSON returns `team`, `account_id`, `capability`, `prefix` and `grants`.
 Plain and pretty output print the capability once. Store that credential in
 the recipient's private connection profile. The server persists its digest,
@@ -1223,6 +1258,20 @@ The deployment's sign-up settings decide whether a new account proceeds or
 waits for admission. The operator controls those settings. A team role or a
 supplied email does not grant an exception. Authentication and tenant isolation
 still apply after admission.
+
+When an operator admits a waitlisted account, the controller makes one attempt
+to email the account's verified address, with a link to sign in to the
+console. The email follows the committed admission: a retried approval or an
+account that is already admitted sends nothing. A failed send leaves the
+account admitted and logs the account ID with a failure class, never the
+address. An account without a verified address is admitted without an email.
+Admission at sign-in, as a listed operator account, sends no email because the
+person is already in the console. Accepting a team invitation joins that team
+at once and leaves the account waiting for its own workspace. Without
+`--email-sender`, the controller logs the email's subject instead of sending
+it. `/api/v1/me` returns `admission_email: true` for a waitlisted account when
+the deployment has a sender and the account's address is verified, and the
+waitlist screen promises the email only then.
 
 ## Unauthenticated endpoints
 

@@ -151,6 +151,11 @@ func Registry() []Command {
 			{Name: "display-name", Argument: "NAME"},
 			{Name: "profile", Argument: "NAME"},
 		}},
+		{Path: "sparkwing operator teams reissue-admin", Authority: deploymentAdmin, Rules: []string{"Issue a new team-admin credential for an existing team under operator authority. It serves a team nobody signs in to, such as a monitoring team made with operator teams create, whose only administrator is a credential with a fixed 30-day lifetime. The new credential has the same owner grants and the same 30-day lifetime.", "The team must have no member with an email or a sign-in identity and no open invitation, and the account it was created with must still own it; otherwise the request is refused with conflict and nothing changes. A team that people sign in to renews credentials through its own owners. A team whose people have all left becomes eligible again while that account still owns it.", "For routine renewal, omit --revoke-previous: mint and deploy replacement tokens from the new credential, then revoke each old administrator prefix with tokens revoke. --revoke-previous is the compromise response: in the same transaction it revokes every earlier administrator credential, including earlier reissues, and every token and session derived from them, so deployed tokens stop at once. Invitations, runner bindings, triggers and secrets made with an old credential survive it.", "JSON includes the one-time capability, its expiry and the revoked capability prefixes. Plain and pretty print the capability once. This operation is never retried automatically."}, Flags: []Flag{
+			{Name: "team", Argument: "SLUG", Required: true},
+			{Name: "revoke-previous"},
+			{Name: "profile", Argument: "NAME"},
+		}},
 		{Path: "sparkwing operator warm-capacity", Authority: deploymentAdmin, Flags: []Flag{}},
 		{Path: "sparkwing operator warm-capacity show", Authority: deploymentAdmin, Flags: []Flag{{Name: "profile", Argument: "NAME"}}},
 		{Path: "sparkwing operator warm-capacity set", Authority: deploymentAdmin, Rules: []string{"Replace one class policy. Off is the default. Counts default to zero and the start-time target to 20s.", "Auto uses the higher of cold-start waits / 2 rounded up and current warm + 1 when the hourly median exceeds the target, clamped to min/max."}, Flags: []Flag{
@@ -863,8 +868,8 @@ func Registry() []Command {
 			{Name: "egress-daily-alarm-bytes", Argument: "N", Meaning: "Bytes this process may send in a UTC day before it raises the egress alarm, which the health route and the metrics report and the log carries at warn level."},
 			{Name: "egress-max-downloads", Argument: "N", Meaning: "Metered downloads one principal may hold open at once; a further one is refused with 429."},
 			{Name: "egress-max-log-streams", Argument: "N", Meaning: "Live log streams one principal may hold open at once; a further one is refused with 429."},
-			{Name: "email-configuration-set", Argument: "VALUE", Meaning: "SES configuration set every invitation email names, for delivery and bounce events; empty names none."},
-			{Name: "email-sender", Argument: "VALUE", Meaning: "Address invitation emails are sent from through Amazon SES, such as noreply@example.com; credentials and region come from the AWS default chain."},
+			{Name: "email-configuration-set", Argument: "VALUE", Meaning: "SES configuration set every email names, for delivery and bounce events; empty names none."},
+			{Name: "email-sender", Argument: "VALUE", Meaning: "Address that team invitations, billing notices and waitlist admission emails are sent from through Amazon SES, such as noreply@example.com; credentials and region come from the AWS default chain."},
 			{Name: "external-url", Argument: "VALUE", Meaning: "Base URL this controller answers on from outside the cluster, which is where runners transfer signed filesystem data and logs, and what GitHub Actions workflows and OIDC tokens name."},
 			{Name: "github-app-id", Argument: "VALUE", Meaning: "Numeric id of the deployment's GitHub App."},
 			{Name: "github-app-slug", Argument: "VALUE", Meaning: "The GitHub App's name in https://github.com/apps/<slug>, where a team owner installs it."},

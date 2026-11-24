@@ -158,10 +158,18 @@ export function WaitlistNotice({ me }: { me: WaitlistedMe }) {
               on a waitlist without a workspace for now. This also happens when
               the GitHub account you signed in with is only a few days old.
             </p>
-            <p>
-              Nothing else is needed from you. Once you&apos;re let in, your
-              workspace will be here the next time you open this page.
-            </p>
+            {me.admission_email ? (
+              <p>
+                Nothing else is needed from you. We&apos;ll email you at this
+                address when you&apos;re let in, and your workspace will be
+                here the next time you open this page.
+              </p>
+            ) : (
+              <p>
+                Nothing else is needed from you. Once you&apos;re let in, your
+                workspace will be here the next time you open this page.
+              </p>
+            )}
             <p>
               If a team invites you, you can join it right away; the invitation
               shows above once it is sent to this address.

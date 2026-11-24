@@ -150,8 +150,10 @@ type storeTx struct {
 	wrote         bool
 	rotatingRoot  *capability.Capability
 	createdTeam   *TeamInfo
-	blobIO        *blobIO
-	matchingRuns  map[matchingRunKey]*matchingRun
+	// safety: an operator team-admin origin may provision only this team and account.
+	operatorTeamAdmin *TeamInfo
+	blobIO            *blobIO
+	matchingRuns      map[matchingRunKey]*matchingRun
 }
 
 func (s *Store) now() time.Time {
