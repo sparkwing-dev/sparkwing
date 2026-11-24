@@ -7,7 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
-// NewBillingManager uses authenticated transport for the team's standing and automatic refill.
+// NewBillingManager uses authenticated transport for the team's balance, standing and automatic refill.
 func NewBillingManager(options EngineOptions) (controllerwire.BillingManager, error) {
 	return newEngineClient(options)
 }
@@ -27,4 +27,15 @@ func (c *engineClient) ReadRefill(ctx context.Context) (controllerwire.TeamRefil
 
 func (c *engineClient) SetRefill(ctx context.Context, w controllerwire.RefillWrite) error {
 	return c.request(ctx, "PUT", "/api/v1/team/billing/refill", "/api/v1/team/billing/refill", "", w, nil)
+}
+
+func (c *engineClient) ReadBalance(ctx context.Context) (controllerwire.TeamBalance, error) {
+	var balance controllerwire.TeamBalance
+	if err := c.request(ctx, "GET", "/api/v1/team/billing", "/api/v1/team/billing", "", nil, &balance); err != nil {
+		return controllerwire.TeamBalance{}, err
+	}
+	if balance.MicroPerCredit <= 0 || balance.CreditsPerDollar <= 0 {
+		return controllerwire.TeamBalance{}, &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned no credit conversion"}
+	}
+	return balance, nil
 }

@@ -6,10 +6,11 @@ Every `sparkwing billing` command, flag, and argument, generated from the CLI's 
 
 ## `sparkwing billing`
 
-Inspect Cloud standing, contact operators and set automatic refill
+Inspect the Cloud balance and standing, contact operators and set automatic refill
 
 ### Subcommands
 
+- `balance` -- Show the team's prepaid credit balance
 - `standing` -- Show the team's Cloud standing and latest tier request
 - `request-tier` -- Contact operators for High standing, higher limits or larger payments
 - `refill` -- Show or change the team's automatic refill
@@ -22,6 +23,34 @@ Inspect Cloud standing, contact operators and set automatic refill
 | `-C, --checkout PATH` | Resolve the project from this local checkout path. |
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
+
+## `sparkwing billing balance`
+
+Show the team's prepaid credit balance
+
+Show the team's prepaid Cloud balance in credits and dollars.
+
+Report the team's prepaid Cloud balance in credits and its dollar value, as the billing page shows it. Both truncate toward zero: a positive balance is never shown larger than it is, and a negative balance, which usage can leave, is never shown more negative. Pretty output also says when a hold or an empty balance stops Cloud work. JSON returns team, credits, prepaid_cents, balance_micro, frozen and any hold_cause; plain prints the credits.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Pretty on a terminal; JSON when piped; explicit format wins. Values: pretty, json, plain. |
+| `-C, --checkout PATH` | Resolve the project from this local checkout path. |
+| `-h, --help` | Show command help without executing. |
+| `--help-all` | Include uncommon flags in command help. |
+| `--profile NAME` | Controller connection profile from your config. Must be supplied explicitly. (required) |
+
+### Examples
+
+```sh
+# Show the balance
+sparkwing billing balance --profile prod
+
+# Print only the credits
+sparkwing billing balance --profile prod -o plain
+```
 
 ## `sparkwing billing refill`
 
