@@ -20,6 +20,51 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.79.0] - 2026-11-24
+
+### Added
+
+- **cli:** Show the team's prepaid balance with `sparkwing billing balance`
+  The command reports the credits and their dollar value as the billing page shows them, rounded toward zero, and says when a hold or an empty balance stops Cloud work. JSON returns `team`, `credits`, `prepaid_cents`, `balance_micro`, `frozen` and any `hold_cause`; plain prints the credits.
+
+
+- **controller:** Add an `operator.metrics` grant that reads only `/metrics`
+  A Prometheus scraper previously needed `operator.limits`, which also changes limits, signups, warm capacity and Actions dispatch retries. `sparkwing operator tokens create --scope operator.metrics` now issues a service credential that `GET /metrics` accepts on either listener and every other route refuses. `operator.limits` and operator-console sessions still read `/metrics`.
+
+
+- **cli + controller:** Reissue the administrator credential of a team nobody signs in to
+  `sparkwing operator teams reissue-admin --team SLUG` and `POST /api/v1/operator/teams/{team}/admin-credentials` issue a fresh team-admin credential under the same operator authority as `operator teams create`, with the same owner grants and 30-day lifetime. A monitoring team made with `operator teams create` previously had no way to outlive its first credential, because nobody can sign in as its account and an admin credential cannot extend itself. Teams with any member who has an email or a sign-in identity, or with an open invitation, are refused with `conflict`. Routine renewal reissues, deploys replacement tokens, then revokes the old prefix with `sparkwing tokens revoke`. `--revoke-previous` is the compromise response: it revokes every earlier administrator credential, including earlier reissues, and every token and session derived from them in the same transaction, but not invitations, runner bindings, triggers or secrets they made. The issue and each revocation are audited with the operator as actor.
+
+
+- **controller:** Email waitlisted people when an operator admits them
+  The controller makes one attempt to email the account's verified address, with a link to the console sign-in page. A retried approval or an account that is already admitted sends nothing. `/api/v1/me` returns `admission_email`, and the waitlist screen promises the email only when the deployment has a sender and the address is verified. See [sign-up gate](docs/auth.md#sign-up-gate).
+
+### Fixed
+
+- **controller:** Keep the Cloud launcher outside the team request budget
+  The deployment's Cloud launcher claims and reconciles every team's Cloud Jobs under one credential, so `--requests-per-token-minute` charged all of that work to one bucket and sustained refusals could delay placement, stop lease renewal, or tear down a Job at activation. Only the operator-provisioned launcher credential is exempt, and only on its claim and sync routes, so a credential that also carries other grants stays budgeted on their routes; team credentials, team-pool launchers and other operator credentials keep their buckets, and the request-rate alarm still counts launcher traffic.
+
+
+- **controller:** Send each email in one SES attempt and keep addresses out of send-failure logs
+  SES `SendEmail` takes no idempotency key, so an SDK retry after a lost response could deliver an invitation, billing notice or admission email twice. A failed send now logs a fixed failure class instead of the provider's error text, which can quote the recipient address.
+
+### Security
+
+- **controller:** Stop an account that owns three unpaid teams from taking on another
+  Every team carries its own free storage, download and request allowances, so creating teams without limit multiplied them. The limit is checked when an account creates a team, accepts an owner invitation or is promoted to owner of an unpaid team, and the refusal is `422 limit_exceeded` with reason `unpaid_team_limit`; a promotion's refusal does not disclose the member's usage to the promoting owner. Taking ownership of a team that has paid is always allowed. To own another unpaid team, add funds to one of your unpaid teams or delete or leave one until you own fewer than three unpaid teams. Teams already owned above the limit, for example after a refund, keep working and keep their allowances. Operator-created teams are not checked when created. See [team resource limits](docs/limits.md#team-resource-limits).
+
+### Docs
+
+- **controller:** Describe `--requests-per-token-minute` as a token bucket per team or authority
+  The flag help, chart values and 429 message named a per-token rolling minute. Every credential of one team shares the team's bucket, which holds N requests and refills N a minute.
+
+- **controller:** Describe the per-runner claim and heartbeat budgets by their real key
+  The `--claims-per-runner-minute` and `--heartbeats-per-runner-minute` help and the chart values said the budgets were keyed on the token prefix. They are keyed on the caller's team, or on the credential when it has no team or the default team, on its authority's kind and ID, together with the runner identity: the authenticated holder, else the runner name the request states, else its Here run or machine, else one unnamed bucket that such requests share.
+
+
+- **chart:** Say that `controller.metricsPort` still requires a bearer
+  The `sparkwing-full` values comment said the dedicated metrics port served `/metrics` without one. Both listeners require `operator.metrics` or `operator.limits`.
+
 ## [v0.78.0] - 2026-11-23
 
 ### Changed
