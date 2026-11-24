@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth/githubtest"
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -261,6 +263,63 @@ func TestApprovingAnAdmittedAccountSendsNoEmail(t *testing.T) {
 	}
 }
 
+func TestWaitlistedAccountIsToldWhetherAdmissionSendsEmail(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		mailer bool
+		want   bool
+	}{
+		{"with a sender", true, true},
+		{"without a sender", false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
+				s.WithSignUpWaitlist(true)
+				if c.mailer {
+					s.WithMailer(&mailFake{})
+				}
+			}})
+			out := f.signIn(person("w", "w@example.com", "W"))
+			if me := f.me(sessionAuth(out.SessionID)); !me.Waitlisted || me.AdmissionEmail != c.want {
+				t.Fatalf("/me = %+v, want waitlisted with admission_email=%v", me, c.want)
+			}
+		})
+	}
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) { s.WithMailer(&mailFake{}) }})
+	out := f.signIn(person("a", "a@example.com", "A"))
+	if me := f.me(sessionAuth(out.SessionID)); me.Waitlisted || me.AdmissionEmail {
+		t.Fatalf("/me for an admitted account = %+v, want no admission email", me)
+	}
+}
+
+type failingMail struct{}
+
+func (failingMail) Send(_ context.Context, m mailer.Message) error {
+	return fmt.Errorf("mailer: SES send to %s: MessageRejected: %s is not verified", m.To, m.To)
+}
+
+func TestFailedAdmissionEmailLogsNoAddress(t *testing.T) {
+	var logs syncBuffer
+	f := newIdentityFixtureWith(t, fixtureOpts{
+		logger: slog.New(slog.NewTextHandler(&logs, nil)),
+		configure: func(s *controller.Server) {
+			s.WithSignUpWaitlist(true).WithMailer(failingMail{})
+		},
+	})
+	waiting := f.signIn(person("w", "private-person@example.com", "W"))
+	if code := f.call("POST", "/api/v1/operator/waitlist/approve", f.operatorAuth(),
+		map[string]any{"account_ids": []string{waiting.User.ID}}, nil); code != http.StatusOK {
+		t.Fatalf("approve = %d", code)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "signup.admission_email_failed") || !strings.Contains(out, "error_class=unavailable") {
+		t.Fatalf("logs lack the failure and its class:\n%s", out)
+	}
+	if strings.Contains(out, "private-person@example.com") {
+		t.Fatalf("logs name the recipient address:\n%s", out)
+	}
+}
+
 func (f *identityFixture) metricValue(series string) float64 {
 	t := f.t
 	t.Helper()
@@ -410,5 +469,26 @@ func TestAnOperatorAccountIsAdmittedAtSignIn(t *testing.T) {
 	}
 	if other := f.signIn(person("g-x", "x@example.com", "X")); !other.Waitlisted {
 		t.Fatal("a non-operator sign-up skipped the waitlist")
+	}
+}
+
+func TestFailedInvitationEmailLogsNoAddress(t *testing.T) {
+	var logs syncBuffer
+	f := newIdentityFixtureWith(t, fixtureOpts{
+		logger:    slog.New(slog.NewTextHandler(&logs, nil)),
+		configure: func(s *controller.Server) { s.WithMailer(failingMail{}) },
+	})
+	owner := f.user("o", "olga@example.com")
+	f.createTeam(&owner, "acme")
+	if code := f.call("POST", "/api/v1/team/invitations", owner.auth,
+		map[string]string{"email": "private-invitee@example.com", "role": "reader"}, nil); code != http.StatusCreated {
+		t.Fatalf("invite = %d", code)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "invitation email: send") || !strings.Contains(out, "error_class=unavailable") {
+		t.Fatalf("logs lack the failure and its class:\n%s", out)
+	}
+	if strings.Contains(out, "send to private-invitee@example.com") {
+		t.Fatalf("logs quote the provider error with the recipient address:\n%s", out)
 	}
 }

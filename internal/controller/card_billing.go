@@ -273,7 +273,7 @@ func (s *Server) mailRecipients(ctx context.Context, recipients []string, subjec
 				html.EscapeString(link) + "</a></p>",
 		}
 		if err := m.Send(ctx, msg); err != nil {
-			s.logger.Warn("owner mail: send", "err", err)
+			s.logger.Warn("owner mail: send", "error_class", mailer.ErrorClass(err))
 		}
 	}
 }

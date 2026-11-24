@@ -182,6 +182,7 @@ describe("getMe", () => {
         memberships: [],
         invitations: [],
         waitlisted: false,
+        admission_email: false,
         operator_console: false,
       },
     });
@@ -244,6 +245,7 @@ describe("getMe", () => {
         },
       ],
       waitlisted: true,
+      admission_email: true,
       operator_console: true,
     };
     respond = () => new Response(JSON.stringify(body), { status: 200 });
@@ -254,6 +256,7 @@ describe("getMe", () => {
         memberships: [],
         invitations: body.invitations,
         waitlisted: true,
+        admission_email: true,
         operator_console: true,
       },
     });

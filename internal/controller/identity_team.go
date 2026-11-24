@@ -156,7 +156,7 @@ func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, in
 		return false
 	}
 	if err := s.mailer.Send(ctx, msg); err != nil {
-		s.logger.Warn("invitation email: send", "invitation", inv.ID, "err", err)
+		s.logger.Warn("invitation email: send", "invitation", inv.ID, "error_class", mailer.ErrorClass(err))
 		return false
 	}
 	return true

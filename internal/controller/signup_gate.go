@@ -252,7 +252,7 @@ func (s *Server) handleApproveWaitlist(w http.ResponseWriter, r *http.Request, a
 // transaction, so a replayed request or an account already admitted sends nothing; a lost send loses
 // only the email, and the account stays admitted.
 func (s *Server) mailAdmission(ctx context.Context, a store.Account) {
-	if !a.EmailVerified || a.Email == "" {
+	if !hasVerifiedAddress(a) {
 		s.logger.Info("signup.admission_email_skipped", "account", a.ID, "reason", "no verified email address")
 		return
 	}
@@ -266,6 +266,15 @@ func (s *Server) mailAdmission(ctx context.Context, a store.Account) {
 		m = mailer.Log{Logger: s.logger}
 	}
 	if err := m.Send(ctx, msg); err != nil {
-		s.logger.Warn("signup.admission_email_failed", "account", a.ID, "err", err)
+		s.logger.Warn("signup.admission_email_failed", "account", a.ID, "error_class", mailer.ErrorClass(err))
 	}
+}
+
+// safety: shares mailAdmission's conditions, so the waitlist screen promises an email only when one will be sent.
+func (s *Server) willMailAdmission(a store.Account) bool {
+	return a.Waitlisted && s.mailer != nil && hasVerifiedAddress(a)
+}
+
+func hasVerifiedAddress(a store.Account) bool {
+	return a.EmailVerified && a.Email != ""
 }

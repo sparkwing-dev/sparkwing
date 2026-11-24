@@ -32,6 +32,8 @@ export interface Me {
   // True while the account waits for admission: it holds no personal space
   // and cannot create a team, but it can join a team that invites it.
   waitlisted?: boolean;
+  // True when admitting this waitlisted account sends it an email.
+  admission_email?: boolean;
   operator_console?: boolean;
 }
 
@@ -192,6 +194,7 @@ export async function getMe(): Promise<MeResult> {
           memberships: body.memberships ?? [],
           invitations: body.invitations ?? [],
           waitlisted: body.waitlisted ?? false,
+          admission_email: body.admission_email ?? false,
           operator_console: body.operator_console,
         },
       };

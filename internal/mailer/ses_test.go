@@ -3,12 +3,14 @@ package mailer_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -58,7 +60,6 @@ func newTestSES(t *testing.T, srvURL string, cfg mailer.SESConfig) *mailer.SES {
 		o.Region = "us-west-2"
 		o.BaseEndpoint = aws.String(srvURL)
 		o.Credentials = credentials.NewStaticCredentialsProvider("AKIDTEST", "secret", "")
-		o.RetryMaxAttempts = 1
 	})
 	if err != nil {
 		t.Fatalf("NewSES: %v", err)
@@ -153,5 +154,54 @@ func TestSESSendSurfacesErrorStatus(t *testing.T) {
 func TestNewSESRequiresSender(t *testing.T) {
 	if _, err := mailer.NewSES(context.Background(), mailer.SESConfig{}); err == nil {
 		t.Fatal("NewSES accepted an empty From")
+	}
+}
+
+func TestSESSendMakesOneAttempt(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		if requests.Add(1) == 1 {
+			w.Header().Set("X-Amzn-ErrorType", "ServiceUnavailable")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"message":"rejected ` + testMessage.To + `"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"MessageId":"m-1"}`))
+	}))
+	t.Cleanup(srv.Close)
+	m := newTestSES(t, srv.URL, mailer.SESConfig{From: "noreply@sparkwing.example"})
+
+	err := m.Send(context.Background(), testMessage)
+	if n := requests.Load(); n != 1 {
+		t.Fatalf("SES received %d SendEmail requests, want 1", n)
+	}
+	if err == nil {
+		t.Fatal("Send reported success after a 503")
+	}
+	if got := mailer.ErrorClass(err); got != "unavailable" {
+		t.Fatalf("ErrorClass = %q, want unavailable", got)
+	}
+}
+
+func TestErrorClassNamesNoProviderText(t *testing.T) {
+	srv, _ := newSESServer(t, http.StatusBadRequest)
+	m := newTestSES(t, srv.URL, mailer.SESConfig{From: "noreply@sparkwing.example"})
+	err := m.Send(context.Background(), testMessage)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{err, "rejected"},
+		{ctx.Err(), "canceled"},
+		{context.DeadlineExceeded, "timeout"},
+		{errors.New("dial tcp: connection refused"), "unavailable"},
+	} {
+		if got := mailer.ErrorClass(c.err); got != c.want {
+			t.Errorf("ErrorClass(%v) = %q, want %q", c.err, got, c.want)
+		}
 	}
 }
