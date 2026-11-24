@@ -15,6 +15,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/runners/launcher"
 )
 
+const (
+	launcherKubeQPS   = 50
+	launcherKubeBurst = 100
+)
+
 func productionLauncher(version string) LauncherFactory {
 	return func(ctx context.Context, jobs launcher.CloudJobConfig, bearer func(context.Context) (string, error)) (*launcher.Launcher, error) {
 		if err := context.Cause(ctx); err != nil {
@@ -27,6 +32,9 @@ func productionLauncher(version string) LauncherFactory {
 		if err != nil {
 			return nil, fmt.Errorf("load launcher Kubernetes configuration: %w", err)
 		}
+		// perf: in-cluster configuration leaves client-go at 5 requests/s per API group, and one
+		// reconciliation pass drains that, so each placement call on the first-job handoff waited ~200 ms.
+		config.QPS, config.Burst = launcherKubeQPS, launcherKubeBurst
 		kube, err := kubernetes.NewForConfig(config)
 		if err != nil {
 			return nil, err
