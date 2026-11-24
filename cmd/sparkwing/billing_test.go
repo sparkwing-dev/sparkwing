@@ -219,3 +219,42 @@ func TestBillingCLIHighTeamRequestsLargerPayments(t *testing.T) {
 		t.Fatalf("High team's contact queue=%+v: %v", open, err)
 	}
 }
+
+func TestBillingCLIBalanceReportsCreditsAndPrepaidDollars(t *testing.T) {
+	connect, state := billingCLIConnect(t, "reader", capability.RunsRead)
+	run := func(format string) string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := runBillingArgs(t.Context(), []string{"balance", "--profile", "work", "-o", format}, &out, connect); err != nil {
+			t.Fatalf("balance -o %s: %v", format, err)
+		}
+		return out.String()
+	}
+	if got := run("pretty"); got != "Team: billing-test\nBalance: 0 credits, $0.00 prepaid\nThe balance is empty, so Cloud work cannot run. Add funds on the billing page or turn on automatic refill; your own runners keep working.\n" {
+		t.Fatalf("empty balance: %q", got)
+	}
+	tenant, err := state.ForTeam(t.Context(), "billing-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tenant.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 12_345*store.MicroCreditsPerCredit + 99_999, Reference: "balance", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := run("pretty"); got != "Team: billing-test\nBalance: 12,345 credits, $12.34 prepaid\n" {
+		t.Fatalf("funded balance: %q", got)
+	}
+	if got := run("plain"); got != "12345\n" {
+		t.Fatalf("plain balance: %q", got)
+	}
+	got := run("json")
+	var report map[string]any
+	if err := json.Unmarshal([]byte(got), &report); err != nil || strings.Count(got, "\n") != 1 {
+		t.Fatalf("json balance: %q %v", got, err)
+	}
+	want := map[string]any{"team": "billing-test", "credits": float64(12_345), "prepaid_cents": float64(1_234), "balance_micro": float64(12_345*store.MicroCreditsPerCredit + 99_999), "frozen": false}
+	for k, v := range want {
+		if report[k] != v {
+			t.Fatalf("json %s = %v, want %v in %s", k, report[k], v, got)
+		}
+	}
+}

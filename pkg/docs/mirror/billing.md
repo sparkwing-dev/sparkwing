@@ -2,8 +2,9 @@
 
 Cloud usage draws on a prepaid balance. A team buys credits with Add funds, and
 can turn on automatic refill so a saved card tops the balance up before it runs
-out. Cloud work never runs on credit: when the balance cannot pay for the next
-slice of a running job, the job stops.
+out. The billing page and `sparkwing billing balance` show the balance in
+credits and its dollar value. Cloud work never runs on credit: when the balance
+cannot pay for the next slice of a running job, the job stops.
 
 Cloud size labels select a fixed allocation and its exact credit class: `sparkwing-2cpu`,
 `sparkwing-4cpu`, `sparkwing-8cpu`, `sparkwing-16cpu`, `sparkwing-32cpu` and

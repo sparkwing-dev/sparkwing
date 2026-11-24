@@ -103,3 +103,53 @@ func TestBillingCLIQuotesServerMetadata(t *testing.T) {
 		assertBillingHumanText(t, got, "Sent your request for "+quoted+" standing, higher limits or larger payments ("+quoted+"). An operator", 1)
 	})
 }
+
+func TestBillingCLIBalanceShowsHoldsAndNegativeBalances(t *testing.T) {
+	units := map[string]any{"team": "t", "balance_micro": 0, "micro_per_credit": 100_000, "credits_per_dollar": 1_000, "frozen": false}
+	with := func(fields map[string]any) map[string]any {
+		r := map[string]any{}
+		for k, v := range units {
+			r[k] = v
+		}
+		for k, v := range fields {
+			r[k] = v
+		}
+		return r
+	}
+	for _, tc := range []struct {
+		name   string
+		fields map[string]any
+		want   string
+	}{
+		{"one credit", map[string]any{"balance_micro": 100_000}, "Balance: 1 credit, $0.00 prepaid\n"},
+		{"negative rounds toward zero", map[string]any{"balance_micro": -150_000}, "Balance: -1 credits, $0.00 prepaid\nThe balance is empty"},
+		{"negative dollars", map[string]any{"balance_micro": -1_234_500_000}, "Balance: -12,345 credits, -$12.34 prepaid\nThe balance is empty"},
+		{"dispute hold", map[string]any{"balance_micro": 500_000_000, "frozen": true, "hold_cause": "dispute"}, "Balance: 5,000 credits, $5.00 prepaid\nCloud work is stopped while a payment dispute is open."},
+		{"unknown hold", map[string]any{"balance_micro": 500_000_000, "hold_cause": "future\x1b[2J"}, "$5.00 prepaid\nSparkwing support placed a hold on this team"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runBillingDisplay(t, []string{"balance", "-o", "pretty"}, with(tc.fields)); !strings.Contains(got, tc.want) {
+				t.Fatalf("balance = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	input := "team\x1b[2J\n\u202ename"
+	got := runBillingDisplay(t, []string{"balance", "-o", "pretty"}, with(map[string]any{"team": input, "balance_micro": 100_000}))
+	assertBillingHumanText(t, got, "Team: "+strconv.Quote(input)+"\n", 2)
+}
+
+func TestBillingCLIBalanceRefusesAResponseWithoutCreditUnits(t *testing.T) {
+	connect := func(_ context.Context, _ string) (controllerwire.BillingManager, func(), error) {
+		manager, err := client.NewBillingManager(client.EngineOptions{URL: "https://controller.test", HTTP: &http.Client{Transport: logRoundTrip(func(r *http.Request) (*http.Response, error) {
+			w := httptest.NewRecorder()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.WriteString(`{"team":"t","balance_micro":100000,"micro_per_credit":0,"credits_per_dollar":0,"frozen":false}`)
+			return w.Result(), nil
+		})}})
+		return manager, func() {}, err
+	}
+	var out bytes.Buffer
+	if err := runBillingArgs(t.Context(), []string{"balance", "--profile", "work"}, &out, connect); err == nil || out.Len() != 0 {
+		t.Fatalf("balance without units: %q %v", out.String(), err)
+	}
+}

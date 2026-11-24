@@ -49,6 +49,12 @@ func runBillingCommand(ctx context.Context, inv clisurface.Invocation, out io.Wr
 func manageBilling(ctx context.Context, inv clisurface.Invocation, manager controllerwire.BillingManager, out io.Writer) error {
 	format := inv.Output(color.IsInteractiveStdout())
 	switch inv.Command.Path {
+	case "sparkwing billing balance":
+		balance, err := manager.ReadBalance(ctx)
+		if err != nil {
+			return err
+		}
+		return writeBalance(out, format, balance)
 	case "sparkwing billing standing":
 		standing, err := manager.ReadStanding(ctx)
 		if err != nil {
@@ -73,6 +79,79 @@ func manageBilling(ctx context.Context, inv clisurface.Invocation, manager contr
 		return manageRefill(ctx, inv, manager, out, format)
 	}
 	return &clisurface.UsageError{Path: inv.Command.Path, Message: "unknown billing command"}
+}
+
+type balanceReport struct {
+	Team         string `json:"team"`
+	Credits      int64  `json:"credits"`
+	PrepaidCents int64  `json:"prepaid_cents"`
+	BalanceMicro int64  `json:"balance_micro"`
+	Frozen       bool   `json:"frozen"`
+	HoldCause    string `json:"hold_cause,omitempty"`
+}
+
+var holdNotices = map[string]string{
+	"dispute":             "Cloud work is stopped while a payment dispute is open. Contact support to resolve it. Your own runners keep working.",
+	"early_fraud_warning": "Cloud work is stopped because the card issuer reported possible fraud. Contact support. Your own runners keep working.",
+	"revoked":             "Sparkwing support revoked this team's Cloud standing, so Cloud work is stopped. Contact support.",
+}
+
+func writeBalance(out io.Writer, format string, b controllerwire.TeamBalance) error {
+	// safety: credits and cents round toward zero, as on the billing page, so a balance never reads larger than it is.
+	r := balanceReport{
+		Team:         b.Team,
+		Credits:      b.BalanceMicro / b.MicroPerCredit,
+		PrepaidCents: b.BalanceMicro * 100 / (b.MicroPerCredit * b.CreditsPerDollar),
+		BalanceMicro: b.BalanceMicro,
+		Frozen:       b.Frozen,
+		HoldCause:    b.HoldCause,
+	}
+	switch format {
+	case "json":
+		return json.NewEncoder(out).Encode(r)
+	case "plain":
+		_, err := fmt.Fprintln(out, r.Credits)
+		return err
+	}
+	unit := "credits"
+	if r.Credits == 1 {
+		unit = "credit"
+	}
+	var s strings.Builder
+	fmt.Fprintf(&s, "Team: %s\nBalance: %s %s, %s prepaid\n", opsview.DisplayText(r.Team), groupDigits(r.Credits), unit, fmtSignedDollars(r.PrepaidCents))
+	switch {
+	case r.Frozen || r.HoldCause != "":
+		notice, ok := holdNotices[r.HoldCause]
+		if !ok {
+			notice = "Sparkwing support placed a hold on this team, so Cloud work is stopped. Contact support."
+		}
+		s.WriteString(notice + "\n")
+	case r.BalanceMicro <= 0:
+		s.WriteString("The balance is empty, so Cloud work cannot run. Add funds on the billing page or turn on automatic refill; your own runners keep working.\n")
+	}
+	_, err := io.WriteString(out, s.String())
+	return err
+}
+
+func groupDigits(n int64) string {
+	digits := strconv.FormatInt(n, 10)
+	sign := ""
+	if n < 0 {
+		sign, digits = "-", digits[1:]
+	}
+	for i := len(digits) - 3; i > 0; i -= 3 {
+		digits = digits[:i] + "," + digits[i:]
+	}
+	return sign + digits
+}
+
+func fmtSignedDollars(cents int64) string {
+	// hack: fmtDollars prints whole dollars bare and cannot sign, but a usage charge can leave a balance negative.
+	sign := ""
+	if cents < 0 {
+		sign, cents = "-", -cents
+	}
+	return fmt.Sprintf("%s$%s.%02d", sign, groupDigits(cents/100), cents%100)
 }
 
 func writeStanding(out io.Writer, format string, s controllerwire.TeamStanding) error {
