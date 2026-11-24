@@ -1484,11 +1484,11 @@ therefore multiply all of them.
   `reason: unpaid_team_limit`. For the account's own creation or acceptance it
   names the limit and the account's usage, and tells the person to own fewer
   than 3 unpaid teams by adding funds to one of those teams or by deleting or
-  leaving one. A promotion's refusal says the member already owns the maximum
-  and what they can do, without disclosing their usage to the promoting owner.
-  The limit is a constant with no
-  per-account setting, so the refusal offers support@sparkwing.dev for help
-  rather than a limit increase.
+  leaving one. The limit is a constant with no per-account setting, so these
+  self-service refusals offer support@sparkwing.dev for help rather than a
+  limit increase. A promotion's refusal says the member has reached the limit
+  and must own fewer than 3 unpaid teams, without disclosing their usage to the
+  promoting owner, and offers no support address.
 
 A team deleted and recreated frees its place, so the limit governs how many
 unpaid teams an account may take on at a time, not their lifetime count, and

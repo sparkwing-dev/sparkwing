@@ -205,7 +205,7 @@ func TestPromotionToOwnerRespectsTheUnpaidTeamLimit(t *testing.T) {
 		t.Fatalf("promotion to editor at the limit: %v", err)
 	}
 	refusal := unpaidTeamRefusal(t, team.UpdateMembership(ctx, actor, store.MembershipUpdate{AccountID: full.Account.ID, Role: rolePointer(store.RoleOwner)}))
-	if !strings.Contains(refusal, "this member already owns the maximum number of unpaid teams") || !strings.Contains(refusal, "delete or leave one") ||
+	if !strings.Contains(refusal, "this member has reached it") || !strings.Contains(refusal, "they must own fewer than 3 unpaid teams") ||
 		strings.Contains(refusal, "you own") || strings.Contains(refusal, "3 teams") {
 		t.Fatalf("promotion refusal %q must name the member's limit without their usage", refusal)
 	}

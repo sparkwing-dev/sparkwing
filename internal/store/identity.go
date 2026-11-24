@@ -683,8 +683,9 @@ func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, acc
 	if !self {
 		return &apierr.Error{
 			Code: hosterr.LimitExceeded,
-			Message: fmt.Sprintf("unpaid team limit is %d per account, and this member already owns the maximum number of unpaid teams; "+
-				"they can add funds to one of their unpaid teams or delete or leave one before taking ownership of another", maxUnpaidTeamsPerAccount),
+			Message: fmt.Sprintf("unpaid team limit is %d per account, and this member has reached it; "+
+				"before taking ownership of another unpaid team they must own fewer than %d unpaid teams, by adding funds to them or by deleting or leaving them",
+				maxUnpaidTeamsPerAccount, maxUnpaidTeamsPerAccount),
 			Details: map[string]any{"reason": "unpaid_team_limit"},
 		}
 	}
