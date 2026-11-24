@@ -45,7 +45,7 @@ const headSHA = "89abcdef0123456789abcdef0123456789abcdef"
 type appFixture struct {
 	*identityFixture
 	app     *githubapptest.GitHub
-	logs    *syncBuffer
+	logs    *controller.SyncBuffer
 	replica func() (*controller.Server, string)
 }
 
@@ -65,7 +65,7 @@ func newDeploymentAppFixture(t *testing.T, cfg deployment.Config, opts ...func(*
 		ID: 8, Account: githubapp.Account{ID: 502, Login: "bob", Type: "User"},
 		Repos: []githubapptest.Repo{{ID: 801, FullName: "bob/tools"}},
 	})
-	logs := &syncBuffer{}
+	logs := &controller.SyncBuffer{}
 	logger := slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	assemble := func(st *store.Store) *controller.Server {
 		srv := controller.NewDeployment(st, cfg, logger).WithSecretsCipher(testCipher(t)).

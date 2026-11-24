@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -91,4 +93,21 @@ func (s *Server) WithCostRate(rate float64, source string) *Server {
 // VerifiedIntakeContextForTest supplies the source identity resolved before HTTP intake.
 func VerifiedIntakeContextForTest(ctx context.Context, request runspec.Request) context.Context {
 	return context.WithValue(ctx, verifiedIntakeSourceKey{}, verifiedIntakeSource{location: request.Source.Location, repository: request.Git.Repository})
+}
+
+type SyncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *SyncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *SyncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
