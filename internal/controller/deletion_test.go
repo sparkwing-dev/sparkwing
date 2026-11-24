@@ -265,6 +265,7 @@ func TestInvitationRefusesAddressFormsOtherThanAPlainAddress(t *testing.T) {
 		`"pay-invoice-at-evil.example"<target@example.com>`,
 		`x<target@example.com>`,
 		`<target@example.com>`,
+		`target@example.com (x)`,
 	} {
 		var refusal struct {
 			Error struct {
@@ -279,6 +280,20 @@ func TestInvitationRefusesAddressFormsOtherThanAPlainAddress(t *testing.T) {
 	}
 	if sent := mail.messages(); len(sent) != 0 {
 		t.Fatalf("sent %+v for refused addresses", sent)
+	}
+}
+
+// A local part that needs quotes is still a plain address.
+func TestInvitationAcceptsAQuotedLocalPart(t *testing.T) {
+	mail := &mailFake{}
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
+		s.WithMailer(mail)
+	}})
+	owner := f.user("o", "olga@example.com")
+	var inv inviteBody
+	if code := f.call("POST", "/api/v1/team/invitations", owner.auth,
+		map[string]string{"email": `"qa..alerts"@example.com`, "role": "reader"}, &inv); code != http.StatusCreated {
+		t.Fatalf("invite quoted local part = %d, want 201", code)
 	}
 }
 

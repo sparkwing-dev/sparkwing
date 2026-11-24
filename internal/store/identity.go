@@ -274,12 +274,15 @@ func looksLikeEmail(email string) bool {
 	return strings.Contains(email[at+1:], ".")
 }
 
-// plainEmailAddress accepts only a bare address. net/mail also accepts a
-// display name or angle brackets around one, and each such spelling of one
-// mailbox would carry its own per-recipient invitation allowance.
 func plainEmailAddress(email string) bool {
 	parsed, err := mail.ParseAddress(email)
-	return err == nil && parsed.Name == "" && parsed.Address == email
+	if err != nil || parsed.Name != "" {
+		return false
+	}
+	// safety: net/mail also accepts display names, angle brackets and comments,
+	// and each spelling of one mailbox would get its own per-recipient
+	// invitation allowance. String keeps the quotes a local part needs.
+	return strings.TrimSuffix(strings.TrimPrefix(parsed.String(), "<"), ">") == email
 }
 
 // ValidateSlug checks a proposed team slug against what a hostname label
