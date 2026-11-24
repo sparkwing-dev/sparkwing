@@ -623,9 +623,18 @@ additionally export traces and structured logs via OTLP.
 
 Always active on every service; scrape it with your Prometheus.
 
-The controller serves `/metrics` to a deployment bearer with `operator.limits`
-or an authorized operator-console session, because the run counters name every
-team's pipelines. The same policy applies on either listener.
+The controller serves `/metrics` to a deployment bearer with `operator.metrics`
+or `operator.limits`, or an authorized operator-console session, because the
+run counters name every team's pipelines. The same policy applies on either
+listener. Give a scraper its own `operator.metrics` credential, which reads
+`/metrics` and nothing else:
+
+```bash
+sparkwing operator tokens create --principal metrics-scraper --scope operator.metrics -o plain
+```
+
+Store the printed bearer where the scraper reads it, such as a Prometheus
+`authorization.credentials_file`.
 `sparkwing-controller --metrics-addr 127.0.0.1:9090` moves the endpoint onto its own listener,
 and the API listener then answers `404` for `/metrics`. In `sparkwing-full`,
 `controller.metricsPort` passes that flag and exposes the port on the

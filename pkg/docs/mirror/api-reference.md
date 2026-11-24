@@ -280,7 +280,7 @@ The owner names the server lookup. Bindings and current authority constrain ever
 | `GET` | `/github/app/complete` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
 | `GET` | `/github/app/available` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
 | `POST` | `/github/app/select` | `controller` | `account` | `browser_flow_csrf_nonce` | `never` |  |
-| `GET` | `/metrics` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.limits` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
+| `GET` | `/metrics` | `controller` | `deployment` | `capability` | `safe` | `deployment_admin` / `operator.limits` / `none` / `credential`<br>`deployment_admin` / `operator.metrics` / `none` / `credential`<br>`operator_console_session` / `operator.console` / `none` / `credential` |
 | `GET` | `/node/v1/secrets/{name}` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `secrets.release` / `declaredSecret` / `process`<br>`owner_process` / `secrets.release` / `declaredSecret` / `process` |
 | `GET` | `/node/v1/jobs/{job}/output` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `data.read` / `readSet` / `process`<br>`owner_process` / `data.read` / `readSet` / `process` |
 | `GET` | `/node/v1/pipelines/{name}/latest` | `nodehost` | `nodehost` | `capability` | `safe` | `nodehost_process` / `refs.read` / `readSet` / `process`<br>`owner_process` / `refs.read` / `readSet` / `process` |

@@ -18748,6 +18748,11 @@ paths:
               - operator.limits
             binding: none
             liveness: credential
+          - credential: deployment_admin
+            grants:
+              - operator.metrics
+            binding: none
+            liveness: credential
           - credential: operator_console_session
             grants:
               - operator.console

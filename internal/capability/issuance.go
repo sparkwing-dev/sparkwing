@@ -42,6 +42,7 @@ const (
 	OperatorObjectStore Grant = "operator.object_store"
 	OperatorTokens      Grant = "operator.tokens"
 	OperatorConsole     Grant = "operator.console"
+	OperatorMetrics     Grant = "operator.metrics"
 )
 
 // grants is the complete vocabulary.
@@ -50,7 +51,7 @@ var grants = []Grant{
 	LogsRead, SecretsRead, ApprovalsWrite, TeamAdmin, SecretsRelease, SourceRead,
 	DataRead, DataWrite, OIDCMint, NodeReport, NodeResult, LogTail, RefsRead,
 	ChildrenStart, TriggerHost, ClaimExchange, ExpansionSubmit,
-	OperatorLimits, OperatorObjectStore, OperatorTokens, OperatorConsole,
+	OperatorLimits, OperatorObjectStore, OperatorTokens, OperatorConsole, OperatorMetrics,
 }
 
 // IssuanceKind records the rule which justified a credential, including the here Award.

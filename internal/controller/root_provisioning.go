@@ -123,7 +123,7 @@ func (s *Server) handleIssueServiceCredential(w http.ResponseWriter, r *http.Req
 		return err
 	}
 	for _, grant := range request.Grants {
-		if !slices.Contains([]capability.Grant{capability.ClaimsLaunch, capability.OperatorLimits, capability.OperatorObjectStore, capability.OperatorTokens}, grant) {
+		if !slices.Contains([]capability.Grant{capability.ClaimsLaunch, capability.OperatorLimits, capability.OperatorObjectStore, capability.OperatorTokens, capability.OperatorMetrics}, grant) {
 			return invalidEngineBody("service grants must be deployment operations or claims.launch")
 		}
 	}

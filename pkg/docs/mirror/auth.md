@@ -561,6 +561,7 @@ The shared credential contract defines these recognized grant names:
 | `operator.object_store` |
 | `operator.tokens` |
 | `operator.console` |
+| `operator.metrics` |
 <!-- credential-grants:end -->
 
 A runner enrollment requests `nodes.claim`, `triggers.claim` and `runs.state`.
@@ -571,6 +572,8 @@ Its public work queue is `/api/v1/runners/claim`.
 
 Operational deployment credentials carry `operator.limits`,
 `operator.object_store` or `operator.tokens` for their selected operations.
+`operator.metrics` reads only `/metrics`, so a Prometheus scraper can hold it
+without the power to change limits, signups, storage or credentials.
 Trust changes, grants, freezes and operator account deletion require an
 operator-console session. Those powers do not follow from a deployment token.
 Use the dashboard's `/operator` page for trust, free-credit grants, holds and

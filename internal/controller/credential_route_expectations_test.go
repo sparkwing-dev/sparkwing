@@ -276,7 +276,7 @@ func credentialRouteExpectations() []credentialRouteExpectation {
 		{"GET", "/github/app/complete", "controller", "account", "browser_flow_csrf_nonce", nil},
 		{"GET", "/github/app/available", "controller", "account", "browser_flow_csrf_nonce", nil},
 		{"POST", "/github/app/select", "controller", "account", "browser_flow_csrf_nonce", nil},
-		{"GET", "/metrics", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "operator_console_session|operator.console|none|credential"}},
+		{"GET", "/metrics", "controller", "deployment", "capability", []string{"deployment_admin|operator.limits|none|credential", "deployment_admin|operator.metrics|none|credential", "operator_console_session|operator.console|none|credential"}},
 		{"GET", "/node/v1/secrets/{name}", "nodehost", "nodehost", "capability", []string{"nodehost_process|secrets.release|declaredSecret|process", "owner_process|secrets.release|declaredSecret|process"}},
 		{"GET", "/node/v1/jobs/{job}/output", "nodehost", "nodehost", "capability", []string{"nodehost_process|data.read|readSet|process", "owner_process|data.read|readSet|process"}},
 		{"GET", "/node/v1/pipelines/{name}/latest", "nodehost", "nodehost", "capability", []string{"nodehost_process|refs.read|readSet|process", "owner_process|refs.read|readSet|process"}},

@@ -572,7 +572,8 @@ POST `/api/v1/operator/tokens` uses PolicyRouter with operator.tokens or
 console authority. It accepts `name`, a nonempty unique `grants` array and
 optional absolute `expires_at`. Its subject is service/name, team is empty,
 and its registration selector is `service:<name>`. Grants are limited to
-claims.launch, operator.limits, operator.object_store and operator.tokens.
+claims.launch, operator.limits, operator.object_store, operator.tokens and
+operator.metrics.
 It cannot issue console, member, work, source or data grants. It calls the same
 issuer with ProvisionService and carries the authenticated AuthorityRef.
 
@@ -2656,8 +2657,9 @@ claimed. Existing unfenced Store/Tenant APIs are not production adapters.
 
 Ten team/schedule reads and API metrics also moved off the legacy verifier.
 They select tenants from Authorized, with private infrastructure errors.
-Billing availability follows authentication. Metrics uses operator.limits or
-console policy, while the dedicated listener retains its network boundary.
+Billing availability follows authentication. Metrics uses operator.metrics,
+operator.limits or console policy on either listener; operator.metrics opens no
+other route.
 Controller endpoint groups register together once, so one shared PolicyRouter
 owns every method on a path. Discovery follows those actual endpoint calls.
 

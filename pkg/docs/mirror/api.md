@@ -53,8 +53,9 @@ Missing transaction adapters return `policy_missing`.
 Team invitation, billing and storage reads use the same capability
 boundary, as do GitHub App installation, repository, trigger and extra-repository
 reads. Billing availability is checked after authentication.
-The API's `/metrics` route requires deployment `operator.limits` or a verified
-console session. A dedicated metrics listener keeps its existing network boundary.
+The API's `/metrics` route requires a deployment credential with
+`operator.metrics` or `operator.limits`, or a verified console session. A
+dedicated metrics listener applies the same policy.
 
 The CLI, runners, fetched engines and dashboard use `/api/v1`. The local
 controller exposes the same messages and authorization policy over its private API

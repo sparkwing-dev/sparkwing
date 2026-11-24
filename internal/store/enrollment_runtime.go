@@ -42,7 +42,7 @@ func machineAdministrationTx(ctx context.Context, tx *storeTx, p capability.Prin
 }
 
 func authorizeEnrollmentTx(ctx context.Context, tx *storeTx, spec capability.ProvisionSpec) error {
-	allowed := []capability.Grant{capability.ClaimsLaunch, capability.OperatorLimits, capability.OperatorObjectStore, capability.OperatorTokens}
+	allowed := []capability.Grant{capability.ClaimsLaunch, capability.OperatorLimits, capability.OperatorObjectStore, capability.OperatorTokens, capability.OperatorMetrics}
 	if spec.Kind == capability.ProvisionMachine {
 		if err := ValidateRunnerLabels(spec.AllowedLabels); err != nil {
 			return err

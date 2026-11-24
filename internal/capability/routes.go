@@ -271,7 +271,7 @@ var routes = []RoutePolicy{
 	externalRoute("GET", "/github/app/complete", AuthBrowserFlow, ownerAccount, RetryNever),
 	externalRoute("GET", "/github/app/available", AuthBrowserFlow, ownerAccount, RetryNever),
 	externalRoute("POST", "/github/app/select", AuthBrowserFlow, ownerAccount, RetryNever),
-	route("GET", "/metrics", OwnerDeployment, RetrySafe, deployment(OperatorLimits), console()),
+	route("GET", "/metrics", OwnerDeployment, RetrySafe, deployment(OperatorLimits), deployment(OperatorMetrics), console()),
 	nodeRoute("GET", "/node/v1/secrets/{name}", SecretsRelease, BindDeclaredSecret, RetrySafe),
 	nodeRoute("GET", "/node/v1/jobs/{job}/output", DataRead, BindReadSet, RetrySafe),
 	nodeRoute("GET", "/node/v1/pipelines/{name}/latest", RefsRead, BindReadSet, RetrySafe),

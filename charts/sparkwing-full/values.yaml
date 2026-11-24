@@ -47,10 +47,10 @@ controller:
   port: 4344
 
   # Optional scrape port for Prometheus /metrics on a listener of its
-  # own. 0 leaves /metrics on the API port, where it answers only an
-  # admin bearer, so the scraper needs an admin token. A port moves the
-  # endpoint onto a container port no Service exposes and serves it
-  # without a bearer, so only an in-cluster scraper reaches it.
+  # own. 0 leaves /metrics on the API port. A port moves the endpoint onto
+  # a container port no Service exposes. Either listener answers only a
+  # bearer with operator.metrics or operator.limits, so give the scraper
+  # an operator.metrics credential.
   metricsPort: 0
 
   # Label terms a node whose plan declares no Prefers of its own prefers its
