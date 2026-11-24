@@ -210,8 +210,9 @@ func (s *Server) budgetEndpoint(endpoint controllerwire.Endpoint) controllerwire
 		return endpoint
 	}
 	next := endpoint.Handle
+	launcherRoute := endpoint.Method == http.MethodPost && (endpoint.Pattern == "/api/v1/launcher/claim" || endpoint.Pattern == "/api/v1/launcher/sync")
 	endpoint.Handle = func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-		if !s.allowTokenRequest(w, r, a.Principal) {
+		if !s.allowTokenRequest(w, r, a.Principal, launcherRoute) {
 			return nil
 		}
 		switch endpoint.Pattern {

@@ -223,6 +223,7 @@ func TestTokenRequestBudgetExemptsOnlyTheCloudLauncher(t *testing.T) {
 	customer := engineHTTPRoot(t, engine, "a", "customer", []capability.Grant{capability.NodesClaim})
 	poolLauncher := teamPoolLauncherRoot(t, engine, "a", "pool-launcher")
 	operator := engineHTTPRoot(t, engine, "", "operator", []capability.Grant{capability.OperatorLimits})
+	mixed := engineHTTPRoot(t, engine, "", "mixed-launcher", []capability.Grant{capability.ClaimsLaunch, capability.OperatorLimits})
 	var logs bytes.Buffer
 	s := New(engine.Store, slog.New(slog.NewJSONHandler(&logs, nil))).WithEngineController(engine.EngineController).
 		WithTokenRequestBudget(TokenRequestBudget{PerTokenMinute: 1, AlarmPerMinute: 3})
@@ -251,13 +252,17 @@ func TestTokenRequestBudgetExemptsOnlyTheCloudLauncher(t *testing.T) {
 	if got := refusals(launcher, http.MethodPost, "/api/v1/launcher/sync", `{}`); got != 0 {
 		t.Fatalf("Cloud launcher syncs refused %d times past the budget", got)
 	}
+	if got := refusals(mixed, http.MethodPost, "/api/v1/launcher/claim", claim) + refusals(mixed, http.MethodPost, "/api/v1/launcher/sync", `{}`); got != 0 {
+		t.Fatalf("mixed-grant Cloud launcher refused %d times on launcher routes past the budget", got)
+	}
 	if !strings.Contains(logs.String(), "controller request rate above its alarm") {
 		t.Fatalf("Cloud launcher requests left the aggregate alarm: %s", &logs)
 	}
 	for name, tc := range map[string]struct{ raw, method, path, body string }{
-		"customer naming itself launcher": {customer, http.MethodPost, "/api/v1/runners/claim", claim},
-		"team pool launcher":              {poolLauncher, http.MethodPost, "/api/v1/launcher/claim", claim},
-		"teamless operator service":       {operator, http.MethodGet, "/api/v1/operator/limits", ""},
+		"customer naming itself launcher":     {customer, http.MethodPost, "/api/v1/runners/claim", claim},
+		"team pool launcher":                  {poolLauncher, http.MethodPost, "/api/v1/launcher/claim", claim},
+		"teamless operator service":           {operator, http.MethodGet, "/api/v1/operator/limits", ""},
+		"mixed-grant launcher off its routes": {mixed, http.MethodGet, "/api/v1/operator/limits", ""},
 	} {
 		if got := refusals(tc.raw, tc.method, tc.path, tc.body); got == 0 {
 			t.Errorf("%s: never refused past the budget", name)

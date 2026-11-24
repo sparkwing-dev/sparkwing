@@ -198,6 +198,13 @@ func hostExecCommand(t testing.TB, lang string) []string {
 		if err != nil {
 			t.Skip("node is not installed")
 		}
+		// hack: a version manager's shim needs HOME, which the session's cleared environment drops,
+		// so the session runs the executable the shim resolves to under this test's environment.
+		resolved, err := exec.Command(node, "-p", "process.execPath").Output()
+		if err != nil {
+			t.Fatalf("resolve node executable: %v", err)
+		}
+		node = strings.TrimSpace(string(resolved))
 		fixture, err := filepath.Abs(filepath.Join("testdata", "hostexec", "pipeline.ts"))
 		if err != nil {
 			t.Fatal(err)

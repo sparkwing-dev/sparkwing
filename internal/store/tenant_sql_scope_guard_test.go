@@ -138,7 +138,7 @@ var reviewedUnscopedSQL = map[string]string{
 		"another team is refused; a dispute id is unique across teams",
 
 	"(*Operator).PruneEgressUsage": "expires every team's egress reports under the maintenance lease",
-	"(*Operator).checkUnpaidTeamLimitTx": "counts the never-paid teams one account owns across every team, because the " +
+	"(*Operator).checkUnpaidTeamLimitTx": "counts the unpaid teams one account owns across every team, because the " +
 		"unpaid team limit belongs to the account, not to any one team",
 	"(*Operator).ownedTeamsTx": "lists the teams one account belongs to as owner, with each team's own owner and member counts, so the " +
 		"account deletion can tell sole ownership from shared",

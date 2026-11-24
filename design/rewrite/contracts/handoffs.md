@@ -1453,31 +1453,46 @@ Korey directed executive speed: "make these process changes, push them through a
 
 Recorded from Korey's session decision 26. `runs retry` takes an optional `--reason`, recorded on the new run as `lineage.retry_reason` and shown by `runs status`, `runs list`, the API and the console run view. It is required when the retry is started by an agent, detected as for decision 94 (`--agent`, `SPARKWING_AGENT`, `CODEX_THREAD_ID`, `GEMINI_CLI=1`, `CLAUDECODE=1`); people are never required. The store's retry intake (`retryIntakeTx`) owns the rule, so the retry route and an intake request carrying `retry_of` enforce it alike; the CLI checks the same rule before connecting. The retry request carries the requester's agent label as an additive field, because the source run's label says who started the source, not who is retrying: requiring a reason from every retry of an agent-started run would ask people too. Consequently a CLI older than the field, which sends no label, is not required to give a reason; the controller cannot tell it apart from a person. A controller older than the field refuses it before writing, and the CLI resends without the reason and label and prints a notice. The label stays display-only for authority: it decides only whether a reason is required.
 
-## 2026-11-23 Korey decision 98: an account owns at most three unpaid teams
+## 2026-11-23 Korey decision 98: an account is admitted to own at most three unpaid teams
 
 This supersedes the part of decision 73 that removed every team-creation cap.
 Each team receives its own free allowances: storage, daily downloads, runner
 tokens, invitations, queue depth and request budget. Unlimited free teams
 therefore multiply all of them.
 
-- An account may own at most 3 teams that have never paid. Teams it belongs to
-  without the owner role do not count. Deleted teams no longer count.
+- The limit is an admission rule, not a ceiling on ownership. An account that
+  already owns 3 teams that are unpaid in the current payment mode cannot
+  create a team, accept an owner invitation for an unpaid team or be promoted
+  to owner of one. A grant of ownership over a team that has paid is always
+  admitted. Teams it belongs to without the owner role do not count. Deleted
+  teams no longer count. Teams already owned
+  above the limit keep working and keep their free allowances. A full refund
+  or reversal, or the switch from test to live payments, can leave an account
+  owning more than 3 unpaid teams; it then cannot create or take ownership of
+  another unpaid team until it owns fewer than 3 unpaid teams.
 - A team has paid while its settled paid grants in the active payment mode,
   less their refunds and reversals, are above zero. A team refunded to zero
   counts as unpaid again, so a pay-and-refund cycle cannot lift the limit.
   This is the same sum that earns billing standing history, and the store
   reads it in the creating transaction.
-- The creating transaction holds the account row lock, so concurrent
-  creations by one account cannot exceed the limit.
+- The creating or granting transaction holds the recipient account's row
+  lock, so concurrent creations and owner grants for one account cannot admit
+  past the limit.
 - Teams created by `operator teams create`, such as the `synthetic` team, and
   the personal team made for an account with no team are not checked.
 - The refusal is `limit_exceeded` (HTTP 422) with detail
-  `reason: unpaid_team_limit`. It names the limit and the account's usage, and
-  tells the person to add funds to one of their teams or contact
-  support@sparkwing.dev, as decision 73 requires of every limit refusal.
+  `reason: unpaid_team_limit`. For the account's own creation or acceptance it
+  names the limit and the account's usage, and tells the person to own fewer
+  than 3 unpaid teams by adding funds to one of those teams or by deleting or
+  leaving one. The limit is a constant with no per-account setting, so these
+  self-service refusals offer support@sparkwing.dev for help rather than a
+  limit increase. A promotion's refusal says the member has reached the limit
+  and must own fewer than 3 unpaid teams, without disclosing their usage to the
+  promoting owner, and offers no support address.
 
-A team deleted and recreated frees its place, so the limit bounds concurrent
-free teams rather than their lifetime count. Per-account free allowances would
+A team deleted and recreated frees its place, so the limit governs how many
+unpaid teams an account may take on at a time, not their lifetime count, and
+refunds can leave more in place. Per-account free allowances would
 close that gap and remain a later choice.
 
 ## 2026-11-09 lead amendment to decision 87: narrow Argo refresh permission

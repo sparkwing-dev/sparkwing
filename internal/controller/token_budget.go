@@ -53,7 +53,7 @@ func (t *tokenBudget) values() TokenRequestBudget {
 	return t.policy
 }
 
-func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, p capability.Principal) bool {
+func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, p capability.Principal, launcherRoute bool) bool {
 	t := s.tokenBudget
 	if t == nil {
 		return true
@@ -65,11 +65,10 @@ func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, p cap
 			"requests_per_minute", t.policy.AlarmPerMinute,
 			"reason", "one controller is serving more requests a minute than it was sized for")
 	}
-	// safety: the deployment's Cloud launcher claims and reconciles every
-	// customer's Cloud Jobs under one operator-provisioned credential, so a
-	// shared bucket would let load from all teams stall placement and renewal.
-	// The alarm above still counts its requests.
-	if t.requests == nil || capability.CloudLauncher(p.Capability) {
+	// safety: the Cloud launcher claims and reconciles every team's Cloud Jobs under one credential, so a shared
+	// bucket would let all teams' load stall placement and renewal. Only its claim and sync routes skip the
+	// bucket, keeping a credential with other grants budgeted on their routes; the alarm above still counts it.
+	if t.requests == nil || launcherRoute && capability.CloudLauncher(p.Capability) {
 		return true
 	}
 	key := credentialBudgetKey(p)

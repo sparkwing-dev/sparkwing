@@ -142,9 +142,12 @@ func run(args []string) error {
 			"minutes, and a new name past the cap is answered 429.")
 	claimsPerMinute := fs.Int(flagClaimsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the claim routes, per rolling "+
-			"minute, keyed on the token prefix together with the runner the "+
-			"request names. Past it a claim is answered 429 with a Retry-After "+
-			"naming the refill delay. Zero is unlimited. A claim that comes back "+
+			"minute, keyed on the caller's team, or on the credential when it has "+
+			"no team or the default team, on its authority's kind and ID, together "+
+			"with the runner identity: the authenticated holder, else the runner "+
+			"name the request states, else its Here run or machine, else one "+
+			"unnamed bucket that such requests share. Past it a claim "+
+			"is answered 429 with a Retry-After naming the refill delay. Zero is unlimited. A claim that comes back "+
 			"with a node spends nothing: an award is work this controller handed "+
 			"out and the loop re-claims at once, so the budget bounds empty "+
 			"polling, which a runner can do without limit. Work it from that "+
@@ -157,7 +160,8 @@ func run(args []string) error {
 			controller.CompliantClaimPollsPerMinute()*8))
 	heartbeatsPerMinute := fs.Int(flagHeartbeatsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the heartbeat routes, per "+
-			"rolling minute, charged whatever the answer. Zero is unlimited; %d suits the "+
+			"rolling minute, keyed like the claim budget above and charged "+
+			"whatever the answer. Zero is unlimited; %d suits the "+
 			"cadence the shipped runners heartbeat at.",
 			controller.RecommendedHeartbeatsPerMinute))
 	requestsPerTokenMinute := fs.Int(flagRequestsPerTokenMinute, 0,
@@ -166,8 +170,9 @@ func run(args []string) error {
 			"team's bucket; a credential outside a team has its own. It bounds a "+
 			"caller that varies the runner it says it is, which the per-runner "+
 			"budgets above cannot. The deployment's Cloud launcher credential is "+
-			"exempt. Past the bucket a request is answered 429 with a Retry-After "+
-			"naming the refill delay. Zero is unlimited.")
+			"exempt on its claim and sync routes only. Past the bucket a request "+
+			"is answered 429 with a Retry-After naming the refill delay. Zero is "+
+			"unlimited.")
 	requestsPerMinuteAlarm := fs.Int(flagRequestsPerMinuteAlarm, 0,
 		"request rate, across every caller, past which this controller logs at "+
 			"warn and counts sparkwing_request_rate_alarm_total. It refuses "+
