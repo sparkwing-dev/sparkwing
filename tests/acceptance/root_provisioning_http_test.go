@@ -283,7 +283,7 @@ func TestRootProvisioningHTTPClaimGrantCeilings(t *testing.T) {
 			w := authorityHTTP(rootServer(b, f), b, "POST", path, string(raw))
 			allowed := grant == capability.NodesClaim || grant == capability.TriggersClaim || grant == capability.ClaimsLaunch
 			if service {
-				allowed = grant == capability.ClaimsLaunch || grant == capability.OperatorLimits || grant == capability.OperatorObjectStore || grant == capability.OperatorTokens
+				allowed = grant == capability.ClaimsLaunch || grant == capability.OperatorLimits || grant == capability.OperatorObjectStore || grant == capability.OperatorTokens || grant == capability.OperatorMetrics
 			}
 			if allowed {
 				if w.Code != 201 || len(f.specs) != 1 || !reflect.DeepEqual(f.specs[0].Grants, []capability.Grant{grant}) {
