@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func runBillingDisplay(t *testing.T, args []string, response any) string {
@@ -125,6 +128,8 @@ func TestBillingCLIBalanceShowsHoldsAndNegativeBalances(t *testing.T) {
 		{"negative rounds toward zero", map[string]any{"balance_micro": -150_000}, "Balance: -1 credits, $0.00 prepaid\nThe balance is empty"},
 		{"negative dollars", map[string]any{"balance_micro": -1_234_500_000}, "Balance: -12,345 credits, -$12.34 prepaid\nThe balance is empty"},
 		{"dispute hold", map[string]any{"balance_micro": 500_000_000, "frozen": true, "hold_cause": "dispute"}, "Balance: 5,000 credits, $5.00 prepaid\nCloud work is stopped while a payment dispute is open."},
+		{"near the int64 limit", map[string]any{"balance_micro": int64(math.MaxInt64)}, "Balance: 92,233,720,368,547 credits, $92,233,720,368.54 prepaid\n"},
+		{"most negative balance", map[string]any{"balance_micro": int64(math.MinInt64)}, "Balance: -92,233,720,368,547 credits, -$92,233,720,368.54 prepaid\n"},
 		{"unknown hold", map[string]any{"balance_micro": 500_000_000, "hold_cause": "future\x1b[2J"}, "$5.00 prepaid\nSparkwing support placed a hold on this team"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,7 +154,9 @@ func TestBillingCLIBalanceRefusesAResponseWithoutCreditUnits(t *testing.T) {
 		return manager, func() {}, err
 	}
 	var out bytes.Buffer
-	if err := runBillingArgs(t.Context(), []string{"balance", "--profile", "work"}, &out, connect); err == nil || out.Len() != 0 {
+	err := runBillingArgs(t.Context(), []string{"balance", "--profile", "work"}, &out, connect)
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.ProtocolError || refusal.Message != "controller returned no credit conversion" || out.Len() != 0 {
 		t.Fatalf("balance without units: %q %v", out.String(), err)
 	}
 }

@@ -30,7 +30,7 @@ Show the team's prepaid credit balance
 
 Show the team's prepaid Cloud balance in credits and dollars.
 
-Report the team's prepaid Cloud balance in credits and its dollar value, as the billing page shows it. Both round toward zero, so the balance is never shown larger than it is, and usage can leave it negative. Pretty output also says when a hold or an empty balance stops Cloud work. JSON returns team, credits, prepaid_cents, balance_micro, frozen and any hold_cause; plain prints the credits.
+Report the team's prepaid Cloud balance in credits and its dollar value, as the billing page shows it. Both truncate toward zero: a positive balance is never shown larger than it is, and a negative balance, which usage can leave, is never shown more negative. Pretty output also says when a hold or an empty balance stops Cloud work. JSON returns team, credits, prepaid_cents, balance_micro, frozen and any hold_cause; plain prints the credits.
 
 ### Flags
 

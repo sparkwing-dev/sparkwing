@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"regexp"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func runBilling(ctx context.Context, inv clisurface.Invocation) error {
@@ -97,11 +99,17 @@ var holdNotices = map[string]string{
 }
 
 func writeBalance(out io.Writer, format string, b controllerwire.TeamBalance) error {
-	// safety: credits and cents round toward zero, as on the billing page, so a balance never reads larger than it is.
+	// safety: credits and cents truncate toward zero, as on the billing page. The cents are scaled in big.Int because
+	// balance_micro*100 overflows int64 for a large balance.
+	cents := new(big.Int).Mul(big.NewInt(b.BalanceMicro), big.NewInt(100))
+	cents.Quo(cents, new(big.Int).Mul(big.NewInt(b.MicroPerCredit), big.NewInt(b.CreditsPerDollar)))
+	if !cents.IsInt64() {
+		return &apierr.Error{Code: apierr.ProtocolError, Message: "controller returned a balance too large to show in cents"}
+	}
 	r := balanceReport{
 		Team:         b.Team,
 		Credits:      b.BalanceMicro / b.MicroPerCredit,
-		PrepaidCents: b.BalanceMicro * 100 / (b.MicroPerCredit * b.CreditsPerDollar),
+		PrepaidCents: cents.Int64(),
 		BalanceMicro: b.BalanceMicro,
 		Frozen:       b.Frozen,
 		HoldCause:    b.HoldCause,

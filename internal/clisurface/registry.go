@@ -311,7 +311,7 @@ func Registry() []Command {
 			{Name: "minutes", Argument: "N", HasMinimum: true, Minimum: 0, Conflicts: []string{"uncapped"}},
 			{Name: "uncapped", Conflicts: []string{"minutes"}},
 		}},
-		{Path: "sparkwing billing balance", Authority: teamCredential, Rules: []string{"Report the team's prepaid Cloud balance in credits and its dollar value, as the billing page shows it. Both round toward zero, so the balance is never shown larger than it is, and usage can leave it negative. Pretty output also says when a hold or an empty balance stops Cloud work. JSON returns team, credits, prepaid_cents, balance_micro, frozen and any hold_cause; plain prints the credits."}, Flags: []Flag{
+		{Path: "sparkwing billing balance", Authority: teamCredential, Rules: []string{"Report the team's prepaid Cloud balance in credits and its dollar value, as the billing page shows it. Both truncate toward zero: a positive balance is never shown larger than it is, and a negative balance, which usage can leave, is never shown more negative. Pretty output also says when a hold or an empty balance stops Cloud work. JSON returns team, credits, prepaid_cents, balance_micro, frozen and any hold_cause; plain prints the credits."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
 		{Path: "sparkwing billing standing", Authority: teamCredential, Rules: []string{"Report the team's Cloud standing, the tier its payment history earns, the highest tier prepaid funds can reach and its latest standing request with the operator's decision. Prepaid funds raise standing at most one tier above the history tier. Plain prints the standing tier."}, Flags: []Flag{
