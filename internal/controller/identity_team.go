@@ -112,8 +112,9 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capabili
 	return nil
 }
 
-// WithMailer sends invitation emails through m. Without one, the controller
-// logs that it sent nothing and the owner hands the accept link on.
+// WithMailer sends invitation and waitlist admission emails through m. Without
+// one, the controller logs that it sent nothing; an owner hands an invitation's
+// accept link on.
 func (s *Server) WithMailer(m mailer.Mailer) *Server {
 	s.mailer = m
 	return s
@@ -161,10 +162,13 @@ func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, in
 	return true
 }
 
+func (s *Server) acceptURL(id string) string {
+	return s.consoleURL("/invitations?id=" + url.QueryEscape(id))
+}
+
 // safety: the dashboard origin comes from the first redirect allowlist entry, the one host this deployment
 // already trusts to receive a signed-in browser.
-func (s *Server) acceptURL(id string) string {
-	path := "/invitations?id=" + url.QueryEscape(id)
+func (s *Server) consoleURL(path string) string {
 	if len(s.identity.redirectURIs) == 0 {
 		return path
 	}

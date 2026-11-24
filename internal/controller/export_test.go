@@ -88,14 +88,6 @@ func (s *Server) WithCostRate(rate float64, source string) *Server {
 	return s
 }
 
-// WithSignUpApprovalNotifier runs fn for each account an operator admits from
-// the waitlist, such as to email the person that they are in. A failure is
-// logged and does not undo the admission.
-func (s *Server) WithSignUpApprovalNotifier(fn func(context.Context, store.Account) error) *Server {
-	s.identity.signup.onApproved = fn
-	return s
-}
-
 // VerifiedIntakeContextForTest supplies the source identity resolved before HTTP intake.
 func VerifiedIntakeContextForTest(ctx context.Context, request runspec.Request) context.Context {
 	return context.WithValue(ctx, verifiedIntakeSourceKey{}, verifiedIntakeSource{location: request.Source.Location, repository: request.Git.Repository})

@@ -1221,6 +1221,16 @@ waits for admission. The operator controls those settings. A team role or a
 supplied email does not grant an exception. Authentication and tenant isolation
 still apply after admission.
 
+When an operator admits a waitlisted account, the controller emails the
+account's verified address once, with a link to sign in to the console. The
+email follows the committed admission: a retried approval or an account that
+is already admitted sends nothing, and a failed send leaves the account
+admitted. An account without a verified address is admitted without an email.
+Admission at sign-in, as a listed operator account or by accepting a team
+invitation, sends no email because the person is already in the console.
+Without `--email-sender`, the controller logs the email's subject instead of
+sending it.
+
 ## Unauthenticated endpoints
 
 Public discovery, sign-in, device sign-in start, poll and cancellation, provider
