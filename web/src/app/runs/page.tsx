@@ -41,6 +41,7 @@ import {
   type RunsGrepResponse,
   type Run,
   type RunDetail,
+  RequestTimeoutError,
   cancelRun,
   deleteRun,
   getNodeLogCompleteness,
@@ -54,6 +55,7 @@ import {
   searchRunsGrep,
 } from "@/lib/api";
 import { useRunEvents } from "@/lib/useRunEvents";
+import { startPoll } from "@/lib/poll";
 import {
   type RunsPageRef,
   pageFromResponse,
@@ -79,6 +81,7 @@ import RunRequester from "@/components/RunRequester";
 import DebugPausePanel from "@/components/DebugPausePanel";
 import Tooltip from "@/components/Tooltip";
 import RunRail from "@/components/RunRail";
+import RunsListPlaceholder from "@/components/RunsListPlaceholder";
 import ExecutionWaterfall from "@/components/ExecutionWaterfall";
 import StepProgressBar from "@/components/StepProgressBar";
 import ResourceChart from "@/components/ResourceChart";
@@ -422,6 +425,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     newer: RunsPageRef | null;
   }>({ older: null, newer: null });
   const [runsError, setRunsError] = useState<string | null>(null);
+  const [loadedView, setLoadedView] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [missingRun, setMissingRun] = useState<string | null>(null);
   const runsRequest = useRef({ filterState, pageRef, viewKey });
@@ -466,7 +470,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       page = pageFromResponse(fetched, ref);
     } catch (e) {
       if (runsRequest.current.viewKey === key && seq > runsSeq.current.applied) {
-        setRunsError(e instanceof Error ? e.message : String(e));
+        const message = e instanceof Error ? e.message : String(e);
+        setRunsError(
+          e instanceof RequestTimeoutError
+            ? `${message} ${ref.kind === "latest" ? "Retrying automatically." : "Use Refresh to try again."}`
+            : message,
+        );
       }
       return;
     }
@@ -476,6 +485,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setRuns(page.runs);
     setRunsPage({ older: page.older, newer: page.newer });
     setRunsError(null);
+    setLoadedView(key);
     if (ref.kind === "newer" && page.atLatest) {
       writeParams(pageRefParams({ kind: "latest" }));
     }
@@ -521,13 +531,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const pollsForNewRuns = pageRef.kind === "latest";
   useEffect(() => {
     runsPaneRef.current?.scrollTo({ top: 0 });
-    refresh();
     // perf: only the newest page can gain runs; an older page holds still until asked.
-    if (!pollsForNewRuns) return;
-    const i = setInterval(() => {
-      if (!document.hidden) refresh();
-    }, POLL_MS);
-    return () => clearInterval(i);
+    if (!pollsForNewRuns) {
+      refresh();
+      return;
+    }
+    return startPoll(refresh, POLL_MS);
   }, [refresh, viewKey, pollsForNewRuns]);
 
   const [runProgress, setRunProgress] = useState<
@@ -1248,14 +1257,18 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               );
             })}
             </div>
-            {topLevel.length === 0 && !runsError && (
-              <div className="p-8 text-center text-[var(--muted)] text-sm">
-                {pageRef.kind !== "latest"
-                  ? "No runs on this page"
-                  : activeCount > 0
-                    ? "No matching runs"
-                    : "No runs yet"}
-              </div>
+            {topLevel.length === 0 && (
+              <RunsListPlaceholder
+                loading={loadedView !== viewKey}
+                failed={!!runsError}
+                emptyText={
+                  pageRef.kind !== "latest"
+                    ? "No runs on this page"
+                    : activeCount > 0
+                      ? "No matching runs"
+                      : "No runs yet"
+                }
+              />
             )}
             <RunsPager
               compact={paneOpen}

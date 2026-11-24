@@ -94,6 +94,15 @@ export interface AuthFetchOptions {
   timeoutMs?: number | null;
 }
 
+// RequestTimeoutError is the abort reason for a request that outlived its deadline,
+// so callers see a sentence instead of the browser's "signal is aborted without reason".
+export class RequestTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`The Sparkwing controller did not answer within ${Math.round(timeoutMs / 1000)} seconds. It may be busy.`);
+    this.name = "RequestTimeoutError";
+  }
+}
+
 export function authFetch(
   url: string,
   opts: RequestInit = {},
@@ -106,7 +115,7 @@ export function authFetch(
     return Promise.reject(new Error("rate-limited -- backing off"));
   }
   const controller = new AbortController();
-  const timeout = timeoutMs === null ? undefined : setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = timeoutMs === null ? undefined : setTimeout(() => controller.abort(new RequestTimeoutError(timeoutMs)), timeoutMs);
   const send = () =>
     fetch(url, {
       ...opts,
@@ -140,6 +149,9 @@ export function authFetch(
       return res;
     })
     .catch((err) => {
+      // A controller that is slow to answer was still reached; the caller's
+      // message says it is busy rather than the banner calling it down.
+      if (controller.signal.reason instanceof RequestTimeoutError) throw controller.signal.reason;
       setConnectionStatus("unreachable");
       throw err;
     })
@@ -564,14 +576,17 @@ export interface RunFilter {
   since?: string;
 }
 
-export async function getRuns(filter: RunFilter = {}): Promise<Run[]> {
+export async function getRuns(
+  filter: RunFilter = {},
+  { timeoutMs }: Pick<AuthFetchOptions, "timeoutMs"> = {},
+): Promise<Run[]> {
   const params = new URLSearchParams();
   if (filter.limit) params.set("limit", String(filter.limit));
   if (filter.pipeline) params.set("pipeline", filter.pipeline);
   if (filter.status) params.set("status", filter.status);
   if (filter.since) params.set("since", filter.since);
   const url = `${API_URL}/api/v1/runs${params.toString() ? `?${params}` : ""}`;
-  const res = await authFetch(url, { cache: "no-store" });
+  const res = await authFetch(url, { cache: "no-store" }, { timeoutMs });
   if (!res.ok) return [];
   const body = await res.json();
   return body.runs || [];

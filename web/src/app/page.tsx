@@ -28,43 +28,47 @@ import Tooltip from "@/components/Tooltip";
 import { Sparkline } from "@/components/PipelineOverview";
 import { hasTimestamp, runTimestamp } from "@/lib/runTime";
 import { recentPipelineTriage } from "@/lib/homeTriage";
+import { startPoll } from "@/lib/poll";
 
 const POLL_MS = 15000;
 const OVERVIEW_RUN_LIMIT = 1000;
+// The overview reads up to a thousand runs, which a busy controller can take well
+// past the ordinary 10 s read deadline to answer.
+const OVERVIEW_TIMEOUT_MS = 60_000;
 
 export default function Home() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
   const [anchorMs, setAnchorMs] = useState(DEFAULT_ANCHOR_MS);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [includeFeatureBranches, setIncludeFeatureBranches] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const refresh = useCallback(async () => {
     const sinceHrs = Math.ceil((anchorMs + WEEK_MS) / (60 * 60 * 1000)) + 24;
-    const [rs, ap] = await Promise.all([
-      getRuns({ since: `${sinceHrs}h`, limit: OVERVIEW_RUN_LIMIT }),
-      getPendingApprovals(),
-    ]);
+    let rs: Run[];
+    let ap: Approval[];
+    try {
+      [rs, ap] = await Promise.all([
+        getRuns(
+          { since: `${sinceHrs}h`, limit: OVERVIEW_RUN_LIMIT },
+          { timeoutMs: OVERVIEW_TIMEOUT_MS },
+        ),
+        getPendingApprovals(),
+      ]);
+    } catch (e) {
+      setLoadError(`${e instanceof Error ? e.message : String(e)} Retrying automatically.`);
+      return;
+    }
     setRuns(rs);
     setApprovals(ap);
     setNow(Date.now());
     setLoaded(true);
+    setLoadError(null);
   }, [anchorMs]);
 
-  useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) void refresh();
-    });
-    const i = window.setInterval(() => {
-      if (!document.hidden) refresh();
-    }, POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(i);
-    };
-  }, [refresh]);
+  useEffect(() => startPoll(refresh, POLL_MS), [refresh]);
 
   const overview = useMemo(
     () => summarize(runs, now, anchorMs),
@@ -97,6 +101,11 @@ export default function Home() {
         <AnchorSelect value={anchorMs} onChange={setAnchorMs} />
       </div>
 
+      {loadError && (
+        <div role="alert" className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--warning)]">
+          {loadError}
+        </div>
+      )}
       {!loaded ? (
         <div role="status" aria-label="Loading overview" className="animate-pulse motion-reduce:animate-none">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">

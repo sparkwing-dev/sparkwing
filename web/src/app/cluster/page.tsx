@@ -10,6 +10,7 @@ import {
   formatFleetResources,
   sortFleetRunners,
 } from "@/lib/fleet";
+import { startPoll } from "@/lib/poll";
 
 const POLL_MS = 5000;
 
@@ -48,19 +49,7 @@ export default function ClusterPage() {
     setLoaded(true);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) void refresh();
-    });
-    const i = window.setInterval(() => {
-      if (!document.hidden) refresh();
-    }, POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(i);
-    };
-  }, [refresh]);
+  useEffect(() => startPoll(refresh, POLL_MS), [refresh]);
 
   const sortedAgents = useMemo(
     () => [...agents].sort(sortFleetRunners),
