@@ -1256,6 +1256,20 @@ waits for admission. The operator controls those settings. A team role or a
 supplied email does not grant an exception. Authentication and tenant isolation
 still apply after admission.
 
+When an operator admits a waitlisted account, the controller makes one attempt
+to email the account's verified address, with a link to sign in to the
+console. The email follows the committed admission: a retried approval or an
+account that is already admitted sends nothing. A failed send leaves the
+account admitted and logs the account ID with a failure class, never the
+address. An account without a verified address is admitted without an email.
+Admission at sign-in, as a listed operator account, sends no email because the
+person is already in the console. Accepting a team invitation joins that team
+at once and leaves the account waiting for its own workspace. Without
+`--email-sender`, the controller logs the email's subject instead of sending
+it. `/api/v1/me` returns `admission_email: true` for a waitlisted account when
+the deployment has a sender and the account's address is verified, and the
+waitlist screen promises the email only then.
+
 ## Unauthenticated endpoints
 
 Public discovery, sign-in, device sign-in start, poll and cancellation, provider

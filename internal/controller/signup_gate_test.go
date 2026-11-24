@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/githubauth/githubtest"
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -201,16 +203,10 @@ func TestWaitlistedSignUpThroughTheAPI(t *testing.T) {
 	}
 }
 
-func TestApprovingTheOldestRunsTheNotifier(t *testing.T) {
-	var mu sync.Mutex
-	var notified []string
+func TestApprovingTheOldestEmailsEachAdmittedAccountOnce(t *testing.T) {
+	mail := &mailFake{}
 	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
-		s.WithSignUpWaitlist(true).WithSignUpApprovalNotifier(func(_ context.Context, a store.Account) error {
-			mu.Lock()
-			defer mu.Unlock()
-			notified = append(notified, a.Email)
-			return nil
-		})
+		s.WithSignUpWaitlist(true).WithMailer(mail)
 	}})
 	operator := f.operatorAuth()
 	for i := range 3 {
@@ -224,14 +220,103 @@ func TestApprovingTheOldestRunsTheNotifier(t *testing.T) {
 		st.Counts.Waitlisted != 3 {
 		t.Fatalf("status = %+v", st)
 	}
-	if code := f.call("POST", "/api/v1/operator/waitlist/approve", operator,
-		map[string]any{"oldest": 2}, nil); code != http.StatusOK {
-		t.Fatalf("approve oldest = %d", code)
+	if n := len(mail.messages()); n != 0 {
+		t.Fatalf("waitlisting sent %d emails", n)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(notified) != 2 || notified[0] != "p0@example.com" || notified[1] != "p1@example.com" {
-		t.Fatalf("notified = %v", notified)
+	const key = "approve-oldest-two"
+	for range 2 {
+		if code := f.callKeyed("POST", "/api/v1/operator/waitlist/approve", operator, key,
+			map[string]any{"oldest": 2}, nil); code != http.StatusOK {
+			t.Fatalf("approve oldest = %d", code)
+		}
+	}
+	sent := mail.messages()
+	if len(sent) != 2 || sent[0].To != "p0@example.com" || sent[1].To != "p1@example.com" {
+		t.Fatalf("sent = %+v, want one email each to p0 and p1 across the retried request", sent)
+	}
+	for _, m := range sent {
+		if m.Subject != "Your Sparkwing account is ready" || !strings.Contains(m.Text, "http://"+dashHost+"/") ||
+			!strings.Contains(m.HTML, "http://"+dashHost+"/") {
+			t.Fatalf("admission email = %+v, want the subject and a console sign-in link", m)
+		}
+	}
+}
+
+func TestApprovingAnAdmittedAccountSendsNoEmail(t *testing.T) {
+	mail := &mailFake{}
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
+		s.WithSignUpWaitlist(true).WithMailer(mail)
+	}})
+	operator := f.operatorAuth()
+	waiting := f.signIn(person("w", "w@example.com", "W"))
+	if !waiting.Waitlisted {
+		t.Fatal("sign-up under the deployment waitlist was admitted")
+	}
+	for i := range 2 {
+		if code := f.call("POST", "/api/v1/operator/waitlist/approve", operator,
+			map[string]any{"account_ids": []string{waiting.User.ID}}, nil); code != http.StatusOK {
+			t.Fatalf("approve %d = %d", i, code)
+		}
+	}
+	if sent := mail.messages(); len(sent) != 1 || sent[0].To != "w@example.com" {
+		t.Fatalf("sent = %+v, want one email for the one admission", sent)
+	}
+}
+
+func TestWaitlistedAccountIsToldWhetherAdmissionSendsEmail(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		mailer bool
+		want   bool
+	}{
+		{"with a sender", true, true},
+		{"without a sender", false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
+				s.WithSignUpWaitlist(true)
+				if c.mailer {
+					s.WithMailer(&mailFake{})
+				}
+			}})
+			out := f.signIn(person("w", "w@example.com", "W"))
+			if me := f.me(sessionAuth(out.SessionID)); !me.Waitlisted || me.AdmissionEmail != c.want {
+				t.Fatalf("/me = %+v, want waitlisted with admission_email=%v", me, c.want)
+			}
+		})
+	}
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) { s.WithMailer(&mailFake{}) }})
+	out := f.signIn(person("a", "a@example.com", "A"))
+	if me := f.me(sessionAuth(out.SessionID)); me.Waitlisted || me.AdmissionEmail {
+		t.Fatalf("/me for an admitted account = %+v, want no admission email", me)
+	}
+}
+
+type failingMail struct{}
+
+func (failingMail) Send(_ context.Context, m mailer.Message) error {
+	return fmt.Errorf("mailer: SES send to %s: MessageRejected: %s is not verified", m.To, m.To)
+}
+
+func TestFailedAdmissionEmailLogsNoAddress(t *testing.T) {
+	var logs syncBuffer
+	f := newIdentityFixtureWith(t, fixtureOpts{
+		logger: slog.New(slog.NewTextHandler(&logs, nil)),
+		configure: func(s *controller.Server) {
+			s.WithSignUpWaitlist(true).WithMailer(failingMail{})
+		},
+	})
+	waiting := f.signIn(person("w", "private-person@example.com", "W"))
+	if code := f.call("POST", "/api/v1/operator/waitlist/approve", f.operatorAuth(),
+		map[string]any{"account_ids": []string{waiting.User.ID}}, nil); code != http.StatusOK {
+		t.Fatalf("approve = %d", code)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "signup.admission_email_failed") || !strings.Contains(out, "error_class=unavailable") {
+		t.Fatalf("logs lack the failure and its class:\n%s", out)
+	}
+	if strings.Contains(out, "private-person@example.com") {
+		t.Fatalf("logs name the recipient address:\n%s", out)
 	}
 }
 
@@ -384,5 +469,26 @@ func TestAnOperatorAccountIsAdmittedAtSignIn(t *testing.T) {
 	}
 	if other := f.signIn(person("g-x", "x@example.com", "X")); !other.Waitlisted {
 		t.Fatal("a non-operator sign-up skipped the waitlist")
+	}
+}
+
+func TestFailedInvitationEmailLogsNoAddress(t *testing.T) {
+	var logs syncBuffer
+	f := newIdentityFixtureWith(t, fixtureOpts{
+		logger:    slog.New(slog.NewTextHandler(&logs, nil)),
+		configure: func(s *controller.Server) { s.WithMailer(failingMail{}) },
+	})
+	owner := f.user("o", "olga@example.com")
+	f.createTeam(&owner, "acme")
+	if code := f.call("POST", "/api/v1/team/invitations", owner.auth,
+		map[string]string{"email": "private-invitee@example.com", "role": "reader"}, nil); code != http.StatusCreated {
+		t.Fatalf("invite = %d", code)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "invitation email: send") || !strings.Contains(out, "error_class=unavailable") {
+		t.Fatalf("logs lack the failure and its class:\n%s", out)
+	}
+	if strings.Contains(out, "send to private-invitee@example.com") {
+		t.Fatalf("logs quote the provider error with the recipient address:\n%s", out)
 	}
 }

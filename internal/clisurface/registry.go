@@ -316,6 +316,9 @@ func Registry() []Command {
 			{Name: "minutes", Argument: "N", HasMinimum: true, Minimum: 0, Conflicts: []string{"uncapped"}},
 			{Name: "uncapped", Conflicts: []string{"minutes"}},
 		}},
+		{Path: "sparkwing billing balance", Authority: teamCredential, Rules: []string{"Report the team's prepaid Cloud balance in credits and its dollar value, as the billing page shows it. Both truncate toward zero: a positive balance is never shown larger than it is, and a negative balance, which usage can leave, is never shown more negative. Pretty output also says when a hold or an empty balance stops Cloud work. JSON returns team, credits, prepaid_cents, balance_micro, frozen and any hold_cause; plain prints the credits."}, Flags: []Flag{
+			{Name: "profile", Argument: "NAME", Required: true},
+		}},
 		{Path: "sparkwing billing standing", Authority: teamCredential, Rules: []string{"Report the team's Cloud standing, the tier its payment history earns, the highest tier prepaid funds can reach and its latest standing request with the operator's decision. Prepaid funds raise standing at most one tier above the history tier. Plain prints the standing tier."}, Flags: []Flag{
 			{Name: "profile", Argument: "NAME", Required: true},
 		}},
@@ -865,8 +868,8 @@ func Registry() []Command {
 			{Name: "egress-daily-alarm-bytes", Argument: "N", Meaning: "Bytes this process may send in a UTC day before it raises the egress alarm, which the health route and the metrics report and the log carries at warn level."},
 			{Name: "egress-max-downloads", Argument: "N", Meaning: "Metered downloads one principal may hold open at once; a further one is refused with 429."},
 			{Name: "egress-max-log-streams", Argument: "N", Meaning: "Live log streams one principal may hold open at once; a further one is refused with 429."},
-			{Name: "email-configuration-set", Argument: "VALUE", Meaning: "SES configuration set every invitation email names, for delivery and bounce events; empty names none."},
-			{Name: "email-sender", Argument: "VALUE", Meaning: "Address invitation emails are sent from through Amazon SES, such as noreply@example.com; credentials and region come from the AWS default chain."},
+			{Name: "email-configuration-set", Argument: "VALUE", Meaning: "SES configuration set every email names, for delivery and bounce events; empty names none."},
+			{Name: "email-sender", Argument: "VALUE", Meaning: "Address that team invitations, billing notices and waitlist admission emails are sent from through Amazon SES, such as noreply@example.com; credentials and region come from the AWS default chain."},
 			{Name: "external-url", Argument: "VALUE", Meaning: "Base URL this controller answers on from outside the cluster, which is where runners transfer signed filesystem data and logs, and what GitHub Actions workflows and OIDC tokens name."},
 			{Name: "github-app-id", Argument: "VALUE", Meaning: "Numeric id of the deployment's GitHub App."},
 			{Name: "github-app-slug", Argument: "VALUE", Meaning: "The GitHub App's name in https://github.com/apps/<slug>, where a team owner installs it."},

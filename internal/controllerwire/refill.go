@@ -38,8 +38,20 @@ type RefillWrite struct {
 	MonthLimitCents int64 `json:"month_limit_cents"`
 }
 
-// BillingManager reads and changes the authenticated team's standing and automatic refill.
+// TeamBalance is the team's prepaid balance as the billing response reports it, with the factors that convert
+// micro-credits to credits and dollars and any hold that stops Cloud work.
+type TeamBalance struct {
+	Team             string `json:"team"`
+	BalanceMicro     int64  `json:"balance_micro"`
+	MicroPerCredit   int64  `json:"micro_per_credit"`
+	CreditsPerDollar int64  `json:"credits_per_dollar"`
+	Frozen           bool   `json:"frozen"`
+	HoldCause        string `json:"hold_cause,omitempty"`
+}
+
+// BillingManager reads and changes the authenticated team's balance, standing and automatic refill.
 type BillingManager interface {
+	ReadBalance(context.Context) (TeamBalance, error)
 	ReadStanding(context.Context) (TeamStanding, error)
 	RequestStanding(context.Context, StandingRequestWrite) (StandingRequest, error)
 	ReadRefill(context.Context) (TeamRefill, error)

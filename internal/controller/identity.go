@@ -268,6 +268,7 @@ type meResp struct {
 	Memberships     []teamRefJSON       `json:"memberships"`
 	Invitations     []invitationRefJSON `json:"invitations"`
 	Waitlisted      bool                `json:"waitlisted"`
+	AdmissionEmail  bool                `json:"admission_email"`
 	OperatorConsole bool                `json:"operator_console"`
 }
 
@@ -290,6 +291,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, a capability.A
 		Memberships:     []teamRefJSON{},
 		Invitations:     []invitationRefJSON{},
 		Waitlisted:      acct.Waitlisted,
+		AdmissionEmail:  s.willMailAdmission(acct),
 		OperatorConsole: a.Principal.DirectAccountSession() && s.operatorAccount(accountID),
 	}
 	members, err := reader.AccountMemberships(ctx, accountID)

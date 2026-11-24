@@ -569,7 +569,8 @@ var commandSynopses = map[string]string{
 	"sparkwing pipeline sparks update":              "Re-resolve every declared library",
 	"sparkwing pipeline trigger":                    "Submit a pipeline run to a controller",
 	"sparkwing overflow":                            "Manage your Cloud overflow allowance",
-	"sparkwing billing":                             "Inspect Cloud standing, contact operators and set automatic refill",
+	"sparkwing billing":                             "Inspect the Cloud balance and standing, contact operators and set automatic refill",
+	"sparkwing billing balance":                     "Show the team's prepaid credit balance",
 	"sparkwing billing refill":                      "Show or change the team's automatic refill",
 	"sparkwing billing standing":                    "Show the team's Cloud standing and latest tier request",
 	"sparkwing billing request-tier":                "Contact operators for High standing, higher limits or larger payments",
@@ -767,6 +768,7 @@ var commandIntros = map[string]string{
 	"sparkwing __tick":                              "Evaluate armed local schedules, starting the local controller when needed.",
 	"sparkwing wingd runner":                        "Run the local runner instance selected by its supervising controller.",
 	"sparkwing wingd run":                           "Run the local controller in the foreground for the selected state home.",
+	"sparkwing billing balance":                     "Show the team's prepaid Cloud balance in credits and dollars.",
 	"sparkwing billing refill":                      "Show automatic credit refill settings, or change them with the refill flags. Changes require team ownership.",
 	"sparkwing billing request-tier":                "Ask the operators for higher Cloud standing or payment limits. Only team owners can send a request.",
 	"sparkwing billing standing":                    "Show the team's Cloud standing and the outcome of its latest standing request.",
@@ -885,6 +887,7 @@ var briefFlags = map[string]bool{
 }
 
 var commandExamples = map[string][]Example{
+	"sparkwing billing balance":  {{"Show the balance", "sparkwing billing balance --profile prod"}, {"Print only the credits", "sparkwing billing balance --profile prod -o plain"}},
 	"sparkwing runs":             {{"Find a run to inspect", "sparkwing runs list"}},
 	"sparkwing pipeline":         {{"Inspect the available pipelines", "sparkwing pipeline list"}},
 	"sparkwing pipeline upgrade": {{"Preview the SDK update", "sparkwing pipeline upgrade --dry-run"}},

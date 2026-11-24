@@ -57,10 +57,10 @@ func (s *SES) Send(ctx context.Context, m Message) error {
 	if s.cfg.ConfigurationSet != "" {
 		in.ConfigurationSetName = aws.String(s.cfg.ConfigurationSet)
 	}
-	// safety: the error names the recipient and subject only; the body
-	// can carry a bearer link.
-	if _, err := s.client.SendEmail(ctx, in); err != nil {
-		return fmt.Errorf("mailer: SES send to %s (subject %q): %w", m.To, m.Subject, err)
+	// safety: SendEmail takes no idempotency key, so an SDK retry after a response lost in transit can
+	// deliver the message twice; one attempt makes every email at most once and a failure the caller's to report.
+	if _, err := s.client.SendEmail(ctx, in, func(o *sesv2.Options) { o.RetryMaxAttempts = 1 }); err != nil {
+		return fmt.Errorf("mailer: SES send (subject %q): %w", m.Subject, err)
 	}
 	return nil
 }

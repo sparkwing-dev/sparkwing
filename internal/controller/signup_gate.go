@@ -4,18 +4,17 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type signUpConfig struct {
 	forceWaitlist bool
-	onApproved    func(context.Context, store.Account) error
 	// safety: set while the hourly count sits above the warn threshold, so the warning fires once per
 	// crossing rather than on every sign-up.
 	warned atomic.Bool
@@ -242,20 +241,40 @@ func (s *Server) handleApproveWaitlist(w http.ResponseWriter, r *http.Request, a
 	out := make([]approvedJSON, 0, len(approved))
 	for _, a := range approved {
 		s.logger.Info("signup.approved", "account", a.ID, "by", actor, "team", string(a.ActiveTeam))
-		s.notifyApproved(ctx, a)
+		s.mailAdmission(ctx, a)
 		out = append(out, approvedJSON{ID: a.ID, Email: a.Email, ActiveTeam: string(a.ActiveTeam)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"approved": out})
 	return nil
 }
 
-func (s *Server) notifyApproved(ctx context.Context, a store.Account) {
-	fn := s.identity.signup.onApproved
-	if fn == nil {
-		s.logger.Info("signup.approval_not_sent", "account", a.ID, "reason", "no approval notifier is configured")
+// safety: the store returns only the accounts this request moved off the waitlist, in the committed
+// transaction, so a replayed request or an account already admitted sends nothing; a lost send loses
+// only the email, and the account stays admitted.
+func (s *Server) mailAdmission(ctx context.Context, a store.Account) {
+	if !hasVerifiedAddress(a) {
+		s.logger.Info("signup.admission_email_skipped", "account", a.ID, "reason", "no verified email address")
 		return
 	}
-	if err := fn(ctx, a); err != nil {
-		s.logger.Warn("signup.approval_notify_failed", "account", a.ID, "error", strings.TrimSpace(err.Error()))
+	msg, err := mailer.AdmissionMessage(a.Email, s.consoleURL("/"))
+	if err != nil {
+		s.logger.Warn("signup.admission_email_failed", "account", a.ID, "err", err)
+		return
 	}
+	m := s.mailer
+	if m == nil {
+		m = mailer.Log{Logger: s.logger}
+	}
+	if err := m.Send(ctx, msg); err != nil {
+		s.logger.Warn("signup.admission_email_failed", "account", a.ID, "error_class", mailer.ErrorClass(err))
+	}
+}
+
+// safety: shares mailAdmission's conditions, so the waitlist screen promises an email only when one will be sent.
+func (s *Server) willMailAdmission(a store.Account) bool {
+	return a.Waitlisted && s.mailer != nil && hasVerifiedAddress(a)
+}
+
+func hasVerifiedAddress(a store.Account) bool {
+	return a.EmailVerified && a.Email != ""
 }

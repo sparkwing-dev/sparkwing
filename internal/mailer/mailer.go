@@ -5,7 +5,9 @@ package mailer
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"strings"
 )
 
 // Message is one outbound email with a plain-text and an HTML body.
@@ -38,4 +40,30 @@ func (l Log) Send(ctx context.Context, m Message) error {
 	}
 	logger.InfoContext(ctx, "mail not sent; no mail service configured", "subject", m.Subject)
 	return nil
+}
+
+// ErrorClass names why a send failed as one fixed word, so a caller can log
+// it. A provider's error text can quote the recipient address, which is
+// personal data, so callers log the class instead of the error.
+func ErrorClass(err error) string {
+	var api interface{ ErrorCode() string }
+	var status interface{ HTTPStatusCode() int }
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.As(err, &status) && status.HTTPStatusCode() >= 500:
+		return "unavailable"
+	case errors.As(err, &api):
+		code := api.ErrorCode()
+		if strings.Contains(code, "Throttl") || strings.Contains(code, "TooManyRequests") || strings.Contains(code, "LimitExceeded") {
+			return "throttled"
+		}
+		return "rejected"
+	default:
+		return "unavailable"
+	}
 }

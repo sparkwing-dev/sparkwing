@@ -286,8 +286,8 @@ controller:
     # Google OAuth client id (--google-client-id).
     clientID: ""
 
-  # Invitation email through Amazon SES (--email-sender,
-  # --email-configuration-set).
+  # Team invitation, billing notice and waitlist admission email through
+  # Amazon SES (--email-sender, --email-configuration-set).
   email:
     sender: ""
     configurationSet: ""

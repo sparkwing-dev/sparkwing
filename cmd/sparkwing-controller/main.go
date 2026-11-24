@@ -250,11 +250,12 @@ func run(args []string) error {
 		"GitHub OAuth app client id for dashboard sign-in; the secret is the "+
 			credGitHubClientSecret+" credential. Offered only with a multi-team license.")
 	emailSender := fs.String("email-sender", "",
-		"address invitation emails are sent from through Amazon SES, such as noreply@example.com; "+
-			"credentials and region come from the AWS default chain. Empty sends no email and logs "+
-			"each invitation instead, so the owner shares its link")
+		"address that team invitations, billing notices and waitlist admission emails are sent from "+
+			"through Amazon SES, such as noreply@example.com; credentials and region come from the AWS "+
+			"default chain. Empty sends no email and logs each message's subject instead, so an owner "+
+			"shares an invitation's link")
 	emailConfigSet := fs.String("email-configuration-set", "",
-		"SES configuration set every invitation email names, for delivery and bounce events; empty names none")
+		"SES configuration set every email names, for delivery and bounce events; empty names none")
 	githubAppID := fs.String("github-app-id", "",
 		"numeric id of the deployment's GitHub App. The App's client id and secret are "+
 			"--github-client-id and the "+credGitHubClientSecret+" credential, its private key is the "+
