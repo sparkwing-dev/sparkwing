@@ -90,6 +90,16 @@ func TestPipelineToolchainOverrideStaysInTheBuild(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// safety: the module's floor must sit above the go1.26.6 pin, or the build needs no override to keep.
+			if err := parsed.AddGoStmt("1.26.8"); err != nil {
+				t.Fatal(err)
+			}
+			if module, err = parsed.Format(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "go.mod"), module, 0o600); err != nil {
+				t.Fatal(err)
+			}
 			selected := "go" + parsed.Go.Version
 			runSnapshotGit(t, root, "add", ".")
 			runSnapshotGit(t, root, "commit", "-qm", "fixture")
