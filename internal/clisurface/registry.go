@@ -849,7 +849,7 @@ func Registry() []Command {
 			{Name: "bucket-reconcile", Argument: "DURATION", Meaning: "How often the controller measures the whole bucket and replaces the running count with the measurement."},
 			{Name: "bucket-store", Argument: "VALUE", Meaning: "Object store the bucket ceiling measures, as a store URL such as s3://bucket/prefix."},
 			{Name: "cache-blob-store", Argument: "VALUE", Meaning: "The controller's data store, as s3://bucket/prefix: blobs, artifacts, source bundles, pipeline binaries, staged uploads and logs."},
-			{Name: "claims-per-runner-minute", Argument: "N", Meaning: "Per-runner request budget on the claim routes, per rolling minute, keyed on the caller's team, or on the credential when it has no team, together with the runner the request names."},
+			{Name: "claims-per-runner-minute", Argument: "N", Meaning: "Per-runner request budget on the claim routes, per rolling minute, keyed on the caller's team, or on the credential when it has no team or the default team, together with the runner identity: the authenticated holder, else the runner name the request states, else its Here run or machine."},
 			{Name: "cloudfront-domain", Argument: "VALUE", Meaning: "CloudFront distribution domain that signs public-ingress downloads from --cache-blob-store, such as d111111abcdef8.cloudfront.net; needs --cloudfront-key-pair-id and the cloudfront-key credential."},
 			{Name: "cloudfront-key-pair-id", Argument: "VALUE", Meaning: "CloudFront key pair or public key id the cloudfront-key credential signs for."},
 			{Name: "credential-epoch-dir", Argument: "VALUE", Meaning: "Writable persistent directory for credential-epoch; defaults to --credentials-dir, or the local state directory when unset."},

@@ -9,4 +9,4 @@
   The flag help, chart values and 429 message named a per-token rolling minute. Every credential of one team shares the team's bucket, which holds N requests and refills N a minute.
 
 - **controller:** Describe the per-runner claim and heartbeat budgets by their real key
-  The `--claims-per-runner-minute` and `--heartbeats-per-runner-minute` help and the chart values said the budgets were keyed on the token prefix. They are keyed on the caller's team, or on the credential when it has no team, together with the runner the request names.
+  The `--claims-per-runner-minute` and `--heartbeats-per-runner-minute` help and the chart values said the budgets were keyed on the token prefix. They are keyed on the caller's team, or on the credential when it has no team or the default team, together with the runner identity: the authenticated holder, else the runner name the request states, else its Here run or machine.

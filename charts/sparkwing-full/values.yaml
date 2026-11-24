@@ -84,8 +84,9 @@ controller:
 
   # Per-runner request budgets on the claim and heartbeat routes, per rolling
   # minute, keyed on the caller's team, or on the credential when it has no
-  # team, together with the runner the request names, so a fleet sharing one
-  # team is budgeted runner by runner. The agent
+  # team or the default team, together with the runner identity: the
+  # authenticated holder, else the runner name the request states, else its
+  # Here run or machine. A fleet sharing one team is budgeted runner by runner. The agent
   # liveness heartbeat is never budgeted. Empty leaves both unlimited; 1200
   # suits the cadence the shipped runners use.
   claimsPerRunnerMinute: ""

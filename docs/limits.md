@@ -31,9 +31,9 @@ The operator's minimum cron interval still applies.
 Each claim and run may mint 30 OIDC tokens, refilled over five minutes on the
 controller. A refusal includes `Retry-After`. See [OIDC](oidc.md).
 
-An account may own at most 3 teams that are unpaid in the current payment
-mode, because each team receives its own free storage, download and request
-allowances. A team counts as paid while its settled payments, less refunds and
+An account that already owns 3 teams that are unpaid in the current payment
+mode cannot take on another unpaid team, because each team receives its own
+free storage, download and request allowances. A team counts as paid while its settled payments, less refunds and
 reversals, are above zero. Teams you belong to without owning them do not
 count, and deleting a team frees its place.
 
@@ -45,7 +45,8 @@ or take ownership of another unpaid team until the count is below 3.
 
 A refusal is `422 limit_exceeded`, detail `reason: unpaid_team_limit`. To
 continue, add funds to one of your unpaid teams, or delete or leave one, until
-you own fewer than 3. The limit is the same for every account; contact
+you own fewer than 3 unpaid teams. When an owner promotes a member who is at
+the limit, the refusal says so without showing that member's teams. The limit is the same for every account; contact
 support@sparkwing.dev if you need help. Teams the operator creates with
 `sparkwing operator teams create` are not checked when created, but once a
 customer owns one it counts toward that customer's limit. Slug uniqueness,

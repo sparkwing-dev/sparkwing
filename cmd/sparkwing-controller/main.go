@@ -143,7 +143,9 @@ func run(args []string) error {
 	claimsPerMinute := fs.Int(flagClaimsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the claim routes, per rolling "+
 			"minute, keyed on the caller's team, or on the credential when it has "+
-			"no team, together with the runner the request names. Past it a claim "+
+			"no team or the default team, together with the runner identity: the "+
+			"authenticated holder, else the runner name the request states, else "+
+			"its Here run or machine. Past it a claim "+
 			"is answered 429 with a Retry-After naming the refill delay. Zero is unlimited. A claim that comes back "+
 			"with a node spends nothing: an award is work this controller handed "+
 			"out and the loop re-claims at once, so the budget bounds empty "+

@@ -652,7 +652,7 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 	if waitlisted != 0 {
 		return TeamInfo{}, ErrWaitlisted
 	}
-	if err := tx.operator.checkUnpaidTeamLimitTx(ctx, tx, accountID); err != nil {
+	if err := tx.operator.checkUnpaidTeamLimitTx(ctx, tx, accountID, true); err != nil {
 		return TeamInfo{}, err
 	}
 	if err := createTeamTx(ctx, tx, accountID, slug, displayName, auditAccountActor(accountID), now); err != nil {
@@ -663,8 +663,9 @@ func createAccountTeamTx(ctx context.Context, tx *storeTx, accountID string, slu
 
 // safety: the caller locks the account row, and SQLite serializes writers, so concurrent creations and
 // owner grants for one account count each other's teams. A team whose paid grants were reversed to zero
-// counts as unpaid. The caller runs it before writing the new ownership.
-func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, accountID string) error {
+// counts as unpaid. Callers check before the ownership write; only an account acting for itself sees its
+// count, because a promoting owner must not learn another account's ownership across teams.
+func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, accountID string, self bool) error {
 	mode, err := creditPaymentMode(ctx, tx)
 	if err != nil {
 		return err
@@ -679,6 +680,14 @@ func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, acc
 	if unpaid < maxUnpaidTeamsPerAccount {
 		return nil
 	}
+	if !self {
+		return &apierr.Error{
+			Code: hosterr.LimitExceeded,
+			Message: fmt.Sprintf("unpaid team limit is %d per account, and this member already owns the maximum number of unpaid teams; "+
+				"they can add funds to one of their unpaid teams or delete or leave one before taking ownership of another", maxUnpaidTeamsPerAccount),
+			Details: map[string]any{"reason": "unpaid_team_limit"},
+		}
+	}
 	return &apierr.Error{
 		Code: hosterr.LimitExceeded,
 		Message: fmt.Sprintf("unpaid team limit is %d per account, and you own %d teams that are unpaid in the current payment mode; "+
@@ -689,7 +698,7 @@ func (op *Operator) checkUnpaidTeamLimitTx(ctx context.Context, tx *storeTx, acc
 }
 
 // safety: ownership of a team that has paid is always admitted, so only an unpaid grant meets the limit.
-func (op *Operator) checkOwnerGrantTx(ctx context.Context, tx *storeTx, accountID string, team Team) error {
+func (op *Operator) checkOwnerGrantTx(ctx context.Context, tx *storeTx, accountID string, team Team, self bool) error {
 	mode, err := creditPaymentMode(ctx, tx)
 	if err != nil {
 		return err
@@ -703,7 +712,7 @@ func (op *Operator) checkOwnerGrantTx(ctx context.Context, tx *storeTx, accountI
 	if paid > 0 {
 		return nil
 	}
-	return op.checkUnpaidTeamLimitTx(ctx, tx, accountID)
+	return op.checkUnpaidTeamLimitTx(ctx, tx, accountID, self)
 }
 
 func createTeamTx(ctx context.Context, tx *storeTx, accountID string, slug Team, displayName string, actor auditActor, now time.Time) error {
@@ -876,8 +885,15 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return none, ErrInvitationClosed
 	}
+	var member int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM memberships WHERE team = ? AND account_id = ?`, team, accountID).Scan(&member); err != nil {
+		return none, err
+	}
+	if member > 0 {
+		return none, ErrAlreadyMember
+	}
 	if Role(role) == RoleOwner {
-		if err := op.checkOwnerGrantTx(ctx, tx, accountID, Team(team)); err != nil {
+		if err := op.checkOwnerGrantTx(ctx, tx, accountID, Team(team), true); err != nil {
 			return none, err
 		}
 	}

@@ -22,13 +22,24 @@ func createOwnedTeam(t *testing.T, st *store.Store, accountID string, slug store
 
 func requireUnpaidTeamLimit(t *testing.T, err error) {
 	t.Helper()
+	requireUnpaidTeamUsage(t, err, 3)
+}
+
+func unpaidTeamRefusal(t *testing.T, err error) string {
+	t.Helper()
 	var failure *apierr.Error
 	if !errors.As(err, &failure) || failure.Code != hosterr.LimitExceeded || failure.Details["reason"] != "unpaid_team_limit" {
 		t.Fatalf("grant past the unpaid limit = %v, want limit_exceeded with reason unpaid_team_limit", err)
 	}
-	for _, want := range []string{"unpaid team limit is 3 per account", "you own 3 teams that are unpaid in the current payment mode", "adding funds to one of them", "deleting or leaving one", "support@sparkwing.dev"} {
-		if !strings.Contains(failure.Message, want) {
-			t.Fatalf("refusal %q omits %q", failure.Message, want)
+	return failure.Message
+}
+
+func requireUnpaidTeamUsage(t *testing.T, err error, owned int) {
+	t.Helper()
+	message := unpaidTeamRefusal(t, err)
+	for _, want := range []string{"unpaid team limit is 3 per account", fmt.Sprintf("you own %d teams that are unpaid in the current payment mode", owned), "adding funds to one of them", "deleting or leaving one", "support@sparkwing.dev"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("refusal %q omits %q", message, want)
 		}
 	}
 }
@@ -74,7 +85,7 @@ func TestFullyRefundedTeamCountsAsUnpaid(t *testing.T) {
 	st := storetest.Open(t)
 	u := signIn(t, st, "s", "refund@example.com")
 	payTeam(t, st, u.PersonalTeam, "pay-refunded")
-	for _, slug := range []store.Team{"refund-two", "refund-three"} {
+	for _, slug := range []store.Team{"refund-two", "refund-three", "refund-four"} {
 		if err := createOwnedTeam(t, st, u.Account.ID, slug); err != nil {
 			t.Fatalf("team %s: %v", slug, err)
 		}
@@ -82,7 +93,16 @@ func TestFullyRefundedTeamCountsAsUnpaid(t *testing.T) {
 	if _, err := st.AsOperator().TestOnlyReversePayment(context.Background(), "pay-refunded", "refund-pay-refunded", "billing", 0); err != nil {
 		t.Fatal(err)
 	}
-	requireUnpaidTeamLimit(t, createOwnedTeam(t, st, u.Account.ID, "refund-four"))
+	memberships, err := st.AsOperator().AccountMemberships(context.Background(), u.Account.ID)
+	if err != nil || len(memberships) != 4 {
+		t.Fatalf("refund left %d memberships, want all 4 owned teams kept: %v", len(memberships), err)
+	}
+	for _, m := range memberships {
+		if m.Role != store.RoleOwner {
+			t.Fatalf("refund changed %s to %s, want owner", m.Team, m.Role)
+		}
+	}
+	requireUnpaidTeamUsage(t, createOwnedTeam(t, st, u.Account.ID, "refund-five"), 4)
 }
 
 func TestConcurrentTeamCreationKeepsTheUnpaidTeamLimit(t *testing.T) {
@@ -184,7 +204,11 @@ func TestPromotionToOwnerRespectsTheUnpaidTeamLimit(t *testing.T) {
 	if err := team.UpdateMembership(ctx, actor, store.MembershipUpdate{AccountID: full.Account.ID, Role: rolePointer(store.RoleEditor)}); err != nil {
 		t.Fatalf("promotion to editor at the limit: %v", err)
 	}
-	requireUnpaidTeamLimit(t, team.UpdateMembership(ctx, actor, store.MembershipUpdate{AccountID: full.Account.ID, Role: rolePointer(store.RoleOwner)}))
+	refusal := unpaidTeamRefusal(t, team.UpdateMembership(ctx, actor, store.MembershipUpdate{AccountID: full.Account.ID, Role: rolePointer(store.RoleOwner)}))
+	if !strings.Contains(refusal, "this member already owns the maximum number of unpaid teams") || !strings.Contains(refusal, "delete or leave one") ||
+		strings.Contains(refusal, "you own") || strings.Contains(refusal, "3 teams") {
+		t.Fatalf("promotion refusal %q must name the member's limit without their usage", refusal)
+	}
 	if role, err := team.MemberRole(ctx, full.Account.ID); err != nil || role != store.RoleEditor {
 		t.Fatalf("refused promotion left role %q: %v", role, err)
 	}
@@ -232,5 +256,22 @@ func TestOwnerInvitationAndTeamCreationShareTheLastUnpaidSlot(t *testing.T) {
 				t.Fatalf("%d refused and account owns %d teams, want 1 refused and 3 teams: %v", refused, len(memberships), err)
 			}
 		})
+	}
+}
+
+func TestOwnerInvitationToAMemberAtTheLimitReportsTheMembership(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	full := ownsThreeUnpaidTeams(t, st, "full", "full@example.com")
+	host := signIn(t, st, "host", "host@example.com")
+	if err := acceptInvitation(t, st, full.Account.ID, inviteAs(t, st, host, host.PersonalTeam, full.Account.Email, store.RoleEditor)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO email_owners(email,account_id,updated_at) VALUES (?,?,1)`), "full-next@example.com", full.Account.ID); err != nil {
+		t.Fatal(err)
+	}
+	owner := inviteAs(t, st, host, host.PersonalTeam, "full-next@example.com", store.RoleOwner)
+	if err := acceptInvitation(t, st, full.Account.ID, owner); !errors.Is(err, store.ErrAlreadyMember) {
+		t.Fatalf("owner invitation to an existing member at the limit = %v, want ErrAlreadyMember", err)
 	}
 }
