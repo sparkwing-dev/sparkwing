@@ -118,8 +118,10 @@ and the [controller chart](../charts/sparkwing-full/README.md) for credential fi
 
 That credential expires after 30 days. A team that keeps no human member, such
 as one whose tokens feed monitoring, renews it before then with
-`sparkwing operator teams reissue-admin --team support-test --profile deployment`.
-The command refuses a team with any member who signs in; see
+`sparkwing operator teams reissue-admin --team support-test --profile deployment`,
+then deploys tokens minted from the new credential and revokes the old one with
+`sparkwing tokens revoke`. The command refuses a team with any member who signs
+in or an open invitation; see
 [Cloud operations](auth.md#cloud-operations-and-test-environments).
 
 Team members save their credential with `profiles add --token-stdin`. The command

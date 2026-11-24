@@ -172,8 +172,15 @@ func requireHeadlessTeamTx(ctx context.Context, tx *storeTx, team, account strin
   OR EXISTS (SELECT 1 FROM identities i WHERE i.account_id=m.account_id))`, team).Scan(&people); err != nil {
 		return err
 	}
+	// safety: acceptance takes the team write lock held here, so an open invitation cannot become a member mid-check.
+	var invited int
+	now := tx.now(ctx).UnixNano()
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM invitations WHERE team=? AND accepted_at IS NULL AND withdrawn_at IS NULL AND expires_at>?`, team, now).Scan(&invited); err != nil {
+		return err
+	}
+	people += invited
 	if people != 0 {
-		return authorityError(apierr.Conflict, "team has members who sign in; a team owner must issue its credentials")
+		return authorityError(apierr.Conflict, "team has members who sign in or open invitations; a team owner must issue its credentials")
 	}
 	return nil
 }

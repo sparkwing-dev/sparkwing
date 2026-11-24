@@ -43,13 +43,28 @@ with `{}` or `{"revoke_previous":true}`. It issues a new credential for the
 account the team was created with, with the same owner grants and 30-day
 lifetime, and records `token.minted` and a `ReissueOperatorTeamAdmin` mutation
 naming the operator. The operation refuses with `conflict` and changes nothing
-when any member has an email or a sign-in identity, or when that account no
-longer owns the team, so operator authority cannot take over a team people use.
-Such a team renews through its own owners. Earlier credentials keep working
-until they expire. `--revoke-previous` also revokes them, and every token and
-session derived from them, in the same transaction and audits each revocation,
-so mint and deploy the replacement tokens from the new credential first. JSON
-adds `expires_at` and the `revoked` capability prefixes to the creation fields.
+when any member has an email or a sign-in identity, when the team has an open
+invitation, or when that account no longer owns the team, so operator authority
+cannot take over a team people use or are joining. Such a team renews through
+its own owners. Eligibility is judged on current members and invitations: a
+team whose people have all left becomes eligible again while the
+operator-created account still owns it, so owners of a handed-over team should
+remove that account. JSON adds `expires_at` and the `revoked` capability
+prefixes to the creation fields.
+
+To renew without downtime, reissue without `--revoke-previous`, mint and deploy
+the replacement tokens from the new credential, then revoke each old
+administrator prefix with
+`sparkwing tokens revoke --token PREFIX --profile NEW-PROFILE`. Earlier
+credentials keep working until then or until they expire.
+
+`--revoke-previous` is the compromise response. In the same transaction it
+revokes every earlier administrator credential of that account, including
+credentials from earlier reissues, and every token and session derived from
+them, so tokens already deployed from any of them stop at once. It ends
+credentials and sessions only. Invitations, runner bindings, triggers and
+secrets made with an old credential survive, so review the team's audit
+records for them after a compromise.
 
 JSON returns `team`, `account_id`, `capability`, `prefix` and `grants`.
 Plain and pretty output print the capability once. Store that credential in

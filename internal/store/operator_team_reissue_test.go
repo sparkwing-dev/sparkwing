@@ -117,6 +117,9 @@ func TestOperatorTeamAdminReissueRefusesTeamsWithPeople(t *testing.T) {
 		"creator linked a sign-in": {
 			`INSERT INTO identities(provider,subject,account_id,created_at) SELECT 'github','502',created_by,1 FROM teams WHERE name='synthetic'`,
 		},
+		"open invitation": {
+			`INSERT INTO invitations(id,team,email,role,invited_by,created_at,expires_at) SELECT 'invite','synthetic','owner@example.test','owner',created_by,1,9223372036854775807 FROM teams WHERE name='synthetic'`,
+		},
 		"creator no longer owns the team": {
 			`UPDATE memberships SET role='editor' WHERE team='synthetic'`,
 		},
@@ -136,6 +139,19 @@ func TestOperatorTeamAdminReissueRefusesTeamsWithPeople(t *testing.T) {
 				t.Fatalf("refused reissue revoked the root: %v", err)
 			}
 		})
+	}
+}
+
+func TestOperatorTeamAdminReissueIgnoresClosedInvitations(t *testing.T) {
+	s, operator, _ := reissueFixture(t)
+	for _, statement := range []string{
+		`INSERT INTO invitations(id,team,email,role,invited_by,created_at,expires_at,withdrawn_at) SELECT 'withdrawn','synthetic','a@example.test','owner',created_by,1,9223372036854775807,2 FROM teams WHERE name='synthetic'`,
+		`INSERT INTO invitations(id,team,email,role,invited_by,created_at,expires_at) SELECT 'expired','synthetic','b@example.test','owner',created_by,1,2 FROM teams WHERE name='synthetic'`,
+	} {
+		rewriteSchemaExec(t, s.db, statement)
+	}
+	if _, err := s.AsOperator().ReissueOperatorTeamAdmin(t.Context(), capability.Authorized{Principal: operator}, "synthetic", false); err != nil {
+		t.Fatalf("closed invitations blocked a reissue: %v", err)
 	}
 }
 

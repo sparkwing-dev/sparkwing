@@ -215,13 +215,13 @@ JSON includes the one-time capability and account metadata. Plain and pretty pri
 
 Issue a fresh administrator credential for a team nobody signs in to
 
-Print a fresh administrator credential once for a team nobody signs in to. Teams with members who sign in are refused.
+Print a fresh administrator credential once for a team nobody signs in to. Teams with members who sign in or open invitations are refused.
 
 Issue a new team-admin credential for an existing team under operator authority. It serves a team nobody signs in to, such as a monitoring team made with operator teams create, whose only administrator is a credential with a fixed 30-day lifetime. The new credential has the same owner grants and the same 30-day lifetime.
 
-The team must have no member with an email or a sign-in identity, and the account it was created with must still own it; otherwise the request is refused with conflict and nothing changes. A team that people sign in to renews credentials through its own owners.
+The team must have no member with an email or a sign-in identity and no open invitation, and the account it was created with must still own it; otherwise the request is refused with conflict and nothing changes. A team that people sign in to renews credentials through its own owners. A team whose people have all left becomes eligible again while that account still owns it.
 
-Earlier administrator credentials stay valid until they expire. --revoke-previous revokes them, with every token and session derived from them, in the same transaction, so mint and deploy replacements from the new credential first.
+For routine renewal, omit --revoke-previous: mint and deploy replacement tokens from the new credential, then revoke each old administrator prefix with tokens revoke. --revoke-previous is the compromise response: in the same transaction it revokes every earlier administrator credential, including earlier reissues, and every token and session derived from them, so deployed tokens stop at once. Invitations, runner bindings, triggers and secrets made with an old credential survive it.
 
 JSON includes the one-time capability, its expiry and the revoked capability prefixes. Plain and pretty print the capability once. This operation is never retried automatically.
 
@@ -234,7 +234,7 @@ JSON includes the one-time capability, its expiry and the revoked capability pre
 | `-h, --help` | Show command help without executing. |
 | `--help-all` | Include uncommon flags in command help. |
 | `--team SLUG` | Slug of an existing team that nobody signs in to. (required) |
-| `--revoke-previous` | Also revoke the team's earlier administrator credentials, and every token and session derived from them, in the same transaction. |
+| `--revoke-previous` | Compromise response: also revoke every earlier administrator credential of the team, including earlier reissues, and every token and session derived from them, at once. Omit it for routine renewal. |
 | `--profile NAME` | Controller connection profile from your config. Without it, or with --profile=, the command uses the local controller. |
 
 ## `sparkwing operator teams show`
