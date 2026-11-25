@@ -38,7 +38,8 @@ const OVERVIEW_TIMEOUT_MS = 60_000;
 
 export default function Home() {
   const [runs, setRuns] = useState<Run[]>([]);
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  // null until the first successful read: unknown, not "none pending".
+  const [approvals, setApprovals] = useState<Approval[] | null>(null);
   const [anchorMs, setAnchorMs] = useState(DEFAULT_ANCHOR_MS);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -54,7 +55,7 @@ export default function Home() {
     const sinceHrs = Math.ceil((anchorMs + WEEK_MS) / (60 * 60 * 1000)) + 24;
     // Approvals only fill Needs Attention, so the overview does not wait on them.
     const approvalsRead = getPendingApprovals().then((ap) => {
-      if (isLatest()) setApprovals(ap);
+      if (ap && isLatest()) setApprovals(ap);
     });
     try {
       const rs = await getRuns(
@@ -417,10 +418,10 @@ function NeedsAttention({
   approvals,
   running,
 }: {
-  approvals: Approval[];
+  approvals: Approval[] | null;
   running: number;
 }) {
-  const nothing = approvals.length === 0;
+  const nothing = approvals !== null && approvals.length === 0;
   return (
     <div className="mb-6">
       <div className="flex items-baseline gap-2 mb-2">
@@ -436,7 +437,11 @@ function NeedsAttention({
           </Link>
         )}
       </div>
-      {nothing ? (
+      {approvals === null ? (
+        <Panel>
+          <span className="text-sm text-[var(--muted)]">Checking for pending approvals…</span>
+        </Panel>
+      ) : nothing ? (
         <Panel>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-2 text-sm">

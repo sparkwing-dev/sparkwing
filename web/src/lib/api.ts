@@ -132,7 +132,6 @@ export function authFetch(
     });
   const signIn = ensureLocalSignIn();
   return (signIn ? signIn.then(send) : send())
-    .then((res) => (deadlineCoversBody ? readWithinDeadline(res) : res))
     .then((res) => {
       if (res.status === 429) {
         _backoffUntil = Date.now() + 10_000;
@@ -153,6 +152,9 @@ export function authFetch(
       }
       return res;
     })
+    // Status handling runs on the headers, so a stalled 401 or 429 body still
+    // ends the session or arms the backoff before the body read times out.
+    .then((res) => (deadlineCoversBody ? readWithinDeadline(res) : res))
     .catch((err) => {
       // Once the deadline fires, every rejection is that timeout: browsers raise
       // a plain AbortError from a body read whatever the signal's reason. A slow
@@ -1090,13 +1092,15 @@ export async function getApproval(
   return res.json();
 }
 
-export async function getPendingApprovals(): Promise<Approval[]> {
+// getPendingApprovals returns null when the read failed, so callers keep what
+// they last knew instead of reporting that nothing is pending.
+export async function getPendingApprovals(): Promise<Approval[] | null> {
   const res = await listPages(
     `${API_URL}/api/v1/approvals`,
     ["approvals"],
     (path) => authFetch(path, { cache: "no-store" }, { deadlineCoversBody: true }),
   ).catch(() => null);
-  if (!res || !res.ok) return [];
+  if (!res || !res.ok) return null;
   const body = await res.json();
   return body.approvals || [];
 }

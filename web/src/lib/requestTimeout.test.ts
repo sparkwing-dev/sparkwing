@@ -103,7 +103,18 @@ describe("request deadline", () => {
     const pending = getPendingApprovals();
     await settle();
     t.mock.timers.tick(10_000);
-    assert.deepEqual(await pending, []);
+    assert.equal(await pending, null, "a failed read reports unknown, not none pending");
+  });
+
+  it("arms the rate-limit backoff from a 429 whose body stalls", async (t) => {
+    // Date is mocked too, so the backoff this arms is already past once the test ends.
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    withFetch(t, stallBodyLikeChromium('{"error":', 429));
+    const pending = authFetch("/api/v1/runs", {}, { deadlineCoversBody: true });
+    await settle();
+    await assert.rejects(authFetch("/api/v1/runs"), /rate-limited/, "the headers alone must arm the backoff");
+    t.mock.timers.tick(10_000);
+    await assert.rejects(pending, (err: Error) => err.name === "RequestTimeoutError");
   });
 
   it("leaves no deadline timer armed once a read settles", async (t) => {
@@ -128,7 +139,7 @@ async function settle() {
 }
 
 // Chromium errors a stalled body with a plain AbortError, whatever the signal's reason.
-function stallBodyLikeChromium(prefix: string): typeof globalThis.fetch {
+function stallBodyLikeChromium(prefix: string, status = 200): typeof globalThis.fetch {
   return (async (_input: unknown, init?: RequestInit) => {
     const body = new ReadableStream<Uint8Array>({
       start(stream) {
@@ -138,7 +149,7 @@ function stallBodyLikeChromium(prefix: string): typeof globalThis.fetch {
         );
       },
     });
-    return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+    return new Response(body, { status, headers: { "Content-Type": "application/json" } });
   }) as typeof globalThis.fetch;
 }
 
