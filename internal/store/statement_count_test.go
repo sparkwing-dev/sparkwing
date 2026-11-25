@@ -4,11 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -150,76 +148,4 @@ func ClaimableUnitQueuedPlan(t *testing.T, s *Store, team string) string {
 		t.Fatal(err)
 	}
 	return strings.Join(plan, "\n")
-}
-
-// TestOnlyRecordRunnerPollWith records a poll through RecordRunnerPoll's path, running between after its
-// read-only check and before it restamps or writes.
-func (s *Store) TestOnlyRecordRunnerPollWith(ctx context.Context, observation UnitDemand, between func()) error {
-	return s.AsOperator().recordRunnerPoll(ctx, observation, between)
-}
-
-// TestOnlyConsumeClaimSlot takes one of the claimant's free slots, as an award does.
-func (s *Store) TestOnlyConsumeClaimSlot(ctx context.Context, t *testing.T, prefix, team string) {
-	t.Helper()
-	if err := s.inTx(ctx, func(tx *storeTx) error { return consumeClaimSlotTx(ctx, tx, prefix, team) }); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestOnlyRevoke revokes a credential at the store clock.
-func (s *Store) TestOnlyRevoke(t *testing.T, prefix string) {
-	t.Helper()
-	s.TestOnlyRevokeAfter(t, prefix, 0)
-}
-
-// TestOnlyRunnerPollRow is the free slots and last-seen time a claimant's row holds.
-func (s *Store) TestOnlyRunnerPollRow(ctx context.Context, t *testing.T, prefix string) (int, int64) {
-	t.Helper()
-	var body []byte
-	var seen int64
-	if err := s.db.QueryRowContext(ctx, rewritePh(s.dialect, `SELECT claim_observation_json,last_used_at FROM capabilities WHERE prefix=?`), prefix).Scan(&body, &seen); err != nil {
-		t.Fatal(err)
-	}
-	var stored runnerPoll
-	if err := json.Unmarshal(body, &stored); err != nil || stored.FreeSlots == nil {
-		t.Fatalf("stored observation %s: %v", body, err)
-	}
-	return *stored.FreeSlots, seen
-}
-
-// TestOnlyWithdrawRunnerLabels clears a machine credential's enrolled labels, as ConfigureRunnerLabels does.
-func (s *Store) TestOnlyWithdrawRunnerLabels(ctx context.Context, t *testing.T, prefix string) {
-	t.Helper()
-	if err := s.inTx(ctx, func(tx *storeTx) error {
-		record, err := tx.operator.loadCapabilityRecordTx(ctx, tx, prefix)
-		if err != nil {
-			return err
-		}
-		if record.Origin == nil {
-			t.Fatalf("credential %s has no enrollment origin", prefix)
-		}
-		record.Origin.AllowedLabels = []string{}
-		body, err := json.Marshal(record)
-		if err != nil {
-			return err
-		}
-		_, err = tx.execContext(ctx, `UPDATE capabilities SET authority_json=? WHERE prefix=?`, body, prefix)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestOnlyRevokeAfter schedules a credential's revocation through the rotation path; zero grace revokes it now.
-func (s *Store) TestOnlyRevokeAfter(t *testing.T, prefix string, grace time.Duration) {
-	t.Helper()
-	if err := s.inTx(t.Context(), func(tx *storeTx) error {
-		record, err := tx.operator.loadCapabilityRecordTx(t.Context(), tx, prefix)
-		if err != nil {
-			return err
-		}
-		return scheduleRotationTx(t.Context(), tx, record.Value, tx.now(t.Context()).Add(grace))
-	}); err != nil {
-		t.Fatal(err)
-	}
 }

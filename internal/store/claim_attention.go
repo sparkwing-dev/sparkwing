@@ -1,7 +1,6 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -28,15 +27,8 @@ type runnerPoll struct {
 	ObservedAt time.Time `json:"observed_at"`
 }
 
-// RecordRunnerPoll stores a live claimant's advertised labels and platform
-// with the store clock. A poll that changes nothing is checked read-only and
-// then only restamps the stored observation, with no team lock.
+// RecordRunnerPoll stores a live claimant's advertised labels and platform with the store clock.
 func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
-	return o.recordRunnerPoll(ctx, observation, nil)
-}
-
-// safety: afterRead runs between the read-only check and the restamp, so a test can commit a concurrent write there.
-func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand, afterRead func()) error {
 	if err := ValidateRunnerLabels(observation.Labels); err != nil {
 		return err
 	}
@@ -48,31 +40,30 @@ func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand,
 	if err != nil {
 		return err
 	}
-	// safety: the read-only check writes nothing, so any failure in it except a refusal the locked write would
-	// repeat falls through to the locked write, which is the complete check.
-	team, seen, unchanged, err := o.runnerPollUnchanged(ctx, observation, raw)
-	if runnerPollRefusal(err) {
-		return err
-	}
-	if afterRead != nil {
-		afterRead()
-	}
-	// perf: an unchanged poll still restamps, because placement holds judge liveness by the observation's time and
-	// must count it from the runner's last poll, not its last change.
-	if err == nil && unchanged {
-		stamped, err := o.stampRunnerPoll(ctx, observation, team, seen)
-		if err != nil || stamped {
-			return err
-		}
-	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix}
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, ref.ID); err != nil {
 			return err
 		}
-		c, _, err := checkRunnerPollTx(ctx, tx, observation)
+		chain, err := authorityChainTx(ctx, tx, ref, false)
 		if err != nil {
 			return err
+		}
+		principal := chain[0].principal
+		facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
+		if err != nil {
+			return err
+		}
+		here, err := hereObserverTx(ctx, tx, principal)
+		if err != nil {
+			return err
+		}
+		c := principal.Capability
+		if err := checkRunnerLabelsTx(ctx, tx, chain, observation.Labels); err != nil {
+			return err
+		}
+		if !facts.Observable && !here {
+			return authorityError(hosterr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
 		}
 		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: tx.now(ctx)})
 		if err != nil {
@@ -81,107 +72,6 @@ func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand,
 		_, err = tx.execContext(ctx, `UPDATE capabilities SET advertised_labels_json=?,claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=?`, raw, body, tx.now(ctx).UnixNano(), c.Team, observation.CapabilityPrefix)
 		return err
 	})
-}
-
-func checkRunnerPollTx(ctx context.Context, tx *storeTx, observation UnitDemand) (leaf capability.Capability, root capability.Principal, err error) {
-	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix}, false)
-	if err != nil {
-		return capability.Capability{}, capability.Principal{}, err
-	}
-	principal := chain[0].principal
-	facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
-	if err != nil {
-		return capability.Capability{}, capability.Principal{}, err
-	}
-	here, err := hereObserverTx(ctx, tx, principal)
-	if err != nil {
-		return capability.Capability{}, capability.Principal{}, err
-	}
-	if err := checkRunnerLabelsTx(ctx, tx, chain, observation.Labels); err != nil {
-		return capability.Capability{}, capability.Principal{}, err
-	}
-	if !facts.Observable && !here {
-		return capability.Capability{}, capability.Principal{}, authorityError(hosterr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
-	}
-	return principal.Capability, chain[len(chain)-1].principal, nil
-}
-
-// safety: for an unchanged observation of a live credential, the read-only snapshot applies the locked write's
-// refusals, so skipping that write refuses exactly what it would; any other poll takes the locked write.
-func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDemand, labels []byte) (_ string, _ runnerPollStamp, _ bool, err error) {
-	tx, err := o.s.beginSnapshotReadTx(ctx)
-	if err != nil {
-		return "", runnerPollStamp{}, false, err
-	}
-	defer func() { err = errors.Join(err, tx.Rollback()) }()
-	c, root, err := checkRunnerPollTx(ctx, tx, observation)
-	if err != nil {
-		return "", runnerPollStamp{}, false, err
-	}
-	// safety: only a poller that is its own chain root keeps the fast path, so the restamp's own row carries the
-	// label policy it fences; a delegated or session-rooted poller takes the locked write.
-	if root.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix}) {
-		return c.Team, runnerPollStamp{}, false, nil
-	}
-	var advertised, body, authority []byte
-	var seen sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT advertised_labels_json,claim_observation_json,last_used_at,authority_json FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, c.Team, observation.CapabilityPrefix).Scan(&advertised, &body, &seen, &authority); err != nil {
-		return "", runnerPollStamp{}, false, err
-	}
-	var stored runnerPoll
-	if len(body) == 0 || !seen.Valid || !bytes.Equal(advertised, labels) || json.Unmarshal(body, &stored) != nil {
-		return c.Team, runnerPollStamp{}, false, nil
-	}
-	want, err := json.Marshal(observation)
-	if err != nil {
-		return "", runnerPollStamp{}, false, err
-	}
-	have, err := json.Marshal(stored.UnitDemand)
-	return c.Team, runnerPollStamp{lastUsed: seen.Int64, body: body, authority: authority}, err == nil && bytes.Equal(want, have), err
-}
-
-// safety: a restamp must still find the stored observation and last-seen time the unchanged poll read.
-type runnerPollStamp struct {
-	lastUsed  int64
-	body      []byte
-	authority []byte
-}
-
-// safety: it applies only while its own row holds the observation, last_used_at and authority the snapshot read,
-// so a concurrent poll, an award or a label change misses. False means nothing was written; an error once commit
-// was attempted is returned, because the restamp may have landed and the locked write would write again.
-func (o *Operator) stampRunnerPoll(ctx context.Context, observation UnitDemand, team string, seen runnerPollStamp) (bool, error) {
-	var stamped, committing bool
-	err := o.s.inTx(ctx, func(tx *storeTx) error {
-		stamped, committing = false, false
-		now := tx.now(ctx)
-		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: now})
-		if err != nil {
-			return err
-		}
-		// safety: an ancestor's revocation is not fenced here: the read-only check walked the chain just before,
-		// and a stamp that slips past one only advances a timestamp that authorization ignores.
-		result, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=? AND last_used_at=? AND claim_observation_json=? AND authority_json=? AND `+liveCredentialSQL(""), body, now.UnixNano(), team, observation.CapabilityPrefix, seen.lastUsed, seen.body, seen.authority, now.UnixNano(), now.UnixNano())
-		if err != nil {
-			return err
-		}
-		rows, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		stamped, committing = rows == 1, true
-		return nil
-	})
-	if err != nil && !committing {
-		return false, nil
-	}
-	return stamped, err
-}
-
-// safety: a poll refusal is one the locked write would return too, so the read-only check returns it directly.
-func runnerPollRefusal(err error) bool {
-	var illegal *ErrIllegalTransition
-	return refusal(err) || errors.As(err, &illegal) && illegal.Reason == ReasonHolderRights
 }
 
 // RegisteredAgent is a live agent credential of a team, online or not.
