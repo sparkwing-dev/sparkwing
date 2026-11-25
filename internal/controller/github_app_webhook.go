@@ -1043,7 +1043,7 @@ func (s *Server) startGitHubAppRun(
 	}
 	result, err := admitWithFlood(r.Context(), s, tenant.Team(), func(ctx context.Context) (store.AdmissionResult, error) {
 		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event"), SourceCredentialVerified: credentialVerified, UnverifiedReason: unverifiedReason, RepositoryPlacement: placement})
-	})
+	}, queuedAdmission)
 	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
 		return githubAppRun{Pipeline: plan.pipeline, Status: "ignored"}, nil
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/controller"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 )
@@ -87,4 +88,32 @@ func TestAnAppWebhookRunReturnsOnlyItsTeamsRunnersAndTheLauncherToTheirOwnCadenc
 	wantOwnCadence(t, f.srv, store.Team(olga.team))
 	wantOwnCadence(t, f.srv, "")
 	wantIdleAdvice(t, f.srv, store.Team(bob.team))
+}
+
+func TestAReplayedSubmissionLeavesTheIdleClocksAlone(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	body := computeIntake("build")
+	body.IdempotencyKey = "once"
+	first := floodRun(t, f.intake(f.token, body), http.StatusCreated)
+	controller.ResetQueueActivity(f.srv, time.Now().Add(-5*time.Minute))
+
+	replay := floodRun(t, f.intake(f.token, body), http.StatusOK)
+	if replay.RunID != first.RunID || !replay.Replayed {
+		t.Fatalf("the second submission was not a replay: %+v", replay)
+	}
+	wantIdleAdvice(t, f.srv, store.DefaultTeam)
+	wantIdleAdvice(t, f.srv, "")
+}
+
+func TestAPublishOnlyIntakeLeavesTheIdleClocksAlone(t *testing.T) {
+	f := newFloodServer(t, controller.FloodPolicy{})
+	controller.ResetQueueActivity(f.srv, time.Now().Add(-5*time.Minute))
+	body := computeIntake("build")
+	body.Request.Mode = runspec.IntakePublish
+	published := floodRun(t, f.intake(f.token, body), http.StatusCreated)
+	if triggers, err := teststore.Triggers(t.Context(), teststore.ForTeam(t, f.st, store.DefaultTeam), "build"); err != nil || len(triggers) != 0 {
+		t.Fatalf("publish-only intake %s queued %d units (%v)", published.RunID, len(triggers), err)
+	}
+	wantIdleAdvice(t, f.srv, store.DefaultTeam)
+	wantIdleAdvice(t, f.srv, "")
 }

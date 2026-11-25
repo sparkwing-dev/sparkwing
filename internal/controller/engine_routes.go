@@ -242,6 +242,8 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		//nolint:contextcheck // ctx carries r.Context() with the verified intake source.
 		response, err := admitWithFlood(ctx, s, store.Team(a.Target.Team), func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.admitRun(ctx, a.Target.Team, request)
+		}, func(r controllerwire.CreateRunResponse) bool {
+			return !r.Replayed && request.Request.Mode != runspec.IntakePublish
 		})
 		if err != nil {
 			if refusal := publicQueueDepthRefusal(err); refusal != nil {

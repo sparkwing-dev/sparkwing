@@ -36,11 +36,11 @@ func TestFloodRunTokenSurvivesPolicyRechecksProperty(t *testing.T) {
 			}
 			return controllerwire.CreateRunResponse{RunID: "admitted"}, nil
 		}
-		result, err := admitWithFlood(t.Context(), s, "a", admit)
+		result, err := admitWithFlood(t.Context(), s, "a", admit, func(controllerwire.CreateRunResponse) bool { return true })
 		if err != nil || result.RunID != "admitted" || calls != 2 {
 			return false
 		}
-		_, err = admitWithFlood(t.Context(), s, "a", admit)
+		_, err = admitWithFlood(t.Context(), s, "a", admit, func(controllerwire.CreateRunResponse) bool { return true })
 		var refusal *apierr.Error
 		return errors.As(err, &refusal) && refusal.Code == hosterr.RateLimited && calls == 3
 	}

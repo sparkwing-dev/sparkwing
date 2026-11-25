@@ -49,7 +49,7 @@ func TestChildrenSpendTheirRootsFloodBudget(t *testing.T) {
 				if _, err := admitWithFlood(t.Context(), s, "a", func(ctx context.Context) (bool, error) {
 					_, err := s.admissionFloodRefusal(ctx, nil, intake, principal)
 					return true, err
-				}); err != nil {
+				}, func(bool) bool { return true }); err != nil {
 					t.Fatal(err)
 				}
 				want := http.StatusTooManyRequests
@@ -154,7 +154,7 @@ func TestAppAndScheduleAdmissionsShareTeamBudget(t *testing.T) {
 		_, err := admitWithFlood(t.Context(), s, "a", func(ctx context.Context) (bool, error) {
 			_, err := s.admissionFloodRefusal(ctx, nil, request, p)
 			return true, err
-		})
+		}, func(bool) bool { return true })
 		return err
 	}
 	if err := admit(store.IntakeRequest{}, principal); err != nil {

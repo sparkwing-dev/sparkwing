@@ -28,6 +28,7 @@ type runControlWriterFake struct {
 	key      string
 	calls    int
 	failure  error
+	replayed bool
 }
 
 func (f *runControlWriterFake) Team() store.Team { return f.team }
@@ -55,7 +56,7 @@ func (f *runControlWriterFake) ResolveAuthorizedApproval(_ context.Context, a ca
 	return store.ApprovalResult{Approval: store.Approval{
 		RunID: a.Target.RunID, NodeID: a.Target.NodeID, Resolution: decision.Resolution, Comment: decision.Comment,
 		Approver: a.Principal.Capability.Subject.ID, RequestedAt: now, ResolvedAt: &now,
-	}}, f.failure
+	}, Replayed: f.replayed}, f.failure
 }
 
 func TestRunControlHTTPAuthorityProperty(t *testing.T) {
