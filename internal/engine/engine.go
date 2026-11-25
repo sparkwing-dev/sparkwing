@@ -56,10 +56,13 @@ type Config struct {
 	CacheDirectory string
 	// LocalBuildDirectory names the host's retained replacement engines, keyed by executable SHA-256.
 	LocalBuildDirectory string
-	Mode                toolchain.Mode
-	HTTPClient          *http.Client
-	BuildVersion        string
-	LocalOnly           bool
+	// ShippedDirectory names read-only release files the resolver tries before downloading, laid out
+	// <version>/<release file name>. They are verified exactly like a download and grant no trust of their own.
+	ShippedDirectory string
+	Mode             toolchain.Mode
+	HTTPClient       *http.Client
+	BuildVersion     string
+	LocalOnly        bool
 	// TrustedKeys defaults to releaseauth.PublicKeys when nil. NewResolver copies every key.
 	TrustedKeys []ed25519.PublicKey
 }

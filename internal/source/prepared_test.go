@@ -214,7 +214,8 @@ func TestAcquirePreparationTimingsExcludeSourceAndDiagnostics(t *testing.T) {
 			t.Fatalf("missing %s timing: %s", stage, &logs)
 		}
 	}
-	if len(receipts) != 6 || receipts[5].Stage != "restore" || !receipts[5].Reused {
+	// safety: the restore receipt follows the engine resolution nested inside it.
+	if len(receipts) != 7 || receipts[5].Stage != "engine" || receipts[6].Stage != "restore" || !receipts[6].Reused {
 		t.Fatalf("missing stage or reuse receipts: %+v", receipts)
 	}
 	for _, receipt := range receipts {
