@@ -60,7 +60,7 @@ func switchToolchain(dir string, beforeExec func() error) error {
 	if typescript {
 		sdk = engineid.TypeScriptSDK
 	}
-	current, err := os.Executable()
+	current, err := engine.InstalledExecutable()
 	if err != nil {
 		return err
 	}
