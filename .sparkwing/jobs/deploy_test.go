@@ -471,6 +471,7 @@ type fakeDeploy struct {
 	expired      int
 	oidcDown     bool
 	onSmoke      func(run string) error
+	releases     map[string][]byte
 }
 
 func testPins(version, ctl, run string) valuesPins {
@@ -685,6 +686,14 @@ func (f *fakeDeploy) deployer(dry bool) *deployer {
 			f.said = append(f.said, msg)
 		},
 		mask: func(context.Context, string) error { return nil },
+		fetch: func(_ context.Context, url string) ([]byte, error) {
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if body, ok := f.releases[url]; ok {
+				return body, nil
+			}
+			return nil, errors.New("HTTP 404")
+		},
 	}
 	return &deployer{tools: tools, cfg: f.config(), dry: dry, runID: "run-deploy", repoDir: f.repo, tmp: f.t.TempDir()}
 }

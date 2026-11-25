@@ -67,6 +67,7 @@ type deployTools struct {
 	lookPath   func(string) (string, error)
 	say        func(context.Context, string)
 	mask       func(context.Context, string) error
+	fetch      func(context.Context, string) ([]byte, error)
 }
 
 func realDeployTools() deployTools {
@@ -90,6 +91,7 @@ func realDeployTools() deployTools {
 		lookPath: exec.LookPath,
 		say:      func(ctx context.Context, msg string) { sparkwing.Info(ctx, "%s", msg) },
 		mask:     sparkwing.Mask,
+		fetch:    fetchHTTPS,
 	}
 }
 
@@ -501,7 +503,7 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 		}
 		if err := d.tools.registry.publish(ctx, d.ecrPass, PublishImagesArgs{
 			Dist: dist, Version: out.Version, Revision: out.Commit, Registry: d.cfg.Registry,
-			ControllerBase: d.cfg.ControllerBase, RunnerBase: d.cfg.RunnerBase,
+			ControllerBase: d.cfg.ControllerBase, RunnerBase: d.cfg.RunnerBase, Engine: d.shippedEngine(ctx, out.Version),
 		}); err != nil {
 			return err
 		}
@@ -556,6 +558,21 @@ func (d *deployer) requireMainAncestor(ctx context.Context, commit string) error
 		}
 		return nil
 	})
+}
+
+// safety: a missing bundle only costs Pod start time, so it returns "" and never blocks a deploy.
+func (d *deployer) shippedEngine(ctx context.Context, build string) string {
+	version, ok := shippedEngineVersion(build)
+	if !ok {
+		d.tools.say(ctx, "the runner image ships no engine: "+build+" has no stable release base")
+		return ""
+	}
+	release, err := fetchShippedEngine(ctx, d.tools.fetch, version, filepath.Join(d.tmp, "shipped-engine"))
+	if err != nil {
+		d.tools.say(ctx, fmt.Sprintf("the runner image ships no engine, so Pods download %s: %v", version, err))
+		return ""
+	}
+	return release
 }
 
 func writeSHA256Sums(dist string) error {
