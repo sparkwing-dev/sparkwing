@@ -302,22 +302,30 @@ func localProcessHTTP(ctx context.Context, listener net.Listener, handler http.H
 	}
 }
 
+// perf: local workers wake the scheduler through its completion channel, so these wakes only pace remote jobs,
+// cancellation, approvals and holder handoff. Each wait subscribes afresh: the first wake after a change stays fast
+// while an idle wait backs off to the cap.
+const stateFollowFirst, stateFollowMax = 250 * time.Millisecond, 500 * time.Millisecond
+
 func localStateSubscription(ctx context.Context, _ string) (stateSubscription, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	changed, done := make(chan struct{}, 1), make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(250 * time.Millisecond)
-		defer ticker.Stop()
+		delay := stateFollowFirst
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-timer.C:
 				select {
 				case changed <- struct{}{}:
 				default:
 				}
+				delay = min(2*delay, stateFollowMax)
+				timer.Reset(delay)
 			}
 		}
 	}()

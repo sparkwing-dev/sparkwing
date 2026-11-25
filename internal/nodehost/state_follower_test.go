@@ -5,7 +5,9 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -257,6 +259,64 @@ func TestStateFollowerRejectsRegressedOrForeignState(t *testing.T) {
 			if err := f.wait(t.Context(), before); err == nil {
 				t.Fatal("invalid persistence view accepted")
 			}
+		})
+	}
+}
+
+func followLocalState(t *testing.T, at time.Duration, change bool) (reads int, waited time.Duration) {
+	t.Helper()
+	before := followerSnapshot()
+	var changed atomic.Bool
+	f := stateFollower{
+		Store: followerReader{snapshot: func(context.Context, string) (store.RunSnapshot, error) {
+			reads++
+			current := followerSnapshot()
+			if changed.Load() {
+				current.Run.StateSeq++
+			}
+			return current, nil
+		}},
+		Subscribe: localStateSubscription,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	if change {
+		time.AfterFunc(at, func() { changed.Store(true) })
+	} else {
+		time.AfterFunc(at, cancel)
+	}
+	started := time.Now()
+	err := f.wait(ctx, before)
+	waited = time.Since(started)
+	if change && err != nil || !change && !errors.Is(err, context.Canceled) {
+		t.Fatalf("wait = %v", err)
+	}
+	return reads, waited
+}
+
+func TestLocalStateFollowerReadsLessWhileIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		if reads, _ := followLocalState(t, time.Minute, false); reads > 125 {
+			t.Fatalf("idle minute made %d snapshot reads, want at most 125", reads)
+		}
+	})
+}
+
+func TestLocalStateFollowerSeesChangesPromptly(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		changeAt time.Duration
+		within   time.Duration
+	}{
+		{"first wake", 200 * time.Millisecond, 250 * time.Millisecond},
+		{"after idle", 30*time.Second + 260*time.Millisecond, 30*time.Second + 760*time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				if _, waited := followLocalState(t, test.changeAt, true); waited > test.within {
+					t.Fatalf("change at %s seen after %s, want by %s", test.changeAt, waited, test.within)
+				}
+			})
 		})
 	}
 }
