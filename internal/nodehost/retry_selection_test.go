@@ -41,7 +41,7 @@ func TestRetryExecutesCommittedSelectionAfterRestart(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := original.Host.execute(ctx, original.Input, original.Accepted, entry, store.ReconcileRequest{Ref: runspec.NodeRef{RunID: runspec.RunID(original.Input.RunID), NodeID: "setup"}, Actor: original.Actor, Policy: runstate.SourceNone}, 0, nil); err != nil {
+				if err := original.Host.execute(ctx, original.Input, original.Accepted, entry, store.ReconcileRequest{Ref: runspec.NodeRef{RunID: runspec.RunID(original.Input.RunID), NodeID: "setup"}, Actor: original.Actor, Policy: runstate.SourceNone}, localTurn{}); err != nil {
 					t.Fatal(err)
 				}
 			} else if result, err := original.Host.Run(ctx, original.Input); err != nil || result.Outcome != "failed" {

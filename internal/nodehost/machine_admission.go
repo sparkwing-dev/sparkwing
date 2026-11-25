@@ -81,15 +81,27 @@ func (l machineLease) Watch(evicted func(wingwire.Evicted), stopped func(wingwir
 	return l.lease.WatchControl(evicted, stopped)
 }
 
+// safety: one capacity probe is bounded because the daemon client retries a draining or unanswering daemon until its
+// context ends.
+const machineProbeTimeout = time.Second
+
+type machineQueue interface {
+	QueueState(context.Context) (wingwire.QueueState, error)
+}
+
+func (a machineAdmitter) QueueState(ctx context.Context) (wingwire.QueueState, error) {
+	return wingdclient.Query(ctx, a.options)
+}
+
 func (a *LocalAdmission) machineFitsJob(ctx context.Context, cores float64) bool {
 	if a == nil {
 		return true
 	}
-	machine, ok := a.Daemon.(machineAdmitter)
+	machine, ok := a.Daemon.(machineQueue)
 	if !ok {
 		return true
 	}
-	state, err := wingdclient.Query(ctx, machine.options)
+	state, err := machine.QueueState(ctx)
 	// safety: admission remains authoritative when the ledger cannot be observed.
 	return err != nil || wingdclient.JobFits(state, cores)
 }
@@ -97,7 +109,28 @@ func (a *LocalAdmission) machineFitsJob(ctx context.Context, cores float64) bool
 // perf: waiting here on the local daemon, rather than returning to the scheduler, keeps a job the machine
 // cannot fit from reading the controller's snapshot every poll.
 func (a *LocalAdmission) awaitJobFits(ctx context.Context, cores float64, leftReady <-chan struct{}) error {
-	for !a.machineFitsJob(ctx, cores) {
+	for {
+		probe, cancel := context.WithTimeout(ctx, machineProbeTimeout)
+		go func() {
+			select {
+			case <-leftReady:
+				cancel()
+			case <-probe.Done():
+			}
+		}()
+		fits := a.machineFitsJob(probe, cores)
+		cancel()
+		if err := context.Cause(ctx); err != nil {
+			return err
+		}
+		select {
+		case <-leftReady:
+			return nil
+		default:
+		}
+		if fits {
+			return nil
+		}
 		timer := time.NewTimer(waiterPoll)
 		select {
 		case <-ctx.Done():
@@ -109,5 +142,4 @@ func (a *LocalAdmission) awaitJobFits(ctx context.Context, cores float64, leftRe
 		case <-timer.C:
 		}
 	}
-	return context.Cause(ctx)
 }

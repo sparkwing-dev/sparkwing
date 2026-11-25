@@ -190,7 +190,7 @@ func FuzzOwnerHostSelfClaimPreservesExecutionIdentity(f *testing.F) {
 		if flags&2 != 0 {
 			h.AdoptClaim = nil
 		}
-		err := h.execute(t.Context(), RunInput{GrantedRunner: runner}, input.Accepted, input.Entry, store.ReconcileRequest{Ref: state.row.Ref}, 0, nil)
+		err := h.execute(t.Context(), RunInput{GrantedRunner: runner}, input.Accepted, input.Entry, store.ReconcileRequest{Ref: state.row.Ref}, localTurn{})
 		valid := flags&1 == 0 && name != "" && flags&2 == 0
 		if (err == nil) != (valid && flags&4 == 0) || adopted != valid || executed != (valid && flags&4 == 0) {
 			t.Fatalf("flags=%d valid=%v adopted=%v executed=%v error=%v", flags, valid, adopted, executed, err)

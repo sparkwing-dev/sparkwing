@@ -37,15 +37,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		slots = make(chan struct{}, limit)
 	}
 	execute := func(ctx context.Context, request store.ReconcileRequest, cores float64, leftReady <-chan struct{}) error {
-		if slots != nil {
-			select {
-			case slots <- struct{}{}:
-				defer func() { <-slots }()
-			case <-ctx.Done():
-				return context.Cause(ctx)
-			}
-		}
-		return h.execute(ctx, input, accepted, entry, request, cores, leftReady)
+		return h.execute(ctx, input, accepted, entry, request, localTurn{cores: cores, leftReady: leftReady, slot: &workerSlot{slots: slots}})
 	}
 	active := map[string]context.CancelCauseFunc{}
 	releasing := map[string]*atomic.Bool{}
@@ -392,7 +384,53 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 	return work(ctx)
 }
 
-func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest, cores float64, leftReady <-chan struct{}) error {
+type localTurn struct {
+	cores     float64
+	leftReady <-chan struct{}
+	slot      *workerSlot
+}
+
+// safety: a --workers slot is held only while its job reconciles or executes, so a job waiting for machine capacity
+// or following another holder never keeps an independent job from starting.
+type workerSlot struct {
+	slots chan struct{}
+	held  bool
+}
+
+func (s *workerSlot) take(ctx context.Context) error {
+	if s == nil || s.slots == nil || s.held {
+		return nil
+	}
+	select {
+	case s.slots <- struct{}{}:
+		s.held = true
+		return nil
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
+}
+
+func (s *workerSlot) give() {
+	if s != nil && s.held {
+		<-s.slots
+		s.held = false
+	}
+}
+
+func (s *workerSlot) whileFollowing(wait WaitNodeChange) WaitNodeChange {
+	if wait == nil {
+		return nil
+	}
+	return func(ctx context.Context, ref runspec.NodeRef, after int64) error {
+		s.give()
+		if err := wait(ctx, ref, after); err != nil {
+			return err
+		}
+		return s.take(ctx)
+	}
+}
+
+func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest, turn localTurn) error {
 	if h.Executor == nil || entry == nil {
 		return errors.New("self execution requires a node host and acquired entry")
 	}
@@ -404,12 +442,16 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 	// safety: an owner whose machine cannot fit a burst job leaves it ready for other executors until the machine
 	// fits it or leftReady reports that another executor holds or finished it.
 	if spec.Request.Request.Burst != nil {
-		if err := h.executionAdmission.compute.awaitJobFits(ctx, cores, leftReady); err != nil {
+		if err := h.executionAdmission.compute.awaitJobFits(ctx, turn.cores, turn.leftReady); err != nil {
 			return err
 		}
 	}
+	if err := turn.slot.take(ctx); err != nil {
+		return err
+	}
+	defer turn.slot.give()
 
-	result, err := followReconciliation(ctx, h.Store, request, h.WaitNode)
+	result, err := followReconciliation(ctx, h.Store, request, turn.slot.whileFollowing(h.WaitNode))
 	if err != nil {
 		// safety: completion or cancellation can commit while reconciliation is in flight.
 		snapshot, readErr := h.Store.ReadSnapshot(ctx, run.RunID)
