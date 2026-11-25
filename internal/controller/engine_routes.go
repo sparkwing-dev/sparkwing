@@ -47,7 +47,7 @@ func (s *Server) engineEndpoints() []controllerwire.Endpoint {
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/plan", Authentication: capability.AuthCapability,
-			Decode: engine.runResultTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handlePlan,
+			Decode: engine.runResultTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.recordingTeamQueueActivity(engine.handlePlan),
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
