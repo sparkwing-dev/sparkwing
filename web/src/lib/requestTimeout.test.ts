@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { createServer, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, it, type TestContext } from "node:test";
-import { authFetch, getConnectionStatus, getRuns } from "./api";
+import { authFetch, getConnectionStatus, getRunners, getRuns } from "./api";
 
 function hangUntilAborted(seen: { signal?: AbortSignal | null }) {
   return (_input: unknown, init?: RequestInit) => {
@@ -54,5 +56,35 @@ describe("request deadline", () => {
     assert.equal(seen.signal?.aborted, false);
     answer(new Response(JSON.stringify({ runs: [{ id: "late" }] }), { status: 200 }));
     assert.deepEqual((await pending).map((r) => r.id), ["late"]);
+  });
+
+  it("ends a polled read whose body stalls after its headers at the deadline", { timeout: 5_000 }, async (t) => {
+    const stalled: ServerResponse[] = [];
+    const server = createServer((_request, response) => {
+      stalled.push(response);
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.write('{"runs":[');
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    t.after(() => {
+      for (const response of stalled) response.destroy();
+      server.close();
+    });
+    const { port } = server.address() as AddressInfo;
+    const realFetch = globalThis.fetch;
+    withFetch(t, ((input: string, init?: RequestInit) =>
+      realFetch(`http://127.0.0.1:${port}${input}`, init)) as typeof globalThis.fetch);
+    await assert.rejects(
+      getRuns({}, { timeoutMs: 300 }),
+      (err: Error) => err.name === "RequestTimeoutError",
+    );
+  });
+
+  it("reports a Fleet inventory timeout instead of an empty fleet", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    withFetch(t, hangUntilAborted({}) as typeof globalThis.fetch);
+    const pending = getRunners();
+    t.mock.timers.tick(10_000);
+    await assert.rejects(pending, (err: Error) => err.name === "RequestTimeoutError");
   });
 });

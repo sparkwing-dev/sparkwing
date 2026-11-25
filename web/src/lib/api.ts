@@ -92,6 +92,9 @@ function endSession() {
 export interface AuthFetchOptions {
   speaksForSession?: boolean;
   timeoutMs?: number | null;
+  // A polled read sets this so a body that stalls after its headers still ends
+  // at the deadline; otherwise the poll would wait on it forever.
+  deadlineCoversBody?: boolean;
 }
 
 // RequestTimeoutError is the abort reason for a request that outlived its deadline,
@@ -106,7 +109,7 @@ export class RequestTimeoutError extends Error {
 export function authFetch(
   url: string,
   opts: RequestInit = {},
-  { speaksForSession = true, timeoutMs = 10_000 }: AuthFetchOptions = {},
+  { speaksForSession = true, timeoutMs = 10_000, deadlineCoversBody = false }: AuthFetchOptions = {},
 ): Promise<Response> {
   if (_sessionEnded) {
     return Promise.reject(new Error("session ended -- sign in again"));
@@ -155,7 +158,9 @@ export function authFetch(
       setConnectionStatus("unreachable");
       throw err;
     })
-    .finally(() => clearTimeout(timeout));
+    .finally(() => {
+      if (!deadlineCoversBody) clearTimeout(timeout);
+    });
 }
 
 function serverErrorMessage(res: Response): string {
@@ -586,7 +591,7 @@ export async function getRuns(
   if (filter.status) params.set("status", filter.status);
   if (filter.since) params.set("since", filter.since);
   const url = `${API_URL}/api/v1/runs${params.toString() ? `?${params}` : ""}`;
-  const res = await authFetch(url, { cache: "no-store" }, { timeoutMs });
+  const res = await authFetch(url, { cache: "no-store" }, { timeoutMs, deadlineCoversBody: true });
   if (!res.ok) return [];
   const body = await res.json();
   return body.runs || [];
@@ -597,7 +602,7 @@ export async function getRuns(
 export async function listRuns(params: URLSearchParams): Promise<Run[]> {
   const res = await authFetch(`${API_URL}/api/v1/runs?${params}`, {
     cache: "no-store",
-  });
+  }, { deadlineCoversBody: true });
   if (!res.ok) {
     if (res.status >= 500) throw new Error(serverErrorMessage(res));
     const detail = await res.text().catch(() => "");
@@ -874,7 +879,16 @@ export interface Runner {
 }
 
 export async function getRunners(): Promise<Runner[]> {
-  const res = await listPages(`${API_URL}/api/v1/runners`, ["runners"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null);
+  // A timeout reaches the Fleet page, which keeps its last inventory rather than
+  // showing an empty fleet.
+  const res = await listPages(
+    `${API_URL}/api/v1/runners`,
+    ["runners"],
+    (path) => authFetch(path, { cache: "no-store" }, { deadlineCoversBody: true }),
+  ).catch((err) => {
+    if (err instanceof RequestTimeoutError) throw err;
+    return null;
+  });
   if (!res || !res.ok) return [];
   const data: { runners?: Runner[] } = await res.json();
   return data.runners ?? [];

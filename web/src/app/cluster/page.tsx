@@ -40,13 +40,22 @@ function classBadge(kind: string): { label: string; cls: string } {
 export default function ClusterPage() {
   const [agents, setAgents] = useState<Runner[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<Record<string, boolean>>(
     {},
   );
 
   const refresh = useCallback(async () => {
-    setAgents(await getRunners());
+    let next: Runner[];
+    try {
+      next = await getRunners();
+    } catch (e) {
+      setLoadError(`${e instanceof Error ? e.message : String(e)} Retrying automatically.`);
+      return;
+    }
+    setAgents(next);
     setLoaded(true);
+    setLoadError(null);
   }, []);
 
   useEffect(() => startPoll(refresh, POLL_MS), [refresh]);
@@ -83,8 +92,13 @@ export default function ClusterPage() {
       </div>
 
       <SectionHeader title="Machines" hint="/api/v1/runners" />
-      <FleetCards totals={fleetTotals} />
+      <FleetCards totals={loaded ? fleetTotals : null} />
       <div className="space-y-2 mb-6">
+        {loadError && (
+          <div role="alert" className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--warning)]">
+            {loadError}
+          </div>
+        )}
         {!loaded ? (
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 text-xs text-[var(--muted)]">
             Loading fleet...
@@ -130,14 +144,15 @@ function FleetCards({
     byType: Record<string, number>;
     busy: number;
     running: number;
-  };
+  } | null;
 }) {
   const cards: Array<{ label: string; value: number | null }> = [
-    { label: "total", value: totals.total },
-    { label: "busy", value: totals.busy },
+    { label: "total", value: totals?.total ?? null },
+    { label: "busy", value: totals?.busy ?? null },
   ];
-  for (const k of Object.keys(totals.byType).sort()) {
-    cards.push({ label: k, value: totals.byType[k] });
+  const byType = totals?.byType ?? {};
+  for (const k of Object.keys(byType).sort()) {
+    cards.push({ label: k, value: byType[k] });
   }
   return (
     <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-4 mb-3">

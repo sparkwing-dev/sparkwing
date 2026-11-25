@@ -1,7 +1,7 @@
 "use client";
 
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   type Approval,
@@ -44,6 +44,10 @@ export default function Home() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [includeFeatureBranches, setIncludeFeatureBranches] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  const activeAnchor = useRef(anchorMs);
+  useEffect(() => {
+    activeAnchor.current = anchorMs;
+  }, [anchorMs]);
 
   const refresh = useCallback(async () => {
     const sinceHrs = Math.ceil((anchorMs + WEEK_MS) / (60 * 60 * 1000)) + 24;
@@ -58,9 +62,12 @@ export default function Home() {
         getPendingApprovals(),
       ]);
     } catch (e) {
+      if (activeAnchor.current !== anchorMs) return;
       setLoadError(`${e instanceof Error ? e.message : String(e)} Retrying automatically.`);
       return;
     }
+    // A read for a comparison the reader has since left would relabel its runs.
+    if (activeAnchor.current !== anchorMs) return;
     setRuns(rs);
     setApprovals(ap);
     setNow(Date.now());
