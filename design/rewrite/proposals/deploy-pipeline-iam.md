@@ -53,8 +53,8 @@ Maximum session duration: 3600 seconds. The OIDC provider `arn:aws:iam::63328090
 ```
 
 The policy above cannot delete images, read other parameters, or touch the database, Route 53
-or IAM. The repositories keep immutable tags except the runner's `cloud-prepull`, which
-production moves for the Cloud node pre-pull.
+or IAM. The repositories keep immutable tags except the runner's `cloud-prepull` and
+`cloud-prepull-staging`, which production and staging move for the Cloud node pre-pull.
 
 The deploy role gets no RDS permission. Recovery uses RDS point-in-time recovery.
 

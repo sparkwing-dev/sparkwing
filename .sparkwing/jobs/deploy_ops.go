@@ -955,21 +955,104 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 	}); err != nil {
 		return err
 	}
+	return d.confirmRollout(ctx, env, phase, digest)
+}
+
+// safety: rollout status can report the previous revision complete just
+// before Argo changes the template, so completion and the image are judged
+// from one Deployment snapshot, and a snapshot whose rollout is still in
+// progress waits for that rollout instead.
+func (d *deployer) confirmRollout(ctx context.Context, env deployEnv, phase deployPhase, digest string) error {
 	deployment := phase.deployment(env)
 	return d.act(ctx, "wait for deployment "+env.Namespace+"/"+deployment+" to roll out "+digest, func() error {
-		if _, err := d.kubectl(ctx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout="+d.cfg.RolloutTimeout.String()); err != nil {
+		// safety: the rollback budget counts one RolloutTimeout per phase, so
+		// every watch and read shares a single deadline. kubectl starts its own
+		// --timeout only after its first lookup, so the shared context kills it.
+		deadline := d.tools.now().Add(d.cfg.RolloutTimeout)
+		budgetCtx, cancel := context.WithDeadline(ctx, time.Now().Add(d.cfg.RolloutTimeout))
+		defer cancel()
+		image := ""
+		timedOut := func() error {
+			return fmt.Errorf("%s did not finish rolling out %q within %s", deployment, image, d.cfg.RolloutTimeout)
+		}
+		overran := func(err error) error {
+			if ctx.Err() == nil && budgetCtx.Err() != nil {
+				return timedOut()
+			}
 			return err
 		}
-		image, err := d.kubectl(ctx, "-n", env.Namespace, "get", "deployment", deployment, "-o",
-			`jsonpath={.spec.template.spec.containers[?(@.name=="`+phase.name+`")].image}`)
-		if err != nil {
-			return err
+		for {
+			remaining := deadline.Sub(d.tools.now()).Truncate(time.Second)
+			if remaining <= 0 {
+				return timedOut()
+			}
+			if _, err := d.kubectl(budgetCtx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout="+remaining.String()); err != nil {
+				return overran(err)
+			}
+			remaining = deadline.Sub(d.tools.now()).Truncate(time.Second)
+			if remaining <= 0 {
+				return timedOut()
+			}
+			out, err := d.kubectl(budgetCtx, "-n", env.Namespace, "get", "deployment", deployment, "-o", "json", "--request-timeout="+remaining.String())
+			if err != nil {
+				return overran(err)
+			}
+			var complete bool
+			image, complete, err = rolledOutImage(out, phase.name)
+			if err != nil {
+				return fmt.Errorf("%s: %w", deployment, err)
+			}
+			if complete {
+				if !strings.HasSuffix(image, "@"+digest) {
+					return fmt.Errorf("%s runs %q, not %s", deployment, image, digest)
+				}
+				return nil
+			}
+			if err := d.tools.wait(budgetCtx, time.Second); err != nil {
+				return overran(err)
+			}
 		}
-		if !strings.HasSuffix(strings.TrimSpace(image), "@"+digest) {
-			return fmt.Errorf("%s runs %q, not %s", deployment, strings.TrimSpace(image), digest)
-		}
-		return nil
 	})
+}
+
+// safety: the image and rollout state come from one object so they describe the same template.
+func rolledOutImage(deploymentJSON, container string) (string, bool, error) {
+	var dep struct {
+		Metadata struct{ Generation int64 }
+		Spec     struct {
+			Replicas *int32
+			Template struct {
+				Spec struct {
+					Containers []struct{ Name, Image string }
+				}
+			}
+		}
+		Status struct {
+			ObservedGeneration                                          int64
+			Replicas, UpdatedReplicas, ReadyReplicas, AvailableReplicas int32
+		}
+	}
+	if err := json.Unmarshal([]byte(deploymentJSON), &dep); err != nil {
+		return "", false, err
+	}
+	image := ""
+	for _, c := range dep.Spec.Template.Spec.Containers {
+		if c.Name == container {
+			image = c.Image
+		}
+	}
+	if image == "" {
+		return "", false, fmt.Errorf("no %s container", container)
+	}
+	want := int32(1)
+	if dep.Spec.Replicas != nil {
+		want = *dep.Spec.Replicas
+	}
+	st := dep.Status
+	// safety: matches Kubernetes' rollout-complete predicate, so no older-revision pod remains.
+	complete := st.ObservedGeneration >= dep.Metadata.Generation && st.Replicas == want &&
+		st.UpdatedReplicas == want && st.ReadyReplicas == want && st.AvailableReplicas == want
+	return image, complete, nil
 }
 
 func (d *deployer) gitopsEnvironmentUnchanged(ctx context.Context, env deployEnv, commit, observed string, gitEnv map[string]string) (bool, error) {
