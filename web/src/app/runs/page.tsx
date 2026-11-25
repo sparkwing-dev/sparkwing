@@ -41,6 +41,7 @@ import {
   type RunsGrepResponse,
   type Run,
   type RunDetail,
+  RequestTimeoutError,
   cancelRun,
   deleteRun,
   getNodeLogCompleteness,
@@ -54,6 +55,7 @@ import {
   searchRunsGrep,
 } from "@/lib/api";
 import { useRunEvents } from "@/lib/useRunEvents";
+import { startPoll } from "@/lib/poll";
 import {
   type RunsPageRef,
   pageFromResponse,
@@ -79,6 +81,7 @@ import RunRequester from "@/components/RunRequester";
 import DebugPausePanel from "@/components/DebugPausePanel";
 import Tooltip from "@/components/Tooltip";
 import RunRail from "@/components/RunRail";
+import RunsListPlaceholder from "@/components/RunsListPlaceholder";
 import ExecutionWaterfall from "@/components/ExecutionWaterfall";
 import StepProgressBar from "@/components/StepProgressBar";
 import ResourceChart from "@/components/ResourceChart";
@@ -421,7 +424,15 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     older: RunsPageRef | null;
     newer: RunsPageRef | null;
   }>({ older: null, newer: null });
-  const [runsError, setRunsError] = useState<string | null>(null);
+  // A failure belongs to the view that produced it, so a new filter or page starts
+  // from its own loading state rather than an older view's error.
+  const [runsFailure, setRunsFailure] = useState<{
+    view: string;
+    message: string;
+    timeout: boolean;
+  } | null>(null);
+  const runsError = runsFailure?.view === viewKey ? runsFailure : null;
+  const [loadedView, setLoadedView] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [missingRun, setMissingRun] = useState<string | null>(null);
   const runsRequest = useRef({ filterState, pageRef, viewKey });
@@ -466,7 +477,15 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       page = pageFromResponse(fetched, ref);
     } catch (e) {
       if (runsRequest.current.viewKey === key && seq > runsSeq.current.applied) {
-        setRunsError(e instanceof Error ? e.message : String(e));
+        const message = e instanceof Error ? e.message : String(e);
+        const timeout = e instanceof RequestTimeoutError;
+        setRunsFailure({
+          view: key,
+          timeout,
+          message: timeout
+            ? `${message} ${ref.kind === "latest" ? "Retrying automatically." : "Use Refresh to try again."}`
+            : message,
+        });
       }
       return;
     }
@@ -475,7 +494,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     captureScrollAnchor();
     setRuns(page.runs);
     setRunsPage({ older: page.older, newer: page.newer });
-    setRunsError(null);
+    setRunsFailure(null);
+    setLoadedView(key);
     if (ref.kind === "newer" && page.atLatest) {
       writeParams(pageRefParams({ kind: "latest" }));
     }
@@ -521,13 +541,12 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const pollsForNewRuns = pageRef.kind === "latest";
   useEffect(() => {
     runsPaneRef.current?.scrollTo({ top: 0 });
-    refresh();
     // perf: only the newest page can gain runs; an older page holds still until asked.
-    if (!pollsForNewRuns) return;
-    const i = setInterval(() => {
-      if (!document.hidden) refresh();
-    }, POLL_MS);
-    return () => clearInterval(i);
+    if (!pollsForNewRuns) {
+      refresh();
+      return;
+    }
+    return startPoll(refresh, POLL_MS);
   }, [refresh, viewKey, pollsForNewRuns]);
 
   const [runProgress, setRunProgress] = useState<
@@ -1175,8 +1194,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           <>
           <div ref={runsPaneRef} className="pane-scrollbar flex-1 overflow-y-auto" tabIndex={0} aria-label="Runs pane" data-scrolling={runsScrollbar.scrolling} onScroll={runsScrollbar.onScroll}>
             {runsError && (
-              <div role="alert" className="px-3 py-2 text-xs font-mono text-red-400 border-b border-[var(--border)]">
-                {runsError}
+              <div role="alert" className={`px-3 py-2 text-xs font-mono border-b border-[var(--border)] ${runsError.timeout ? "text-[var(--warning)]" : "text-red-400"}`}>
+                {runsError.message}
               </div>
             )}
             <div role="list" aria-label="Runs">
@@ -1248,14 +1267,18 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
               );
             })}
             </div>
-            {topLevel.length === 0 && !runsError && (
-              <div className="p-8 text-center text-[var(--muted)] text-sm">
-                {pageRef.kind !== "latest"
-                  ? "No runs on this page"
-                  : activeCount > 0
-                    ? "No matching runs"
-                    : "No runs yet"}
-              </div>
+            {topLevel.length === 0 && (
+              <RunsListPlaceholder
+                loading={loadedView !== viewKey}
+                failed={!!runsError}
+                emptyText={
+                  pageRef.kind !== "latest"
+                    ? "No runs on this page"
+                    : activeCount > 0
+                      ? "No matching runs"
+                      : "No runs yet"
+                }
+              />
             )}
             <RunsPager
               compact={paneOpen}

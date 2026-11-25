@@ -17,6 +17,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
@@ -423,7 +424,9 @@ func (p *Prepared) restore(ctx context.Context, spec Spec, options Options) (ent
 		}
 		return nil, nil
 	}
+	started := time.Now()
 	resolved, err := resolveEngine(ctx, spec, options, directory)
+	options.RecordTiming(ctx, "engine", started, err == nil, false)
 	if err != nil {
 		return nil, err
 	}

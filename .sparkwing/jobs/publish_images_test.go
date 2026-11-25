@@ -108,7 +108,7 @@ func publishFixture(t *testing.T, arches ...string) (PublishImagesArgs, string) 
 
 func TestPublishImagesJoinsBothArchitecturesUnderOneIndexPerTag(t *testing.T) {
 	in, host := publishFixture(t, "amd64", "arm64")
-	refs, err := publishReleaseImages(t.Context(), in)
+	refs, err := publishReleaseImages(t.Context(), in, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestPublishImagesJoinsBothArchitecturesUnderOneIndexPerTag(t *testing.T) {
 			}
 		}
 	}
-	again, err := publishReleaseImages(t.Context(), in)
+	again, err := publishReleaseImages(t.Context(), in, "")
 	if err != nil || len(again) != 2 {
 		t.Fatalf("rerun over the same inputs: %v %v", again, err)
 	}
@@ -159,7 +159,7 @@ func TestPublishImagesJoinsBothArchitecturesUnderOneIndexPerTag(t *testing.T) {
 
 func TestPublishImagesRefusesABaseWithoutArm64(t *testing.T) {
 	in, _ := publishFixture(t, "amd64")
-	if _, err := publishReleaseImages(t.Context(), in); err == nil || !strings.Contains(err.Error(), "no linux/arm64 image") {
+	if _, err := publishReleaseImages(t.Context(), in, ""); err == nil || !strings.Contains(err.Error(), "no linux/arm64 image") {
 		t.Fatalf("published from an amd64-only base: %v", err)
 	}
 }
@@ -189,7 +189,7 @@ func TestPublishImagesOverlapsIndependentComponents(t *testing.T) {
 		}
 		return http.DefaultTransport.RoundTrip(req)
 	})
-	refs, err := publishReleaseImages(ctx, in, remote.WithTransport(transport))
+	refs, err := publishReleaseImages(ctx, in, "", remote.WithTransport(transport))
 	if err != nil || len(refs) != 2 {
 		t.Fatalf("concurrent publication = %v, %v", refs, err)
 	}
@@ -217,7 +217,7 @@ func TestPublishImagesCancelsAndJoinsSiblingOnFailure(t *testing.T) {
 		}
 		return http.DefaultTransport.RoundTrip(req)
 	})
-	_, err := publishReleaseImages(ctx, in, remote.WithTransport(transport))
+	_, err := publishReleaseImages(ctx, in, "", remote.WithTransport(transport))
 	if err == nil || !strings.Contains(err.Error(), "runner base unavailable") {
 		t.Fatalf("publication failure = %v", err)
 	}
@@ -233,7 +233,7 @@ func TestPublishImagesPushesNothingForABinaryThatFailsItsSum(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(in.Dist, "sparkwing-runner-linux-arm64"), []byte("tampered"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := publishReleaseImages(t.Context(), in); err == nil || !strings.Contains(err.Error(), "sparkwing-runner-linux-arm64 does not match SHA256SUMS") {
+	if _, err := publishReleaseImages(t.Context(), in, ""); err == nil || !strings.Contains(err.Error(), "sparkwing-runner-linux-arm64 does not match SHA256SUMS") {
 		t.Fatalf("published a tampered binary: %v", err)
 	}
 	if _, err := remote.Index(mustTag(t, host+"/sparkwing/sparkwing-controller:v0.68.0-qa.1")); err == nil {
@@ -242,7 +242,7 @@ func TestPublishImagesPushesNothingForABinaryThatFailsItsSum(t *testing.T) {
 }
 
 func TestPublishImagesNeedsEveryInput(t *testing.T) {
-	if _, err := publishReleaseImages(t.Context(), PublishImagesArgs{Dist: "dist"}); err == nil || !strings.Contains(err.Error(), "--version is required") {
+	if _, err := publishReleaseImages(t.Context(), PublishImagesArgs{Dist: "dist"}, ""); err == nil || !strings.Contains(err.Error(), "--version is required") {
 		t.Fatalf("plan accepted missing inputs: %v", err)
 	}
 }

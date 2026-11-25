@@ -288,14 +288,15 @@ func TestIsDirective(t *testing.T) {
 		"//nolint:errcheck":               true,
 		"//lint:ignore U1000 reason":      true,
 		"//lint:file-ignore U1000 reason": true,
+		"//sparkwing:critical":            true,
+		"//sparkwing:critical extra":      false,
+		"//why:not allowed":               false,
+		"// hack: not a dir":              false,
+		"// regular comment":              false,
+		"//just text":                     false,
+		"//TODO:nope":                     false,
+
 		"// sleepcheck:external-boundary real HTTP process bound": true,
-		"//sparkwing:critical":       true,
-		"//sparkwing:critical extra": false,
-		"//why:not allowed":          false,
-		"// hack: not a dir":         false,
-		"// regular comment":         false,
-		"//just text":                false,
-		"//TODO:nope":                false,
 	}
 	for text, want := range cases {
 		if got := isDirective(text); got != want {

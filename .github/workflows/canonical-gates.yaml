@@ -85,7 +85,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.11"
+          go-version: "1.27.4"
           cache: false
 
       # perf: setup-go keys its cache on go.sum alone, so every run hit that key
@@ -99,10 +99,10 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-${{ runner.os }}-${{ runner.arch }}-1.26.11-${{ hashFiles('go.sum', '.sparkwing/go.sum') }}-${{ github.sha }}
+          key: go-${{ runner.os }}-${{ runner.arch }}-1.27.4-${{ hashFiles('go.sum', '.sparkwing/go.sum') }}-${{ github.sha }}
           restore-keys: |
-            go-${{ runner.os }}-${{ runner.arch }}-1.26.11-${{ hashFiles('go.sum', '.sparkwing/go.sum') }}-
-            go-${{ runner.os }}-${{ runner.arch }}-1.26.11-
+            go-${{ runner.os }}-${{ runner.arch }}-1.27.4-${{ hashFiles('go.sum', '.sparkwing/go.sum') }}-
+            go-${{ runner.os }}-${{ runner.arch }}-1.27.4-
 
       - name: Capture the immutable source commit
         run: echo "SOURCE_SHA=$(git rev-parse HEAD)" >>"$GITHUB_ENV"
@@ -130,7 +130,7 @@ jobs:
         if: ${{ !startsWith(matrix.gate, 'race-store-') }}
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.12.2
+          version: v2.14.0
           install-only: true
           skip-cache: true
 

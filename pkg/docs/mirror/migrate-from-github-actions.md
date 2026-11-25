@@ -166,7 +166,7 @@ For `actions/setup-go`, pin the Go version and its archive checksums in the same
 ```yaml
 - uses: actions/setup-go@v7
   with:
-    go-version: '1.26.11'
+    go-version: '1.27.4'
 - run: go version && go test ./...
 ```
 
@@ -177,10 +177,10 @@ For macOS, Windows or another architecture, choose its archive and published che
 
 ```bash
 # scripts/setup-go.sh, sourced by a job
-GO_VERSION=1.26.11
+GO_VERSION=1.27.4
 case "$(uname -m)" in
-  x86_64) GO_ARCH=amd64; GO_SHA256=9849f4e04ee35303714e34fbc3ac8ab44ea3e448a95aa182f91e3b9b79c710ec ;;
-  aarch64|arm64) GO_ARCH=arm64; GO_SHA256=6c2f29b458b5add0835f18b776f69c8881a6d88428f1484a6da55755e620757e ;;
+  x86_64) GO_ARCH=amd64; GO_SHA256=7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840 ;;
+  aarch64|arm64) GO_ARCH=arm64; GO_SHA256=3392582988a273a87ab5043ee1b2c9c17a2c3c00580bf9326c47a2e0aaaeac92 ;;
   *) echo "unsupported Go architecture" >&2; return 1 ;;
 esac
 [ "$(uname -s)" = Linux ] || { echo "this recipe requires Linux" >&2; return 1; }
@@ -219,7 +219,7 @@ Get new checksum values from [Go downloads](https://go.dev/dl/) or
 The cache paths include the version and architecture. Keep these setup jobs sequential on a local checkout,
 because local jobs share its `.tools` directory. `GOROOT` points at the installed archive even when the runner inherited
 another Go installation. `GOTOOLCHAIN=local` prevents Go from downloading a different toolchain.
-To check the pin, look for `go version go1.26.11 linux/amd64` or `linux/arm64` in the job log.
+To check the pin, look for `go version go1.27.4 linux/amd64` or `linux/arm64` in the job log.
 Both SDKs key the `.tools` cache on `scripts/setup-go.sh`, so changing the version or checksum invalidates it.
 Since `actions/setup-go` also caches Go modules by default, add [`GoModules()` (Go) or `goModules()` (TypeScript)](#cache) alongside the `.tools` cache for equivalent module caching.
 

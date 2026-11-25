@@ -442,6 +442,12 @@ to it.
 Teams can have any number of members, regardless of their funding or payment
 holds. Invitation creation and acceptance do not depend on member count.
 
+An invitation takes a plain email address such as `name@example.com`. The
+controller refuses a display name or angle brackets around the address with
+`400`. The invitation email's subject is always "You're invited to a team on
+Sparkwing"; the inviter's name and the team name appear only in the body, in
+quotation marks, as names Sparkwing users chose.
+
 `GET /api/v1/team/settings` returns `members_can_add_machines`,
 `claim_ranking`, `max_children_per_root` and `high_trust` under `runs.read`. `PUT /api/v1/team/settings` requires
 `team.admin` and names at least one of them. `claim_ranking` takes distinct

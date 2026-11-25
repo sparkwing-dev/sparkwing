@@ -20,8 +20,23 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/releaseasset"
 )
 
+var installedExecutable = os.Executable
+
+// InstalledExecutable returns the installed CLI that replacement pins resolve to, so engine selection compares a
+// selected engine against the same file.
+func InstalledExecutable() (string, error) {
+	return installedExecutable()
+}
+
+// UseInstalledExecutableForTest makes replacement pins resolve to the executable locate returns instead of the
+// running one. A go test binary records its main package as <package>.test, which the retained-engine check refuses,
+// so a CLI test suite that drives replacement pins in process supplies a real build of the CLI.
+func UseInstalledExecutableForTest(locate func() (string, error)) {
+	installedExecutable = locate
+}
+
 func installedEngineVersion() (string, error) {
-	path, err := os.Executable()
+	path, err := installedExecutable()
 	if err != nil {
 		return "", err
 	}
@@ -37,7 +52,7 @@ func installedEngineVersion() (string, error) {
 }
 
 func installedEngine(ctx context.Context, pin engineid.Pin, target releaseasset.Target) (Resolved, error) {
-	path, err := os.Executable()
+	path, err := installedExecutable()
 	if err != nil {
 		return Resolved{}, err
 	}
@@ -191,7 +206,7 @@ func writeSelfDigestRecord(record, line string) {
 func (r *Resolver) replacementEngine(ctx context.Context, pin engineid.Pin, target releaseasset.Target) (Resolved, error) {
 	installed := r.installed
 	if installed == nil {
-		installed = os.Executable
+		installed = installedExecutable
 	}
 	path, err := installed()
 	if err != nil {

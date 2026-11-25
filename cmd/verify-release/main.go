@@ -37,6 +37,7 @@ func run(args []string) error {
 	acceptedProtocols := fs.String("accepted-sdk-protocols", "2", "comma-separated SDK protocol versions accepted by the required engine")
 	bootstrapIndex := fs.Bool("bootstrap-index", false, "replace the legacy unsigned documentation index once")
 	latest := fs.String("latest-tag", "", "report whether this tag outranks the published stable releases")
+	engineBundle := fs.String("engine-bundle", "", "verify a directory named by a release version holding its SHA256SUMS, signature and linux engines")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -50,6 +51,13 @@ func run(args []string) error {
 			return err
 		}
 		return publishReleaseIndex(*previousIndex, *indexOut, *requireVersion, *bootstrapIndex, *sdkEntries, *acceptedProtocols)
+	}
+	if *engineBundle != "" {
+		keys, err := releaseauth.PublicKeys()
+		if err != nil {
+			return err
+		}
+		return verifyEngineBundle(*engineBundle, keys)
 	}
 	if *latest != "" {
 		body, err := publishedReleasePages()

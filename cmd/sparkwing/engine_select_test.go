@@ -37,7 +37,7 @@ func TestReplacementPinWarnsAndKeepsInstalledCLI(t *testing.T) {
 	}
 	var diagnostics bytes.Buffer
 	command := pipelineEngineSwitcher{
-		readPin: engine.ReadPin, current: current,
+		readPin: engine.ReadPin, current: current, installed: engine.InstalledExecutable,
 		target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, diagnostics: &diagnostics,
 		resolve: func(ctx context.Context, pin engineid.Pin, target releaseasset.Target, _ toolchain.Mode) (engine.Resolved, error) {
 			return r.Resolve(ctx, pin, target)

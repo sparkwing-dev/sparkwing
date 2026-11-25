@@ -73,7 +73,7 @@ func (p *PublishImages) Plan(_ context.Context, plan *sparkwing.Plan, in Publish
 
 func (p *PublishImages) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "publish", func(ctx context.Context) error {
-		refs, err := publishReleaseImages(ctx, p.args, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+		refs, err := publishReleaseImages(ctx, p.args, "", remote.WithAuthFromKeychain(authn.DefaultKeychain))
 		for _, ref := range refs {
 			sparkwing.Info(ctx, "published %s (linux/amd64, linux/arm64)", ref)
 		}
@@ -84,7 +84,8 @@ func (p *PublishImages) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 var releaseImageArches = []string{"amd64", "arm64"}
 
-func publishReleaseImages(ctx context.Context, in PublishImagesArgs, opts ...remote.Option) ([]string, error) {
+// safety: engine stays off the pipeline flags; only the deploy passes it, after verifying the release bundle.
+func publishReleaseImages(ctx context.Context, in PublishImagesArgs, engine string, opts ...remote.Option) ([]string, error) {
 	for _, input := range []struct{ flag, value string }{
 		{"--dist", in.Dist},
 		{"--version", in.Version},
@@ -115,12 +116,18 @@ func publishReleaseImages(ctx context.Context, in PublishImagesArgs, opts ...rem
 			}
 		}
 	}
+	var engineSums map[string]string
+	if engine != "" {
+		if engineSums, err = checkShippedEngine(engine); err != nil {
+			return nil, err
+		}
+	}
 	group, publishCtx := errgroup.WithContext(ctx)
 	opts = append(opts, remote.WithContext(publishCtx))
 	published := make([]string, len(components))
 	for i, c := range components {
 		group.Go(func() error {
-			ref, err := publishComponent(in, c.binary, c.base, sums, opts)
+			ref, err := publishComponent(in, c.binary, c.base, engine, sums, engineSums, opts)
 			if err != nil {
 				return fmt.Errorf("%s: %w", c.binary, err)
 			}
@@ -132,7 +139,8 @@ func publishReleaseImages(ctx context.Context, in PublishImagesArgs, opts ...rem
 	return slices.DeleteFunc(published, func(ref string) bool { return ref == "" }), err
 }
 
-func publishComponent(in PublishImagesArgs, binary, base string, sums map[string]string, opts []remote.Option) (string, error) {
+func publishComponent(in PublishImagesArgs, binary, base, engine string, sums, engineSums map[string]string, opts []remote.Option) (string, error) {
+	shipsEngine := binary == "sparkwing-runner" && engine != ""
 	baseRef, err := name.NewDigest(base)
 	if err != nil {
 		return "", fmt.Errorf("base %q must be a reference by digest: %w", base, err)
@@ -155,6 +163,11 @@ func publishComponent(in PublishImagesArgs, binary, base string, sums map[string
 		baseImage, err := baseIndex.Image(desc.Digest)
 		if err != nil {
 			return "", err
+		}
+		if shipsEngine {
+			if baseImage, err = withShippedEngine(baseImage, engine, arch); err != nil {
+				return "", err
+			}
 		}
 		img, err := withBinary(baseImage, filepath.Join(in.Dist, binary+"-linux-"+arch), binary, map[string]string{
 			"org.opencontainers.image.version":  in.Version,
@@ -183,7 +196,11 @@ func publishComponent(in PublishImagesArgs, binary, base string, sums map[string
 	if err := remote.WriteIndex(tag, index, opts...); err != nil {
 		return "", fmt.Errorf("push %s: %w", tag, err)
 	}
-	if err := verifyPublishedIndex(tag, binary, sums, opts); err != nil {
+	engineVersion := ""
+	if shipsEngine {
+		engineVersion = filepath.Base(engine)
+	}
+	if err := verifyPublishedIndex(tag, binary, sums, engineVersion, engineSums, opts); err != nil {
 		return "", err
 	}
 	return tag.String(), nil
@@ -251,7 +268,7 @@ func withBinary(base v1.Image, path, binary string, labels map[string]string) (v
 	return mutate.ConfigFile(img, cfg)
 }
 
-func verifyPublishedIndex(tag name.Tag, binary string, sums map[string]string, opts []remote.Option) error {
+func verifyPublishedIndex(tag name.Tag, binary string, sums map[string]string, engineVersion string, engineSums map[string]string, opts []remote.Option) error {
 	index, err := remote.Index(tag, opts...)
 	if err != nil {
 		return fmt.Errorf("read back %s: %w", tag, err)
@@ -284,6 +301,16 @@ func verifyPublishedIndex(tag name.Tag, binary string, sums map[string]string, o
 		want := sums[binary+"-linux-"+d.Platform.Architecture]
 		if got != want {
 			return fmt.Errorf("%s linux/%s carries %s sha256 %s, SHA256SUMS says %s", tag, d.Platform.Architecture, binary, got, want)
+		}
+		if engineVersion != "" {
+			engine := "sparkwing-linux-" + d.Platform.Architecture
+			got, err := imageFileSHA256(img, shippedEngineRoot+engineVersion+"/"+engine)
+			if err != nil {
+				return fmt.Errorf("%s linux/%s: %w", tag, d.Platform.Architecture, err)
+			}
+			if got != engineSums[engine] {
+				return fmt.Errorf("%s linux/%s ships engine sha256 %s, its SHA256SUMS says %s", tag, d.Platform.Architecture, got, engineSums[engine])
+			}
 		}
 	}
 	slices.Sort(arches)

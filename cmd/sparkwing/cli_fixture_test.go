@@ -263,6 +263,7 @@ func TestMain(m *testing.M) { os.Exit(testmanager.Run(func() int { return runCLI
 
 func runCLITestMain(m *testing.M) int {
 	sdkFixtureEnvironment = os.Environ()
+	defer useTestEngine()()
 	if !testmanager.Enabled() {
 		fixtureUseUnmanagedUserManager()
 	}

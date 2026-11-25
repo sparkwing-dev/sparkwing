@@ -115,8 +115,11 @@ publishing set cannot invalidate an older permitted release.
 The machine caches verified engines under its user cache directory in
 `sparkwing/engines`. A partial or corrupt recoverable entry is a miss.
 `SPARKWING_TOOLCHAIN=auto` may fetch a missing verified release.
-`SPARKWING_TOOLCHAIN=local` requires the exact verified cached release. Current
-Available policy is checked before every execution, including cache hits. Pipeline binaries
+`SPARKWING_TOOLCHAIN=local` requires the exact verified cached release. Cloud
+runner images ship the release files of one engine read-only. A Cloud Pod verifies
+them exactly like a download before caching them, and downloads any other release,
+or a shipped release that fails verification. The current
+signed policy is checked before every execution, including cache hits. Pipeline binaries
 are compiled and cached locally rather than downloaded from a controller.
 
 ## Support and security policy

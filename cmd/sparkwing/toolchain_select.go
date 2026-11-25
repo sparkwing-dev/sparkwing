@@ -45,6 +45,7 @@ type pipelineEngineSwitcher struct {
 	resolve     func(context.Context, engineid.Pin, releaseasset.Target, toolchain.Mode) (engine.Resolved, error)
 	execute     func(string, []string, []string) error
 	current     string
+	installed   func() (string, error)
 	target      releaseasset.Target
 	diagnostics io.Writer
 }
@@ -66,7 +67,8 @@ func switchToolchain(dir string, beforeExec func() error) error {
 	}
 	command := pipelineEngineSwitcher{
 		readPin: readEnginePin,
-		current: current, target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
+		current: current, installed: engine.InstalledExecutable,
+		target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH},
 		execute: func(binary string, args, environment []string) error {
 			if beforeExec != nil {
 				if err := beforeExec(); err != nil {
@@ -118,7 +120,15 @@ func (c pipelineEngineSwitcher) run(ctx context.Context, dir string, sdk enginei
 	if err := errors.Join(writeEngineNoticesOnce(c.diagnostics, selected.Notices), ctx.Err()); err != nil {
 		return err
 	}
-	current, err := os.Stat(c.current)
+	running := c.current
+	// safety: a replacement pin resolves to the installed CLI, so it is compared with that file rather than the
+	// running one.
+	if pin.Replacement != "" && c.installed != nil {
+		if running, err = c.installed(); err != nil {
+			return err
+		}
+	}
+	current, err := os.Stat(running)
 	if err != nil {
 		return err
 	}

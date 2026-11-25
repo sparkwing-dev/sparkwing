@@ -84,6 +84,13 @@ revocation and minimum-version denials still stop claims. Owner:
 Replacement engines selected by runners are retained by executable digest.
 Owner: `internal/engine/retain.go`; guard:
 `TestReplacementResolutionSurvivesInstalledEngineSwap`.
+Local-host owners follow changes committed by other processes on a timer
+that wakes at 250 ms and backs off to 500 ms while state is unchanged; every
+wait subscribes afresh, so the first wake after a change is 250 ms again.
+Owner: `internal/nodehost/native_assembly.go`: `localStateSubscription`;
+guards in `internal/nodehost/state_follower_test.go`:
+`TestLocalStateFollowerReadsLessWhileIdle` (idle reads) and
+`TestLocalStateFollowerSeesChangesPromptly` (500 ms worst case after an idle poll).
 
 Artifact manifest admission and reads share `internal/blob/manifest.go`: `CheckManifestMembers` with staging. `TestManifestAdmissionRejectsUnstageablePaths` guards traversal and file/parent collisions.
 
@@ -704,6 +711,11 @@ Linux process inspection treats ENOENT and ESRCH as absent processes. Owners:
 Runner claim dispatch rechecks cancellation after version policy validation.
 Owner: `internal/runners/loop.go`; guard:
 `TestLoopDoesNotClaimAfterPolicyCancelsContext`.
+
+`ServeWith` returns only after every goroutine it started has exited, so no
+background worker writes to the store or logger after it returns. Owner:
+`internal/controller/server.go`: `ServeWith`; guard:
+`TestServeWithReturnsOnlyAfterItsWorkersExit`.
 
 Controller startup plaintext sealing shares `internal/store/sealed_rotation.go`
 with operator key rotation. `internal/controller/startup_sealing.go` owns the

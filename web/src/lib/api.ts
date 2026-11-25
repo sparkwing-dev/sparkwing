@@ -92,12 +92,25 @@ function endSession() {
 export interface AuthFetchOptions {
   speaksForSession?: boolean;
   timeoutMs?: number | null;
+  // A polled read sets this so authFetch reads the whole body within the
+  // deadline; a body that stalls after its headers would otherwise hold the
+  // poll forever. The body is buffered, so this suits short JSON reads only.
+  deadlineCoversBody?: boolean;
+}
+
+// RequestTimeoutError is the abort reason for a request that outlived its deadline,
+// so callers see a sentence instead of the browser's "signal is aborted without reason".
+export class RequestTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`The Sparkwing controller did not answer within ${Math.round(timeoutMs / 1000)} seconds. It may be busy.`);
+    this.name = "RequestTimeoutError";
+  }
 }
 
 export function authFetch(
   url: string,
   opts: RequestInit = {},
-  { speaksForSession = true, timeoutMs = 10_000 }: AuthFetchOptions = {},
+  { speaksForSession = true, timeoutMs = 10_000, deadlineCoversBody = false }: AuthFetchOptions = {},
 ): Promise<Response> {
   if (_sessionEnded) {
     return Promise.reject(new Error("session ended -- sign in again"));
@@ -106,7 +119,7 @@ export function authFetch(
     return Promise.reject(new Error("rate-limited -- backing off"));
   }
   const controller = new AbortController();
-  const timeout = timeoutMs === null ? undefined : setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = timeoutMs === null ? undefined : setTimeout(() => controller.abort(new RequestTimeoutError(timeoutMs)), timeoutMs);
   const send = () =>
     fetch(url, {
       ...opts,
@@ -139,11 +152,29 @@ export function authFetch(
       }
       return res;
     })
+    // Status handling runs on the headers, so a stalled 401 or 429 body still
+    // ends the session or arms the backoff before the body read times out.
+    .then((res) => (deadlineCoversBody ? readWithinDeadline(res) : res))
     .catch((err) => {
+      // Once the deadline fires, every rejection is that timeout: browsers raise
+      // a plain AbortError from a body read whatever the signal's reason. A slow
+      // controller was still reached, so the banner does not call it down.
+      if (controller.signal.reason instanceof RequestTimeoutError) throw controller.signal.reason;
       setConnectionStatus("unreachable");
       throw err;
     })
     .finally(() => clearTimeout(timeout));
+}
+
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
+
+async function readWithinDeadline(res: Response): Promise<Response> {
+  const body = await res.arrayBuffer();
+  return new Response(NULL_BODY_STATUSES.has(res.status) ? null : body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers: res.headers,
+  });
 }
 
 function serverErrorMessage(res: Response): string {
@@ -564,14 +595,17 @@ export interface RunFilter {
   since?: string;
 }
 
-export async function getRuns(filter: RunFilter = {}): Promise<Run[]> {
+export async function getRuns(
+  filter: RunFilter = {},
+  { timeoutMs }: Pick<AuthFetchOptions, "timeoutMs"> = {},
+): Promise<Run[]> {
   const params = new URLSearchParams();
   if (filter.limit) params.set("limit", String(filter.limit));
   if (filter.pipeline) params.set("pipeline", filter.pipeline);
   if (filter.status) params.set("status", filter.status);
   if (filter.since) params.set("since", filter.since);
   const url = `${API_URL}/api/v1/runs${params.toString() ? `?${params}` : ""}`;
-  const res = await authFetch(url, { cache: "no-store" });
+  const res = await authFetch(url, { cache: "no-store" }, { timeoutMs, deadlineCoversBody: true });
   if (!res.ok) return [];
   const body = await res.json();
   return body.runs || [];
@@ -582,7 +616,7 @@ export async function getRuns(filter: RunFilter = {}): Promise<Run[]> {
 export async function listRuns(params: URLSearchParams): Promise<Run[]> {
   const res = await authFetch(`${API_URL}/api/v1/runs?${params}`, {
     cache: "no-store",
-  });
+  }, { deadlineCoversBody: true });
   if (!res.ok) {
     if (res.status >= 500) throw new Error(serverErrorMessage(res));
     const detail = await res.text().catch(() => "");
@@ -859,7 +893,16 @@ export interface Runner {
 }
 
 export async function getRunners(): Promise<Runner[]> {
-  const res = await listPages(`${API_URL}/api/v1/runners`, ["runners"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null);
+  // A timeout reaches the Fleet page, which keeps its last inventory rather than
+  // showing an empty fleet.
+  const res = await listPages(
+    `${API_URL}/api/v1/runners`,
+    ["runners"],
+    (path) => authFetch(path, { cache: "no-store" }, { deadlineCoversBody: true }),
+  ).catch((err) => {
+    if (err instanceof RequestTimeoutError) throw err;
+    return null;
+  });
   if (!res || !res.ok) return [];
   const data: { runners?: Runner[] } = await res.json();
   return data.runners ?? [];
@@ -1049,9 +1092,15 @@ export async function getApproval(
   return res.json();
 }
 
-export async function getPendingApprovals(): Promise<Approval[]> {
-  const res = await listPages(`${API_URL}/api/v1/approvals`, ["approvals"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null);
-  if (!res || !res.ok) return [];
+// getPendingApprovals returns null when the read failed, so callers keep what
+// they last knew instead of reporting that nothing is pending.
+export async function getPendingApprovals(): Promise<Approval[] | null> {
+  const res = await listPages(
+    `${API_URL}/api/v1/approvals`,
+    ["approvals"],
+    (path) => authFetch(path, { cache: "no-store" }, { deadlineCoversBody: true }),
+  ).catch(() => null);
+  if (!res || !res.ok) return null;
   const body = await res.json();
   return body.approvals || [];
 }

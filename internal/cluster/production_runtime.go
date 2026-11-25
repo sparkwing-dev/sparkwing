@@ -29,6 +29,10 @@ import (
 
 // productionRuntime composes installed commands with authenticated controller and native host services.
 func productionRuntime(version string) clusterRuntime {
+	return productionRuntimeWith(version, lookupController)
+}
+
+func productionRuntimeWith(version string, lookup hostLookup) clusterRuntime {
 	return clusterRuntime{
 		Launcher: productionLauncher(version),
 		Runner: RunnerCLI{Actions: func(ctx context.Context, controller, team, receipt string) (capability.Issued, error) {
@@ -89,7 +93,8 @@ func productionRuntime(version string) clusterRuntime {
 				if err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
-				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.ModuleCache, false, procenv.SubmitAcceptAll(), nil)}, nil, nil
+				controllerClient := controllerHTTP(options.ControllerURL, lookup)
+				return launcher.BootstrapHost{HTTP: controllerClient, Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL, HTTP: controllerClient}, options.ModuleCache, false, procenv.SubmitAcceptAll(), nil)}, nil, nil
 			},
 		},
 	}
@@ -120,7 +125,7 @@ func productionHostingAt(home, version string, connection client.EngineOptions, 
 	hosting := runners.NativeHosting(runners.NativeHostingConfig{
 		Home: home, Controller: connection, Admission: machineAdmission, SubmitAccept: accept, PrepareSource: modules != "",
 		Source: func(ctx context.Context, unit controllerwire.ClaimedUnit, options client.EngineOptions) (source.Options, error) {
-			engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines"), LocalBuildDirectory: filepath.Join(home, "runners", "builds")})
+			engines, err := engine.NewResolver(engine.Config{BuildVersion: version, CacheDirectory: filepath.Join(home, "engines"), LocalBuildDirectory: filepath.Join(home, "runners", "builds"), ShippedDirectory: engine.ShippedReleasesDirectory})
 			if err != nil {
 				return source.Options{}, err
 			}

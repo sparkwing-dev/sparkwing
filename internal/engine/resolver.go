@@ -73,7 +73,7 @@ func NewResolver(config Config) (*Resolver, error) {
 	if config.HTTPClient == nil {
 		config.HTTPClient = http.DefaultClient
 	}
-	return &Resolver{config: config, installed: os.Executable}, nil
+	return &Resolver{config: config, installed: installedExecutable}, nil
 }
 
 // Resolve obtains the exact pin's permitted executable, including on a warm cache.
@@ -182,9 +182,12 @@ func (r *Resolver) resolve(ctx context.Context, identity engineid.Identity, targ
 	if r.config.Mode == toolchain.ModeLocal {
 		return Resolved{}, &apierr.Error{Code: hosterr.Unavailable, Message: "Exact verified engine is absent from the machine cache", Hint: "Use auto toolchain mode once to fetch the matching official release."}
 	}
-	release, err := r.fetchRelease(ctx, identity.Version, target)
-	if err != nil {
-		return Resolved{}, err
+	release, shipped := r.shippedRelease(identity, target)
+	if !shipped {
+		release, err = r.fetchRelease(ctx, identity.Version, target)
+		if err != nil {
+			return Resolved{}, err
+		}
 	}
 	if identity.ManifestDigest != "" && digest(release.bundle.Manifest) != identity.ManifestDigest {
 		return Resolved{}, integrity(fmt.Errorf("release manifest differs from accepted engine identity"))

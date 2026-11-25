@@ -1100,6 +1100,14 @@ publishes them through `publish-images`, reusing the image pair when its immutab
 already exist and both revision labels match the candidate commit. A new build checks that both
 pinned runtime-base manifests exist before compiling the dashboard or binaries. A missing base
 fails with its reference and a repair hint. Reusing published candidate images needs no base lookup.
+The runner image also ships the candidate's stable release base, such as `v0.79.0` for
+`v0.79.1-0.<time>-<sha>`: that release's SHA256SUMS, its signature, and each platform's `sparkwing`
+executable and signature, read-only under `/usr/local/share/sparkwing/releases/<version>/`. The
+deploy first checks them with `go run ./cmd/verify-release --engine-bundle`, the runner's own release
+verification under the production keys. Cloud Pods verify those files again exactly like a download
+and skip the engine download when the signed policy selects that release. When the bundle cannot be
+downloaded or fails verification, the deploy says so and publishes without it, so Pods download the
+engine as before.
 `staging-gate` pins the
 digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the
 controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
@@ -1321,7 +1329,7 @@ exceed them. The watched staging deploy should record phase durations before set
 | Resolve version, role and existing images | 2-15 seconds | Git fetch and commit metadata, STS, ECR lookups. A matching published pair skips all builds. |
 | Dashboard | 30 seconds-3 minutes when rebuilt, seconds on validated reuse | `bin/build-web.sh --reuse` validates its existing input/output receipt before reusing the bundle. |
 | Two Linux binary builds | 1-6 minutes warm, 5-20 minutes cold | amd64 then arm64, each compiling the CLI, controller and runner. Whole build job budget: 45 minutes. |
-| Publish and verify both multi-arch images | 30 seconds-3 minutes | Controller and runner publish concurrently after all binary hashes pass. One binary layer per platform over pinned runtime bases. Verification reads the published binaries back. |
+| Publish and verify both multi-arch images | 30 seconds-3 minutes | Controller and runner publish concurrently after all binary hashes pass. One binary layer per platform over pinned runtime bases, plus the runner's shipped engine layer. Verification reads the published binaries and shipped engines back. |
 | GitOps and two rollouts, per environment | 1-8 minutes | Two serial GitOps pushes, each waiting for Argo (10-minute cap, one-second observation interval) and rollout (5-minute cap). |
 | Cold Cloud provisioning, per new claim | Measure per leg, no fixed estimate | Creation to Initialized. Included in smoke elapsed time when on its critical path. Report separately from image pull and preparation. |
 | Staging gate | 1-10 minutes with available capacity | Candidate CLI build plus two overlapping pipeline runs. Each run has a 45-minute limit. |
@@ -1400,10 +1408,11 @@ as root, at the versions the deploy machines already use:
 sudo install -d -o root -g root -m 0755 /opt/sparkwing-deploy /opt/sparkwing-deploy/bin
 cd "$(mktemp -d)"
 # Go, matching go.mod's toolchain line
-curl -fsSLO https://go.dev/dl/go1.26.11.linux-amd64.tar.gz
-curl -fsSL "https://go.dev/dl/?mode=json&include=all" | grep -A3 '"go1.26.11.linux-amd64.tar.gz"' | grep sha256  # compare
-sha256sum go1.26.11.linux-amd64.tar.gz
-sudo tar -C /opt/sparkwing-deploy -xzf go1.26.11.linux-amd64.tar.gz
+curl -fsSLO https://go.dev/dl/go1.27.4.linux-amd64.tar.gz
+curl -fsSL "https://go.dev/dl/?mode=json&include=all" | grep -A3 '"go1.27.4.linux-amd64.tar.gz"' | grep sha256  # compare
+sha256sum go1.27.4.linux-amd64.tar.gz
+sudo rm -rf /opt/sparkwing-deploy/go  # an older Go's files would otherwise survive the extract
+sudo tar -C /opt/sparkwing-deploy -xzf go1.27.4.linux-amd64.tar.gz
 sudo ln -sf /opt/sparkwing-deploy/go/bin/go /opt/sparkwing-deploy/bin/go
 # kubectl
 curl -fsSLO https://dl.k8s.io/release/v1.37.0/bin/linux/amd64/kubectl
@@ -2728,7 +2737,7 @@ file. Other syntax and workflow checks remain active.
 - **Go directive policy:** the release cut and `pre-release`, beside its version
   checks, reject patch-level requirements in the published root module and
   template registry modules: `go 1.26` and `go 1.26.0` pass; `go 1.26.3` fails.
-  Our modules select the patched Go 1.26.11 toolchain separately.
+  Our modules select the patched Go 1.27.4 toolchain separately.
   Pipeline and fixture modules are excluded from this release check. Init and
   pipeline scaffolding share a generator that takes only the running Go
   version's major and minor; this step runs a focused scaffold test against a
