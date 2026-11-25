@@ -27,7 +27,7 @@ func TestReplacementPinWarnsAndKeepsInstalledCLI(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fixture\nrequire "+engine.GoModule+" v0.0.0\nreplace "+engine.GoModule+" => ../sdk\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	current, err := testEngine()
+	current, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestReplacementPinWarnsAndKeepsInstalledCLI(t *testing.T) {
 	}
 	var diagnostics bytes.Buffer
 	command := pipelineEngineSwitcher{
-		readPin: engine.ReadPin, current: current,
+		readPin: engine.ReadPin, current: current, installed: engine.InstalledExecutable,
 		target: releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}, diagnostics: &diagnostics,
 		resolve: func(ctx context.Context, pin engineid.Pin, target releaseasset.Target, _ toolchain.Mode) (engine.Resolved, error) {
 			return r.Resolve(ctx, pin, target)
