@@ -351,3 +351,26 @@ func TestConfirmRolloutKeepsOneDeadlineAcrossRolloutWatches(t *testing.T) {
 		t.Fatalf("confirmRollout = %v after %s with watches %q; want a failure within the %s budget", err, elapsed, watches, d.cfg.RolloutTimeout)
 	}
 }
+
+func TestConfirmRolloutStopsAKubectlThatOutlivesItsTimeout(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	d.cfg.RolloutTimeout = time.Second
+	frozen := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	d.tools.now = func() time.Time { return frozen }
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var calls atomic.Int32
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		// kubectl starts --timeout only after its first lookup, so a slow lookup outlives it.
+		calls.Add(1)
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+	started := time.Now()
+	err := d.confirmRollout(ctx, d.cfg.Staging, phaseNamed(deployPhaseLauncher), f.old.Runner.Digest)
+	elapsed := time.Since(started)
+	if calls.Load() == 0 || err == nil || !strings.Contains(err.Error(), "did not finish rolling out") || elapsed > 3*time.Second {
+		t.Fatalf("confirmRollout = %v after %s and %d kubectl calls; want the rollout timeout error within the %s budget", err, elapsed, calls.Load(), d.cfg.RolloutTimeout)
+	}
+}

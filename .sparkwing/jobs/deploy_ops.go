@@ -966,24 +966,36 @@ func (d *deployer) confirmRollout(ctx context.Context, env deployEnv, phase depl
 	deployment := phase.deployment(env)
 	return d.act(ctx, "wait for deployment "+env.Namespace+"/"+deployment+" to roll out "+digest, func() error {
 		// safety: the rollback budget counts one RolloutTimeout per phase, so
-		// every watch and read shares a single deadline.
+		// every watch and read shares a single deadline. kubectl starts its own
+		// --timeout only after its first lookup, so the shared context kills it.
 		deadline := d.tools.now().Add(d.cfg.RolloutTimeout)
+		budgetCtx, cancel := context.WithDeadline(ctx, time.Now().Add(d.cfg.RolloutTimeout))
+		defer cancel()
 		image := ""
+		timedOut := func() error {
+			return fmt.Errorf("%s did not finish rolling out %q within %s", deployment, image, d.cfg.RolloutTimeout)
+		}
+		overran := func(err error) error {
+			if ctx.Err() == nil && budgetCtx.Err() != nil {
+				return timedOut()
+			}
+			return err
+		}
 		for {
 			remaining := deadline.Sub(d.tools.now()).Truncate(time.Second)
 			if remaining <= 0 {
-				return fmt.Errorf("%s did not finish rolling out %q within %s", deployment, image, d.cfg.RolloutTimeout)
+				return timedOut()
 			}
-			if _, err := d.kubectl(ctx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout="+remaining.String()); err != nil {
-				return err
+			if _, err := d.kubectl(budgetCtx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout="+remaining.String()); err != nil {
+				return overran(err)
 			}
 			remaining = deadline.Sub(d.tools.now()).Truncate(time.Second)
 			if remaining <= 0 {
-				return fmt.Errorf("%s did not finish rolling out %q within %s", deployment, image, d.cfg.RolloutTimeout)
+				return timedOut()
 			}
-			out, err := d.kubectl(ctx, "-n", env.Namespace, "get", "deployment", deployment, "-o", "json", "--request-timeout="+remaining.String())
+			out, err := d.kubectl(budgetCtx, "-n", env.Namespace, "get", "deployment", deployment, "-o", "json", "--request-timeout="+remaining.String())
 			if err != nil {
-				return err
+				return overran(err)
 			}
 			var complete bool
 			image, complete, err = rolledOutImage(out, phase.name)
@@ -996,8 +1008,8 @@ func (d *deployer) confirmRollout(ctx context.Context, env deployEnv, phase depl
 				}
 				return nil
 			}
-			if err := d.tools.wait(ctx, time.Second); err != nil {
-				return err
+			if err := d.tools.wait(budgetCtx, time.Second); err != nil {
+				return overran(err)
 			}
 		}
 	})
