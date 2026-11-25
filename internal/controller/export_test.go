@@ -116,8 +116,15 @@ func (s *SyncBuffer) String() string {
 // IdleSince sets every team's idle poll clock to at.
 func IdleSince(s *Server, at time.Time) { s.recordQueueActivity(at) }
 
-// TeamIdleSince sets one team's idle poll clock to at.
-func TeamIdleSince(s *Server, team store.Team, at time.Time) { s.recordTeamQueueActivity(team, at) }
+// TeamIdleSince sets one team's idle poll clock to at, even when it is older than the clock's reading.
+func TeamIdleSince(s *Server, team store.Team, at time.Time) {
+	s.queueActivity.mu.Lock()
+	defer s.queueActivity.mu.Unlock()
+	if s.queueActivity.teams == nil {
+		s.queueActivity.teams = map[store.Team]int64{}
+	}
+	s.queueActivity.teams[team] = at.UnixNano()
+}
 
 // ClaimPollAdvice is the idle interval s would advise a claimant of team now.
 func ClaimPollAdvice(s *Server, team store.Team) time.Duration {

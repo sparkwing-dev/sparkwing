@@ -56,18 +56,36 @@ type queueActivity struct {
 	teams map[store.Team]int64
 }
 
+// safety: a team's admissions and awards finish out of order, so a team clock
+// keeps its newest reading rather than the last one written.
 func (q *queueActivity) record(team store.Team, at int64) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	q.any = at
 	if team == "" {
-		q.all = at
+		q.all, q.any = at, at
 		return
 	}
+	q.any = max(q.any, at)
 	if q.teams == nil {
 		q.teams = map[store.Team]int64{}
 	}
-	q.teams[team] = at
+	q.teams[team] = max(q.teams[team], at)
+}
+
+// prune forgets team clocks that can no longer change advice or enforcement:
+// a clock older than the controller-start clock, or idle long enough that
+// the advice, read one ceiling in the past, is already at the ceiling. A
+// forgotten team falls back to the older controller-start clock, which gives
+// the same advice.
+func (q *queueActivity) prune(now time.Time, ceiling time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	settled := now.Add(-(idleClaimPollFraction + 1) * ceiling).UnixNano()
+	for team, at := range q.teams {
+		if ceiling <= 0 || at <= q.all || at <= settled {
+			delete(q.teams, team)
+		}
+	}
 }
 
 func (q *queueActivity) last(team store.Team) int64 {
@@ -79,15 +97,15 @@ func (q *queueActivity) last(team store.Team) int64 {
 	return max(q.teams[team], q.all)
 }
 
-// safety: the idle clock measures from here, and work arriving resets it as
-// surely as work handed out, or a fleet advised while idle would still be
-// waiting minutes after the queue filled. This resets every team's clock.
+// recordQueueActivity resets every team's idle clock, as a controller start
+// does, so no runner is advised to wait on a queue nobody has read yet.
 func (s *Server) recordQueueActivity(now time.Time) {
 	s.queueActivity.record("", now.UnixNano())
 }
 
-// recordTeamQueueActivity resets the idle clock of one team's runners and of
-// claimants that serve every team.
+// safety: the idle clock measures from here, and work queued or handed out
+// for a team resets it, or that team's runners advised while idle would still
+// be waiting after its queue filled. Claimants that serve every team reset too.
 func (s *Server) recordTeamQueueActivity(team store.Team, now time.Time) {
 	s.queueActivity.record(team, now.UnixNano())
 }

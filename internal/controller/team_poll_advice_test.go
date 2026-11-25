@@ -60,3 +60,31 @@ func TestARetryReturnsItsTeamsRunnersToTheirOwnCadence(t *testing.T) {
 	wantOwnCadence(t, f.srv, store.DefaultTeam)
 	wantIdleAdvice(t, f.srv, "another-team")
 }
+
+func TestAnAppWebhookRunReturnsOnlyItsTeamsRunnersAndTheLauncherToTheirOwnCadence(t *testing.T) {
+	f := newAppFixture(t)
+	olga, bob := f.ghUser(501, "olga"), f.ghUser(502, "bob")
+	f.connect(olga, 501, 7, acmeAdmin)
+	f.connect(bob, 502, 8, nil)
+	team, err := f.store.ForTeam(t.Context(), store.Team(olga.team))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := team.RecordCreditGrant(t.Context(), store.CreditGrantRequest{Kind: store.CreditGrantFree, AmountMicro: 100 * store.MicroCreditsPerCredit, Reference: "app-team-fixture", CreatedBy: "fixture"}); err != nil {
+		t.Fatal(err)
+	}
+	if code := f.subscribe(olga, "acme/widgets", "build", nil); code != http.StatusOK {
+		t.Fatalf("subscribe = %d", code)
+	}
+	controller.IdleSince(f.srv, time.Now().Add(-5*time.Minute))
+	for _, team := range []store.Team{store.Team(olga.team), store.Team(bob.team), ""} {
+		wantIdleAdvice(t, f.srv, team)
+	}
+
+	if code, out := f.deliver("push", pushPayload(7, 701, "acme/widgets", headSHA), ""); code != http.StatusAccepted || out["status"] != "dispatched" {
+		t.Fatalf("push = %d %v", code, out)
+	}
+	wantOwnCadence(t, f.srv, store.Team(olga.team))
+	wantOwnCadence(t, f.srv, "")
+	wantIdleAdvice(t, f.srv, store.Team(bob.team))
+}

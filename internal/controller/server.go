@@ -515,6 +515,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		}
 		if sample {
 			s.sampleOperationalSeries(ctx)
+			s.queueActivity.prune(time.Now(), s.idleClaimPoll)
 		}
 	}
 }

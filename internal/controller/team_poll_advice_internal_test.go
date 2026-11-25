@@ -109,3 +109,80 @@ func TestATeamsOwnScheduledRunReturnsOnlyItsRunnersToTheirOwnCadence(t *testing.
 		t.Errorf("another team's advice=%s after the scheduled run, want %s", got, DefaultMaxIdleClaimPoll)
 	}
 }
+
+func TestATeamClockKeepsItsNewestReadingWhenWritesArriveOutOfOrder(t *testing.T) {
+	srv := New(nil, nil)
+	now := time.Now()
+	srv.recordQueueActivity(now.Add(-testIdleWindow))
+	srv.recordTeamQueueActivity("a", now)
+	srv.recordTeamQueueActivity("a", now.Add(-testIdleWindow))
+	if got := srv.claimPollAdvice("a", now); got != 0 {
+		t.Errorf("a slow admission's older time replaced the team's fresh award: advice=%s, want none", got)
+	}
+	if got := srv.claimPollAdvice("", now); got != 0 {
+		t.Errorf("a claimant serving every team lost the fresh award: advice=%s, want none", got)
+	}
+}
+
+func TestPruneForgetsOnlyTeamClocksThatCanNoLongerChangeAdvice(t *testing.T) {
+	srv := New(nil, nil)
+	now := time.Now()
+	srv.recordQueueActivity(now.Add(-time.Hour))
+	settledAt := now.Add(-(idleClaimPollFraction+1)*DefaultMaxIdleClaimPoll - time.Second)
+	srv.recordTeamQueueActivity("settled", settledAt)
+	srv.recordTeamQueueActivity("recent", now.Add(-time.Second))
+	srv.recordTeamQueueActivity("ramping", now.Add(-(idleClaimPollFraction+1)*DefaultMaxIdleClaimPoll+time.Second))
+	before := map[store.Team][2]time.Duration{}
+	for _, team := range []store.Team{"settled", "recent", "ramping"} {
+		before[team] = [2]time.Duration{srv.claimPollAdvice(team, now), srv.claimPollAdvice(team, now.Add(-srv.idleClaimPoll))}
+	}
+
+	srv.queueActivity.prune(now, srv.idleClaimPoll)
+
+	if _, kept := srv.queueActivity.teams["settled"]; kept {
+		t.Error("a team idle past the enforced ceiling was kept")
+	}
+	for _, team := range []store.Team{"recent", "ramping"} {
+		if _, kept := srv.queueActivity.teams[team]; !kept {
+			t.Errorf("team %s, whose advice can still change, was forgotten", team)
+		}
+	}
+	for team, want := range before {
+		if got := [2]time.Duration{srv.claimPollAdvice(team, now), srv.claimPollAdvice(team, now.Add(-srv.idleClaimPoll))}; got != want {
+			t.Errorf("team %s advice changed across pruning: %v, want %v", team, got, want)
+		}
+	}
+}
+
+func TestAnApprovedJobReturnsItsTeamsRunnersToTheirOwnCadence(t *testing.T) {
+	f := newScheduleHTTPFixture(t)
+	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl, capability.ApprovalsWrite}
+	f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
+	testOnlyTenantPort[runControlWriter](f.s, func(context.Context, store.Team) (runControlWriter, error) {
+		return &runControlWriterFake{team: store.DefaultTeam}, nil
+	})
+	f.s.recordQueueActivity(time.Now().Add(-testIdleWindow))
+	approve := func(resolution string) {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/runs/bound-run/approvals/bound-job", strings.NewReader(`{"resolution":"`+resolution+`"}`))
+		r.Header.Set("Authorization", "Bearer "+f.raw)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Idempotency-Key", resolution)
+		w := httptest.NewRecorder()
+		f.s.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", resolution, w.Code, w.Body)
+		}
+	}
+	approve(store.ApprovalResolutionDenied)
+	if got := f.s.claimPollAdvice(store.DefaultTeam, time.Now()); got == 0 {
+		t.Fatal("a denial, which queues no work, returned the team's runners to their own cadence")
+	}
+	approve(store.ApprovalResolutionApproved)
+	if got := f.s.claimPollAdvice(store.DefaultTeam, time.Now()); got != 0 {
+		t.Fatalf("advice=%s right after an approval released the job; the team's runners must return to their own cadence", got)
+	}
+	if got := f.s.claimPollAdvice("another-team", time.Now()); got == 0 {
+		t.Fatal("another team's runners lost their idle advice to this team's approval")
+	}
+}
