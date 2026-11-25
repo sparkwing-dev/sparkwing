@@ -306,10 +306,25 @@ func checkStartPermitTx(ctx context.Context, tx *storeTx, team Team, row runstat
 	return err
 }
 
-// RelinquishStart returns an unstarted award when the host cannot start or queue it.
-// Readiness keeps its original timestamp so placement ranking does not restart.
+// RelinquishStart returns an unstarted award when the host cannot start or queue it, and revokes
+// that award. Readiness keeps its original timestamp so placement ranking does not restart.
 func (t *Tenant) RelinquishStart(ctx context.Context, b runstate.CapacityBinding, actor runstate.Actor) error {
 	return t.s.inTx(ctx, func(tx *storeTx) error {
+		award, err := relinquishedAwardTx(ctx, tx, t.team, b)
+		if err != nil {
+			return err
+		}
+		// safety: the holder check below resolves the award under a read lock, and a lock cannot be upgraded or taken
+		// after node rows, so the award's authority is write-locked first for the revocation at the end.
+		if award.ID != "" {
+			leaves := []capability.AuthorityRef{award}
+			if actor.Authority.ID != "" {
+				leaves = append(leaves, actor.Authority)
+			}
+			if err := acquireLockSet(ctx, tx, func() lockSet { return discoverAuthorityLocks(ctx, tx, leaves, award.ID) }); err != nil {
+				return err
+			}
+		}
 		if err := checkCapacityUnitTx(ctx, tx, t.team, capacityFence{binding: b, actor: actor}); err != nil {
 			return err
 		}
@@ -321,14 +336,29 @@ func (t *Tenant) RelinquishStart(ctx context.Context, b runstate.CapacityBinding
 		if row.Status != runstate.StatusPending || row.ClaimedBy == "" {
 			return holderRefusal()
 		}
+		if award.ID != "" && row.CapabilityPrefix != award.ID {
+			return errAuthorityChanged
+		}
 		ready, queued := row.ReadyAt, row.QueueStartedAt
 		_, err = transitionNodeTx(ctx, tx, t.team, nodeTransition{Ref: ref, Actor: actor, To: nodePending, Cause: runstate.CauseRelease, SourceAttempt: &row.Attempt})
 		if err != nil {
 			return err
 		}
 		_, err = tx.execContext(ctx, `UPDATE nodes SET ready_at=?,queue_started_at=? WHERE team=? AND run_id=? AND node_id=?`, nullableTime(ready), nullableTime(queued), t.team, b.RunID, b.NodeID)
-		return err
+		if err != nil || award.ID == "" {
+			return err
+		}
+		return tx.operator.revokeAuthorityTx(ctx, tx, award)
 	})
+}
+
+func relinquishedAwardTx(ctx context.Context, tx *storeTx, team Team, b runstate.CapacityBinding) (capability.AuthorityRef, error) {
+	award := capability.AuthorityRef{Kind: capability.AuthorityCapability}
+	err := tx.QueryRowContext(ctx, `SELECT c.prefix FROM nodes n JOIN capabilities c ON c.prefix=n.capability_prefix AND c.team=n.team WHERE n.team=? AND n.run_id=? AND n.node_id=? AND n.generation=? AND c.issuance='award' AND c.bind_kind='node' AND c.bind_run=n.run_id AND c.bind_node=n.node_id AND c.bind_generation=n.generation`, team, b.RunID, b.NodeID, b.Generation).Scan(&award.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return award, nil
+	}
+	return award, err
 }
 
 func capacityScopeKey(runID, nodeID, scope, group, host string) (string, error) {
