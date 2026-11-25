@@ -32,6 +32,11 @@ type runnerPoll struct {
 // with the store clock. A poll that changes nothing is checked read-only and
 // then only restamps the stored observation, with no team lock.
 func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
+	return o.recordRunnerPoll(ctx, observation, nil)
+}
+
+// safety: afterRead runs between the read-only check and the restamp, so a test can commit a concurrent write there.
+func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand, afterRead func()) error {
 	if err := ValidateRunnerLabels(observation.Labels); err != nil {
 		return err
 	}
@@ -47,6 +52,11 @@ func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand)
 	if err != nil {
 		return err
 	}
+	if afterRead != nil {
+		afterRead()
+	}
+	// perf: an unchanged poll still restamps, because placement holds judge liveness by the observation's time and
+	// must count it from the runner's last poll, not its last change.
 	if unchanged {
 		if stamped, err := o.stampRunnerPoll(ctx, observation, team, seen); err != nil || stamped {
 			return err
@@ -93,8 +103,8 @@ func checkRunnerPollTx(ctx context.Context, tx *storeTx, observation UnitDemand)
 	return principal.Capability, nil
 }
 
-// safety: the read-only snapshot applies the same refusals as the locked write, so a poll skipping that write
-// is refused exactly when the write would have refused it.
+// safety: for an unchanged observation of a live credential, the read-only snapshot applies the locked write's
+// refusals, so skipping that write refuses exactly what it would; any other poll takes the locked write.
 func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDemand, labels []byte) (_ string, _ runnerPollStamp, _ bool, err error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
@@ -140,7 +150,9 @@ func (o *Operator) stampRunnerPoll(ctx context.Context, observation UnitDemand, 
 		if err != nil {
 			return err
 		}
-		result, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=? AND last_used_at=? AND claim_observation_json=?`, body, now.UnixNano(), team, observation.CapabilityPrefix, seen.lastUsed, seen.body)
+		// safety: an ancestor's revocation is not fenced here: the read-only check walked the chain just before,
+		// and a stamp that slips past one only advances a timestamp that authorization ignores.
+		result, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=? AND last_used_at=? AND claim_observation_json=? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?)`, body, now.UnixNano(), team, observation.CapabilityPrefix, seen.lastUsed, seen.body, now.UnixNano())
 		if err != nil {
 			return err
 		}

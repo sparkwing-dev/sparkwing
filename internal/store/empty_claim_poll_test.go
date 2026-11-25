@@ -179,3 +179,51 @@ func TestAnAwardBetweenAnUnchangedPollsReadAndItsRestampKeepsTheConsumedSlot(t *
 		t.Fatalf("the restamp applied=%t over an award and left %d free slots, want it to miss and leave 1", stamped, stored)
 	}
 }
+
+func TestAnAwardBetweenAnUnchangedPollsReadAndItsWriteFallsBackToTheLockedWrite(t *testing.T) {
+	f := rankingFixture(t, true)
+	ctx := preferRunner(t.Context(), 30*time.Second)
+	f.At(0)
+	f.PollIn(ctx, t, f.Self, 2)
+	f.At(2 * time.Second)
+	count := f.Store.TestOnlyCountStatements(t)
+	slots := 2
+	poll := store.UnitDemand{CapabilityPrefix: f.Self, Kinds: nodeKinds, Labels: []string{"team-4cpu"}, FreeSlots: &slots}
+	var afterAward int
+	if err := f.Store.TestOnlyRecordRunnerPollWith(ctx, poll, func() {
+		f.Store.TestOnlyConsumeClaimSlot(ctx, t, f.Self, "a")
+		afterAward, _ = f.Store.TestOnlyRunnerPollRow(ctx, t, f.Self)
+		count.Take()
+	}); err != nil {
+		t.Fatal(err)
+	}
+	took := count.Take()
+	stored, _ := f.Store.TestOnlyRunnerPollRow(ctx, t, f.Self)
+	if afterAward != 1 || took.TeamLocks == 0 {
+		t.Fatalf("the restamp wrote over the award instead of falling back to the locked write: after award %d, %+v", afterAward, took)
+	}
+	// safety: the locked write records the slots the poll reported, as the merge base does;
+	// that race is tracked separately.
+	if stored != 2 {
+		t.Fatalf("the locked fallback left %d free slots, want the poll's reported 2 as at the merge base", stored)
+	}
+}
+
+func TestARevokedCredentialsUnchangedPollDoesNotAdvanceItsLastSeenTime(t *testing.T) {
+	f := rankingFixture(t, true)
+	ctx := preferRunner(t.Context(), 30*time.Second)
+	f.At(0)
+	f.PollIn(ctx, t, f.Self, 1)
+	_, before := f.Store.TestOnlyRunnerPollRow(ctx, t, f.Self)
+	f.At(2 * time.Second)
+	slots := 1
+	err := f.Store.TestOnlyRecordRunnerPollWith(ctx, store.UnitDemand{CapabilityPrefix: f.Self, Kinds: nodeKinds, Labels: []string{"team-4cpu"}, FreeSlots: &slots}, func() {
+		f.Store.TestOnlyRevoke(t, f.Self)
+	})
+	if _, after := f.Store.TestOnlyRunnerPollRow(ctx, t, f.Self); after != before {
+		t.Fatalf("a credential revoked before the restamp had its last-seen time advanced from %d to %d (poll error %v)", before, after, err)
+	}
+	if err == nil {
+		t.Fatal("a poll from a credential revoked mid-poll was recorded")
+	}
+}

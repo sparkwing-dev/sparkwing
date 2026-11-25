@@ -860,8 +860,8 @@ func claimInputsForTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds
 	return nil
 }
 
-// perf: a team-wide claimant's empty poll answers from the partial claim indexes before the full search.
-//
+// perf: a team-wide claimant's empty poll answers from the partial claim indexes, skipping the full search's
+// reads of every other live runner's facts and authority, the team's credit balance, rates and ranking.
 // safety: each branch is its kind's claim source with only the team scope and index predicate kept, so any unit
 // the search can return for this claimant makes this true in the same snapshot.
 func claimableUnitQueuedTx(ctx context.Context, tx *storeTx, team string, kinds []capability.UnitKind) (bool, error) {
