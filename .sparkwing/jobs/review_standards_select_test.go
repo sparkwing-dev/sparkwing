@@ -1,7 +1,10 @@
 package jobs
 
 import (
+	"context"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -33,5 +36,31 @@ func TestReviewerCardNamesLoadsReviewCardsByAlwaysScopeAndSurface(t *testing.T) 
 		if got := reviewerCardNames(listing, rules, tc.files); !slices.Equal(got, tc.want) {
 			t.Errorf("reviewerCardNames(%q) = %q, want %q", tc.files, got, tc.want)
 		}
+	}
+}
+
+func TestReviewStandardsSeeACopyDestinationNotItsUnchangedSource(t *testing.T) {
+	fx := newReviewFixture(t)
+	root := t.TempDir()
+	gitInit(t, root)
+	body := "#!/bin/sh\nallowed() { return 0; }\n"
+	writeGoFile(t, filepath.Join(root, ".sparkwing/guide.sh"), body)
+	gitCommitAll(t, root, "base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", strings.TrimSpace(gitOutput(t, root, "rev-parse", "HEAD")))
+	writeGoFile(t, filepath.Join(root, "guide.sh"), body)
+	gitCommitAll(t, root, "copy the guide")
+	fx.deps.root = root
+	fx.deps.git = func(ctx context.Context, args ...string) (string, error) { return reviewGit(ctx, root, args...) }
+	var seen []string
+	fx.deps.standards = func(_ context.Context, files []string) (string, error) {
+		seen = files
+		return "", nil
+	}
+	fx.def.replies = []string{`{"findings":[]}`}
+	if _, _, err := runReview(newTestContext(t), fx.deps, testPolicy(t), reviewInputs{branch: "work", brief: "Copy a guide"}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(seen, []string{"guide.sh"}) {
+		t.Fatalf("standards saw %q, want only the copy destination", seen)
 	}
 }

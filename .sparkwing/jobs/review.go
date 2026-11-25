@@ -240,7 +240,7 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 
 	if sameTree {
 		rec.Notes = append(rec.Notes, "tree and objective unchanged since the last review, so no reviewer ran; skips were reapplied")
-	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree, diff, changes); err != nil {
+	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree, diff, changes, modified); err != nil {
 		return reviewRecord{}, "", err
 	}
 	diff.enforceBinaryReview(&rec, p, changes)
@@ -255,7 +255,7 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	return rec, file, nil
 }
 
-func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree string, diff reviewDiffResult, changes [][]string) error {
+func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree string, diff reviewDiffResult, changes [][]string, modified []string) error {
 	started := d.now()
 	var err error
 	var files []string
@@ -300,7 +300,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	}
 	standards := ""
 	if p.usesStandards() {
-		if standards, err = d.standards(ctx, files); err != nil {
+		if standards, err = d.standards(ctx, modified); err != nil {
 			rec.Notes = append(rec.Notes, "house standards unavailable, so the standards rule was judged without them: "+err.Error())
 			standards = ""
 		}
