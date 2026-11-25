@@ -268,3 +268,20 @@ func TestALabelWithdrawnFromTheRootOfADelegatedPollerSendsItsRestampToTheLockedW
 		t.Fatal("a poll advertising a label its root withdrew was recorded")
 	}
 }
+
+func TestADelegatedPollerAlwaysTakesTheLockedWrite(t *testing.T) {
+	f := rankingFixture(t, true)
+	ctx := preferRunner(t.Context(), 30*time.Second)
+	f.At(0)
+	child, err := f.Store.AsOperator().DelegateCapability(ctx, capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: f.Personal}, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.PollIn(ctx, t, child.Capability.Prefix, 1)
+	f.At(2 * time.Second)
+	count := f.Store.TestOnlyCountStatements(t)
+	f.PollIn(ctx, t, child.Capability.Prefix, 1)
+	if took := count.Take(); took.TeamLocks == 0 {
+		t.Fatalf("an unchanged poll from a delegated credential skipped the locked write: %+v", took)
+	}
+}

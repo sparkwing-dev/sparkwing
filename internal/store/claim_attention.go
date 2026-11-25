@@ -48,10 +48,10 @@ func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand,
 	if err != nil {
 		return err
 	}
-	// safety: the fast path only saves work, so any failure in it except a refusal the locked write would repeat
-	// falls through to the locked write, which is the complete check.
+	// safety: the read-only check writes nothing, so any failure in it except a refusal the locked write would
+	// repeat falls through to the locked write, which is the complete check.
 	team, seen, unchanged, err := o.runnerPollUnchanged(ctx, observation, raw)
-	if refusal(err) {
+	if runnerPollRefusal(err) {
 		return err
 	}
 	if afterRead != nil {
@@ -60,8 +60,9 @@ func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand,
 	// perf: an unchanged poll still restamps, because placement holds judge liveness by the observation's time and
 	// must count it from the runner's last poll, not its last change.
 	if err == nil && unchanged {
-		if stamped, err := o.stampRunnerPoll(ctx, observation, team, seen); err == nil && stamped {
-			return nil
+		stamped, err := o.stampRunnerPoll(ctx, observation, team, seen)
+		if err != nil || stamped {
+			return err
 		}
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
@@ -117,17 +118,14 @@ func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDema
 	if err != nil {
 		return "", runnerPollStamp{}, false, err
 	}
-	var advertised, body, authority []byte
-	var seen sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT advertised_labels_json,claim_observation_json,last_used_at FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, c.Team, observation.CapabilityPrefix).Scan(&advertised, &body, &seen); err != nil {
-		return "", runnerPollStamp{}, false, err
-	}
-	// safety: a chain rooted in an account session has no capability row to fence, so it takes the locked write.
-	if root.Authority.Kind != capability.AuthorityCapability {
+	// safety: only a poller that is its own chain root keeps the fast path, so the restamp's own row carries the
+	// label policy it fences; a delegated or session-rooted poller takes the locked write.
+	if root.Authority != (capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix}) {
 		return c.Team, runnerPollStamp{}, false, nil
 	}
-	// safety: allowed labels live on the chain root, which is a different row when a machine root delegated the poller.
-	if err := tx.QueryRowContext(ctx, `SELECT authority_json FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, root.Capability.Team, root.Authority.ID).Scan(&authority); err != nil {
+	var advertised, body, authority []byte
+	var seen sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT advertised_labels_json,claim_observation_json,last_used_at,authority_json FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, c.Team, observation.CapabilityPrefix).Scan(&advertised, &body, &seen, &authority); err != nil {
 		return "", runnerPollStamp{}, false, err
 	}
 	var stored runnerPoll
@@ -139,24 +137,25 @@ func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDema
 		return "", runnerPollStamp{}, false, err
 	}
 	have, err := json.Marshal(stored.UnitDemand)
-	return c.Team, runnerPollStamp{lastUsed: seen.Int64, body: body, rootTeam: root.Capability.Team, rootPrefix: root.Authority.ID, rootAuthority: authority}, err == nil && bytes.Equal(want, have), err
+	return c.Team, runnerPollStamp{lastUsed: seen.Int64, body: body, authority: authority}, err == nil && bytes.Equal(want, have), err
 }
 
 // safety: a restamp must still find the stored observation and last-seen time the unchanged poll read.
 type runnerPollStamp struct {
-	lastUsed             int64
-	body                 []byte
-	rootTeam, rootPrefix string
-	rootAuthority        []byte
+	lastUsed  int64
+	body      []byte
+	authority []byte
 }
 
 // perf: an unchanged poll restamps its observation in one statement instead of the locked write.
 //
-// safety: the update applies only while the row holds the observation and last_used_at, and the chain root the
-// authority, the snapshot read, so a concurrent poll, an award or a label change sends it to the locked write.
+// safety: it applies only while its own row holds the observation, last_used_at and authority the snapshot read,
+// so a concurrent poll, an award or a label change misses. False means nothing was written; an error once commit
+// was attempted is returned, because the restamp may have landed and the locked write would write again.
 func (o *Operator) stampRunnerPoll(ctx context.Context, observation UnitDemand, team string, seen runnerPollStamp) (bool, error) {
-	var stamped bool
+	var stamped, committing bool
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		stamped, committing = false, false
 		now := tx.now(ctx)
 		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: now})
 		if err != nil {
@@ -164,15 +163,27 @@ func (o *Operator) stampRunnerPoll(ctx context.Context, observation UnitDemand, 
 		}
 		// safety: an ancestor's revocation is not fenced here: the read-only check walked the chain just before,
 		// and a stamp that slips past one only advances a timestamp that authorization ignores.
-		result, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=? AND last_used_at=? AND claim_observation_json=? AND `+liveCredentialSQL("")+` AND EXISTS (SELECT 1 FROM capabilities root WHERE COALESCE(root.team,'')=? AND root.prefix=? AND root.authority_json=?)`, body, now.UnixNano(), team, observation.CapabilityPrefix, seen.lastUsed, seen.body, now.UnixNano(), now.UnixNano(), seen.rootTeam, seen.rootPrefix, seen.rootAuthority)
+		result, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=? AND last_used_at=? AND claim_observation_json=? AND authority_json=? AND `+liveCredentialSQL(""), body, now.UnixNano(), team, observation.CapabilityPrefix, seen.lastUsed, seen.body, seen.authority, now.UnixNano(), now.UnixNano())
 		if err != nil {
 			return err
 		}
 		rows, err := result.RowsAffected()
-		stamped = rows == 1
-		return err
+		if err != nil {
+			return err
+		}
+		stamped, committing = rows == 1, true
+		return nil
 	})
+	if err != nil && !committing {
+		return false, nil
+	}
 	return stamped, err
+}
+
+// safety: a poll refusal is one the locked write would return too, so the read-only check returns it directly.
+func runnerPollRefusal(err error) bool {
+	var illegal *ErrIllegalTransition
+	return refusal(err) || errors.As(err, &illegal) && illegal.Reason == ReasonHolderRights
 }
 
 // RegisteredAgent is a live agent credential of a team, online or not.
