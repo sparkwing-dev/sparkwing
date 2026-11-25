@@ -48,8 +48,10 @@ func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand,
 	if err != nil {
 		return err
 	}
+	// safety: the fast path only saves work, so any failure in it except a refusal the locked write would repeat
+	// falls through to the locked write, which is the complete check.
 	team, seen, unchanged, err := o.runnerPollUnchanged(ctx, observation, raw)
-	if err != nil {
+	if refusal(err) {
 		return err
 	}
 	if afterRead != nil {
@@ -57,9 +59,9 @@ func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand,
 	}
 	// perf: an unchanged poll still restamps, because placement holds judge liveness by the observation's time and
 	// must count it from the runner's last poll, not its last change.
-	if unchanged {
-		if stamped, err := o.stampRunnerPoll(ctx, observation, team, seen); err != nil || stamped {
-			return err
+	if err == nil && unchanged {
+		if stamped, err := o.stampRunnerPoll(ctx, observation, team, seen); err == nil && stamped {
+			return nil
 		}
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
@@ -80,27 +82,27 @@ func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand,
 	})
 }
 
-func checkRunnerPollTx(ctx context.Context, tx *storeTx, observation UnitDemand) (leaf, root capability.Capability, err error) {
+func checkRunnerPollTx(ctx context.Context, tx *storeTx, observation UnitDemand) (leaf capability.Capability, root capability.Principal, err error) {
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix}, false)
 	if err != nil {
-		return capability.Capability{}, capability.Capability{}, err
+		return capability.Capability{}, capability.Principal{}, err
 	}
 	principal := chain[0].principal
 	facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
 	if err != nil {
-		return capability.Capability{}, capability.Capability{}, err
+		return capability.Capability{}, capability.Principal{}, err
 	}
 	here, err := hereObserverTx(ctx, tx, principal)
 	if err != nil {
-		return capability.Capability{}, capability.Capability{}, err
+		return capability.Capability{}, capability.Principal{}, err
 	}
 	if err := checkRunnerLabelsTx(ctx, tx, chain, observation.Labels); err != nil {
-		return capability.Capability{}, capability.Capability{}, err
+		return capability.Capability{}, capability.Principal{}, err
 	}
 	if !facts.Observable && !here {
-		return capability.Capability{}, capability.Capability{}, authorityError(hosterr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
+		return capability.Capability{}, capability.Principal{}, authorityError(hosterr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
 	}
-	return principal.Capability, chain[len(chain)-1].principal.Capability, nil
+	return principal.Capability, chain[len(chain)-1].principal, nil
 }
 
 // safety: for an unchanged observation of a live credential, the read-only snapshot applies the locked write's
@@ -120,8 +122,12 @@ func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDema
 	if err := tx.QueryRowContext(ctx, `SELECT advertised_labels_json,claim_observation_json,last_used_at FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, c.Team, observation.CapabilityPrefix).Scan(&advertised, &body, &seen); err != nil {
 		return "", runnerPollStamp{}, false, err
 	}
+	// safety: a chain rooted in an account session has no capability row to fence, so it takes the locked write.
+	if root.Authority.Kind != capability.AuthorityCapability {
+		return c.Team, runnerPollStamp{}, false, nil
+	}
 	// safety: allowed labels live on the chain root, which is a different row when a machine root delegated the poller.
-	if err := tx.QueryRowContext(ctx, `SELECT authority_json FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, root.Team, root.Prefix).Scan(&authority); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT authority_json FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, root.Capability.Team, root.Authority.ID).Scan(&authority); err != nil {
 		return "", runnerPollStamp{}, false, err
 	}
 	var stored runnerPoll
@@ -133,7 +139,7 @@ func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDema
 		return "", runnerPollStamp{}, false, err
 	}
 	have, err := json.Marshal(stored.UnitDemand)
-	return c.Team, runnerPollStamp{lastUsed: seen.Int64, body: body, rootTeam: root.Team, rootPrefix: root.Prefix, rootAuthority: authority}, err == nil && bytes.Equal(want, have), err
+	return c.Team, runnerPollStamp{lastUsed: seen.Int64, body: body, rootTeam: root.Capability.Team, rootPrefix: root.Authority.ID, rootAuthority: authority}, err == nil && bytes.Equal(want, have), err
 }
 
 // safety: a restamp must still find the stored observation and last-seen time the unchanged poll read.
