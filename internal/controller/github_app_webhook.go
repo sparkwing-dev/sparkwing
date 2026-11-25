@@ -1054,7 +1054,7 @@ func (s *Server) startGitHubAppRun(
 	if result.Replayed {
 		status = "duplicate"
 	} else {
-		s.recordQueueActivity(now)
+		s.recordTeamQueueActivity(tenant.Team(), now)
 	}
 	return githubAppRun{Pipeline: plan.pipeline, RunID: result.RunID, Status: status}, nil
 }

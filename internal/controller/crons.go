@@ -60,7 +60,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 		return "", routepolicy.MissingEndpointPolicy()
 	}
 	if !admitted.Replayed {
-		l.server.recordQueueActivity(admitted.Request.AdmittedAt)
+		l.server.recordTeamQueueActivity(s.Team, admitted.Request.AdmittedAt)
 	}
 	return admitted.RunID, nil
 }

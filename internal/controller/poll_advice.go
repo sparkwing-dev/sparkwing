@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -42,18 +43,62 @@ func (s *Server) WithIdleClaimPoll(max time.Duration) *Server {
 	return s
 }
 
-// safety: the idle clock measures from here, and work arriving resets it as
-// surely as work handed out, or a fleet advised while idle would still be
-// waiting minutes after the queue filled.
-func (s *Server) recordQueueActivity(now time.Time) {
-	s.lastClaimAward.Store(now.UnixNano())
+// queueActivity keeps the idle clocks behind claim poll advice. Each team
+// idles on its own clock, so one team's work never shortens the advice
+// another team's runners get.
+type queueActivity struct {
+	mu sync.Mutex
+	// all is activity that concerns every team, such as a controller start.
+	all int64
+	// any is the latest activity of any team, for a claimant that serves
+	// every team's queue.
+	any   int64
+	teams map[store.Team]int64
 }
 
-func (s *Server) claimPollAdvice(now time.Time) time.Duration {
+func (q *queueActivity) record(team store.Team, at int64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.any = at
+	if team == "" {
+		q.all = at
+		return
+	}
+	if q.teams == nil {
+		q.teams = map[store.Team]int64{}
+	}
+	q.teams[team] = at
+}
+
+func (q *queueActivity) last(team store.Team) int64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if team == "" {
+		return q.any
+	}
+	return max(q.teams[team], q.all)
+}
+
+// safety: the idle clock measures from here, and work arriving resets it as
+// surely as work handed out, or a fleet advised while idle would still be
+// waiting minutes after the queue filled. This resets every team's clock.
+func (s *Server) recordQueueActivity(now time.Time) {
+	s.queueActivity.record("", now.UnixNano())
+}
+
+// recordTeamQueueActivity resets the idle clock of one team's runners and of
+// claimants that serve every team.
+func (s *Server) recordTeamQueueActivity(team store.Team, now time.Time) {
+	s.queueActivity.record(team, now.UnixNano())
+}
+
+// claimPollAdvice suggests an idle interval to a claimant of team, or to a
+// claimant of every team when team is empty.
+func (s *Server) claimPollAdvice(team store.Team, now time.Time) time.Duration {
 	if s.idleClaimPoll <= 0 {
 		return 0
 	}
-	last := s.lastClaimAward.Load()
+	last := s.queueActivity.last(team)
 	if last == 0 {
 		return 0
 	}
@@ -89,8 +134,8 @@ func (s *Server) rebuildIdlePollGate() {
 }
 
 // safety: a header set after the status line is never sent, so this runs ahead of WriteHeader.
-func (s *Server) writeClaimPollAdvice(w http.ResponseWriter) {
-	advice := s.claimPollAdvice(time.Now())
+func (s *Server) writeClaimPollAdvice(w http.ResponseWriter, team store.Team) {
+	advice := s.claimPollAdvice(team, time.Now())
 	if advice <= 0 {
 		return
 	}
@@ -99,7 +144,7 @@ func (s *Server) writeClaimPollAdvice(w http.ResponseWriter) {
 
 // safety: a refusal is written here, so a caller that gets false must return
 // without writing its own answer.
-func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request, key string) bool {
+func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request, team store.Team, key string) bool {
 	if s.idlePolls == nil {
 		return true
 	}
@@ -108,7 +153,7 @@ func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request, key 
 	// controller would send now, so the gate waits until the suggestion a whole
 	// interval ago was already the widest one. Until then, and whenever work
 	// arrives, this refuses nothing.
-	if s.claimPollAdvice(now.Add(-s.idleClaimPoll)) < s.idleClaimPoll {
+	if s.claimPollAdvice(team, now.Add(-s.idleClaimPoll)) < s.idleClaimPoll {
 		return true
 	}
 	if s.idlePolls.Allow(key, now) {
