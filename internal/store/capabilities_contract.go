@@ -449,17 +449,20 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 	if lock && !tx.snapshotRead {
 		return lockedAuthorityChainTx(ctx, tx, ref, writes)
 	}
-	_, chain, err := verifyAuthorityChainTx(ctx, tx, ref, tx.snapshotRead)
+	_, chain, fresh, err := verifyAuthorityChainTx(ctx, tx, ref)
 	if err != nil {
 		return nil, err
+	}
+	if tx.fixedSnapshot {
+		tx.rememberAuthority(fresh)
 	}
 	return finishAuthorityChainTx(ctx, tx, chain)
 }
 
 func lockedAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, writes []string) ([]authorityNode, error) {
-	// safety: discovery validates the whole chain before locking, so ended or foreign authority is
-	// refused without taking its team row, and its reads never stand in for the locked verification.
-	discovered, chain, err := verifyAuthorityChainTx(ctx, tx, ref, false)
+	// safety: discovery validates the whole chain before locking, so ended authority or lost membership is
+	// refused without taking a team row; its reads never stand in for the locked verification.
+	discovered, chain, _, err := verifyAuthorityChainTx(ctx, tx, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -470,22 +473,25 @@ func lockedAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.Aut
 	if err := acquireLockRows(ctx, tx, set); err != nil {
 		return nil, err
 	}
-	raw, chain, err := verifyAuthorityChainTx(ctx, tx, ref, true)
+	raw, chain, fresh, err := verifyAuthorityChainTx(ctx, tx, ref)
 	if err != nil {
 		return nil, err
 	}
 	if !slices.Equal(set.rows, authorityChainLocks(tx, lockSet{}, raw, writes).normalized().rows) {
 		return nil, errAuthorityChanged
 	}
+	// safety: only reads fenced by the lock set they were compared against may be kept.
+	tx.rememberAuthority(fresh)
 	return finishAuthorityChainTx(ctx, tx, chain)
 }
 
-// safety: only reads taken under held locks or in a fixed snapshot may be remembered; discovery reads never are.
-func verifyAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, remember bool) (raw, chain []authorityNode, err error) {
+// safety: fresh reads are returned for the caller to keep only once they are fenced by held locks or a fixed
+// snapshot; discovery reads never are.
+func verifyAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) (raw, chain []authorityNode, fresh []rememberedAuthority, err error) {
 	seen := map[capability.AuthorityRef]bool{}
 	for {
 		if seen[ref] {
-			return nil, nil, authorityError(hosterr.IntegrityFailure, "cyclic authority ancestry")
+			return nil, nil, nil, authorityError(hosterr.IntegrityFailure, "cyclic authority ancestry")
 		}
 		seen[ref] = true
 		sessionChild := ancestrySessionChild(ref, chain)
@@ -500,20 +506,18 @@ func verifyAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.Aut
 				entry.verified, err = verifyAuthorityNodeTx(ctx, tx, entry.raw)
 			}
 			if errors.Is(err, sql.ErrNoRows) {
-				return nil, nil, authorityError(hosterr.Unauthenticated, "authority ancestry is unavailable")
+				return nil, nil, nil, authorityError(hosterr.Unauthenticated, "authority ancestry is unavailable")
 			}
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
-			if remember {
-				tx.rememberAuthority(key, entry)
-			}
+			fresh = append(fresh, rememberedAuthority{key: key, entry: entry})
 		}
 		raw = append(raw, cloneAuthorityNode(entry.raw))
 		chain = append(chain, cloneAuthorityNode(entry.verified))
 		parent := entry.verified.principal.Capability.Parent
 		if parent == nil {
-			return raw, chain, nil
+			return raw, chain, fresh, nil
 		}
 		ref = *parent
 	}

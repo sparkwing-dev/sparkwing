@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql/driver"
 	"errors"
 	"reflect"
 	"strings"
@@ -250,17 +251,91 @@ func TestAuthorityLockAfterLedgerIsRefused(t *testing.T) {
 	s := authorityStore(t)
 	authorityPersist(t, s, authorityRoot("root", "a"))
 	member := authorityMember(t, s, "member", RoleEditor)
-	for _, ref := range []capability.AuthorityRef{{Kind: capability.AuthorityCapability, ID: "root"}, member.Authority} {
+	for _, tc := range []struct {
+		ref     capability.AuthorityRef
+		refusal string
+	}{
+		{capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}, "authority lock order: authority must precede the ledger"},
+		{member.Authority, "authority lock order: memberships must precede the ledger"},
+	} {
 		err := s.inTxOnce(t.Context(), func(tx *storeTx) error {
 			if _, err := lockLedgerTx(t.Context(), tx, "a"); err != nil {
 				return err
 			}
-			_, err := authorityChainTx(t.Context(), tx, ref, true)
+			_, err := authorityChainTx(t.Context(), tx, tc.ref, true)
 			return err
 		})
-		if err == nil || !strings.Contains(err.Error(), "must precede the ledger") {
-			t.Fatalf("%s locked after the ledger: %v", ref.Kind, err)
+		if err == nil || err.Error() != tc.refusal {
+			t.Fatalf("%s locked after the ledger: %v, want %q", tc.ref.Kind, err, tc.refusal)
 		}
+	}
+}
+
+func TestAuthorityMemoKeepsNothingFromAChangedLockSet(t *testing.T) {
+	s, recording := singleCursorStore(t)
+	rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1),('b',1,1)")
+	member := authorityMember(t, s, "member", RoleEditor)
+	rewriteSchemaExec(t, s.db, "INSERT INTO memberships(team,account_id,role,created_at) VALUES ('b','member','editor',1)")
+	rewriteSchemaExec(t, s.db, "INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('member','b',0)")
+	s.dialect = DialectPostgres
+	selectTeam := func(team string) {
+		t.Helper()
+		if _, err := recording.Conn.(driver.ExecerContext).ExecContext(t.Context(), "UPDATE sessions SET team='"+team+"' WHERE hash='member'", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	moved := false
+	recording.beforeQuery = func(query string) error {
+		if !moved && strings.HasSuffix(query, " FOR UPDATE") {
+			moved = true
+			selectTeam("b")
+		}
+		return nil
+	}
+	err := s.inTxOnce(t.Context(), func(tx *storeTx) error {
+		if _, err := authorityChainTx(t.Context(), tx, member.Authority, true); !errors.Is(err, errAuthorityChanged) {
+			t.Fatalf("session moved teams between discovery and verification: %v, want a restart", err)
+		}
+		selectTeam("a")
+		chain, err := authorityChainTx(t.Context(), tx, member.Authority, false)
+		if err != nil {
+			return err
+		}
+		if team := chain[0].principal.Capability.Team; team != "a" {
+			t.Fatalf("resolution after a refused lock set used team %s from that refused verification", team)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAuthorityMemoClearedByMixedCaseReturningWrite(t *testing.T) {
+	s, recording := singleCursorStore(t)
+	rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)")
+	authorityPersist(t, s, authorityRoot("root", "a"))
+	s.dialect = DialectPostgres
+	reads := countAncestorReads(recording)
+	ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "root"}
+	if err := s.inTxOnce(t.Context(), func(tx *storeTx) error {
+		if _, err := tx.ResolveAuthority(t.Context(), ref); err != nil {
+			return err
+		}
+		var name string
+		if err := tx.QueryRowContext(t.Context(), `UPDATE teams SET updated_at=updated_at WHERE name='a' Returning name`).Scan(&name); err != nil {
+			return err
+		}
+		before := *reads
+		if _, err := authorityChainTx(t.Context(), tx, ref, false); err != nil {
+			return err
+		}
+		if *reads == before {
+			t.Fatal("resolution after a Returning write reused ancestors verified before it")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -356,5 +431,37 @@ func TestOwnerSnapshotReadsEachAncestorOnce(t *testing.T) {
 	}
 	if reads != 2 {
 		t.Fatalf("owner snapshot read its two ancestors %d times, want once each", reads)
+	}
+}
+
+func TestWriteTransactionCopyMarkedAsSnapshotKeepsNoReads(t *testing.T) {
+	s, recording := singleCursorStore(t)
+	rewriteSchemaExec(t, s.db, "INSERT INTO teams(name,created_at,updated_at) VALUES ('a',1,1)")
+	authorityPersist(t, s, authorityRoot("held", "a"))
+	authorityPersist(t, s, authorityRoot("other", "a"))
+	s.dialect = DialectPostgres
+	reads := countAncestorReads(recording)
+	held := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "held"}
+	other := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "other"}
+	if err := s.inTxOnce(t.Context(), func(tx *storeTx) error {
+		if _, err := tx.ResolveAuthority(t.Context(), held); err != nil {
+			return err
+		}
+		// hack: this is the copy claimCapacityReadyTx makes of its claim transaction.
+		probe := *tx
+		probe.snapshotRead = true
+		if _, err := authorityChainTx(t.Context(), &probe, other, false); err != nil {
+			return err
+		}
+		before := *reads
+		if _, err := tx.ResolveAuthority(t.Context(), other); err != nil {
+			return err
+		}
+		if *reads == before {
+			t.Fatal("locked resolution trusted an unlocked read made through a copy of its own write transaction")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -2,7 +2,6 @@ package store
 
 import (
 	"slices"
-	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
@@ -29,23 +28,27 @@ type verifiedAuthority struct {
 	raw, verified authorityNode
 }
 
-func (t *storeTx) rememberAuthority(key authorityMemoKey, entry verifiedAuthority) {
+type rememberedAuthority struct {
+	key   authorityMemoKey
+	entry verifiedAuthority
+}
+
+func (t *storeTx) rememberAuthority(reads []rememberedAuthority) {
+	if len(reads) == 0 {
+		return
+	}
 	if t.verifiedAuthority == nil {
 		t.verifiedAuthority = map[authorityMemoKey]verifiedAuthority{}
 	}
-	t.verifiedAuthority[key] = verifiedAuthority{raw: cloneAuthorityNode(entry.raw), verified: cloneAuthorityNode(entry.verified)}
+	for _, read := range reads {
+		t.verifiedAuthority[read.key] = verifiedAuthority{raw: cloneAuthorityNode(read.entry.raw), verified: cloneAuthorityNode(read.entry.verified)}
+	}
 }
 
 // safety: any write, savepoint or savepoint rollback by this transaction may change ancestry rows or
 // release row locks taken after a savepoint, so every remembered node is read again afterwards.
 func (t *storeTx) forgetAuthority() {
 	t.verifiedAuthority = nil
-}
-
-func (t *storeTx) forgetAuthorityOnWrite(q string) {
-	if strings.Contains(q, "RETURNING") || strings.Contains(q, "returning") {
-		t.forgetAuthority()
-	}
 }
 
 // safety: callers own the nodes they receive, so no edit can reach a remembered verification.
