@@ -965,16 +965,28 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 func (d *deployer) confirmRollout(ctx context.Context, env deployEnv, phase deployPhase, digest string) error {
 	deployment := phase.deployment(env)
 	return d.act(ctx, "wait for deployment "+env.Namespace+"/"+deployment+" to roll out "+digest, func() error {
+		// safety: the rollback budget counts one RolloutTimeout per phase, so
+		// every watch and read shares a single deadline.
 		deadline := d.tools.now().Add(d.cfg.RolloutTimeout)
+		image := ""
 		for {
-			if _, err := d.kubectl(ctx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout="+d.cfg.RolloutTimeout.String()); err != nil {
+			remaining := deadline.Sub(d.tools.now()).Truncate(time.Second)
+			if remaining <= 0 {
+				return fmt.Errorf("%s did not finish rolling out %q within %s", deployment, image, d.cfg.RolloutTimeout)
+			}
+			if _, err := d.kubectl(ctx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout="+remaining.String()); err != nil {
 				return err
 			}
-			out, err := d.kubectl(ctx, "-n", env.Namespace, "get", "deployment", deployment, "-o", "json")
+			remaining = deadline.Sub(d.tools.now()).Truncate(time.Second)
+			if remaining <= 0 {
+				return fmt.Errorf("%s did not finish rolling out %q within %s", deployment, image, d.cfg.RolloutTimeout)
+			}
+			out, err := d.kubectl(ctx, "-n", env.Namespace, "get", "deployment", deployment, "-o", "json", "--request-timeout="+remaining.String())
 			if err != nil {
 				return err
 			}
-			image, complete, err := rolledOutImage(out, phase.name)
+			var complete bool
+			image, complete, err = rolledOutImage(out, phase.name)
 			if err != nil {
 				return fmt.Errorf("%s: %w", deployment, err)
 			}
@@ -983,9 +995,6 @@ func (d *deployer) confirmRollout(ctx context.Context, env deployEnv, phase depl
 					return fmt.Errorf("%s runs %q, not %s", deployment, image, digest)
 				}
 				return nil
-			}
-			if !d.tools.now().Before(deadline) {
-				return fmt.Errorf("%s did not finish rolling out %q within %s", deployment, image, d.cfg.RolloutTimeout)
 			}
 			if err := d.tools.wait(ctx, time.Second); err != nil {
 				return err
@@ -1008,8 +1017,8 @@ func rolledOutImage(deploymentJSON, container string) (string, bool, error) {
 			}
 		}
 		Status struct {
-			ObservedGeneration                                int64
-			UpdatedReplicas, ReadyReplicas, AvailableReplicas int32
+			ObservedGeneration                                          int64
+			Replicas, UpdatedReplicas, ReadyReplicas, AvailableReplicas int32
 		}
 	}
 	if err := json.Unmarshal([]byte(deploymentJSON), &dep); err != nil {
@@ -1029,7 +1038,8 @@ func rolledOutImage(deploymentJSON, container string) (string, bool, error) {
 		want = *dep.Spec.Replicas
 	}
 	st := dep.Status
-	complete := st.ObservedGeneration >= dep.Metadata.Generation &&
+	// Kubernetes' own rollout-complete predicate: no pod of an older revision remains.
+	complete := st.ObservedGeneration >= dep.Metadata.Generation && st.Replicas == want &&
 		st.UpdatedReplicas == want && st.ReadyReplicas == want && st.AvailableReplicas == want
 	return image, complete, nil
 }

@@ -267,21 +267,27 @@ func TestStagingRetryWaitsOutALauncherRolloutArgoStartsAfterRolloutStatus(t *tes
 
 func TestRolledOutImageRequiresTheObservedTemplateOnEveryReplica(t *testing.T) {
 	const image = "registry/runner@sha256:new"
-	snapshot := func(generation, observed, replicas, updated, ready, available int) string {
+	// total is status.replicas, old and new pods together; it defaults to the spec count.
+	snapshot := func(generation, observed, replicas, updated, ready, available int, total ...int) string {
+		pods := replicas
+		if len(total) > 0 {
+			pods = total[0]
+		}
 		return fmt.Sprintf(`{"metadata":{"generation":%d},"spec":{"replicas":%d,"template":{"spec":{"containers":[{"name":"launcher","image":%q}]}}},`+
-			`"status":{"observedGeneration":%d,"updatedReplicas":%d,"readyReplicas":%d,"availableReplicas":%d}}`,
-			generation, replicas, image, observed, updated, ready, available)
+			`"status":{"observedGeneration":%d,"replicas":%d,"updatedReplicas":%d,"readyReplicas":%d,"availableReplicas":%d}}`,
+			generation, replicas, image, observed, pods, updated, ready, available)
 	}
 	for name, tc := range map[string]struct {
 		json     string
 		complete bool
 	}{
-		"rolled out":          {snapshot(3, 3, 2, 2, 2, 2), true},
-		"template unobserved": {snapshot(3, 2, 2, 2, 2, 2), false},
-		"replica not updated": {snapshot(3, 3, 2, 1, 2, 2), false},
-		"replica not ready":   {snapshot(3, 3, 2, 2, 1, 2), false},
-		"replica unavailable": {snapshot(3, 3, 2, 2, 2, 1), false},
-		"default one replica": {`{"metadata":{"generation":1},"spec":{"template":{"spec":{"containers":[{"name":"launcher","image":"` + image + `"}]}}},"status":{"observedGeneration":1,"updatedReplicas":1,"readyReplicas":1,"availableReplicas":1}}`, true},
+		"rolled out":            {snapshot(3, 3, 2, 2, 2, 2), true},
+		"template unobserved":   {snapshot(3, 2, 2, 2, 2, 2), false},
+		"replica not updated":   {snapshot(3, 3, 2, 1, 2, 2), false},
+		"replica not ready":     {snapshot(3, 3, 2, 2, 1, 2), false},
+		"replica unavailable":   {snapshot(3, 3, 2, 2, 2, 1), false},
+		"old pod still running": {snapshot(3, 3, 1, 1, 1, 1, 2), false},
+		"default one replica":   {`{"metadata":{"generation":1},"spec":{"template":{"spec":{"containers":[{"name":"launcher","image":"` + image + `"}]}}},"status":{"observedGeneration":1,"replicas":1,"updatedReplicas":1,"readyReplicas":1,"availableReplicas":1}}`, true},
 	} {
 		got, complete, err := rolledOutImage(tc.json, "launcher")
 		if err != nil || got != image || complete != tc.complete {
@@ -290,5 +296,58 @@ func TestRolledOutImageRequiresTheObservedTemplateOnEveryReplica(t *testing.T) {
 	}
 	if _, _, err := rolledOutImage(snapshot(1, 1, 1, 1, 1, 1), "controller"); err == nil {
 		t.Error("a Deployment without the container was accepted")
+	}
+}
+
+func TestConfirmRolloutKeepsOneDeadlineAcrossRolloutWatches(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	start := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	clock := start
+	d.tools.now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return clock
+	}
+	launcher := d.cfg.Staging.LauncherDeployment
+	const rolloutTakes = 4*time.Minute + 59*time.Second
+	var watches []string
+	d.tools.run = func(_ context.Context, c deployCommand) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case slices.Contains(c.Args, "rollout"):
+			// Each watch outlasts most of the budget; one cut short by its timeout fails as kubectl does.
+			timeout := d.cfg.RolloutTimeout
+			for _, arg := range c.Args {
+				if v, ok := strings.CutPrefix(arg, "--timeout="); ok {
+					var err error
+					if timeout, err = time.ParseDuration(v); err != nil {
+						t.Errorf("watch timeout %q: %v", v, err)
+					}
+				}
+			}
+			watches = append(watches, timeout.String())
+			if timeout < rolloutTakes {
+				clock = clock.Add(timeout)
+				return "", errors.New("timed out waiting for the condition")
+			}
+			clock = clock.Add(rolloutTakes)
+			return "", nil
+		case slices.Contains(c.Args, "get") && slices.Contains(c.Args, launcher):
+			// The rollout completes only after nearly two full watches.
+			done := clock.Sub(start) >= 2*rolloutTakes
+			return testDeploymentSnapshot("launcher", f.old.Runner.ref(), done), nil
+		}
+		t.Errorf("unexpected command %s %v", c.Name, c.Args)
+		return "", errors.New("unexpected command")
+	}
+	err := d.confirmRollout(t.Context(), d.cfg.Staging, phaseNamed(deployPhaseLauncher), f.old.Runner.Digest)
+	mu.Lock()
+	elapsed := clock.Sub(start)
+	mu.Unlock()
+	if err == nil || elapsed > d.cfg.RolloutTimeout {
+		t.Fatalf("confirmRollout = %v after %s with watches %q; want a failure within the %s budget", err, elapsed, watches, d.cfg.RolloutTimeout)
 	}
 }

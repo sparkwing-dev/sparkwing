@@ -855,7 +855,7 @@ func (f *fakeDeploy) kubectl(c deployCommand) (string, error) {
 		if strings.Contains(c.Args[4], "controller") {
 			container, image = "controller", pins.Controller.ref()
 		}
-		if c.Args[len(c.Args)-1] != "json" {
+		if !slices.Contains(c.Args, "json") {
 			return image, nil
 		}
 		return testDeploymentSnapshot(container, image, true), nil
@@ -1704,11 +1704,11 @@ func TestDeploySchemaFetchPreservesShallowCandidateReachability(t *testing.T) {
 // testDeploymentSnapshot is a one-replica Deployment whose current template runs
 // image, fully rolled out or still waiting for the controller to observe it.
 func testDeploymentSnapshot(container, image string, complete bool) string {
-	observed, ready := 2, 1
+	observed, pods, ready := 2, 1, 1
 	if !complete {
-		observed, ready = 1, 0
+		observed, pods, ready = 1, 2, 0
 	}
 	return fmt.Sprintf(`{"metadata":{"generation":2},"spec":{"replicas":1,"template":{"spec":{"containers":[{"name":%q,"image":%q}]}}},`+
-		`"status":{"observedGeneration":%d,"updatedReplicas":%d,"readyReplicas":%d,"availableReplicas":%d}}`,
-		container, image, observed, ready, ready, ready)
+		`"status":{"observedGeneration":%d,"replicas":%d,"updatedReplicas":%d,"readyReplicas":%d,"availableReplicas":%d}}`,
+		container, image, observed, pods, ready, ready, ready)
 }
