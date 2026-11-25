@@ -36,7 +36,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 	if limit := spec.Resolved.Settings.Options.Workers.Value; limit > 0 {
 		slots = make(chan struct{}, limit)
 	}
-	execute := func(ctx context.Context, request store.ReconcileRequest) error {
+	execute := func(ctx context.Context, request store.ReconcileRequest, cores float64, leftReady <-chan struct{}) error {
 		if slots != nil {
 			select {
 			case slots <- struct{}{}:
@@ -45,10 +45,29 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				return context.Cause(ctx)
 			}
 		}
-		return h.execute(ctx, input, accepted, entry, request)
+		return h.execute(ctx, input, accepted, entry, request, cores, leftReady)
 	}
 	active := map[string]context.CancelCauseFunc{}
 	releasing := map[string]*atomic.Bool{}
+	// safety: a worker waiting for machine capacity keeps its job reported as running, so it must stop waiting once
+	// another executor holds or finishes the job and leave the outcome to reconciliation.
+	waiting := map[string]context.CancelFunc{}
+	awaitLocal := func(row runstate.NodeRow) <-chan struct{} {
+		waitCtx, stop := context.WithCancel(ctx)
+		waiting[string(row.Ref.NodeID)] = stop
+		if row.ClaimedBy != "" {
+			stop()
+		}
+		return waitCtx.Done()
+	}
+	retire := func(nodeID string) {
+		delete(active, nodeID)
+		delete(releasing, nodeID)
+		if stop := waiting[nodeID]; stop != nil {
+			stop()
+			delete(waiting, nodeID)
+		}
+	}
 	debugged := map[string]int64{}
 	project, decide := h.Project, h.Decide
 	if project == nil {
@@ -85,8 +104,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 		}
 		select {
 		case result := <-completed:
-			delete(active, result.nodeID)
-			delete(releasing, result.nodeID)
+			retire(result.nodeID)
 			if result.err != nil {
 				return RunCompletion{}, result.err
 			}
@@ -104,6 +122,9 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			stop := active[string(row.Ref.NodeID)]
 			if stop != nil && releasing[string(row.Ref.NodeID)] != nil && releasing[string(row.Ref.NodeID)].Load() && row.Status == runstate.StatusDone {
 				stop(context.Canceled)
+			}
+			if stopWaiting := waiting[string(row.Ref.NodeID)]; stopWaiting != nil && (row.ClaimedBy != "" || row.Status == runstate.StatusDone) {
+				stopWaiting()
 			}
 			if row.CancelRequestedAt == nil || row.Status == runstate.StatusDone {
 				continue
@@ -172,10 +193,11 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				releasePending := &atomic.Bool{}
 				releasePending.Store(true)
 				releasing[action.NodeID] = releasePending
+				leftReady := awaitLocal(row)
 				launch(action.NodeID, func(ctx context.Context) error {
 					return h.release(ctx, input, accepted, entry, snapshot.Run, row, action.Kind, func(ctx context.Context, request store.ReconcileRequest) error {
 						releasePending.Store(false)
-						return execute(ctx, request)
+						return execute(ctx, request, row.Execution.Cores, leftReady)
 					})
 				})
 				continue
@@ -207,15 +229,15 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 				continue
 			}
 			if row.ReadyAt != nil || row.ClaimedBy != "" {
+				leftReady := awaitLocal(row)
 				launch(string(row.Ref.NodeID), func(ctx context.Context) error {
-					return execute(ctx, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: runstate.SourceNone})
+					return execute(ctx, store.ReconcileRequest{Ref: row.Ref, Actor: input.Owner, Policy: runstate.SourceNone}, row.Execution.Cores, leftReady)
 				})
 			}
 		}
 		select {
 		case result := <-completed:
-			delete(active, result.nodeID)
-			delete(releasing, result.nodeID)
+			retire(result.nodeID)
 			if result.err != nil {
 				return RunCompletion{}, result.err
 			}
@@ -230,8 +252,7 @@ func (h *OwnerHost) schedule(parent context.Context, input RunInput, accepted Ac
 			return RunCompletion{}, err
 		}
 		if result != nil {
-			delete(active, result.nodeID)
-			delete(releasing, result.nodeID)
+			retire(result.nodeID)
 			if result.err != nil {
 				return RunCompletion{}, result.err
 			}
@@ -371,7 +392,7 @@ func (h *OwnerHost) release(ctx context.Context, input RunInput, accepted Accept
 	return work(ctx)
 }
 
-func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest) error {
+func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted AcceptedRun, entry *source.Entry, request store.ReconcileRequest, cores float64, leftReady <-chan struct{}) error {
 	if h.Executor == nil || entry == nil {
 		return errors.New("self execution requires a node host and acquired entry")
 	}
@@ -380,9 +401,12 @@ func (h *OwnerHost) execute(ctx context.Context, run RunInput, accepted Accepted
 	if err := json.Unmarshal(accepted.Spec, &spec); err != nil {
 		return err
 	}
-	// safety: a busy owner must leave burst jobs ready for other executors.
-	if spec.Request.Request.Burst != nil && !h.executionAdmission.compute.machineHasJobCapacity(ctx) {
-		return deferRelease(ctx)
+	// safety: an owner whose machine cannot fit a burst job leaves it ready for other executors until the machine
+	// fits it or leftReady reports that another executor holds or finished it.
+	if spec.Request.Request.Burst != nil {
+		if err := h.executionAdmission.compute.awaitJobFits(ctx, cores, leftReady); err != nil {
+			return err
+		}
 	}
 
 	result, err := followReconciliation(ctx, h.Store, request, h.WaitNode)

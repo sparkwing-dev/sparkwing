@@ -132,7 +132,7 @@ func TestOwnerExecutionCancellationKeepsIndependentFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fixture.Host.execute(ctx, fixture.Input, fixture.Accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: fixture.Actor, Policy: runstate.SourceNone})
+	err = fixture.Host.execute(ctx, fixture.Input, fixture.Accepted, entry, store.ReconcileRequest{Ref: row.Ref, Actor: fixture.Actor, Policy: runstate.SourceNone}, 0, nil)
 	if !errors.Is(err, independent) {
 		t.Fatalf("cancellation hid executor cleanup failure: %v", err)
 	}

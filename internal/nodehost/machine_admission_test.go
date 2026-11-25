@@ -36,7 +36,7 @@ func TestLocalMachineAdmissionUsesCapturedHomeWithoutReadingMachineConfig(t *tes
 }
 
 func TestMachineCapacityPreflightLeavesMissingDaemonToAdmission(t *testing.T) {
-	if !MachineAdmission(t.TempDir(), "v1.0.0").machineHasJobCapacity(t.Context()) {
+	if !MachineAdmission(t.TempDir(), "v1.0.0").machineFitsJob(t.Context(), 1) {
 		t.Fatal("missing ledger blocked authoritative admission")
 	}
 }

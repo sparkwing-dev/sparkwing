@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"slices"
 	"syscall"
 
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -67,6 +69,42 @@ func queryOptions(opts Options) Options {
 func HasJobCapacity(state wingwire.QueueState) bool {
 	for _, resource := range state.Resources {
 		if (resource.Key == "cores" || resource.Key == "memory") && resource.Capacity > 0 && resource.Available <= 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// JobFits reports whether the ledger would grant a native job charging cores
+// right now, judged from the daemon's own queue state. Zero cores is charged
+// the daemon's default, and a charge above the machine's capacity is judged at
+// that capacity. An idle machine always fits, as it does in the ledger, so an
+// estimate stricter than the ledger can delay a job until the holders finish
+// but never strand it; admission stays authoritative either way.
+func JobFits(state wingwire.QueueState, cores float64) bool {
+	if state.AdmissionMode == string(admission.ModeOff) {
+		return true
+	}
+	if cores <= 0 {
+		cores = admission.DefaultChargeCores
+	}
+	idle := true
+	for _, resource := range state.Resources {
+		idle = idle && resource.Held <= 0
+	}
+	if idle {
+		return true
+	}
+	for _, waiter := range state.Waiters {
+		// safety: the ledger admits host resources first in, first out, so an earlier waiter goes first.
+		if slices.Contains(waiter.WaitingOn, "cores") {
+			return false
+		}
+	}
+	for _, resource := range state.Resources {
+		// safety: Reserved is a share of the whole machine while a budget caps Capacity, so the daemon's
+		// idle clamp is never above Capacity and judging at Capacity is never more lenient than the ledger.
+		if resource.Key == "cores" && resource.Capacity > 0 && resource.Available < min(cores, resource.Capacity) {
 			return false
 		}
 	}

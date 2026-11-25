@@ -1,0 +1,41 @@
+package client
+
+import (
+	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
+)
+
+func TestJobFitsAsksWhetherTheWholeChargeFits(t *testing.T) {
+	twoCores := func(held, available float64) []wingwire.ResourceState {
+		return []wingwire.ResourceState{
+			{Key: "cores", Capacity: 2, Held: held, Reserved: 0.4, Available: available},
+			{Key: "memory", Capacity: 1 << 30, Available: 1 << 30},
+		}
+	}
+	for _, tc := range []struct {
+		name  string
+		state wingwire.QueueState
+		cores float64
+		want  bool
+	}{
+		{"a fraction of a core left refuses a one-core job", wingwire.QueueState{Resources: twoCores(1, 0.6)}, 1, false},
+		{"an undeclared job is charged one core", wingwire.QueueState{Resources: twoCores(1, 0.6)}, 0, false},
+		{"a fraction of a core left admits a job that fits it", wingwire.QueueState{Resources: twoCores(1, 0.6)}, 0.5, true},
+		{"exactly the charge left fits", wingwire.QueueState{Resources: twoCores(0.6, 1)}, 1, true},
+		{"an idle machine fits an oversized job", wingwire.QueueState{Resources: twoCores(0, 1.6)}, 4, true},
+		{"a budget below the machine reserve still refuses a fraction of a core", wingwire.QueueState{Resources: []wingwire.ResourceState{{Key: "cores", Capacity: 1.5, Held: 1, Reserved: 3.2, Available: 0.5}}}, 1, false},
+		{"an oversized job is judged at the budget's capacity", wingwire.QueueState{Resources: []wingwire.ResourceState{{Key: "cores", Capacity: 1.5, Reserved: 3.2, Available: 1.5}, {Key: "db", Capacity: 1, Held: 1}}}, 4, true},
+		{"a busy machine refuses an oversized job", wingwire.QueueState{Resources: twoCores(0.4, 1.2)}, 4, false},
+		{"an earlier waiter on cores goes first", wingwire.QueueState{Resources: twoCores(0.5, 1.1), Waiters: []wingwire.Waiter{{RunID: "ahead", WaitingOn: []string{"cores"}}}}, 1, false},
+		{"a waiter on a semaphore does not hold back host capacity", wingwire.QueueState{Resources: twoCores(0.5, 1.1), Waiters: []wingwire.Waiter{{RunID: "ahead", WaitingOn: []string{"semaphore:db"}}}}, 1, true},
+		{"admission off charges nothing", wingwire.QueueState{AdmissionMode: "off", Resources: twoCores(1.6, 0)}, 1, true},
+		{"a held semaphore keeps the machine from reading idle", wingwire.QueueState{Resources: append(twoCores(0, 0.5), wingwire.ResourceState{Key: "db", Capacity: 1, Held: 1})}, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := JobFits(tc.state, tc.cores); got != tc.want {
+				t.Fatalf("JobFits(%+v, %v) = %t, want %t", tc.state, tc.cores, got, tc.want)
+			}
+		})
+	}
+}

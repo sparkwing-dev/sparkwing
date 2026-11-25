@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -80,7 +81,7 @@ func (l machineLease) Watch(evicted func(wingwire.Evicted), stopped func(wingwir
 	return l.lease.WatchControl(evicted, stopped)
 }
 
-func (a *LocalAdmission) machineHasJobCapacity(ctx context.Context) bool {
+func (a *LocalAdmission) machineFitsJob(ctx context.Context, cores float64) bool {
 	if a == nil {
 		return true
 	}
@@ -90,5 +91,23 @@ func (a *LocalAdmission) machineHasJobCapacity(ctx context.Context) bool {
 	}
 	state, err := wingdclient.Query(ctx, machine.options)
 	// safety: admission remains authoritative when the ledger cannot be observed.
-	return err != nil || wingdclient.HasJobCapacity(state)
+	return err != nil || wingdclient.JobFits(state, cores)
+}
+
+// perf: waiting here on the local daemon, rather than returning to the scheduler, keeps a job the machine
+// cannot fit from reading the controller's snapshot every poll.
+func (a *LocalAdmission) awaitJobFits(ctx context.Context, cores float64, leftReady <-chan struct{}) error {
+	for !a.machineFitsJob(ctx, cores) {
+		timer := time.NewTimer(waiterPoll)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return context.Cause(ctx)
+		case <-leftReady:
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+	}
+	return context.Cause(ctx)
 }
