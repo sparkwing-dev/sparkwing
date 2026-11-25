@@ -341,7 +341,7 @@ func newReviewFixture(t *testing.T) *reviewFixture {
 			fx.tickets = append(fx.tickets, id)
 			return id + ": the ticket", nil
 		},
-		standards: func(context.Context, string) (string, error) { return "STANDARDS TEXT", nil },
+		standards: func(context.Context, []string) (string, error) { return "STANDARDS TEXT", nil },
 		reviewer: func(model string) (reviewer, error) {
 			if model == "fake-security" {
 				return fx.sec, nil
