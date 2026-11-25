@@ -28,27 +28,9 @@ type runnerPoll struct {
 	ObservedAt time.Time `json:"observed_at"`
 }
 
-// runnerPollRefresh bounds how long an unchanged runner observation goes
-// without a rewrite, so the two-minute inventory windows always see it.
-const runnerPollRefresh = 15 * time.Second
-
-// perf: an unchanged observation is rewritten once it is a quarter of the
-// placement liveness window old. A runner polls at least twice per window,
-// because the controller refuses an idle-poll suggestion that does not fit
-// twice, so the observation a hold reads is never older than three quarters
-// of the window.
-func runnerPollRefreshAfter(ctx context.Context) time.Duration {
-	policy, _ := claimPlacementFromContext(ctx)
-	liveness := policy.Liveness
-	if liveness <= 0 {
-		liveness = time.Minute
-	}
-	return min(runnerPollRefresh, liveness/4)
-}
-
 // RecordRunnerPoll stores a live claimant's advertised labels and platform
-// with the store clock. A poll that changes nothing and arrives while the
-// stored observation is still fresh is checked without a write or a lock.
+// with the store clock. A poll that changes nothing is checked read-only and
+// then only restamps the stored observation, with no team lock.
 func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand) error {
 	if err := ValidateRunnerLabels(observation.Labels); err != nil {
 		return err
@@ -61,8 +43,14 @@ func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand)
 	if err != nil {
 		return err
 	}
-	if fresh, err := o.runnerPollFresh(ctx, observation, raw); err != nil || fresh {
+	team, seen, unchanged, err := o.runnerPollUnchanged(ctx, observation, raw)
+	if err != nil {
 		return err
+	}
+	if unchanged {
+		if stamped, err := o.stampRunnerPoll(ctx, observation, team, seen); err != nil || stamped {
+			return err
+		}
 	}
 	return o.s.inTx(ctx, func(tx *storeTx) error {
 		ref := capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix}
@@ -106,40 +94,59 @@ func checkRunnerPollTx(ctx context.Context, tx *storeTx, observation UnitDemand)
 	return principal.Capability, nil
 }
 
-// runnerPollFresh reports, from a read-only snapshot that applies the same
-// refusals as the write, whether the stored observation already says what
-// this poll would write and is younger than the refresh interval.
-func (o *Operator) runnerPollFresh(ctx context.Context, observation UnitDemand, labels []byte) (_ bool, err error) {
+// runnerPollUnchanged applies the same refusals as the locked write in a
+// read-only snapshot and reports whether the stored observation already says
+// what this poll would write, with the stored last-seen time to stamp from.
+func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDemand, labels []byte) (_ string, _ int64, _ bool, err error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
-		return false, err
+		return "", 0, false, err
 	}
 	defer func() { err = errors.Join(err, tx.Rollback()) }()
 	c, err := checkRunnerPollTx(ctx, tx, observation)
 	if err != nil {
-		return false, err
+		return "", 0, false, err
 	}
 	var advertised, body []byte
-	if err := tx.QueryRowContext(ctx, `SELECT advertised_labels_json,claim_observation_json FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, c.Team, observation.CapabilityPrefix).Scan(&advertised, &body); err != nil {
-		return false, err
+	var seen sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT advertised_labels_json,claim_observation_json,last_used_at FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, c.Team, observation.CapabilityPrefix).Scan(&advertised, &body, &seen); err != nil {
+		return "", 0, false, err
 	}
 	var stored runnerPoll
-	if len(body) == 0 || !bytes.Equal(advertised, labels) || json.Unmarshal(body, &stored) != nil {
-		return false, nil
-	}
-	age := tx.now(ctx).Sub(stored.ObservedAt)
-	if tx.err != nil {
-		return false, tx.err
-	}
-	if age < 0 || age >= runnerPollRefreshAfter(ctx) {
-		return false, nil
+	if len(body) == 0 || !seen.Valid || !bytes.Equal(advertised, labels) || json.Unmarshal(body, &stored) != nil {
+		return c.Team, 0, false, nil
 	}
 	want, err := json.Marshal(observation)
 	if err != nil {
-		return false, err
+		return "", 0, false, err
 	}
 	have, err := json.Marshal(stored.UnitDemand)
-	return err == nil && bytes.Equal(want, have), err
+	return c.Team, seen.Int64, err == nil && bytes.Equal(want, have), err
+}
+
+// perf: an unchanged poll restamps its observation in one statement instead
+// of the locked write, so every poll still counts toward runner liveness.
+//
+// safety: the update applies only while last_used_at still holds the value
+// the snapshot read, so a concurrent poll or award makes it miss and fall
+// back to the locked write rather than overwrite a newer observation.
+func (o *Operator) stampRunnerPoll(ctx context.Context, observation UnitDemand, team string, seen int64) (bool, error) {
+	var stamped bool
+	err := o.s.inTx(ctx, func(tx *storeTx) error {
+		now := tx.now(ctx)
+		body, err := json.Marshal(runnerPoll{UnitDemand: observation, ObservedAt: now})
+		if err != nil {
+			return err
+		}
+		result, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=? AND last_used_at=?`, body, now.UnixNano(), team, observation.CapabilityPrefix, seen)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		stamped = rows == 1
+		return err
+	})
+	return stamped, err
 }
 
 // RegisteredAgent is a live agent credential of a team, online or not.

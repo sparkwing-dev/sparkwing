@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // StatementCount is what the store sent to SQLite between two reads of a counter.
@@ -111,4 +113,39 @@ func (c *countingConn) PrepareContext(ctx context.Context, query string) (driver
 func (c *countingConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	c.counter.begin(opts.ReadOnly)
 	return c.statementCachingConn.BeginTx(ctx, opts)
+}
+
+// ClaimableUnitQueuedPlan is PostgreSQL's plan for the empty-poll existence check over every unit kind,
+// planned with sequential scans disabled so that only an index the predicates match avoids one.
+func ClaimableUnitQueuedPlan(t *testing.T, s *Store, team string) string {
+	t.Helper()
+	if s.dialect != DialectPostgres {
+		t.Skip("the plan guard reads the PostgreSQL planner")
+	}
+	query, args := claimableUnitQueuedSQL(team, []capability.UnitKind{capability.UnitNode, capability.UnitEval, capability.UnitTrigger, capability.UnitPlan})
+	tx, err := s.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(t.Context(), `SET LOCAL enable_seqscan = off`); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := tx.QueryContext(t.Context(), `EXPLAIN `+rewritePh(DialectPostgres, query), args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var plan []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, line)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(plan, "\n")
 }

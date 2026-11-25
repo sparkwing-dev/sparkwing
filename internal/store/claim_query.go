@@ -867,6 +867,16 @@ func claimInputsForTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds
 // but the team scope and the index predicate dropped, so any unit the search
 // can return for this claimant makes this true in the same snapshot.
 func claimableUnitQueuedTx(ctx context.Context, tx *storeTx, team string, kinds []capability.UnitKind) (bool, error) {
+	query, args := claimableUnitQueuedSQL(team, kinds)
+	if query == "" {
+		return false, nil
+	}
+	var queued int
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&queued)
+	return queued == 1, err
+}
+
+func claimableUnitQueuedSQL(team string, kinds []capability.UnitKind) (string, []any) {
 	var checks, triggerKinds []string
 	var args []any
 	for _, kind := range kinds {
@@ -889,11 +899,9 @@ func claimableUnitQueuedTx(ctx context.Context, tx *storeTx, team string, kinds 
 		}
 	}
 	if len(checks) == 0 {
-		return false, nil
+		return "", nil
 	}
-	var queued int
-	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN `+strings.Join(checks, ` OR `)+` THEN 1 ELSE 0 END`, args...).Scan(&queued)
-	return queued == 1, err
+	return `SELECT CASE WHEN ` + strings.Join(checks, ` OR `) + ` THEN 1 ELSE 0 END`, args
 }
 
 func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []capability.UnitKind, q *claimSQL) (string, error) {

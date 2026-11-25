@@ -3,11 +3,13 @@ package store_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
 var nodeKinds = []capability.UnitKind{capability.UnitNode}
@@ -20,7 +22,7 @@ func claimNode(ctx context.Context, f *store.RankingFixture, prefix string) (sto
 	return f.Store.AsOperator().ClaimUnit(ctx, store.UnitDemand{CapabilityPrefix: prefix, Kinds: nodeKinds, Labels: []string{"team-4cpu"}})
 }
 
-func TestEmptyClaimPollIsReadOnlyWhateverTheTeamsRunnerCount(t *testing.T) {
+func TestEmptyClaimPollTakesNoTeamLockWhateverTheTeamsRunnerCount(t *testing.T) {
 	f := rankingFixture(t, true)
 	f.ClearQueue(t)
 	ctx := t.Context()
@@ -45,43 +47,34 @@ func TestEmptyClaimPollIsReadOnlyWhateverTheTeamsRunnerCount(t *testing.T) {
 	f.At(2 * time.Second)
 	crowded := emptyPoll()
 	t.Logf("empty poll alone %+v, beside %d live runners %+v", alone, len(others), crowded)
-	if alone.WriteTransactions != 0 || alone.Writes != 0 || alone.TeamLocks != 0 {
-		t.Fatalf("an unchanged empty poll wrote or locked: %+v", alone)
+	if alone.TeamLocks != 0 || alone.WriteTransactions > 1 || alone.Writes > 1 {
+		t.Fatalf("an unchanged empty poll locked the team or wrote more than its timestamp: %+v", alone)
 	}
 	if crowded != alone {
 		t.Fatalf("an empty poll's work grew with the team's live runners: alone %+v, crowded %+v", alone, crowded)
 	}
 }
 
-func TestUnchangedRunnerPollIsRewrittenWithinAQuarterOfLiveness(t *testing.T) {
-	for _, test := range []struct{ liveness, refresh time.Duration }{
-		{20 * time.Second, 5 * time.Second},
-		{30 * time.Second, 7500 * time.Millisecond},
-		{time.Minute, 15 * time.Second},
-		{time.Hour, 15 * time.Second},
-	} {
-		t.Run(test.liveness.String(), func(t *testing.T) {
-			f := rankingFixture(t, true)
-			ctx := preferRunner(t.Context(), test.liveness)
-			count := f.Store.TestOnlyCountStatements(t)
-			poll := func(at time.Duration, slots int) store.StatementCount {
-				t.Helper()
-				f.At(at)
-				count.Take()
-				f.PollIn(ctx, t, f.Self, slots)
-				return count.Take()
-			}
-			poll(0, 1)
-			if got := poll(test.refresh-time.Millisecond, 1); got.Writes != 0 {
-				t.Fatalf("an unchanged poll inside the refresh interval wrote: %+v", got)
-			}
-			if got := poll(test.refresh, 1); got.Writes == 0 {
-				t.Fatalf("an unchanged poll at the refresh interval did not write: %+v", got)
-			}
-			if got := poll(test.refresh+time.Millisecond, 0); got.Writes == 0 {
-				t.Fatalf("a changed poll inside the refresh interval did not write: %+v", got)
-			}
-		})
+func TestPreferenceHoldLastsALivenessWindowAfterTheLastOfFrequentPolls(t *testing.T) {
+	const liveness = 30 * time.Second
+	f := rankingFixture(t, true)
+	if err := f.Rank(t, f.Admin); err != nil {
+		t.Fatal(err)
+	}
+	ctx := preferRunner(t.Context(), liveness)
+	last := -time.Second
+	for at := last; at < 30*time.Second; at += 2 * time.Second {
+		f.At(at)
+		f.PollIn(ctx, t, f.Self, 1)
+		last = at
+	}
+	f.At(last + liveness - time.Millisecond)
+	if claim, err := claimNode(ctx, f, f.Launcher); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the hold lapsed before a full liveness window had passed since the preferred runner's last poll: %+v %v", claim, err)
+	}
+	f.At(last + liveness + time.Millisecond)
+	if claim, err := claimNode(ctx, f, f.Launcher); err != nil || claim.NodeID != "job" {
+		t.Fatalf("the hold outlived the preferred runner's liveness: %+v %v", claim, err)
 	}
 }
 
@@ -158,4 +151,18 @@ func TestQueuedWorkIsAlwaysOfferedToClaimantsThatCanSeeIt(t *testing.T) {
 		wantNone(t, f, other, capability.UnitNode)
 		wantAward(t, f, f.Self, capability.UnitNode, "job")
 	})
+}
+
+func TestEmptyPollExistenceCheckUsesThePartialClaimIndexesOnPostgres(t *testing.T) {
+	plan := store.ClaimableUnitQueuedPlan(t, storetest.OpenPostgres(t), "a")
+	t.Log(plan)
+	if strings.Contains(plan, "Seq Scan") {
+		t.Fatalf("the existence check scans a table instead of a partial claim index:\n%s", plan)
+	}
+	// A team-prefixed index without the claim predicate would still read the team's whole history.
+	for _, index := range []string{"using idx_nodes_claim_", "using idx_eval_units_claimable ", "using idx_triggers_claim_"} {
+		if !strings.Contains(plan, index) {
+			t.Fatalf("the plan does not use a partial claim index (%s):\n%s", strings.TrimPrefix(index, "using "), plan)
+		}
+	}
 }
