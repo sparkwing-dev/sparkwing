@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net/http"
 	"syscall"
 
@@ -95,12 +96,34 @@ func JobFits(state wingwire.QueueState, cores float64) bool {
 	if idle {
 		return true
 	}
+	host, ok := hostCores(state)
+	if !ok || host.Capacity <= 0 {
+		return true
+	}
+	// safety: the ledger counts whole millicores, rounding a request half away from zero, so a charge that rounds
+	// to the free room fits.
+	milli := func(v float64) int64 { return int64(math.Round(v * 1000)) }
+	available, room := milli(host.Available), milli(host.Available)+milli(host.Held)
+	grantable := milli(host.Capacity) - milli(host.Reserved)
+	if state.Budget != nil && state.Budget.MachineCores > 0 {
+		grantable = min(milli(state.Budget.MachineCores)-milli(host.Reserved), milli(state.Budget.Cores))
+	}
+	// safety: the daemon clamps a charge to its idle grantable cores. The ledger's room (Available plus Held) bounds
+	// that clamp from below only while the snapshot agrees with the machine's grantable cores; a room above them,
+	// as while a capacity refresh still shows the previous headroom, leaves the clamp unknown.
+	if room > grantable {
+		return true
+	}
+	return available >= min(milli(cores), room)
+}
+
+// safety: the first "cores" row is the host CPU row, because the daemon lists host rows before semaphore rows and a
+// semaphore may share the name.
+func hostCores(state wingwire.QueueState) (wingwire.ResourceState, bool) {
 	for _, resource := range state.Resources {
-		// safety: the daemon clamps a charge to its idle grantable cores, which are never below the ledger's current
-		// room (Available plus Held), so that room bounds the charge from below without the daemon's private state.
-		if resource.Key == "cores" && resource.Capacity > 0 && resource.Available < min(cores, resource.Available+resource.Held) {
-			return false
+		if resource.Key == "cores" {
+			return resource, true
 		}
 	}
-	return true
+	return wingwire.ResourceState{}, false
 }
