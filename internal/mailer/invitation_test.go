@@ -34,7 +34,7 @@ func TestInvitationMessageStatesTheInvitation(t *testing.T) {
 	if m.To != "invitee@example.com" {
 		t.Errorf("To = %q", m.To)
 	}
-	if m.Subject != "Ada Lovelace invited you to Platform Ops on Sparkwing" {
+	if m.Subject != "You're invited to a team on Sparkwing" {
 		t.Errorf("Subject = %q", m.Subject)
 	}
 	for _, body := range []struct{ name, s string }{{"text", m.Text}, {"html", m.HTML}} {
@@ -87,7 +87,32 @@ func TestInvitationMessageSanitizesNames(t *testing.T) {
 			t.Errorf("%s carries the whole 200-character name", part)
 		}
 	}
-	if !strings.Contains(msg.Subject, "OpsTeam") {
-		t.Errorf("subject = %q, want the team name with its bidi marks removed", msg.Subject)
+	if !strings.Contains(msg.Text, `"OpsTeam"`) {
+		t.Errorf("text = %q, want the quoted team name with its bidi marks removed", msg.Text)
+	}
+}
+
+// The message passes DKIM and DMARC as Sparkwing, so text an inviter or team
+// admin chose stays out of the subject and is quoted as a label in the body.
+func TestInvitationSubjectCarriesNoUserText(t *testing.T) {
+	inv := testInvitation()
+	inv.InviterName = "Billing Dept: invoice overdue"
+	inv.TeamName = "pay at evil.example/inv"
+	m := mustInvitation(t, inv)
+
+	for _, name := range []string{inv.InviterName, inv.TeamName} {
+		if strings.Contains(m.Subject, name) {
+			t.Errorf("Subject = %q carries user text %q", m.Subject, name)
+		}
+	}
+	for _, body := range []struct{ name, s string }{
+		{"text", m.Text},
+		{"html", m.HTML},
+	} {
+		for _, want := range []string{`"Billing Dept: invoice overdue"`, `"pay at evil.example/inv"`} {
+			if !strings.Contains(body.s, want) {
+				t.Errorf("%s body lacks the quoted name %s", body.name, want)
+			}
+		}
 	}
 }

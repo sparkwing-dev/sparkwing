@@ -31,7 +31,7 @@ type browserFixture struct {
 	token  string
 	sessID string
 	csrf   string
-	logs   *syncBuffer
+	logs   *controller.SyncBuffer
 }
 
 func newBrowserFixture(t *testing.T, d *controller.Dashboard, opts ...store.Option) *browserFixture {
@@ -41,7 +41,7 @@ func newBrowserFixture(t *testing.T, d *controller.Dashboard, opts ...store.Opti
 
 func newDeploymentBrowserFixture(t *testing.T, cfg deployment.Config, d *controller.Dashboard, opts ...store.Option) *browserFixture {
 	t.Helper()
-	logs := &syncBuffer{}
+	logs := &controller.SyncBuffer{}
 	var srv *controller.Server
 	composition := store.WithPolicies(func(st *store.Store) (store.Policies, error) {
 		srv = controller.NewDeployment(st, cfg, slog.New(slog.NewTextHandler(logs, nil))).WithSecretsCipher(testCipher(t))

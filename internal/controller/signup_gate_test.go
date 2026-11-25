@@ -10,7 +10,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -299,7 +298,7 @@ func (failingMail) Send(_ context.Context, m mailer.Message) error {
 }
 
 func TestFailedAdmissionEmailLogsNoAddress(t *testing.T) {
-	var logs syncBuffer
+	var logs controller.SyncBuffer
 	f := newIdentityFixtureWith(t, fixtureOpts{
 		logger: slog.New(slog.NewTextHandler(&logs, nil)),
 		configure: func(s *controller.Server) {
@@ -435,23 +434,6 @@ func TestYoungGitHubAccountsAreWaitlistedAtSignIn(t *testing.T) {
 	}
 }
 
-type syncBuffer struct {
-	mu sync.Mutex
-	b  strings.Builder
-}
-
-func (s *syncBuffer) Write(p []byte) (int, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.Write(p)
-}
-
-func (s *syncBuffer) String() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.b.String()
-}
-
 func TestAnOperatorAccountIsAdmittedAtSignIn(t *testing.T) {
 	f := newIdentityFixture(t)
 	f.setSignUp(map[string]any{"mode": "waitlist", "reason": "launch"})
@@ -473,7 +455,7 @@ func TestAnOperatorAccountIsAdmittedAtSignIn(t *testing.T) {
 }
 
 func TestFailedInvitationEmailLogsNoAddress(t *testing.T) {
-	var logs syncBuffer
+	var logs controller.SyncBuffer
 	f := newIdentityFixtureWith(t, fixtureOpts{
 		logger:    slog.New(slog.NewTextHandler(&logs, nil)),
 		configure: func(s *controller.Server) { s.WithMailer(failingMail{}) },

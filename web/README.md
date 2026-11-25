@@ -31,6 +31,12 @@ wraps its metadata and actions to keep controls reachable on phone screens.
 The run-list toolbar also wraps at 375px, including Start a run. Runs show their
 sealed trust class, including asserted runs that name the default branch.
 
+The runs list shows loading rows until its first response arrives, so "No runs
+yet" appears only after the controller answers with no runs. A read that outlives
+its deadline says the controller did not answer and may be busy. Home, Runs and
+Fleet skip a refresh while the previous one is still pending, and Home allows its
+overview read 60 seconds. Fleet keeps its last inventory when a refresh times out.
+
 Run submission refusals show an explanation and remedy. Server errors in run
 lists, details and submission show retry guidance, the support contact and the
 response request ID, while keeping backend error bodies out of the page. A

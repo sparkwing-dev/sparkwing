@@ -399,7 +399,9 @@ type Listeners struct {
 // leaves them to the caller. On return it stops accepting connections and
 // waits up to controllerShutdownBudget, shared by every listener, for
 // in-flight requests to drain; it then stops waiting without closing the
-// requests still running.
+// requests still running. It returns only after its background workers and
+// listener loops have exited; a request still running past the drain budget
+// may write after it returns.
 func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	metricsSrv := s.metricsServer()
 	switch {
@@ -440,46 +442,36 @@ func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	s.loadEgressUsage(ctx)
 	s.reconcileOwnedRuns(ctx)
 
-	sealingDone := make(chan struct{})
-	go func() { defer close(sealingDone); s.RunStartupSealing(ctx) }()
-	go s.runReaper(ctx, 10*time.Second)
-	go s.runCreditSampler(ctx, creditSampleInterval)
-	go s.runCronTick(ctx, cronTickOffer)
-	go s.runStorageMaintenance(ctx, StorageMaintenanceInterval)
-	go s.runBucketCeiling(ctx)
-	go s.runTeamDeletions(ctx, teamDeletionInterval)
-	go s.runBilling(ctx, billingInterval)
-	go s.runLicenseAlarm(ctx, licenseAlarmInterval)
-	actionsDone := make(chan struct{})
-	go func() { defer close(actionsDone); s.runActionsDispatcher(ctx) }()
-	deliveryDone := make(chan struct{})
-	go func() {
-		defer close(deliveryDone)
+	var workers sync.WaitGroup
+	defer func() {
+		stopWorkers()
+		workers.Wait()
+	}()
+	workers.Go(func() { s.RunStartupSealing(ctx) })
+	workers.Go(func() { s.runReaper(ctx, 10*time.Second) })
+	workers.Go(func() { s.runCreditSampler(ctx, creditSampleInterval) })
+	workers.Go(func() { s.runCronTick(ctx, cronTickOffer) })
+	workers.Go(func() { s.runStorageMaintenance(ctx, StorageMaintenanceInterval) })
+	workers.Go(func() { s.runBucketCeiling(ctx) })
+	workers.Go(func() { s.runTeamDeletions(ctx, teamDeletionInterval) })
+	workers.Go(func() { s.runBilling(ctx, billingInterval) })
+	workers.Go(func() { s.runLicenseAlarm(ctx, licenseAlarmInterval) })
+	workers.Go(func() { s.runActionsDispatcher(ctx) })
+	workers.Go(func() {
 		if err := s.DeliverRunEvents(ctx); err != nil {
 			s.logger.Error("run event delivery stopped", "err", err)
 		}
-	}()
-	inboxDone := make(chan struct{})
-	go func() {
-		defer close(inboxDone)
-		s.runGitHubInbox(ctx)
-	}()
-	defer func() {
-		stopWorkers()
-		<-sealingDone
-		<-inboxDone
-		<-actionsDone
-		<-deliveryDone
-	}()
+	})
+	workers.Go(func() { s.runGitHubInbox(ctx) })
 
 	errCh := make(chan error, len(servers))
 	for _, l := range servers {
-		go func() {
+		workers.Go(func() {
 			s.logger.Info("controller listening", "addr", l.ln.Addr().String())
 			if err := l.srv.Serve(l.ln); !errors.Is(err, http.ErrServerClosed) {
 				errCh <- fmt.Errorf("controller listener %s: %w", l.ln.Addr(), err)
 			}
-		}()
+		})
 	}
 
 	var err error

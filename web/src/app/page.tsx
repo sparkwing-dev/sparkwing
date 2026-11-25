@@ -1,7 +1,7 @@
 "use client";
 
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   type Approval,
@@ -28,43 +28,55 @@ import Tooltip from "@/components/Tooltip";
 import { Sparkline } from "@/components/PipelineOverview";
 import { hasTimestamp, runTimestamp } from "@/lib/runTime";
 import { recentPipelineTriage } from "@/lib/homeTriage";
+import { startPoll } from "@/lib/poll";
 
 const POLL_MS = 15000;
 const OVERVIEW_RUN_LIMIT = 1000;
+// The overview reads up to a thousand runs, which a busy controller can take well
+// past the ordinary 10 s read deadline to answer.
+const OVERVIEW_TIMEOUT_MS = 60_000;
 
 export default function Home() {
   const [runs, setRuns] = useState<Run[]>([]);
-  const [approvals, setApprovals] = useState<Approval[]>([]);
+  // null until the first successful read: unknown, not "none pending".
+  const [approvals, setApprovals] = useState<Approval[] | null>(null);
   const [anchorMs, setAnchorMs] = useState(DEFAULT_ANCHOR_MS);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [includeFeatureBranches, setIncludeFeatureBranches] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  // Only the newest refresh may update the page: an older one may belong to a
+  // comparison the reader left, even one they have since returned to.
+  const latestRefresh = useRef(0);
 
   const refresh = useCallback(async () => {
+    const request = ++latestRefresh.current;
+    const isLatest = () => request === latestRefresh.current;
     const sinceHrs = Math.ceil((anchorMs + WEEK_MS) / (60 * 60 * 1000)) + 24;
-    const [rs, ap] = await Promise.all([
-      getRuns({ since: `${sinceHrs}h`, limit: OVERVIEW_RUN_LIMIT }),
-      getPendingApprovals(),
-    ]);
-    setRuns(rs);
-    setApprovals(ap);
-    setNow(Date.now());
-    setLoaded(true);
+    // Approvals only fill Needs Attention, so the overview does not wait on them.
+    const approvalsRead = getPendingApprovals().then((ap) => {
+      if (ap && isLatest()) setApprovals(ap);
+    });
+    try {
+      const rs = await getRuns(
+        { since: `${sinceHrs}h`, limit: OVERVIEW_RUN_LIMIT },
+        { timeoutMs: OVERVIEW_TIMEOUT_MS },
+      );
+      if (isLatest()) {
+        setRuns(rs);
+        setNow(Date.now());
+        setLoaded(true);
+        setLoadError(null);
+      }
+    } catch (e) {
+      if (isLatest()) {
+        setLoadError(`${e instanceof Error ? e.message : String(e)} Retrying automatically.`);
+      }
+    }
+    await approvalsRead;
   }, [anchorMs]);
 
-  useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) void refresh();
-    });
-    const i = window.setInterval(() => {
-      if (!document.hidden) refresh();
-    }, POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(i);
-    };
-  }, [refresh]);
+  useEffect(() => startPoll(refresh, POLL_MS), [refresh]);
 
   const overview = useMemo(
     () => summarize(runs, now, anchorMs),
@@ -94,9 +106,20 @@ export default function Home() {
       </div>
       <div className="flex items-center gap-2 mb-5">
         <span className="text-xs text-[var(--muted)]">compared to</span>
-        <AnchorSelect value={anchorMs} onChange={setAnchorMs} />
+        <AnchorSelect
+          value={anchorMs}
+          onChange={(ms) => {
+            setAnchorMs(ms);
+            setLoadError(null);
+          }}
+        />
       </div>
 
+      {loadError && (
+        <div role="alert" className="mb-3 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--warning)]">
+          {loadError}
+        </div>
+      )}
       {!loaded ? (
         <div role="status" aria-label="Loading overview" className="animate-pulse motion-reduce:animate-none">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
@@ -395,10 +418,10 @@ function NeedsAttention({
   approvals,
   running,
 }: {
-  approvals: Approval[];
+  approvals: Approval[] | null;
   running: number;
 }) {
-  const nothing = approvals.length === 0;
+  const nothing = approvals !== null && approvals.length === 0;
   return (
     <div className="mb-6">
       <div className="flex items-baseline gap-2 mb-2">
@@ -414,7 +437,11 @@ function NeedsAttention({
           </Link>
         )}
       </div>
-      {nothing ? (
+      {approvals === null ? (
+        <Panel>
+          <span className="text-sm text-[var(--muted)]">Checking for pending approvals…</span>
+        </Panel>
+      ) : nothing ? (
         <Panel>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex items-center gap-2 text-sm">

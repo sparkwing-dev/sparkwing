@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -330,21 +331,21 @@ func TestStartupSealingNoKeyAuditWarnsEachFailure(t *testing.T) {
 		if _, err := db.ExecContext(t.Context(), `CREATE TRIGGER reject_startup_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(FAIL,'private-audit-error-canary'); END`); err != nil {
 			t.Fatal(err)
 		}
-		var logs bytes.Buffer
+		var logs SyncBuffer
 		s.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		done := make(chan struct{})
 		go func() { defer close(done); s.RunStartupSealing(ctx) }()
 		synctest.Wait()
-		if bytes.Count(logs.Bytes(), []byte(`"level":"WARN"`)) != 1 {
+		if strings.Count(logs.String(), `"level":"WARN"`) != 1 {
 			cancel()
 			<-done
 			t.Fatalf("first warning: %s", logs.String())
 		}
 		time.Sleep(time.Second)
 		synctest.Wait()
-		if bytes.Count(logs.Bytes(), []byte(`"level":"WARN"`)) != 2 {
+		if strings.Count(logs.String(), `"level":"WARN"`) != 2 {
 			cancel()
 			<-done
 			t.Fatalf("second warning: %s", logs.String())
@@ -353,7 +354,7 @@ func TestStartupSealingNoKeyAuditWarnsEachFailure(t *testing.T) {
 			t.Fatal(err)
 		}
 		<-done
-		if bytes.Count(logs.Bytes(), []byte(`"reason":"audit_error"`)) != 2 || bytes.Contains(logs.Bytes(), []byte("private-audit-error-canary")) || bytes.Count(logs.Bytes(), []byte(`"outcome":"skipped"`)) != 1 {
+		if strings.Count(logs.String(), `"reason":"audit_error"`) != 2 || strings.Contains(logs.String(), "private-audit-error-canary") || strings.Count(logs.String(), `"outcome":"skipped"`) != 1 {
 			t.Fatalf("unsafe or missing logs: %s", logs.String())
 		}
 	})
