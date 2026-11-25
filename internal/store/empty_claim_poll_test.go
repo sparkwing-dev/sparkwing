@@ -86,7 +86,7 @@ func TestPreferenceHoldStaysWhileThePreferredRunnerPollsAtTheSlowestAdvisedInter
 				t.Fatal(err)
 			}
 			ctx := preferRunner(t.Context(), liveness)
-			// The controller refuses an idle-poll suggestion whose jittered interval does not fit twice in the liveness window.
+			// safety: the controller refuses an idle-poll suggestion whose jittered interval does not fit twice in liveness.
 			interval := liveness / 2
 			last := -time.Second
 			for at := last; at < 3*time.Minute; at += interval {
@@ -159,10 +159,23 @@ func TestEmptyPollExistenceCheckUsesThePartialClaimIndexesOnPostgres(t *testing.
 	if strings.Contains(plan, "Seq Scan") {
 		t.Fatalf("the existence check scans a table instead of a partial claim index:\n%s", plan)
 	}
-	// A team-prefixed index without the claim predicate would still read the team's whole history.
+	// safety: a team-prefixed index without the claim predicate would still read the team's whole history.
 	for _, index := range []string{"using idx_nodes_claim_", "using idx_eval_units_claimable ", "using idx_triggers_claim_"} {
 		if !strings.Contains(plan, index) {
 			t.Fatalf("the plan does not use a partial claim index (%s):\n%s", strings.TrimPrefix(index, "using "), plan)
 		}
+	}
+}
+
+func TestAnAwardBetweenAnUnchangedPollsReadAndItsRestampKeepsTheConsumedSlot(t *testing.T) {
+	f := rankingFixture(t, true)
+	ctx := preferRunner(t.Context(), 30*time.Second)
+	f.At(0)
+	f.PollIn(ctx, t, f.Self, 2)
+	f.At(2 * time.Second)
+	slots := 2
+	stamped, stored := f.Store.TestOnlyStampAfterAward(ctx, t, store.UnitDemand{CapabilityPrefix: f.Self, Kinds: nodeKinds, Labels: []string{"team-4cpu"}, FreeSlots: &slots})
+	if stamped || stored != 1 {
+		t.Fatalf("the restamp applied=%t over an award and left %d free slots, want it to miss and leave 1", stamped, stored)
 	}
 }

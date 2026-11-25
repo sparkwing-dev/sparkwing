@@ -95,7 +95,7 @@ func (o *Operator) searchClaimUnit(ctx context.Context, demand UnitDemand) (clai
 	if err != nil {
 		return claimHead{}, err
 	}
-	// Bound claimants already look up their one run directly, and the Cloud
+	// perf: bound claimants already look up their one run directly, and the Cloud
 	// launcher's search across teams carries its own fairness bounds.
 	if current.Cloud == 0 && current.BindRun == "" && len(current.Pushes) == 0 {
 		queued, err := claimableUnitQueuedTx(ctx, tx, current.Team, kinds)

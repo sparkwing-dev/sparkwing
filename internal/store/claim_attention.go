@@ -70,7 +70,6 @@ func (o *Operator) RecordRunnerPoll(ctx context.Context, observation UnitDemand)
 	})
 }
 
-// checkRunnerPollTx refuses a poll the claimant may not record.
 func checkRunnerPollTx(ctx context.Context, tx *storeTx, observation UnitDemand) (capability.Capability, error) {
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix}, false)
 	if err != nil {
@@ -94,43 +93,46 @@ func checkRunnerPollTx(ctx context.Context, tx *storeTx, observation UnitDemand)
 	return principal.Capability, nil
 }
 
-// runnerPollUnchanged applies the same refusals as the locked write in a
-// read-only snapshot and reports whether the stored observation already says
-// what this poll would write, with the stored last-seen time to stamp from.
-func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDemand, labels []byte) (_ string, _ int64, _ bool, err error) {
+// safety: the read-only snapshot applies the same refusals as the locked write, so a poll skipping that write
+// is refused exactly when the write would have refused it.
+func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDemand, labels []byte) (_ string, _ runnerPollStamp, _ bool, err error) {
 	tx, err := o.s.beginSnapshotReadTx(ctx)
 	if err != nil {
-		return "", 0, false, err
+		return "", runnerPollStamp{}, false, err
 	}
 	defer func() { err = errors.Join(err, tx.Rollback()) }()
 	c, err := checkRunnerPollTx(ctx, tx, observation)
 	if err != nil {
-		return "", 0, false, err
+		return "", runnerPollStamp{}, false, err
 	}
 	var advertised, body []byte
 	var seen sql.NullInt64
 	if err := tx.QueryRowContext(ctx, `SELECT advertised_labels_json,claim_observation_json,last_used_at FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, c.Team, observation.CapabilityPrefix).Scan(&advertised, &body, &seen); err != nil {
-		return "", 0, false, err
+		return "", runnerPollStamp{}, false, err
 	}
 	var stored runnerPoll
 	if len(body) == 0 || !seen.Valid || !bytes.Equal(advertised, labels) || json.Unmarshal(body, &stored) != nil {
-		return c.Team, 0, false, nil
+		return c.Team, runnerPollStamp{}, false, nil
 	}
 	want, err := json.Marshal(observation)
 	if err != nil {
-		return "", 0, false, err
+		return "", runnerPollStamp{}, false, err
 	}
 	have, err := json.Marshal(stored.UnitDemand)
-	return c.Team, seen.Int64, err == nil && bytes.Equal(want, have), err
+	return c.Team, runnerPollStamp{lastUsed: seen.Int64, body: body}, err == nil && bytes.Equal(want, have), err
 }
 
-// perf: an unchanged poll restamps its observation in one statement instead
-// of the locked write, so every poll still counts toward runner liveness.
+// safety: a restamp must still find the stored observation and last-seen time the unchanged poll read.
+type runnerPollStamp struct {
+	lastUsed int64
+	body     []byte
+}
+
+// perf: an unchanged poll restamps its observation in one statement instead of the locked write.
 //
-// safety: the update applies only while last_used_at still holds the value
-// the snapshot read, so a concurrent poll or award makes it miss and fall
-// back to the locked write rather than overwrite a newer observation.
-func (o *Operator) stampRunnerPoll(ctx context.Context, observation UnitDemand, team string, seen int64) (bool, error) {
+// safety: the update applies only while the row holds the observation and last_used_at the snapshot read, so a
+// concurrent poll, or an award lowering the free slots, makes it miss and fall back to the locked write.
+func (o *Operator) stampRunnerPoll(ctx context.Context, observation UnitDemand, team string, seen runnerPollStamp) (bool, error) {
 	var stamped bool
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		now := tx.now(ctx)
@@ -138,7 +140,7 @@ func (o *Operator) stampRunnerPoll(ctx context.Context, observation UnitDemand, 
 		if err != nil {
 			return err
 		}
-		result, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=? AND last_used_at=?`, body, now.UnixNano(), team, observation.CapabilityPrefix, seen)
+		result, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=? AND last_used_at=? AND claim_observation_json=?`, body, now.UnixNano(), team, observation.CapabilityPrefix, seen.lastUsed, seen.body)
 		if err != nil {
 			return err
 		}
