@@ -935,6 +935,10 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 	}); err != nil {
 		return err
 	}
+	return d.confirmRollout(ctx, env, phase, digest)
+}
+
+func (d *deployer) confirmRollout(ctx context.Context, env deployEnv, phase deployPhase, digest string) error {
 	deployment := phase.deployment(env)
 	return d.act(ctx, "wait for deployment "+env.Namespace+"/"+deployment+" to roll out "+digest, func() error {
 		if _, err := d.kubectl(ctx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout="+d.cfg.RolloutTimeout.String()); err != nil {

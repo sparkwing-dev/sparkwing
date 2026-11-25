@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -262,7 +263,7 @@ func (d *deployer) stage(ctx context.Context, images deployImages) (stagingGateR
 		var err error
 		rec, _, err = d.deployTo(workCtx, d.cfg.Staging, images)
 		if err == nil {
-			d.movePrepullTag(ctx, d.cfg.Staging, images.Runner)
+			d.movePrepullTag(ctx, d.cfg.Staging, images.Runner, func() error { return d.confirmLauncher(ctx, d.cfg.Staging, rec, images.Runner) })
 		}
 		return err
 	}
@@ -383,7 +384,7 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 		d.tools.say(ctx, "dry-run: on a failed production deploy or smoke, would renew the role session and revert this run's GitOps commits newest first only if the controller schema did not increase; otherwise retain candidate images and record a Bitwing finding requiring roll forward")
 	}
 	if err == nil {
-		d.movePrepullTag(ctx, env, images.Runner)
+		d.movePrepullTag(ctx, env, images.Runner, nil)
 		return rec, nil
 	}
 	if len(rec.Changes) == 0 {
@@ -411,9 +412,15 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 // run's first Job Pod the image pull. A failure costs only that pull and the
 // environment already runs the candidate, so it warns rather than failing or
 // rolling back the deploy.
-func (d *deployer) movePrepullTag(ctx context.Context, env deployEnv, runner imagePin) {
+func (d *deployer) movePrepullTag(ctx context.Context, env deployEnv, runner imagePin, live func() error) {
 	tag := runner.Repository + ":" + env.PrepullTag
-	err := d.refreshRole(ctx)
+	var err error
+	if live != nil {
+		err = live()
+	}
+	if err == nil {
+		err = d.refreshRole(ctx)
+	}
 	if err == nil {
 		err = d.ecrLogin(ctx)
 	}
@@ -427,6 +434,16 @@ func (d *deployer) movePrepullTag(ctx context.Context, env deployEnv, runner ima
 		d.tools.say(ctx, message)
 		sparkwing.Summary(ctx, message)
 	}
+}
+
+// safety: when the GitOps pins already match, as on a retry after a push that
+// Argo has not converged, deployTo pushes nothing and waits for no rollout, so
+// the launcher is checked live before its digest is advertised to nodes.
+func (d *deployer) confirmLauncher(ctx context.Context, env deployEnv, rec envDeployment, runner imagePin) error {
+	if d.dry || slices.ContainsFunc(rec.Changes, func(c gitopsChange) bool { return c.Phase == deployPhaseLauncher }) {
+		return nil
+	}
+	return d.confirmRollout(ctx, env, phaseNamed(deployPhaseLauncher), runner.Digest)
 }
 
 type DeploySmokeInputs struct {

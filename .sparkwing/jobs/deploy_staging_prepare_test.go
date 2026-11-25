@@ -177,3 +177,39 @@ func TestStagingMovesPrepullTagBetweenRolloutAndSmoke(t *testing.T) {
 		t.Fatalf("events = %q, want the tag move after the confirmed rollout and before the first smoke submission", events)
 	}
 }
+
+func TestStagingRetryMovesPrepullTagOnlyOnceTheLiveLauncherRunsTheCandidate(t *testing.T) {
+	f := newFakeDeploy(t)
+	images := f.candidate()
+	if _, err := f.deployer(false).stage(t.Context(), images); err != nil {
+		t.Fatal(err)
+	}
+	moved := images.Runner.Repository + ":cloud-prepull-staging -> " + images.Runner.Digest
+	for _, converged := range []bool{false, true} {
+		f.registry.tagged = nil
+		d := f.deployer(false)
+		run := d.tools.run
+		d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+			// GitOps already pins the candidate, but Argo has not rolled the launcher yet.
+			if !converged && filepath.Base(c.Name) == "kubectl" && slices.Contains(c.Args, d.cfg.Staging.LauncherDeployment) && slices.Contains(c.Args, "get") {
+				return f.old.Runner.ref(), nil
+			}
+			return run(ctx, c)
+		}
+		if _, err := d.stage(t.Context(), images); err != nil {
+			t.Fatalf("retry with converged=%v: %v", converged, err)
+		}
+		want := []string{moved}
+		if !converged {
+			want = nil
+		}
+		if !slices.Equal(f.registry.tagged, want) {
+			t.Fatalf("retry with converged=%v moved %q, want %q", converged, f.registry.tagged, want)
+		}
+	}
+	if !slices.ContainsFunc(f.said, func(s string) bool {
+		return strings.HasPrefix(s, "WARNING: staging Cloud job nodes keep pre-pulling the previous runner") && strings.Contains(s, "not "+images.Runner.Digest)
+	}) {
+		t.Fatalf("no warning for the unconverged launcher: %q", f.said)
+	}
+}
