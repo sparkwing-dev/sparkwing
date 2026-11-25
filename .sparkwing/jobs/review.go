@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -134,7 +133,7 @@ func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 		root:       root,
 		git:        git,
 		showTicket: showTicket,
-		standards:  func(ctx context.Context, diff string) (string, error) { return overwingStandards(ctx, root, diff) },
+		standards:  func(ctx context.Context, files []string) (string, error) { return overwingStandards(ctx, root, files) },
 		reviewer:   newReviewer,
 		recordDir:  filepath.Join(strings.TrimSpace(common), "sparkwing-review"),
 		now:        time.Now,
@@ -156,7 +155,7 @@ type reviewDeps struct {
 	root       string
 	git        func(ctx context.Context, args ...string) (string, error)
 	showTicket func(ctx context.Context, id string) (string, error)
-	standards  func(ctx context.Context, diff string) (string, error)
+	standards  func(ctx context.Context, files []string) (string, error)
 	reviewer   func(model string) (reviewer, error)
 	recordDir  string
 	now        func() time.Time
@@ -301,7 +300,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	}
 	standards := ""
 	if p.usesStandards() {
-		if standards, err = d.standards(ctx, diff.text); err != nil {
+		if standards, err = d.standards(ctx, files); err != nil {
 			rec.Notes = append(rec.Notes, "house standards unavailable, so the standards rule was judged without them: "+err.Error())
 			standards = ""
 		}
@@ -528,14 +527,17 @@ func showTicket(ctx context.Context, id string) (string, error) {
 	return fmt.Sprintf("%s: %s\n\n%s", id, t.Title, clip(t.Body, maxTicketBody)), nil
 }
 
-func overwingStandards(ctx context.Context, root, _ string) (string, error) {
+func overwingStandards(ctx context.Context, root string, files []string) (string, error) {
 	listing, err := sparkwing.Exec(ctx, "overwing", "standards", "list", "-o", "json").String()
 	if err != nil {
 		return "", err
 	}
-	origin, _ := sparkwing.Exec(ctx, "git", "-C", root, "remote", "get-url", "origin").String()
-	owner, repo := repoOwnerAndName(strings.TrimSpace(origin), root)
-	names := reviewerCardNames(listing, owner, repo)
+	// hack: the cursor export is the only command that resolves each card's scope and path globs.
+	rules, err := sparkwing.Exec(ctx, "overwing", "standards", "export", "--harness", "cursor", "--dry-run", "--repo", root, "-o", "json").String()
+	if err != nil {
+		return "", err
+	}
+	names := reviewerCardNames(listing, rules, files)
 	if len(names) == 0 {
 		return "", nil
 	}
@@ -546,57 +548,80 @@ func overwingStandards(ctx context.Context, root, _ string) (string, error) {
 	return reviewStandardBodies(cards)
 }
 
-// safety: card scopes name the hosting owner and repository, so read them from origin.
-func repoOwnerAndName(origin, root string) (owner, repo string) {
-	path := origin
-	if path == "" {
-		return "", filepath.Base(root)
-	}
-	if _, after, ok := strings.Cut(path, "://"); ok {
-		path = after
-		if _, rest, ok := strings.Cut(path, "/"); ok {
-			path = rest
+// safety: a reviewer takes only cards whose apply_type names review. An
+// always-apply review card loads every time, a review-only card whenever it is
+// in scope, and any other review card only when a changed file is on one of its
+// surfaces. Overwing's export omits cards scoped to another repository or owner.
+func reviewerCardNames(listing, rules string, files []string) []string {
+	inScope := map[string][]string{}
+	for _, line := range strings.Split(rules, "\n") {
+		var rule struct {
+			Kind  string   `json:"kind"`
+			Card  string   `json:"card"`
+			Globs []string `json:"globs"`
 		}
-	} else if host, after, ok := strings.Cut(path, ":"); ok && !strings.Contains(host, "/") {
-		path = after
-	} else {
-		return "", filepath.Base(strings.TrimSuffix(strings.TrimRight(path, "/"), ".git"))
+		if json.Unmarshal([]byte(line), &rule) == nil && rule.Kind == "rule" && rule.Card != "" {
+			inScope[rule.Card] = rule.Globs
+		}
 	}
-	parts := strings.Split(strings.TrimSuffix(strings.Trim(path, "/"), ".git"), "/")
-	if len(parts) >= 2 {
-		return parts[len(parts)-2], parts[len(parts)-1]
-	}
-	return "", filepath.Base(root)
-}
-
-func reviewerCardNames(ndjson, owner, repo string) []string {
 	var names []string
-	sc := bufio.NewScanner(strings.NewReader(ndjson))
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		var rec struct {
+	for _, line := range strings.Split(listing, "\n") {
+		var card struct {
 			Name        string   `json:"name"`
-			Mode        string   `json:"mode"`
 			ApplyAlways bool     `json:"apply_always"`
 			ApplyType   []string `json:"apply_type"`
-			ScopeRepo   []string `json:"scope_repo"`
-			ScopeOwner  []string `json:"scope_owner"`
 		}
-		if json.Unmarshal(sc.Bytes(), &rec) != nil || rec.Name == "" || rec.Mode == "runbook" {
+		if json.Unmarshal([]byte(line), &card) != nil || !slices.Contains(card.ApplyType, "review") {
 			continue
 		}
-		if !rec.ApplyAlways && !slices.Contains(rec.ApplyType, "review") {
+		globs, ok := inScope[card.Name]
+		if !ok {
 			continue
 		}
-		if len(rec.ScopeRepo) > 0 && !containsFold(rec.ScopeRepo, repo) {
-			continue
+		reviewOnly := !slices.ContainsFunc(card.ApplyType, func(surface string) bool { return surface != "review" })
+		if card.ApplyAlways || reviewOnly || anyFileMatches(globs, files) {
+			names = append(names, card.Name)
 		}
-		if len(rec.ScopeOwner) > 0 && !containsFold(rec.ScopeOwner, owner) {
-			continue
-		}
-		names = append(names, rec.Name)
 	}
 	return names
+}
+
+func anyFileMatches(globs, files []string) bool {
+	for _, glob := range globs {
+		re, err := regexp.Compile(globPattern(glob))
+		if err != nil {
+			continue
+		}
+		for _, file := range files {
+			if re.MatchString(file) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func globPattern(glob string) string {
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(glob); i++ {
+		switch {
+		case strings.HasPrefix(glob[i:], "**/"):
+			b.WriteString("(?:.*/)?")
+			i += 2
+		case strings.HasPrefix(glob[i:], "**"):
+			b.WriteString(".*")
+			i++
+		case glob[i] == '*':
+			b.WriteString("[^/]*")
+		case glob[i] == '?':
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(glob[i : i+1]))
+		}
+	}
+	b.WriteString("$")
+	return b.String()
 }
 
 var standardBacklink = regexp.MustCompile(`^- \[\[[^\]]+\]\] \x{2014} (ai|semantic)$`)
@@ -634,10 +659,6 @@ func reviewStandardBodies(cards string) (string, error) {
 		}
 		bodies = append(bodies, strings.TrimSpace(body))
 	}
-}
-
-func containsFold(values []string, want string) bool {
-	return want != "" && slices.ContainsFunc(values, func(v string) bool { return strings.EqualFold(v, want) })
 }
 
 type reviewPrompt struct {
