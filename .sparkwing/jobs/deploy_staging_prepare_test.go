@@ -127,7 +127,7 @@ func TestStagingMovesPrepullTagWhenCLIBuildFailsAfterRollout(t *testing.T) {
 	run := d.tools.run
 	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
 		if filepath.Base(c.Name) == "go" {
-			// The build fails only once the confirmed rollout has had its chance to move the tag.
+			// safety: the build fails only after the confirmed rollout could move the tag.
 			select {
 			case <-tagged:
 			case <-ctx.Done():
@@ -191,7 +191,7 @@ func TestStagingRetryMovesPrepullTagOnlyOnceTheLiveLauncherRunsTheCandidate(t *t
 		d := f.deployer(false)
 		run := d.tools.run
 		d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
-			// GitOps already pins the candidate, but Argo has not rolled the launcher yet.
+			// safety: GitOps already pins the candidate, but Argo has not rolled the launcher yet.
 			if !converged && filepath.Base(c.Name) == "kubectl" && slices.Contains(c.Args, d.cfg.Staging.LauncherDeployment) && slices.Contains(c.Args, "get") {
 				return testDeploymentSnapshot("launcher", f.old.Runner.ref(), true), nil
 			}
@@ -224,7 +224,7 @@ func TestStagingRetryWaitsOutALauncherRolloutArgoStartsAfterRolloutStatus(t *tes
 	f.registry.tagged = nil
 	d := f.deployer(false)
 	var mu sync.Mutex
-	// The live launcher still runs the previous image; Argo applies the
+	// safety: the live launcher still runs the previous image; Argo applies the
 	// candidate template right after the first rollout status returns.
 	image, complete, statuses := f.old.Runner.ref(), true, 0
 	var tagWhileRolling []bool
@@ -267,7 +267,7 @@ func TestStagingRetryWaitsOutALauncherRolloutArgoStartsAfterRolloutStatus(t *tes
 
 func TestRolledOutImageRequiresTheObservedTemplateOnEveryReplica(t *testing.T) {
 	const image = "registry/runner@sha256:new"
-	// total is status.replicas, old and new pods together; it defaults to the spec count.
+	// safety: total is status.replicas, old and new pods together; it defaults to the spec count.
 	snapshot := func(generation, observed, replicas, updated, ready, available int, total ...int) string {
 		pods := replicas
 		if len(total) > 0 {
@@ -318,7 +318,7 @@ func TestConfirmRolloutKeepsOneDeadlineAcrossRolloutWatches(t *testing.T) {
 		defer mu.Unlock()
 		switch {
 		case slices.Contains(c.Args, "rollout"):
-			// Each watch outlasts most of the budget; one cut short by its timeout fails as kubectl does.
+			// safety: each watch outlasts most of the budget; one cut short by its timeout fails as kubectl does.
 			timeout := d.cfg.RolloutTimeout
 			for _, arg := range c.Args {
 				if v, ok := strings.CutPrefix(arg, "--timeout="); ok {
@@ -336,7 +336,7 @@ func TestConfirmRolloutKeepsOneDeadlineAcrossRolloutWatches(t *testing.T) {
 			clock = clock.Add(rolloutTakes)
 			return "", nil
 		case slices.Contains(c.Args, "get") && slices.Contains(c.Args, launcher):
-			// The rollout completes only after nearly two full watches.
+			// safety: the rollout completes only after nearly two full watches.
 			done := clock.Sub(start) >= 2*rolloutTakes
 			return testDeploymentSnapshot("launcher", f.old.Runner.ref(), done), nil
 		}
@@ -362,7 +362,7 @@ func TestConfirmRolloutStopsAKubectlThatOutlivesItsTimeout(t *testing.T) {
 	defer cancel()
 	var calls atomic.Int32
 	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
-		// kubectl starts --timeout only after its first lookup, so a slow lookup outlives it.
+		// safety: kubectl starts --timeout only after its first lookup, so a slow lookup outlives it.
 		calls.Add(1)
 		<-ctx.Done()
 		return "", ctx.Err()

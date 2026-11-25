@@ -1324,7 +1324,7 @@ func TestDeployMovesStagingPrepullTagAfterStagingRollout(t *testing.T) {
 		t.Fatalf("pre-pull tag moves = %q, want %q", f.registry.tagged, want)
 	}
 
-	// Staging keeps a candidate whose gate fails, so its nodes should pre-pull it.
+	// safety: staging keeps a candidate whose gate fails, so its nodes should pre-pull it.
 	f = newFakeDeploy(t)
 	f.failRuns["run-deploy-smoke-staging"] = true
 	images = f.candidate()
@@ -1701,7 +1701,7 @@ func TestDeploySchemaFetchPreservesShallowCandidateReachability(t *testing.T) {
 	}
 }
 
-// testDeploymentSnapshot is a one-replica Deployment whose current template runs
+// safety: a one-replica Deployment whose current template runs
 // image, fully rolled out or still waiting for the controller to observe it.
 func testDeploymentSnapshot(container, image string, complete bool) string {
 	observed, pods, ready := 2, 1, 1

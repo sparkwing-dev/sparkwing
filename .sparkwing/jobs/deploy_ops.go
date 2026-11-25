@@ -1015,8 +1015,7 @@ func (d *deployer) confirmRollout(ctx context.Context, env deployEnv, phase depl
 	})
 }
 
-// rolledOutImage reads a container's image and whether the Deployment has
-// fully rolled out its current template, both from the same object.
+// safety: the image and rollout state come from one object so they describe the same template.
 func rolledOutImage(deploymentJSON, container string) (string, bool, error) {
 	var dep struct {
 		Metadata struct{ Generation int64 }
@@ -1050,7 +1049,7 @@ func rolledOutImage(deploymentJSON, container string) (string, bool, error) {
 		want = *dep.Spec.Replicas
 	}
 	st := dep.Status
-	// Kubernetes' own rollout-complete predicate: no pod of an older revision remains.
+	// safety: matches Kubernetes' rollout-complete predicate, so no older-revision pod remains.
 	complete := st.ObservedGeneration >= dep.Metadata.Generation && st.Replicas == want &&
 		st.UpdatedReplicas == want && st.ReadyReplicas == want && st.AvailableReplicas == want
 	return image, complete, nil

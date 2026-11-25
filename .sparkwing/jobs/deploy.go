@@ -407,10 +407,9 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 	return rec, fmt.Errorf("production rolled back to controller %s and runner %s: %w", rec.Previous.Controller.Digest, rec.Previous.Launcher.Digest, err)
 }
 
-// perf: each environment's Cloud job nodes pull its runner pre-pull tag while
-// they boot, so moving it to the image the environment now runs spares each
-// run's first Job Pod the image pull. A failure costs only that pull and the
-// environment already runs the candidate, so it warns rather than failing or
+// perf: Cloud job nodes pull their environment's pre-pull tag at boot, so the
+// tag follows the image that environment runs. A failure costs only one pull
+// and the candidate is already live, so it warns rather than failing or
 // rolling back the deploy.
 func (d *deployer) movePrepullTag(ctx context.Context, env deployEnv, runner imagePin, live func() error) {
 	tag := runner.Repository + ":" + env.PrepullTag
