@@ -49,7 +49,8 @@ func controllerHTTPWith(controllerURL string, lookup hostLookup, dialer *net.Dia
 }
 
 // hack: the hedge only waits out a dropped first lookup; the dial itself stays the standard dialer's, so its
-// shared budget, address order and IPv4/IPv6 race are unchanged at the cost of one more, now prompt, lookup.
+// shared budget, address order and IPv4/IPv6 race are unchanged at the cost of one more lookup. That lookup is
+// usually immediate because DNS just answered, but a dropped packet still costs the resolver's 1 s retry.
 func hedgedDial(dialer *net.Dialer, controller string, lookup hostLookup) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, _, err := net.SplitHostPort(address)
