@@ -34,6 +34,13 @@ func TestProductionLauncherBindsKubernetesAndCloudBoundary(t *testing.T) {
 	if runner == nil || runner.Kube == nil || runner.Boundary == nil || runner.Control == nil {
 		t.Fatal("launcher has no production services")
 	}
+	// perf: a reconciliation pass followed by a node reservation issues dozens of core requests back to back.
+	limiter := runner.Kube.CoreV1().RESTClient().GetRateLimiter()
+	for i := range 40 {
+		if !limiter.TryAccept() {
+			t.Fatalf("core Kubernetes request %d throttled during a handoff burst", i+1)
+		}
+	}
 	stop := errors.New("cancelled before Kubernetes")
 	ctx, cancel := context.WithCancelCause(t.Context())
 	cancel(stop)

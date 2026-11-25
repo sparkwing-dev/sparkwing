@@ -705,6 +705,11 @@ Runner claim dispatch rechecks cancellation after version policy validation.
 Owner: `internal/runners/loop.go`; guard:
 `TestLoopDoesNotClaimAfterPolicyCancelsContext`.
 
+`ServeWith` returns only after every goroutine it started has exited, so no
+background worker writes to the store or logger after it returns. Owner:
+`internal/controller/server.go`: `ServeWith`; guard:
+`TestServeWithReturnsOnlyAfterItsWorkersExit`.
+
 Controller startup plaintext sealing shares `internal/store/sealed_rotation.go`
 with operator key rotation. `internal/controller/startup_sealing.go` owns the
 background lifecycle, bounded retry and sanitized summaries. Existing envelopes
