@@ -399,8 +399,9 @@ type Listeners struct {
 // leaves them to the caller. On return it stops accepting connections and
 // waits up to controllerShutdownBudget, shared by every listener, for
 // in-flight requests to drain; it then stops waiting without closing the
-// requests still running. It returns only after every goroutine it started
-// has exited, so nothing it ran writes to the store or the logger afterwards.
+// requests still running. It returns only after its background workers and
+// listener loops have exited; a request still running past the drain budget
+// may write after it returns.
 func ServeWith(ctx context.Context, s *Server, ln Listeners) error {
 	metricsSrv := s.metricsServer()
 	switch {
