@@ -55,3 +55,16 @@ func TestAnAcceptedPlanReturnsItsTeamsRunnersToTheirOwnCadence(t *testing.T) {
 		}
 	}
 }
+
+func TestAPublicationImportLeavesTheIdleClocksAlone(t *testing.T) {
+	var srv *Server
+	profilePublicationWith(t, func(s *Server) {
+		srv = s
+		s.recordQueueActivity(time.Now().Add(-testIdleWindow))
+	}, "success", publicationLogReader{})
+	for _, team := range []store.Team{"a", ""} {
+		if got := srv.claimPollAdvice(team, time.Now()); got == 0 {
+			t.Fatalf("a publication import, which queues no executable work, returned claimants of team %q to their own cadence", team)
+		}
+	}
+}

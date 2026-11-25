@@ -83,6 +83,11 @@ func FuzzProfilePublicationExcludesShellEnvironment(f *testing.F) {
 
 func profilePublication(t *testing.T, outcome string, logs publicationLogReader, shellNames ...string) controllerwire.LogPage {
 	t.Helper()
+	return profilePublicationWith(t, nil, outcome, logs, shellNames...)
+}
+
+func profilePublicationWith(t *testing.T, configure func(*Server), outcome string, logs publicationLogReader, shellNames ...string) controllerwire.LogPage {
+	t.Helper()
 	objects, err := blob.NewFilesystem(blob.FilesystemOptions{Directory: t.TempDir(), Endpoint: "https://objects.test", SigningKey: bytes.Repeat([]byte{1}, 32)})
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +97,12 @@ func profilePublication(t *testing.T, outcome string, logs publicationLogReader,
 			t.Error(err)
 		}
 	})
-	s, session := credentialSessionServerWith(t, func(s *Server) { s.WithDataObjects(objects) })
+	s, session := credentialSessionServerWith(t, func(s *Server) {
+		s.WithDataObjects(objects)
+		if configure != nil {
+			configure(s)
+		}
+	})
 	h := s.Handler()
 	w := credentialRequestHTTP(t, h, session, `{"grants":["runs.read","runs.write","logs.read"]}`, false)
 	var root credentialResponse

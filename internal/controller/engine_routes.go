@@ -270,8 +270,8 @@ func (s *EngineController) handlePlan(w http.ResponseWriter, r *http.Request, a 
 	if err != nil {
 		return err
 	}
-	// safety: a replayed plan releases no jobs, so it leaves the team's idle clock alone.
-	if !response.Replayed && s.planAccepted != nil {
+	// safety: a replayed plan or an imported publication releases no executable jobs, so it leaves the idle clock alone.
+	if !response.Replayed && response.Spec.Request.Request.Mode != runspec.IntakePublish && s.planAccepted != nil {
 		s.planAccepted(store.Team(a.Target.Team))
 	}
 	writeJSON(w, http.StatusOK, response)
