@@ -20,8 +20,8 @@ func TestReviewerCardNamesSelectsReviewAndAlwaysCardsInScope(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("reviewerCardNames = %q, want %q", got, want)
 	}
-	if got := reviewerCardNames(listing, "koreyGambill", "sparkwing"); !slices.Contains(got, "standard-landing") {
-		t.Fatalf("owner-scoped card missing for its owner: %q", got)
+	if got := reviewerCardNames(listing, "KOREYGAMBILL", "SPARKWING"); !slices.Contains(got, "standard-landing") || !slices.Contains(got, "standard-consumers") {
+		t.Fatalf("scoped cards missing for their owner and repository in another case: %q", got)
 	}
 }
 
@@ -30,6 +30,8 @@ func TestRepoOwnerAndNameReadsOriginForms(t *testing.T) {
 		{"git@github.com:sparkwing-dev/sparkwing", "sparkwing-dev", "sparkwing"},
 		{"git@github.com:sparkwing-dev/sparkwing.git", "sparkwing-dev", "sparkwing"},
 		{"https://github.com/koreyGambill/kikd-infra.git", "koreyGambill", "kikd-infra"},
+		{"ssh://git@github.com:22/sparkwing-dev/sparkwing.git", "sparkwing-dev", "sparkwing"},
+		{"/srv/koreyGambill/sparkwing.git", "", "sparkwing"},
 		{"", "", "checkout"},
 	} {
 		owner, repo := repoOwnerAndName(tc.origin, "/tmp/checkout")

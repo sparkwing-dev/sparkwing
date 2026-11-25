@@ -549,13 +549,18 @@ func overwingStandards(ctx context.Context, root, _ string) (string, error) {
 // safety: card scopes name the hosting owner and repository, so read them from origin.
 func repoOwnerAndName(origin, root string) (owner, repo string) {
 	path := origin
+	if path == "" {
+		return "", filepath.Base(root)
+	}
 	if _, after, ok := strings.Cut(path, "://"); ok {
 		path = after
 		if _, rest, ok := strings.Cut(path, "/"); ok {
 			path = rest
 		}
-	} else if _, after, ok := strings.Cut(path, ":"); ok {
+	} else if host, after, ok := strings.Cut(path, ":"); ok && !strings.Contains(host, "/") {
 		path = after
+	} else {
+		return "", filepath.Base(strings.TrimSuffix(strings.TrimRight(path, "/"), ".git"))
 	}
 	parts := strings.Split(strings.TrimSuffix(strings.Trim(path, "/"), ".git"), "/")
 	if len(parts) >= 2 {
@@ -564,8 +569,6 @@ func repoOwnerAndName(origin, root string) (owner, repo string) {
 	return "", filepath.Base(root)
 }
 
-// safety: overwing dropped diff matching, so the reviewer takes every card that
-// applies to all changes or to reviews, within the card's repository and owner scope.
 func reviewerCardNames(ndjson, owner, repo string) []string {
 	var names []string
 	sc := bufio.NewScanner(strings.NewReader(ndjson))
@@ -585,10 +588,10 @@ func reviewerCardNames(ndjson, owner, repo string) []string {
 		if !rec.ApplyAlways && !slices.Contains(rec.ApplyType, "review") {
 			continue
 		}
-		if len(rec.ScopeRepo) > 0 && !slices.Contains(rec.ScopeRepo, repo) {
+		if len(rec.ScopeRepo) > 0 && !containsFold(rec.ScopeRepo, repo) {
 			continue
 		}
-		if len(rec.ScopeOwner) > 0 && !slices.Contains(rec.ScopeOwner, owner) {
+		if len(rec.ScopeOwner) > 0 && !containsFold(rec.ScopeOwner, owner) {
 			continue
 		}
 		names = append(names, rec.Name)
@@ -631,6 +634,10 @@ func reviewStandardBodies(cards string) (string, error) {
 		}
 		bodies = append(bodies, strings.TrimSpace(body))
 	}
+}
+
+func containsFold(values []string, want string) bool {
+	return want != "" && slices.ContainsFunc(values, func(v string) bool { return strings.EqualFold(v, want) })
 }
 
 type reviewPrompt struct {
