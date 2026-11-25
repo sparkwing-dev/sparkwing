@@ -15,7 +15,8 @@ func TestReviewerCardNamesLoadsReviewCardsByAlwaysScopeAndSurface(t *testing.T) 
 {"name":"standard-gates","apply_type":["pipeline","review"]}
 {"name":"standard-sparkwing-product","apply_type":["review"]}
 {"name":"standard-process","apply_type":["pipeline"],"apply_always":true}
-{"name":"standard-other-repo","apply_type":["review"]}
+{"name":"standard-other-repo","apply_type":["review"],"scope_repo":["elsewhere"]}
+{"name":"standard-scoped","apply_type":["review"],"scope_repo":["SPARKWING"]}
 `
 	rules := `{"kind":"summary"}
 {"kind":"rule","card":"standard-fixes","globs":["**/*.go"]}
@@ -28,12 +29,12 @@ func TestReviewerCardNamesLoadsReviewCardsByAlwaysScopeAndSurface(t *testing.T) 
 		files []string
 		want  []string
 	}{
-		{[]string{"internal/controller/server.go"}, []string{"standard-fixes", "standard-architecture", "standard-sparkwing-product"}},
-		{[]string{".sparkwing/sparkwing.yaml"}, []string{"standard-fixes", "standard-gates", "standard-sparkwing-product"}},
-		{[]string{".golangci.yml"}, []string{"standard-fixes", "standard-gates", "standard-sparkwing-product"}},
-		{[]string{"README.txt"}, []string{"standard-fixes", "standard-sparkwing-product"}},
+		{[]string{"internal/controller/server.go"}, []string{"standard-fixes", "standard-architecture", "standard-sparkwing-product", "standard-scoped"}},
+		{[]string{".sparkwing/sparkwing.yaml"}, []string{"standard-fixes", "standard-gates", "standard-sparkwing-product", "standard-scoped"}},
+		{[]string{".golangci.yml"}, []string{"standard-fixes", "standard-gates", "standard-sparkwing-product", "standard-scoped"}},
+		{[]string{"README.txt"}, []string{"standard-fixes", "standard-sparkwing-product", "standard-scoped"}},
 	} {
-		if got := reviewerCardNames(listing, rules, tc.files); !slices.Equal(got, tc.want) {
+		if got := reviewerCardNames(listing, rules, "sparkwing-dev", "sparkwing", tc.files); !slices.Equal(got, tc.want) {
 			t.Errorf("reviewerCardNames(%q) = %q, want %q", tc.files, got, tc.want)
 		}
 	}
@@ -62,5 +63,20 @@ func TestReviewStandardsSeeACopyDestinationNotItsUnchangedSource(t *testing.T) {
 	}
 	if !slices.Equal(seen, []string{"guide.sh"}) {
 		t.Fatalf("standards saw %q, want only the copy destination", seen)
+	}
+}
+
+func TestRepoOwnerAndNameReadsOriginNotTheWorktreeName(t *testing.T) {
+	for _, tc := range []struct{ origin, owner, repo string }{
+		{"git@github.com:sparkwing-dev/sparkwing", "sparkwing-dev", "sparkwing"},
+		{"https://github.com/koreyGambill/kikd-infra.git", "koreyGambill", "kikd-infra"},
+		{"ssh://git@github.com:22/sparkwing-dev/sparkwing.git", "sparkwing-dev", "sparkwing"},
+		{"/srv/koreyGambill/sparkwing.git", "", "sparkwing"},
+		{"", "", "t3-worktree-7"},
+	} {
+		owner, repo := repoOwnerAndName(tc.origin, "/tmp/t3-worktree-7")
+		if owner != tc.owner || repo != tc.repo {
+			t.Errorf("repoOwnerAndName(%q) = %q, %q; want %q, %q", tc.origin, owner, repo, tc.owner, tc.repo)
+		}
 	}
 }

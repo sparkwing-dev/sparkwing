@@ -532,12 +532,14 @@ func overwingStandards(ctx context.Context, root string, files []string) (string
 	if err != nil {
 		return "", err
 	}
-	// hack: the cursor export is the only command that resolves each card's scope and path globs.
+	// hack: the cursor export is the only command that resolves each card's path globs.
 	rules, err := sparkwing.Exec(ctx, "overwing", "standards", "export", "--harness", "cursor", "--dry-run", "--repo", root, "-o", "json").String()
 	if err != nil {
 		return "", err
 	}
-	names := reviewerCardNames(listing, rules, files)
+	origin, _ := sparkwing.Exec(ctx, "git", "-C", root, "remote", "get-url", "origin").String()
+	owner, repo := repoOwnerAndName(strings.TrimSpace(origin), root)
+	names := reviewerCardNames(listing, rules, owner, repo, files)
 	if len(names) == 0 {
 		return "", nil
 	}
@@ -548,12 +550,35 @@ func overwingStandards(ctx context.Context, root string, files []string) (string
 	return reviewStandardBodies(cards)
 }
 
-// safety: a reviewer takes only cards whose apply_type names review. An
-// always-apply review card loads every time, a review-only card whenever it is
-// in scope, and any other review card only when a changed file is on one of its
-// surfaces. Overwing's export omits cards scoped to another repository or owner.
-func reviewerCardNames(listing, rules string, files []string) []string {
-	inScope := map[string][]string{}
+// safety: card scopes name the hosting repository, which a worktree directory name need not match.
+func repoOwnerAndName(origin, root string) (owner, repo string) {
+	path := origin
+	if path == "" {
+		return "", filepath.Base(root)
+	}
+	if _, after, ok := strings.Cut(path, "://"); ok {
+		path = after
+		if _, rest, ok := strings.Cut(path, "/"); ok {
+			path = rest
+		}
+	} else if host, after, ok := strings.Cut(path, ":"); ok && !strings.Contains(host, "/") {
+		path = after
+	} else {
+		return "", filepath.Base(strings.TrimSuffix(strings.TrimRight(path, "/"), ".git"))
+	}
+	parts := strings.Split(strings.TrimSuffix(strings.Trim(path, "/"), ".git"), "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2], parts[len(parts)-1]
+	}
+	return "", filepath.Base(root)
+}
+
+// safety: a reviewer takes only cards whose apply_type names review and whose
+// scope fits origin. An always-apply review card loads every time, a review-only
+// card whenever in scope, and any other review card only when a changed file
+// matches one of the globs overwing's export gives it.
+func reviewerCardNames(listing, rules, owner, repo string, files []string) []string {
+	globs := map[string][]string{}
 	for _, line := range strings.Split(rules, "\n") {
 		var rule struct {
 			Kind  string   `json:"kind"`
@@ -561,7 +586,7 @@ func reviewerCardNames(listing, rules string, files []string) []string {
 			Globs []string `json:"globs"`
 		}
 		if json.Unmarshal([]byte(line), &rule) == nil && rule.Kind == "rule" && rule.Card != "" {
-			inScope[rule.Card] = rule.Globs
+			globs[rule.Card] = rule.Globs
 		}
 	}
 	var names []string
@@ -570,58 +595,31 @@ func reviewerCardNames(listing, rules string, files []string) []string {
 			Name        string   `json:"name"`
 			ApplyAlways bool     `json:"apply_always"`
 			ApplyType   []string `json:"apply_type"`
+			ScopeRepo   []string `json:"scope_repo"`
+			ScopeOwner  []string `json:"scope_owner"`
 		}
 		if json.Unmarshal([]byte(line), &card) != nil || !slices.Contains(card.ApplyType, "review") {
 			continue
 		}
-		globs, ok := inScope[card.Name]
-		if !ok {
+		if len(card.ScopeRepo) > 0 && !containsFold(card.ScopeRepo, repo) || len(card.ScopeOwner) > 0 && !containsFold(card.ScopeOwner, owner) {
 			continue
 		}
 		reviewOnly := !slices.ContainsFunc(card.ApplyType, func(surface string) bool { return surface != "review" })
-		if card.ApplyAlways || reviewOnly || anyFileMatches(globs, files) {
+		if card.ApplyAlways || reviewOnly || anyFileMatches(globs[card.Name], files) {
 			names = append(names, card.Name)
 		}
 	}
 	return names
 }
 
-func anyFileMatches(globs, files []string) bool {
-	for _, glob := range globs {
-		re, err := regexp.Compile(globPattern(glob))
-		if err != nil {
-			continue
-		}
-		for _, file := range files {
-			if re.MatchString(file) {
-				return true
-			}
-		}
-	}
-	return false
+func containsFold(values []string, want string) bool {
+	return want != "" && slices.ContainsFunc(values, func(v string) bool { return strings.EqualFold(v, want) })
 }
 
-func globPattern(glob string) string {
-	var b strings.Builder
-	b.WriteString("^")
-	for i := 0; i < len(glob); i++ {
-		switch {
-		case strings.HasPrefix(glob[i:], "**/"):
-			b.WriteString("(?:.*/)?")
-			i += 2
-		case strings.HasPrefix(glob[i:], "**"):
-			b.WriteString(".*")
-			i++
-		case glob[i] == '*':
-			b.WriteString("[^/]*")
-		case glob[i] == '?':
-			b.WriteString("[^/]")
-		default:
-			b.WriteString(regexp.QuoteMeta(glob[i : i+1]))
-		}
-	}
-	b.WriteString("$")
-	return b.String()
+func anyFileMatches(globs, files []string) bool {
+	return slices.ContainsFunc(globs, func(glob string) bool {
+		return slices.ContainsFunc(files, func(file string) bool { return globMatch(glob, file) })
+	})
 }
 
 var standardBacklink = regexp.MustCompile(`^- \[\[[^\]]+\]\] \x{2014} (ai|semantic)$`)
