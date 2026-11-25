@@ -154,6 +154,7 @@ type storeTx struct {
 	operatorTeamAdmin *TeamInfo
 	blobIO            *blobIO
 	matchingRuns      map[matchingRunKey]*matchingRun
+	verifiedAuthority map[authorityMemoKey]verifiedAuthority
 }
 
 func (s *Store) now() time.Time {
@@ -390,6 +391,7 @@ func (t *storeTx) execContext(ctx context.Context, q string, args ...any) (sql.R
 		return nil, err
 	}
 	t.wrote = true
+	t.forgetAuthority()
 	return t.tx.ExecContext(ctx, rewritePh(t.dialect, q), args...)
 }
 
@@ -398,6 +400,7 @@ func (t *storeTx) queryContext(ctx context.Context, q string, args ...any) (rowC
 		return nil, err
 	}
 	t.noteReturningWrite(q)
+	t.forgetAuthorityOnWrite(q)
 	rows, err := t.tx.QueryContext(ctx, rewritePh(t.dialect, q), args...)
 	if err != nil {
 		return nil, err
@@ -411,6 +414,7 @@ func (t *storeTx) QueryRowContext(ctx context.Context, q string, args ...any) ro
 		return refusedLedgerRow{err}
 	}
 	t.noteReturningWrite(q)
+	t.forgetAuthorityOnWrite(q)
 	row := t.tx.QueryRowContext(ctx, rewritePh(t.dialect, q), args...)
 	t.rowsOpen = true
 	return &storeRow{Row: row, tx: t}
