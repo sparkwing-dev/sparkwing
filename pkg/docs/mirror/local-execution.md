@@ -851,11 +851,14 @@ and cleanup. Busy local work does not prevent jobs from becoming ready for overf
 The store commits plan capacity with permission to release work. Each executing
 host requests its complete job group set under its actual award before compute.
 Scheduling holds no compute while logical admission waits. The requester takes a
-provisional burst award only when its local ledger has room for the job's whole
-CPU charge. Until then, the here owner leaves the job ready for Cloud or another
-eligible machine and checks this machine's local controller again every 100 ms,
-without asking Sparkwing's controller. If the ledger cannot be read, normal
-admission decides whether the job can start. After taking an award, the requester takes
+provisional burst award unless its local ledger shows the job's whole CPU charge
+certainly cannot fit. While it cannot, the here owner leaves the job ready for
+Cloud or another eligible machine and checks this machine's local controller
+again every 100 ms, without asking Sparkwing's controller. The wait does not hold
+a `--workers` slot. If another executor takes or finishes the job, the owner
+stops waiting after its next run snapshot read shows that. If the ledger cannot
+be read within a second, or its answer is uncertain, normal admission decides
+whether the job can start. After taking an award, the requester takes
 logical admission, then tries compute without waiting.
 If compute is unavailable, it returns the award and job reservations. The original
 readiness ranking window survives, so other ranked claimants can take the job.
