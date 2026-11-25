@@ -528,12 +528,14 @@ func showTicket(ctx context.Context, id string) (string, error) {
 	return fmt.Sprintf("%s: %s\n\n%s", id, t.Title, clip(t.Body, maxTicketBody)), nil
 }
 
-func overwingStandards(ctx context.Context, root, diff string) (string, error) {
-	match, err := runWithStdin(ctx, root, diff, nil, "overwing", "standards", "match", "--repo", root, "--role", "reviewer", "--diff-file", "-", "-o", "json")
+func overwingStandards(ctx context.Context, root, _ string) (string, error) {
+	listing, err := sparkwing.Exec(ctx, "overwing", "standards", "list", "-o", "json").String()
 	if err != nil {
 		return "", err
 	}
-	names := standardCardNames(string(match))
+	origin, _ := sparkwing.Exec(ctx, "git", "-C", root, "remote", "get-url", "origin").String()
+	owner, repo := repoOwnerAndName(strings.TrimSpace(origin), root)
+	names := reviewerCardNames(listing, owner, repo)
 	if len(names) == 0 {
 		return "", nil
 	}
@@ -542,6 +544,56 @@ func overwingStandards(ctx context.Context, root, diff string) (string, error) {
 		return "", err
 	}
 	return reviewStandardBodies(cards)
+}
+
+// safety: card scopes name the hosting owner and repository, so read them from origin.
+func repoOwnerAndName(origin, root string) (owner, repo string) {
+	path := origin
+	if _, after, ok := strings.Cut(path, "://"); ok {
+		path = after
+		if _, rest, ok := strings.Cut(path, "/"); ok {
+			path = rest
+		}
+	} else if _, after, ok := strings.Cut(path, ":"); ok {
+		path = after
+	}
+	parts := strings.Split(strings.TrimSuffix(strings.Trim(path, "/"), ".git"), "/")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2], parts[len(parts)-1]
+	}
+	return "", filepath.Base(root)
+}
+
+// safety: overwing dropped diff matching, so the reviewer takes every card that
+// applies to all changes or to reviews, within the card's repository and owner scope.
+func reviewerCardNames(ndjson, owner, repo string) []string {
+	var names []string
+	sc := bufio.NewScanner(strings.NewReader(ndjson))
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		var rec struct {
+			Name        string   `json:"name"`
+			Mode        string   `json:"mode"`
+			ApplyAlways bool     `json:"apply_always"`
+			ApplyType   []string `json:"apply_type"`
+			ScopeRepo   []string `json:"scope_repo"`
+			ScopeOwner  []string `json:"scope_owner"`
+		}
+		if json.Unmarshal(sc.Bytes(), &rec) != nil || rec.Name == "" || rec.Mode == "runbook" {
+			continue
+		}
+		if !rec.ApplyAlways && !slices.Contains(rec.ApplyType, "review") {
+			continue
+		}
+		if len(rec.ScopeRepo) > 0 && !slices.Contains(rec.ScopeRepo, repo) {
+			continue
+		}
+		if len(rec.ScopeOwner) > 0 && !slices.Contains(rec.ScopeOwner, owner) {
+			continue
+		}
+		names = append(names, rec.Name)
+	}
+	return names
 }
 
 var standardBacklink = regexp.MustCompile(`^- \[\[[^\]]+\]\] \x{2014} (ai|semantic)$`)
@@ -579,22 +631,6 @@ func reviewStandardBodies(cards string) (string, error) {
 		}
 		bodies = append(bodies, strings.TrimSpace(body))
 	}
-}
-
-func standardCardNames(ndjson string) []string {
-	var names []string
-	sc := bufio.NewScanner(strings.NewReader(ndjson))
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		var rec struct {
-			Kind string `json:"kind"`
-			Name string `json:"name"`
-		}
-		if json.Unmarshal(sc.Bytes(), &rec) == nil && rec.Kind == "card" && rec.Name != "" {
-			names = append(names, rec.Name)
-		}
-	}
-	return names
 }
 
 type reviewPrompt struct {
