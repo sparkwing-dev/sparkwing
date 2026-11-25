@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (s *Server) claimEndpoints() []controllerwire.Endpoint {
@@ -105,13 +106,18 @@ func (s *Server) claimHandler(engine *EngineController) func(http.ResponseWriter
 		}
 		ctx := s.placementContext(r.Context())
 		response, err := engine.Claim(ctx, a, body)
+		team := store.Team(a.Principal.Capability.Team)
 		if response.Claim != nil {
-			s.recordQueueActivity(time.Now())
+			// safety: a Cloud launcher holds no team, so its award counts for the awarded unit's team.
+			if team == "" {
+				team = store.Team(response.Claim.Request.Request.Team)
+			}
+			s.recordTeamQueueActivity(team, time.Now())
 		} else {
 			if limiter := s.requestBudget.limiter(budgetClassClaim); limiter != nil {
 				limiter.Penalize(key, time.Now())
 			}
-			s.writeClaimPollAdvice(w)
+			s.writeClaimPollAdvice(w, team)
 			if response.Held {
 				w.Header().Set(controllerwire.ClaimHeldHeader, "1")
 			}

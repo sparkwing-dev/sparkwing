@@ -46,10 +46,10 @@ func TestChildrenSpendTheirRootsFloodBudget(t *testing.T) {
 				principal := capability.Principal{Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: "retrier"}, Capability: capability.Capability{Team: "a"}}
 				intake := store.IntakeRequest{Authority: principal.Authority}
 				engineSQL(t, e.Store, `UPDATE runs SET lineage_json=? WHERE team='a' AND id='run'`, []byte(`{"admission_key":"capability:retrier","admission_subject":{"kind":"account","id":"retrier"}}`))
-				if _, err := admitWithFlood(t.Context(), s, func(ctx context.Context) (bool, error) {
+				if _, err := admitWithFlood(t.Context(), s, "a", func(ctx context.Context) (bool, error) {
 					_, err := s.admissionFloodRefusal(ctx, nil, intake, principal)
 					return true, err
-				}); err != nil {
+				}, func(bool) bool { return true }); err != nil {
 					t.Fatal(err)
 				}
 				want := http.StatusTooManyRequests
@@ -151,10 +151,10 @@ func TestAppAndScheduleAdmissionsShareTeamBudget(t *testing.T) {
 	s := New(nil, nil).WithFloodPolicy(FloodPolicy{RunsPerPrincipalHour: 1})
 	principal := capability.Principal{Authority: capability.AuthorityRef{Kind: "schedule", ID: "schedule"}, Capability: capability.Capability{Team: "a"}}
 	admit := func(request store.IntakeRequest, p capability.Principal) error {
-		_, err := admitWithFlood(t.Context(), s, func(ctx context.Context) (bool, error) {
+		_, err := admitWithFlood(t.Context(), s, "a", func(ctx context.Context) (bool, error) {
 			_, err := s.admissionFloodRefusal(ctx, nil, request, p)
 			return true, err
-		})
+		}, func(bool) bool { return true })
 		return err
 	}
 	if err := admit(store.IntakeRequest{}, principal); err != nil {

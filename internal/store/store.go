@@ -278,19 +278,29 @@ func openPostgresConfig(ctx context.Context, cfg *pgx.ConnConfig, opts ...Option
 	return st, nil
 }
 
+const postgresMaxConns = 25
+
+// perf: the idle bound matches the open bound, so connections a burst opened
+// serve later requests instead of closing, and each new session would pay a
+// TLS handshake and SCRAM login. Unused connections still close after five
+// idle minutes.
+func configurePool(db *sql.DB, dialect Dialect) {
+	switch dialect {
+	case DialectSQLite:
+		db.SetMaxOpenConns(1)
+	case DialectPostgres:
+		db.SetMaxOpenConns(postgresMaxConns)
+		db.SetMaxIdleConns(postgresMaxConns)
+		db.SetConnMaxIdleTime(5 * time.Minute)
+	}
+}
+
 func openSQL(ctx context.Context, driver, dsn string, dialect Dialect, path string, opts []Option) (*Store, error) {
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, err
 	}
-	switch dialect {
-	case DialectSQLite:
-		db.SetMaxOpenConns(1)
-	case DialectPostgres:
-		db.SetMaxOpenConns(25)
-		db.SetMaxIdleConns(5)
-		db.SetConnMaxIdleTime(5 * time.Minute)
-	}
+	configurePool(db, dialect)
 
 	s := &Store{db: db, dialect: dialect}
 	for _, opt := range opts {

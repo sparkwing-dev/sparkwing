@@ -179,11 +179,11 @@ func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request, a capa
 		return err
 	}
 	var scheduleID string
-	result, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (controllerwire.ScheduleRun, error) {
+	result, err := admitWithFlood(r.Context(), s, store.Team(a.Target.Team), func(ctx context.Context) (controllerwire.ScheduleRun, error) {
 		id, run, replayed, err := writer.RunAuthorizedSchedule(ctx, a, r.PathValue("schedule"), key)
 		scheduleID = id
 		return controllerwire.ScheduleRun{RunID: run, Replayed: replayed}, err
-	})
+	}, func(r controllerwire.ScheduleRun) bool { return !r.Replayed })
 	if err != nil {
 		return engineLookupError(err)
 	}

@@ -35,7 +35,7 @@ func TestClaimPollAdvice_WidensWithTheIdleWindow(t *testing.T) {
 		{idle: 10 * time.Minute, want: DefaultMaxIdleClaimPoll},
 	} {
 		srv.recordQueueActivity(now.Add(-tc.idle))
-		if got := srv.claimPollAdvice(now); got != tc.want {
+		if got := srv.claimPollAdvice("a", now); got != tc.want {
 			t.Errorf("idle %s: advice=%s want %s", tc.idle, got, tc.want)
 		}
 	}
@@ -44,7 +44,7 @@ func TestClaimPollAdvice_WidensWithTheIdleWindow(t *testing.T) {
 func TestClaimPollAdvice_ZeroCeilingSuggestsNothing(t *testing.T) {
 	srv := newAdviceServer(t).WithIdleClaimPoll(0)
 	srv.recordQueueActivity(time.Now().Add(-time.Hour))
-	if got := srv.claimPollAdvice(time.Now()); got != 0 {
+	if got := srv.claimPollAdvice("a", time.Now()); got != 0 {
 		t.Errorf("advice=%s want 0", got)
 	}
 }

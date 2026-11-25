@@ -170,7 +170,7 @@ func (s *Server) admitRunnerRequest(w http.ResponseWriter, r *http.Request, a ca
 	if !ok {
 		return "", false
 	}
-	if class == budgetClassClaim && !s.admitIdleClaimPoll(w, r, key) {
+	if class == budgetClassClaim && !s.admitIdleClaimPoll(w, r, store.Team(a.Principal.Capability.Team), key) {
 		return "", false
 	}
 	limiter := s.requestBudget.limiter(class)

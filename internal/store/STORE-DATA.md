@@ -916,6 +916,16 @@ that order with shuffled authority and unit inputs.
    resolution reads leaf to root, so writers lock leaf to root too.
    `lockAuthorityTx` takes registered claimants and
    observation targets `FOR NO KEY UPDATE` on first access and the rest shared.
+   A locked resolution validates the chain without locks, locks the set derived
+   from that read, then reads and verifies each ancestor once under the locks.
+   A changed set restarts the transaction, and no read from that verification is
+   kept. The verified ancestors serve later resolutions in the same transaction
+   until it writes, including any query with `RETURNING` in any letter case;
+   they never stand in for a lock it does not hold. A read snapshot reuses each
+   ancestor it verified for every later resolution in that snapshot. A session
+   is kept per child team and member-token status, so two children that differ
+   in either read the same session twice. Authority and membership locks
+   after a ledger lock are refused, as team locks are.
 8. GitHub installations.
 9. Subscriptions, automation, bindings, pool rules, secrets and credentials.
 10. Schedules, then the intake advisory.

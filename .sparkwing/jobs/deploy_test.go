@@ -851,10 +851,14 @@ func (f *fakeDeploy) kubectl(c deployCommand) (string, error) {
 	case strings.Contains(joined, "get deployment"):
 		ns := c.Args[1]
 		pins := f.pinsOnMain(envDir[ns])
-		if strings.Contains(joined, "controller") && strings.Contains(c.Args[4], "controller") {
-			return pins.Controller.ref(), nil
+		container, image := "launcher", pins.Launcher.ref()
+		if strings.Contains(c.Args[4], "controller") {
+			container, image = "controller", pins.Controller.ref()
 		}
-		return pins.Launcher.ref(), nil
+		if !slices.Contains(c.Args, "json") {
+			return image, nil
+		}
+		return testDeploymentSnapshot(container, image, true), nil
 	case joined == "get nodes -o json":
 		var items []string
 		for _, run := range f.triggered("deploy-smoke") {
@@ -1304,9 +1308,43 @@ func TestDeployMovesPrepullTagOnlyAfterPassingSmoke(t *testing.T) {
 		t.Fatalf("a pre-pull tag failure changed the deploy: %+v, %+v", got, rec)
 	}
 	if !slices.ContainsFunc(f.said, func(s string) bool {
-		return strings.HasPrefix(s, "WARNING: Cloud job nodes keep pre-pulling the previous runner") && strings.HasSuffix(s, "tag is immutable")
+		return strings.HasPrefix(s, "WARNING: production Cloud job nodes keep pre-pulling the previous runner") && strings.HasSuffix(s, "tag is immutable")
 	}) {
 		t.Fatalf("no pre-pull warning: %q", f.said)
+	}
+}
+
+func TestDeployMovesStagingPrepullTagAfterStagingRollout(t *testing.T) {
+	f := newFakeDeploy(t)
+	images := f.candidate()
+	if _, err := f.deployer(false).stage(t.Context(), images); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{images.Runner.Repository + ":cloud-prepull-staging -> " + images.Runner.Digest}; !slices.Equal(f.registry.tagged, want) {
+		t.Fatalf("pre-pull tag moves = %q, want %q", f.registry.tagged, want)
+	}
+
+	// safety: staging keeps a candidate whose gate fails, so its nodes should pre-pull it.
+	f = newFakeDeploy(t)
+	f.failRuns["run-deploy-smoke-staging"] = true
+	images = f.candidate()
+	if _, err := f.deployer(false).stage(t.Context(), images); err == nil {
+		t.Fatal("a failed staging smoke passed the gate")
+	}
+	if want := []string{images.Runner.Repository + ":cloud-prepull-staging -> " + images.Runner.Digest}; !slices.Equal(f.registry.tagged, want) {
+		t.Fatalf("pre-pull tag moves after a failed gate = %q, want %q", f.registry.tagged, want)
+	}
+
+	f = newFakeDeploy(t)
+	f.registry.tagErr = errors.New("tag is immutable")
+	if _, err := f.deployer(false).stage(t.Context(), f.candidate()); err != nil {
+		t.Fatalf("a pre-pull tag failure failed the staging gate: %v", err)
+	}
+	if !slices.ContainsFunc(f.said, func(s string) bool {
+		return strings.HasPrefix(s, "WARNING: staging Cloud job nodes keep pre-pulling the previous runner") &&
+			strings.Contains(s, ":cloud-prepull-staging: ")
+	}) {
+		t.Fatalf("no staging pre-pull warning: %q", f.said)
 	}
 }
 
@@ -1661,4 +1699,16 @@ func TestDeploySchemaFetchPreservesShallowCandidateReachability(t *testing.T) {
 	if got := deployGitIn(t, f.repo, "rev-parse", "--is-shallow-repository"); got != "false" {
 		t.Fatal("promotion did not fetch the history needed to prove ancestry")
 	}
+}
+
+// safety: a one-replica Deployment whose current template runs
+// image, fully rolled out or still waiting for the controller to observe it.
+func testDeploymentSnapshot(container, image string, complete bool) string {
+	observed, pods, ready := 2, 1, 1
+	if !complete {
+		observed, pods, ready = 1, 2, 0
+	}
+	return fmt.Sprintf(`{"metadata":{"generation":2},"spec":{"replicas":1,"template":{"spec":{"containers":[{"name":%q,"image":%q}]}}},`+
+		`"status":{"observedGeneration":%d,"replicas":%d,"updatedReplicas":%d,"readyReplicas":%d,"availableReplicas":%d}}`,
+		container, image, observed, pods, ready, ready, ready)
 }

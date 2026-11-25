@@ -30,6 +30,7 @@ func (s *Server) WithEngineController(engine *EngineController) *Server {
 	s.engineController = engine
 	if engine != nil {
 		engine.cancelCommitted = s.nudgeReaper
+		engine.planAccepted = s.recordPlanAccepted
 	}
 	if engine != nil && engine.ResolveTenant != nil {
 		s.resolveTenant = engine.ResolveTenant
@@ -239,8 +240,11 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		}
 		request.SourceCredentialVerified = credentialVerified
 		request.UnverifiedReason = unverifiedReason
-		response, err := admitWithFlood(ctx, s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
+		//nolint:contextcheck // ctx carries r.Context() with the verified intake source.
+		response, err := admitWithFlood(ctx, s, store.Team(a.Target.Team), func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.admitRun(ctx, a.Target.Team, request)
+		}, func(r controllerwire.CreateRunResponse) bool {
+			return !r.Replayed && request.Request.Mode != runspec.IntakePublish
 		})
 		if err != nil {
 			if refusal := publicQueueDepthRefusal(err); refusal != nil {
@@ -265,6 +269,10 @@ func (s *EngineController) handlePlan(w http.ResponseWriter, r *http.Request, a 
 	response, err := s.AcceptPlan(r.Context(), a, body)
 	if err != nil {
 		return err
+	}
+	// safety: a replayed plan or an imported publication releases no executable jobs, so it leaves the idle clock alone.
+	if !response.Replayed && response.Spec.Request.Request.Mode != runspec.IntakePublish && s.planAccepted != nil {
+		s.planAccepted(store.Team(a.Target.Team))
 	}
 	writeJSON(w, http.StatusOK, response)
 	return nil

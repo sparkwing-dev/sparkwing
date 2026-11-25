@@ -109,6 +109,9 @@ func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request, a
 	if out.Approval.RunID != a.Target.RunID || out.Approval.NodeID != a.Target.NodeID {
 		return routepolicy.MissingEndpointPolicy()
 	}
+	if out.Approval.Resolution == store.ApprovalResolutionApproved && !out.Replayed {
+		s.recordTeamQueueActivity(store.Team(a.Target.Team), time.Now())
+	}
 	writeJSON(w, http.StatusOK, controllerwire.ApprovalResult{Approval: approvalView(out.Approval), Replayed: out.Replayed})
 	return nil
 }

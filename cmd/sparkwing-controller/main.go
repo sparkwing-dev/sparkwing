@@ -188,8 +188,8 @@ func run(args []string) error {
 			"as it was.",
 			strings.Join(controller.LimitsProfileNames(), ", ")))
 	idleClaimPoll := fs.Duration("idle-claim-poll", controller.DefaultMaxIdleClaimPoll,
-		"widest poll interval this controller suggests to a claim loop while it "+
-			"has no work to hand out. The suggestion travels as a response header "+
+		"widest poll interval this controller suggests to a claim loop while the "+
+			"loop's team has no work to hand out. The suggestion travels as a response header "+
 			"and a runner honors it only to poll less often, so an agent that "+
 			"ignores it keeps its configured cadence. Zero suggests nothing.")
 	objectStoreBudget := fs.String("object-store-budget", "",

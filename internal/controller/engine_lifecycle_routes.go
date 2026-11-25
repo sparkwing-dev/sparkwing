@@ -7,6 +7,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
 func (s *EngineController) handleTransition(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
@@ -57,9 +58,9 @@ func (s *Server) handleRetry(engine *EngineController) func(http.ResponseWriter,
 		if err := body.Validate(); err != nil {
 			return err
 		}
-		response, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
+		response, err := admitWithFlood(r.Context(), s, store.Team(a.Target.Team), func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.retry(ctx, a, body)
-		})
+		}, func(r controllerwire.CreateRunResponse) bool { return !r.Replayed })
 		if err != nil {
 			if refusal := publicQueueDepthRefusal(err); refusal != nil {
 				return apierrhttp.Write(w, refusal)

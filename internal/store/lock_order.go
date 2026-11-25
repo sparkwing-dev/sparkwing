@@ -147,17 +147,22 @@ func discoverAuthorityLocks(ctx context.Context, tx *storeTx, leaves []capabilit
 			set.err = err
 			return set
 		}
-		for _, key := range authorityMembershipKeys(chain) {
-			set.rows = append(set.rows, rowLock{key: key})
+		set = authorityChainLocks(tx, set, chain, writes)
+	}
+	return set
+}
+
+func authorityChainLocks(tx *storeTx, set lockSet, chain []authorityNode, writes []string) lockSet {
+	for _, key := range authorityMembershipKeys(chain) {
+		set.rows = append(set.rows, rowLock{key: key})
+	}
+	for i, node := range chain {
+		c, ref := node.principal.Capability, node.principal.Authority
+		if c.Team != "" && !slices.Contains(tx.insertedAuthorities, ref) {
+			set.add(lockTeam, true, c.Team)
 		}
-		for i, node := range chain {
-			c, ref := node.principal.Capability, node.principal.Authority
-			if c.Team != "" && !slices.Contains(tx.insertedAuthorities, ref) {
-				set.add(lockTeam, true, c.Team)
-			}
-			write := slices.Contains(writes, ref.ID) || ref.Kind == capability.AuthorityCapability && registeredClaimant(c)
-			set.rows = append(set.rows, rowLock{key: authorityLockKey(authorityLock{ref: ref, depth: len(chain) - 1 - i}), write: write})
-		}
+		write := slices.Contains(writes, ref.ID) || ref.Kind == capability.AuthorityCapability && registeredClaimant(c)
+		set.rows = append(set.rows, rowLock{key: authorityLockKey(authorityLock{ref: ref, depth: len(chain) - 1 - i}), write: write})
 	}
 	return set
 }
@@ -172,6 +177,21 @@ func acquireLockSet(ctx context.Context, tx *storeTx, discover func() lockSet) e
 	if set.err != nil {
 		return set.err
 	}
+	if err := acquireLockRows(ctx, tx, set); err != nil {
+		return err
+	}
+	current := discover().normalized()
+	if current.err != nil {
+		return current.err
+	}
+	if !slices.Equal(set.rows, current.rows) {
+		return errAuthorityChanged
+	}
+	return nil
+}
+
+// safety: rows already held at least as strongly are skipped; an upgrade or a row earlier than one held is refused.
+func acquireLockRows(ctx context.Context, tx *storeTx, set lockSet) error {
 	for _, row := range set.rows {
 		if row.key.tier == lockTeam && tx.createdTeam != nil && row.key.keys[0] == string(tx.createdTeam.Slug) {
 			continue
@@ -194,13 +214,6 @@ func acquireLockSet(ctx context.Context, tx *storeTx, discover func() lockSet) e
 			return err
 		}
 		tx.authorityLocks = append(tx.authorityLocks, row)
-	}
-	current := discover().normalized()
-	if current.err != nil {
-		return current.err
-	}
-	if !slices.Equal(set.rows, current.rows) {
-		return errAuthorityChanged
 	}
 	return nil
 }
@@ -340,9 +353,17 @@ func (op *Operator) acquireRowLock(ctx context.Context, tx *storeTx, row rowLock
 	case lockAccount:
 		query = "SELECT id FROM accounts WHERE id=?"
 	case lockMembership:
+		if tx.ledgerLocked {
+			tx.err = errors.New("authority lock order: memberships must precede the ledger")
+			return tx.err
+		}
 		query = "SELECT account_id FROM memberships WHERE team=? AND account_id=?"
 		args = append(args, k.keys[1])
 	case lockAuthority:
+		if tx.ledgerLocked {
+			tx.err = errors.New("authority lock order: authority must precede the ledger")
+			return tx.err
+		}
 		query = "SELECT prefix FROM capabilities WHERE prefix=?"
 		if capability.AuthorityKind(k.keys[0]) == capability.AuthoritySession {
 			query = "SELECT hash FROM sessions WHERE hash=?"

@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -42,29 +43,90 @@ func (s *Server) WithIdleClaimPoll(max time.Duration) *Server {
 	return s
 }
 
-// safety: the idle clock measures from here, and work arriving resets it as
-// surely as work handed out, or a fleet advised while idle would still be
-// waiting minutes after the queue filled.
-func (s *Server) recordQueueActivity(now time.Time) {
-	s.lastClaimAward.Store(now.UnixNano())
+// safety: each team idles on its own clock, so one team's work never shortens the advice another team's runners
+// get; all is a controller start, which concerns every team, and any is the latest activity of any team, which a
+// claimant serving every team's queue follows.
+type queueActivity struct {
+	mu    sync.Mutex
+	all   int64
+	any   int64
+	teams map[store.Team]int64
 }
 
-func (s *Server) claimPollAdvice(now time.Time) time.Duration {
+// safety: a team's admissions and awards finish out of order, so a team clock
+// keeps its newest reading rather than the last one written.
+func (q *queueActivity) record(team store.Team, at int64) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if team == "" {
+		q.all, q.any = at, at
+		return
+	}
+	q.any = max(q.any, at)
+	if q.teams == nil {
+		q.teams = map[store.Team]int64{}
+	}
+	q.teams[team] = max(q.teams[team], at)
+}
+
+// safety: a forgotten team falls back to the older controller-start clock, so prune drops only a clock whose advice,
+// read one ceiling back as the enforcement gate reads it, already sits at the ceiling and so can no longer change.
+func (q *queueActivity) prune(now time.Time, ceiling time.Duration) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for team, at := range q.teams {
+		if ceiling <= 0 || at <= q.all || idleAdvice(now.Sub(time.Unix(0, at))-ceiling, ceiling) == ceiling {
+			delete(q.teams, team)
+		}
+	}
+}
+
+func (q *queueActivity) last(team store.Team) int64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if team == "" {
+		return q.any
+	}
+	return max(q.teams[team], q.all)
+}
+
+// safety: a controller start resets every team's clock, so no runner is advised to wait on a queue nobody has read.
+func (s *Server) recordQueueActivity(now time.Time) {
+	s.queueActivity.record("", now.UnixNano())
+}
+
+// safety: the idle clock measures from here, and work queued or handed out
+// for a team resets it, or that team's runners advised while idle would still
+// be waiting after its queue filled. Claimants that serve every team reset too.
+func (s *Server) recordTeamQueueActivity(team store.Team, now time.Time) {
+	s.queueActivity.record(team, now.UnixNano())
+}
+
+// safety: a newly accepted plan's first jobs are claimable work, so the hosted controller resets the team's idle clock.
+func (s *Server) recordPlanAccepted(team store.Team) {
+	s.recordTeamQueueActivity(team, time.Now())
+}
+
+// safety: an empty team is a claimant that serves every team, so it follows any team's activity.
+func (s *Server) claimPollAdvice(team store.Team, now time.Time) time.Duration {
 	if s.idleClaimPoll <= 0 {
 		return 0
 	}
-	last := s.lastClaimAward.Load()
+	last := s.queueActivity.last(team)
 	if last == 0 {
 		return 0
 	}
-	idle := now.Sub(time.Unix(0, last))
+	return idleAdvice(now.Sub(time.Unix(0, last)), s.idleClaimPoll)
+}
+
+func idleAdvice(idle, ceiling time.Duration) time.Duration {
 	advice := idle / idleClaimPollFraction
 	// safety: the advice is a floor a runner may only widen to, so it is withheld
 	// until it would be worth a runner's while to widen at all.
 	if advice < store.MinIdleClaimPoll {
 		return 0
 	}
-	return min(advice.Truncate(time.Second), s.idleClaimPoll)
+	return min(advice.Truncate(time.Second), ceiling)
 }
 
 // WithIdleClaimPollEnforced answers a claim poll that arrives while this
@@ -89,8 +151,8 @@ func (s *Server) rebuildIdlePollGate() {
 }
 
 // safety: a header set after the status line is never sent, so this runs ahead of WriteHeader.
-func (s *Server) writeClaimPollAdvice(w http.ResponseWriter) {
-	advice := s.claimPollAdvice(time.Now())
+func (s *Server) writeClaimPollAdvice(w http.ResponseWriter, team store.Team) {
+	advice := s.claimPollAdvice(team, time.Now())
 	if advice <= 0 {
 		return
 	}
@@ -99,7 +161,7 @@ func (s *Server) writeClaimPollAdvice(w http.ResponseWriter) {
 
 // safety: a refusal is written here, so a caller that gets false must return
 // without writing its own answer.
-func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request, key string) bool {
+func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request, team store.Team, key string) bool {
 	if s.idlePolls == nil {
 		return true
 	}
@@ -108,7 +170,7 @@ func (s *Server) admitIdleClaimPoll(w http.ResponseWriter, r *http.Request, key 
 	// controller would send now, so the gate waits until the suggestion a whole
 	// interval ago was already the widest one. Until then, and whenever work
 	// arrives, this refuses nothing.
-	if s.claimPollAdvice(now.Add(-s.idleClaimPoll)) < s.idleClaimPoll {
+	if s.claimPollAdvice(team, now.Add(-s.idleClaimPoll)) < s.idleClaimPoll {
 		return true
 	}
 	if s.idlePolls.Allow(key, now) {

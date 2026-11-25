@@ -75,7 +75,7 @@ type Server struct {
 	idleClaimPoll     time.Duration
 	idlePolls         *ratelimit.Limiter
 	idlePollsEnforced bool
-	lastClaimAward    atomic.Int64
+	queueActivity     queueActivity
 
 	attentionCursor [2]string
 	attentionPassAt time.Time
@@ -515,6 +515,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 		}
 		if sample {
 			s.sampleOperationalSeries(ctx)
+			s.queueActivity.prune(time.Now(), s.idleClaimPoll)
 		}
 	}
 }

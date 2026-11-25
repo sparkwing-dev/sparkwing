@@ -66,10 +66,10 @@ func TestIdleClaimShedLogsAtDebugWithoutRunnerCredential(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/claims", nil)
 	r.Header.Set(store.RunnerIdentityHeader, credential)
 	key, ok := s.runnerBudgetKey(httptest.NewRecorder(), r, capability.Authorized{})
-	if !ok || !s.admitIdleClaimPoll(httptest.NewRecorder(), r, key) {
+	if !ok || !s.admitIdleClaimPoll(httptest.NewRecorder(), r, "", key) {
 		t.Fatal("first poll refused")
 	}
-	if s.admitIdleClaimPoll(httptest.NewRecorder(), r, key) {
+	if s.admitIdleClaimPoll(httptest.NewRecorder(), r, "", key) {
 		t.Fatal("second poll admitted")
 	}
 	records := auditLines(t, &logs, "claim shed")

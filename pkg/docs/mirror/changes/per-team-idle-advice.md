@@ -1,0 +1,4 @@
+### Changed
+
+- **controller:** Idle poll advice follows each team's own queue
+  The interval a controller suggests to an idle runner now grows from the last award or admitted run of the runner's own team. Every newly admitted run that queues work counts, and so does a newly approved job: CLI and API submissions, retries, child runs, scheduled and run-now runs, GitHub App runs and approvals. A team's runners return to their 500 ms cadence on their next claim request after its work is queued; a runner already waiting honors the interval it was given. A replayed submission or approval and a publish-only intake leave the idle clock alone. Another team's activity no longer returns every runner on the controller to polling every 500 ms for 8 s. The Cloud launcher, which serves every team, still follows any team's activity.
