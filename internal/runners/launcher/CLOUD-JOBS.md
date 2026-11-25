@@ -88,7 +88,9 @@ deploy that sets the launcher's image; the launcher has `get` on it only.
   resource claims and health-check `host` fields must stay unset, as must
   `hostAliases`. Job Pods set exactly the `dnsConfig` resolver options
   `timeout:1` and `attempts:5`, with no nameservers or search domains, so the
-  first lookup outlasts the strict network-policy attach window; capacity
+  first lookup outlasts the strict network-policy attach window, and run-node
+  sends a fresh controller lookup every 200 ms, up to five, so the first answer
+  after the policy attaches is used without waiting for that retry; capacity
   Pods set no `dnsConfig`. The scheduler is the default one, service
   links are off and no `system-` priority class may be named. The fields come
   from the vendored k8s.io/api, so a field a newer API server adds stays

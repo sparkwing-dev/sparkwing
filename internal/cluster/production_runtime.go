@@ -89,7 +89,8 @@ func productionRuntime(version string) clusterRuntime {
 				if err != nil {
 					return launcher.BootstrapHost{}, nil, err
 				}
-				return launcher.BootstrapHost{Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL}, options.ModuleCache, false, procenv.SubmitAcceptAll(), nil)}, nil, nil
+				controllerClient := controllerHTTP(options.ControllerURL)
+				return launcher.BootstrapHost{HTTP: controllerClient, Host: productionHostingAt(home, version, client.EngineOptions{URL: options.ControllerURL, HTTP: controllerClient}, options.ModuleCache, false, procenv.SubmitAcceptAll(), nil)}, nil, nil
 			},
 		},
 	}
