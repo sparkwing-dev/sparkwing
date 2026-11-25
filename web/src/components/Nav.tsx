@@ -28,7 +28,7 @@ export default function Nav() {
     let cancelled = false;
     async function tick() {
       const rows = await getPendingApprovals();
-      if (!cancelled) setPending(rows);
+      if (!cancelled && rows) setPending(rows);
     }
     tick();
     const t = setInterval(tick, APPROVALS_POLL_MS);

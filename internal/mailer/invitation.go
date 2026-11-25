@@ -20,11 +20,16 @@ type Invitation struct {
 
 const expiryLayout = "2 January 2006"
 
+// safety: the message passes DKIM and DMARC as Sparkwing, so names an inviter
+// or team admin chose stay out of the subject, where they would read as
+// Sparkwing's own words.
+const invitationSubject = "You're invited to a team on Sparkwing"
+
 var invitationHTML = template.Must(template.New("invitation").Parse(`<!DOCTYPE html>
 <html lang="en">
 <body style="margin:0;padding:24px;background:#ffffff;color:#1a1a1a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;">
 <div style="max-width:560px;">
-<p style="margin:0 0 16px;">{{.InviterName}} invited you to join the team <strong>{{.TeamName}}</strong> on Sparkwing as {{.Role}}.</p>
+<p style="margin:0 0 16px;">The Sparkwing user "{{.InviterName}}" invited you to join the team <strong>"{{.TeamName}}"</strong> as {{.Role}}. Sparkwing users choose these names themselves.</p>
 <p style="margin:0 0 16px;"><a href="{{.AcceptURL}}" style="display:inline-block;padding:10px 16px;background:#1a1a1a;color:#ffffff;text-decoration:none;border-radius:4px;">Accept invitation</a></p>
 <p style="margin:0 0 16px;">If the button does not work, open this link:<br><a href="{{.AcceptURL}}" style="color:#1a1a1a;word-break:break-all;">{{.AcceptURL}}</a></p>
 <p style="margin:0 0 16px;">This invitation expires on {{.Expires}} (7 days from when it was sent).</p>
@@ -38,10 +43,7 @@ var invitationHTML = template.Must(template.New("invitation").Parse(`<!DOCTYPE h
 func InvitationMessage(to string, inv Invitation) (Message, error) {
 	inv.InviterName, inv.TeamName = displayName(inv.InviterName), displayName(inv.TeamName)
 	expires := inv.ExpiresAt.UTC().Format(expiryLayout)
-	subject := fmt.Sprintf("%s invited you to %s on Sparkwing",
-		inv.InviterName, inv.TeamName)
-
-	text := fmt.Sprintf(`%s invited you to join the team %s on Sparkwing as %s.
+	text := fmt.Sprintf(`The Sparkwing user "%s" invited you to join the team "%s" as %s. Sparkwing users choose these names themselves.
 
 Accept the invitation:
 %s
@@ -58,7 +60,7 @@ If you did not expect this invitation, you can ignore this email.
 		return Message{}, fmt.Errorf("mailer: render invitation HTML: %w", err)
 	}
 
-	return Message{To: to, Subject: subject, Text: text, HTML: html.String()}, nil
+	return Message{To: to, Subject: invitationSubject, Text: text, HTML: html.String()}, nil
 }
 
 const maxNameRunes = 80
