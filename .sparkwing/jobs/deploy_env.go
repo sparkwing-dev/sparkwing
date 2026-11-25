@@ -27,9 +27,6 @@ type deployConfig struct {
 	RoleARN        string
 	GitopsURL      string
 	GitopsBranch   string
-	// perf: kikd-infra's sparkwing-jobs EC2NodeClass pulls this runner tag while a
-	// Cloud job node boots; terraform/ecr exempts it from tag immutability.
-	PrepullTag     string
 	ReferenceURL   string
 	ReferenceName  string
 	CommitName     string
@@ -95,6 +92,10 @@ type deployEnv struct {
 	ControllerDeployment string
 	LauncherDeployment   string
 	ControllerURL        string
+	// perf: kikd-infra's EC2NodeClass for this environment's Cloud job nodes
+	// pulls this runner tag while a node boots; terraform/ecr exempts it from
+	// tag immutability.
+	PrepullTag string
 }
 
 func defaultDeployConfig() deployConfig {
@@ -114,7 +115,6 @@ func defaultDeployConfig() deployConfig {
 		RoleARN:        "arn:aws:iam::633280902600:role/sparkwing-deploy",
 		GitopsURL:      "git@github.com:sparkwing-dev/sparkwing-gitops.git",
 		GitopsBranch:   "main",
-		PrepullTag:     "cloud-prepull",
 		ReferenceURL:   "git@github.com:sparkwing-dev/sparkwing-ci-smoke.git",
 		ReferenceName:  "hello",
 		CommitName:     "Sparkwing deploy",
@@ -134,6 +134,7 @@ func defaultDeployConfig() deployConfig {
 			ControllerDeployment: "sparkwing-staging-sparkwing-full-controller",
 			LauncherDeployment:   "sparkwing-staging-sparkwing-runner-bundle-launcher",
 			ControllerURL:        "https://staging.sparkwing.dev",
+			PrepullTag:           "cloud-prepull-staging",
 		},
 		Production: deployEnv{
 			Name:                 "production",
@@ -144,6 +145,7 @@ func defaultDeployConfig() deployConfig {
 			ControllerDeployment: "sparkwing-sparkwing-full-controller",
 			LauncherDeployment:   "sparkwing-sparkwing-runner-bundle-launcher",
 			ControllerURL:        "https://api.sparkwing.dev",
+			PrepullTag:           "cloud-prepull",
 		},
 		SmokeProfiles:  []string{"production-smoke"},
 		ArgoTimeout:    10 * time.Minute,

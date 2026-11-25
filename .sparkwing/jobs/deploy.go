@@ -35,7 +35,7 @@ func (Deploy) Help() string {
 		"reusing images an earlier run already published for the same commit. Before changing GitOps, deploy protects candidate and previous image indexes and platform manifests with immutable cloud-deploy-<digest> retention tags. A tagging failure stops deployment. staging-gate and production pin the digests in sparkwing-gitops, render with the candidate chart and push the controller, then the launcher, " +
 		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Recovery relies on RDS point-in-time recovery, with no deploy-time snapshot or backup preflight. staging-gate compiles its candidate CLI alongside rollout, joining both before smoke submission. It runs deploy-smoke with a child run and the hello reference pipeline on staging Cloud. " +
 		"production reuses the staging-verified candidate CLI only for the same source SHA, native platform and binary digest, rebuilding on a missing or mismatched handoff. It requires a staging-gate record for the same digests, from this run or, with --promote-proven, from the last successful default-branch deploy run, then runs the two-job deploy-smoke pipeline in the " +
-		"production team that owns the source repository installation and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs after both rollouts complete. After a passing production smoke, deploy moves the runner's cloud-prepull tag, which Cloud job nodes pull while they boot, to the candidate; a failure to move it warns without failing the deploy. A failed production deploy or smoke reverts this run's GitOps commits only when the controller schema did not increase; a schema upgrade retains candidate images and records a Bitwing finding requiring roll forward. " +
+		"production team that owns the source repository installation and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs after both rollouts complete. Each environment's Cloud job nodes pull their own runner tag while they boot: after the staging rollout, deploy moves cloud-prepull-staging to the candidate, and after a passing production smoke it moves cloud-prepull; a failure to move either warns without failing the deploy. A failed production deploy or smoke reverts this run's GitOps commits only when the controller schema did not increase; a schema upgrade retains candidate images and records a Bitwing finding requiring roll forward. " +
 		"Take a manual snapshot before a risky migration. Staging summarizes its deployed and previous digests and emits the gate record. Production emits its deployment record. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
 		"from SSM; no key is stored with the pipeline. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
 		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. Separate capacity-one job queues serialize builds, staging rollout plus gate, and production promotion. The next candidate can build and stage during production. At build and staging admission, superseded commits stop before credentials or Cloud smoke. " +
@@ -276,6 +276,9 @@ func (d *deployer) stage(ctx context.Context, images deployImages) (stagingGateR
 		d.cliBuilt = true
 	}
 	summarizeDeployment(ctx, rec)
+	// perf: staging keeps the candidate even when its gate fails, so the tag
+	// follows the rollout and the gate's own smoke nodes already pre-pull it.
+	d.movePrepullTag(ctx, d.cfg.Staging, images.Runner)
 	return d.stagingGate(ctx, images)
 }
 
@@ -377,7 +380,7 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 		d.tools.say(ctx, "dry-run: on a failed production deploy or smoke, would renew the role session and revert this run's GitOps commits newest first only if the controller schema did not increase; otherwise retain candidate images and record a Bitwing finding requiring roll forward")
 	}
 	if err == nil {
-		d.movePrepullTag(ctx, images.Runner)
+		d.movePrepullTag(ctx, env, images.Runner)
 		return rec, nil
 	}
 	if len(rec.Changes) == 0 {
@@ -400,23 +403,24 @@ func (d *deployer) promote(ctx context.Context, images deployImages) (envDeploym
 	return rec, fmt.Errorf("production rolled back to controller %s and runner %s: %w", rec.Previous.Controller.Digest, rec.Previous.Launcher.Digest, err)
 }
 
-// perf: Cloud job nodes pull the runner's pre-pull tag while they boot, so
-// moving it once production passes its smoke spares each run's first Job Pod
-// the image pull. A failure costs only that pull and production already runs
-// the candidate, so it warns rather than failing or rolling back the deploy.
-func (d *deployer) movePrepullTag(ctx context.Context, runner imagePin) {
-	tag := runner.Repository + ":" + d.cfg.PrepullTag
+// perf: each environment's Cloud job nodes pull its runner pre-pull tag while
+// they boot, so moving it to the image the environment now runs spares each
+// run's first Job Pod the image pull. A failure costs only that pull and the
+// environment already runs the candidate, so it warns rather than failing or
+// rolling back the deploy.
+func (d *deployer) movePrepullTag(ctx context.Context, env deployEnv, runner imagePin) {
+	tag := runner.Repository + ":" + env.PrepullTag
 	err := d.refreshRole(ctx)
 	if err == nil {
 		err = d.ecrLogin(ctx)
 	}
 	if err == nil {
 		err = d.act(ctx, "point "+tag+" at "+runner.Digest+" for Cloud node pre-pull", func() error {
-			return d.tools.registry.tag(ctx, d.ecrPass, runner, d.cfg.PrepullTag)
+			return d.tools.registry.tag(ctx, d.ecrPass, runner, env.PrepullTag)
 		})
 	}
 	if err != nil {
-		message := "WARNING: Cloud job nodes keep pre-pulling the previous runner until the next deploy moves " + tag + ": " + err.Error()
+		message := "WARNING: " + env.Name + " Cloud job nodes keep pre-pulling the previous runner until the next deploy moves " + tag + ": " + err.Error()
 		d.tools.say(ctx, message)
 		sparkwing.Summary(ctx, message)
 	}

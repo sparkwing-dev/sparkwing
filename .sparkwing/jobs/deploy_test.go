@@ -1285,9 +1285,43 @@ func TestDeployMovesPrepullTagOnlyAfterPassingSmoke(t *testing.T) {
 		t.Fatalf("a pre-pull tag failure changed the deploy: %+v, %+v", got, rec)
 	}
 	if !slices.ContainsFunc(f.said, func(s string) bool {
-		return strings.HasPrefix(s, "WARNING: Cloud job nodes keep pre-pulling the previous runner") && strings.HasSuffix(s, "tag is immutable")
+		return strings.HasPrefix(s, "WARNING: production Cloud job nodes keep pre-pulling the previous runner") && strings.HasSuffix(s, "tag is immutable")
 	}) {
 		t.Fatalf("no pre-pull warning: %q", f.said)
+	}
+}
+
+func TestDeployMovesStagingPrepullTagAfterStagingRollout(t *testing.T) {
+	f := newFakeDeploy(t)
+	images := f.candidate()
+	if _, err := f.deployer(false).stage(t.Context(), images); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{images.Runner.Repository + ":cloud-prepull-staging -> " + images.Runner.Digest}; !slices.Equal(f.registry.tagged, want) {
+		t.Fatalf("pre-pull tag moves = %q, want %q", f.registry.tagged, want)
+	}
+
+	// Staging keeps a candidate whose gate fails, so its nodes should pre-pull it.
+	f = newFakeDeploy(t)
+	f.failRuns["run-deploy-smoke-staging"] = true
+	images = f.candidate()
+	if _, err := f.deployer(false).stage(t.Context(), images); err == nil {
+		t.Fatal("a failed staging smoke passed the gate")
+	}
+	if want := []string{images.Runner.Repository + ":cloud-prepull-staging -> " + images.Runner.Digest}; !slices.Equal(f.registry.tagged, want) {
+		t.Fatalf("pre-pull tag moves after a failed gate = %q, want %q", f.registry.tagged, want)
+	}
+
+	f = newFakeDeploy(t)
+	f.registry.tagErr = errors.New("tag is immutable")
+	if _, err := f.deployer(false).stage(t.Context(), f.candidate()); err != nil {
+		t.Fatalf("a pre-pull tag failure failed the staging gate: %v", err)
+	}
+	if !slices.ContainsFunc(f.said, func(s string) bool {
+		return strings.HasPrefix(s, "WARNING: staging Cloud job nodes keep pre-pulling the previous runner") &&
+			strings.Contains(s, ":cloud-prepull-staging: ")
+	}) {
+		t.Fatalf("no staging pre-pull warning: %q", f.said)
 	}
 }
 

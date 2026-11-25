@@ -1131,12 +1131,13 @@ Smoke status follows poll every second. NodeClaim sampling interrupts its wait
 when all followers finish, then takes a final sample before checking the claims
 and logs.
 After a passing smoke, production moves the runner's `cloud-prepull` tag to the candidate.
-Cloud job nodes pull that tag while they boot (kikd-infra `k8s/karpenter/ec2nodeclass.yaml`),
-so the first Job Pod of each run finds the runner already present. ECR exempts only this tag
-from the repository's immutability. A failure to move it warns in the job summary and leaves
-production deployed; nodes keep pre-pulling the previous runner until the next deploy moves it.
-Staging shares the node class and does not move the tag, so staging runs pull a new runner
-themselves until production deploys it.
+Cloud job nodes pull their environment's tag while they boot (kikd-infra
+`k8s/karpenter/ec2nodeclass.yaml`), so the first Job Pod of each run finds the runner already
+present. Staging has its own node class and tag, `cloud-prepull-staging`, which `staging-gate`
+moves once the staging rollout completes, before its smoke: staging keeps the candidate even when
+the gate fails. ECR exempts only these two tags from the repository's immutability. A failure to
+move either warns in the job summary and leaves the environment deployed; its nodes keep
+pre-pulling the previous runner until the next deploy moves the tag.
 Recovered startup probe failures before readiness remain visible in pod logs but do not
 fail the smoke; any warning or error during the smoke still fails it. The QA teams need no installation and are not used for this repository-backed smoke. Staging summarizes its deployed and previous digests before emitting the gate record. Production emits its deployment record. Credentials come
 from the run's OIDC token through the `sparkwing-deploy` role in
