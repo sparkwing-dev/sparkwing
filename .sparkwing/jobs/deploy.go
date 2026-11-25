@@ -254,10 +254,20 @@ func (d *deployer) stage(ctx context.Context, images deployImages) (stagingGateR
 		return stagingGateRecord{}, err
 	}
 	var rec envDeployment
-	if d.dry {
+	// perf: staging keeps a confirmed rollout even when the CLI build or the
+	// gate fails, so the tag moves as soon as the rollout is confirmed, under
+	// ctx rather than a work context a failed build cancels. The gate's own
+	// smoke nodes then pre-pull the candidate.
+	rollOut := func(workCtx context.Context) error {
 		var err error
-		rec, _, err = d.deployTo(ctx, d.cfg.Staging, images)
-		if err != nil {
+		rec, _, err = d.deployTo(workCtx, d.cfg.Staging, images)
+		if err == nil {
+			d.movePrepullTag(ctx, d.cfg.Staging, images.Runner)
+		}
+		return err
+	}
+	if d.dry {
+		if err := rollOut(ctx); err != nil {
 			return stagingGateRecord{}, err
 		}
 	} else {
@@ -265,20 +275,13 @@ func (d *deployer) stage(ctx context.Context, images deployImages) (stagingGateR
 		compiler := *d
 		compiler.resolved = nil
 		group.Go(func() error { return compiler.buildCLI(workCtx) })
-		group.Go(func() error {
-			var err error
-			rec, _, err = d.deployTo(workCtx, d.cfg.Staging, images)
-			return err
-		})
+		group.Go(func() error { return rollOut(workCtx) })
 		if err := group.Wait(); err != nil {
 			return stagingGateRecord{}, err
 		}
 		d.cliBuilt = true
 	}
 	summarizeDeployment(ctx, rec)
-	// perf: staging keeps the candidate even when its gate fails, so the tag
-	// follows the rollout and the gate's own smoke nodes already pre-pull it.
-	d.movePrepullTag(ctx, d.cfg.Staging, images.Runner)
 	return d.stagingGate(ctx, images)
 }
 
