@@ -263,16 +263,29 @@ func TestStateFollowerRejectsRegressedOrForeignState(t *testing.T) {
 	}
 }
 
-func followLocalState(t *testing.T, at time.Duration, change bool) (reads int, waited time.Duration) {
+type localFollow int
+
+const (
+	followIdle localFollow = iota
+	followChangeAt
+	followChangeAfterPoll
+)
+
+func followLocalState(t *testing.T, at time.Duration, mode localFollow) (reads int, delay time.Duration) {
 	t.Helper()
 	before := followerSnapshot()
-	var changed atomic.Bool
+	var armed atomic.Bool
+	var changedAt time.Time
 	f := stateFollower{
 		Store: followerReader{snapshot: func(context.Context, string) (store.RunSnapshot, error) {
 			reads++
 			current := followerSnapshot()
-			if changed.Load() {
+			switch {
+			case !armed.Load():
+			case mode == followChangeAt || !changedAt.IsZero():
 				current.Run.StateSeq++
+			default:
+				changedAt = time.Now()
 			}
 			return current, nil
 		}},
@@ -280,23 +293,27 @@ func followLocalState(t *testing.T, at time.Duration, change bool) (reads int, w
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	if change {
-		time.AfterFunc(at, func() { changed.Store(true) })
-	} else {
-		time.AfterFunc(at, cancel)
-	}
 	started := time.Now()
+	switch mode {
+	case followIdle:
+		time.AfterFunc(at, cancel)
+	case followChangeAt:
+		changedAt = started.Add(at)
+		time.AfterFunc(at, func() { armed.Store(true) })
+	case followChangeAfterPoll:
+		time.AfterFunc(at, func() { armed.Store(true) })
+	}
 	err := f.wait(ctx, before)
-	waited = time.Since(started)
-	if change && err != nil || !change && !errors.Is(err, context.Canceled) {
+	delay = time.Since(changedAt)
+	if mode != followIdle && err != nil || mode == followIdle && !errors.Is(err, context.Canceled) {
 		t.Fatalf("wait = %v", err)
 	}
-	return reads, waited
+	return reads, delay
 }
 
 func TestLocalStateFollowerReadsLessWhileIdle(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		if reads, _ := followLocalState(t, time.Minute, false); reads > 125 {
+		if reads, _ := followLocalState(t, time.Minute, followIdle); reads > 125 {
 			t.Fatalf("idle minute made %d snapshot reads, want at most 125", reads)
 		}
 	})
@@ -304,17 +321,18 @@ func TestLocalStateFollowerReadsLessWhileIdle(t *testing.T) {
 
 func TestLocalStateFollowerSeesChangesPromptly(t *testing.T) {
 	for _, test := range []struct {
-		name     string
-		changeAt time.Duration
-		within   time.Duration
+		name   string
+		at     time.Duration
+		mode   localFollow
+		within time.Duration
 	}{
-		{"first wake", 200 * time.Millisecond, 250 * time.Millisecond},
-		{"after idle", 30*time.Second + 260*time.Millisecond, 30*time.Second + 760*time.Millisecond},
+		{"first wake", 200 * time.Millisecond, followChangeAt, 50 * time.Millisecond},
+		{"after idle poll", 30 * time.Second, followChangeAfterPoll, 500 * time.Millisecond},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
-				if _, waited := followLocalState(t, test.changeAt, true); waited > test.within {
-					t.Fatalf("change at %s seen after %s, want by %s", test.changeAt, waited, test.within)
+				if _, delay := followLocalState(t, test.at, test.mode); delay > test.within {
+					t.Fatalf("change seen %s after it committed, want within %s", delay, test.within)
 				}
 			})
 		})
