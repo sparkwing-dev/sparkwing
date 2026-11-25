@@ -57,6 +57,38 @@ func TestOwnerHostWorkersBoundLocalExecution(t *testing.T) {
 	}
 }
 
+// safety: the fake owner store hands every subscriber one shared channel, so while the scheduler and a holder
+// follower both wait, a notification would wake only one of them; each follower here gets its own copy, as each
+// production subscriber polls on its own.
+type changeFanout struct {
+	mu          sync.Mutex
+	subscribers map[chan struct{}]bool
+}
+
+func (h *changeFanout) subscribe(context.Context, string) (stateSubscription, error) {
+	changed := make(chan struct{}, 1)
+	h.mu.Lock()
+	h.subscribers[changed] = true
+	h.mu.Unlock()
+	return stateSubscription{Changed: changed, Close: func() error {
+		h.mu.Lock()
+		delete(h.subscribers, changed)
+		h.mu.Unlock()
+		return nil
+	}}, nil
+}
+
+func (h *changeFanout) notify() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for changed := range h.subscribers {
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	}
+}
+
 type handoffReconciler struct {
 	*ownerFixture
 	requeued *atomic.Bool
@@ -88,6 +120,21 @@ func TestOwnerHostFollowingAnotherHolderLeavesTheWorkerSlotToASibling(t *testing
 			return decision
 		}
 		host.Local = func(runstate.NodeRow) bool { return true }
+		fanout := &changeFanout{subscribers: map[chan struct{}]bool{}}
+		follower := stateFollower{Store: state, Subscribe: fanout.subscribe}
+		host.Wait, host.WaitNode = follower.wait, follower.waitNode
+		forwarding, stopForwarding := context.WithCancel(t.Context())
+		defer stopForwarding()
+		go func() {
+			for {
+				select {
+				case <-forwarding.Done():
+					return
+				case <-state.changed:
+					fanout.notify()
+				}
+			}
+		}()
 		release := make(chan struct{})
 		var mu sync.Mutex
 		var order []string
