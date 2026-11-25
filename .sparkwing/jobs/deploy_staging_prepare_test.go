@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -192,7 +193,7 @@ func TestStagingRetryMovesPrepullTagOnlyOnceTheLiveLauncherRunsTheCandidate(t *t
 		d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
 			// GitOps already pins the candidate, but Argo has not rolled the launcher yet.
 			if !converged && filepath.Base(c.Name) == "kubectl" && slices.Contains(c.Args, d.cfg.Staging.LauncherDeployment) && slices.Contains(c.Args, "get") {
-				return f.old.Runner.ref(), nil
+				return testDeploymentSnapshot("launcher", f.old.Runner.ref(), true), nil
 			}
 			return run(ctx, c)
 		}
@@ -211,5 +212,83 @@ func TestStagingRetryMovesPrepullTagOnlyOnceTheLiveLauncherRunsTheCandidate(t *t
 		return strings.HasPrefix(s, "WARNING: staging Cloud job nodes keep pre-pulling the previous runner") && strings.Contains(s, "not "+images.Runner.Digest)
 	}) {
 		t.Fatalf("no warning for the unconverged launcher: %q", f.said)
+	}
+}
+
+func TestStagingRetryWaitsOutALauncherRolloutArgoStartsAfterRolloutStatus(t *testing.T) {
+	f := newFakeDeploy(t)
+	images := f.candidate()
+	if _, err := f.deployer(false).stage(t.Context(), images); err != nil {
+		t.Fatal(err)
+	}
+	f.registry.tagged = nil
+	d := f.deployer(false)
+	var mu sync.Mutex
+	// The live launcher still runs the previous image; Argo applies the
+	// candidate template right after the first rollout status returns.
+	image, complete, statuses := f.old.Runner.ref(), true, 0
+	var tagWhileRolling []bool
+	d.tools.registry = observedRegistry{deployRegistry: d.tools.registry, onTag: func() {
+		mu.Lock()
+		defer mu.Unlock()
+		tagWhileRolling = append(tagWhileRolling, image != images.Runner.ref() || !complete)
+	}}
+	run := d.tools.run
+	launcher := d.cfg.Staging.LauncherDeployment
+	d.tools.run = func(ctx context.Context, c deployCommand) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case filepath.Base(c.Name) == "kubectl" && slices.Contains(c.Args, "rollout") && slices.Contains(c.Args, "deployment/"+launcher):
+			statuses++
+			if statuses == 1 {
+				image, complete = images.Runner.ref(), false
+			} else {
+				complete = true
+			}
+			return "", nil
+		case filepath.Base(c.Name) == "kubectl" && slices.Contains(c.Args, "get") && slices.Contains(c.Args, launcher):
+			if slices.Contains(c.Args, "json") {
+				return testDeploymentSnapshot("launcher", image, complete), nil
+			}
+			return image, nil
+		}
+		mu.Unlock()
+		defer mu.Lock()
+		return run(ctx, c)
+	}
+	if _, err := d.stage(t.Context(), images); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(tagWhileRolling, []bool{false}) {
+		t.Fatalf("tag moves while the launcher was still rolling out = %v, want one move after the rollout completed", tagWhileRolling)
+	}
+}
+
+func TestRolledOutImageRequiresTheObservedTemplateOnEveryReplica(t *testing.T) {
+	const image = "registry/runner@sha256:new"
+	snapshot := func(generation, observed, replicas, updated, ready, available int) string {
+		return fmt.Sprintf(`{"metadata":{"generation":%d},"spec":{"replicas":%d,"template":{"spec":{"containers":[{"name":"launcher","image":%q}]}}},`+
+			`"status":{"observedGeneration":%d,"updatedReplicas":%d,"readyReplicas":%d,"availableReplicas":%d}}`,
+			generation, replicas, image, observed, updated, ready, available)
+	}
+	for name, tc := range map[string]struct {
+		json     string
+		complete bool
+	}{
+		"rolled out":          {snapshot(3, 3, 2, 2, 2, 2), true},
+		"template unobserved": {snapshot(3, 2, 2, 2, 2, 2), false},
+		"replica not updated": {snapshot(3, 3, 2, 1, 2, 2), false},
+		"replica not ready":   {snapshot(3, 3, 2, 2, 1, 2), false},
+		"replica unavailable": {snapshot(3, 3, 2, 2, 2, 1), false},
+		"default one replica": {`{"metadata":{"generation":1},"spec":{"template":{"spec":{"containers":[{"name":"launcher","image":"` + image + `"}]}}},"status":{"observedGeneration":1,"updatedReplicas":1,"readyReplicas":1,"availableReplicas":1}}`, true},
+	} {
+		got, complete, err := rolledOutImage(tc.json, "launcher")
+		if err != nil || got != image || complete != tc.complete {
+			t.Errorf("%s: rolledOutImage = %q, %v, %v; want %q, %v", name, got, complete, err, image, tc.complete)
+		}
+	}
+	if _, _, err := rolledOutImage(snapshot(1, 1, 1, 1, 1, 1), "controller"); err == nil {
+		t.Error("a Deployment without the container was accepted")
 	}
 }

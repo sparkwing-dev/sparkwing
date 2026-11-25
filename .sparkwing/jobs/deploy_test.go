@@ -851,10 +851,14 @@ func (f *fakeDeploy) kubectl(c deployCommand) (string, error) {
 	case strings.Contains(joined, "get deployment"):
 		ns := c.Args[1]
 		pins := f.pinsOnMain(envDir[ns])
-		if strings.Contains(joined, "controller") && strings.Contains(c.Args[4], "controller") {
-			return pins.Controller.ref(), nil
+		container, image := "launcher", pins.Launcher.ref()
+		if strings.Contains(c.Args[4], "controller") {
+			container, image = "controller", pins.Controller.ref()
 		}
-		return pins.Launcher.ref(), nil
+		if c.Args[len(c.Args)-1] != "json" {
+			return image, nil
+		}
+		return testDeploymentSnapshot(container, image, true), nil
 	case joined == "get nodes -o json":
 		var items []string
 		for _, run := range f.triggered("deploy-smoke") {
@@ -1695,4 +1699,16 @@ func TestDeploySchemaFetchPreservesShallowCandidateReachability(t *testing.T) {
 	if got := deployGitIn(t, f.repo, "rev-parse", "--is-shallow-repository"); got != "false" {
 		t.Fatal("promotion did not fetch the history needed to prove ancestry")
 	}
+}
+
+// testDeploymentSnapshot is a one-replica Deployment whose current template runs
+// image, fully rolled out or still waiting for the controller to observe it.
+func testDeploymentSnapshot(container, image string, complete bool) string {
+	observed, ready := 2, 1
+	if !complete {
+		observed, ready = 1, 0
+	}
+	return fmt.Sprintf(`{"metadata":{"generation":2},"spec":{"replicas":1,"template":{"spec":{"containers":[{"name":%q,"image":%q}]}}},`+
+		`"status":{"observedGeneration":%d,"updatedReplicas":%d,"readyReplicas":%d,"availableReplicas":%d}}`,
+		container, image, observed, ready, ready, ready)
 }

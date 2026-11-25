@@ -958,22 +958,80 @@ func (d *deployer) waitRollout(ctx context.Context, env deployEnv, commit string
 	return d.confirmRollout(ctx, env, phase, digest)
 }
 
+// safety: rollout status can report the previous revision complete just
+// before Argo changes the template, so completion and the image are judged
+// from one Deployment snapshot, and a snapshot whose rollout is still in
+// progress waits for that rollout instead.
 func (d *deployer) confirmRollout(ctx context.Context, env deployEnv, phase deployPhase, digest string) error {
 	deployment := phase.deployment(env)
 	return d.act(ctx, "wait for deployment "+env.Namespace+"/"+deployment+" to roll out "+digest, func() error {
-		if _, err := d.kubectl(ctx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout="+d.cfg.RolloutTimeout.String()); err != nil {
-			return err
+		deadline := d.tools.now().Add(d.cfg.RolloutTimeout)
+		for {
+			if _, err := d.kubectl(ctx, "-n", env.Namespace, "rollout", "status", "deployment/"+deployment, "--timeout="+d.cfg.RolloutTimeout.String()); err != nil {
+				return err
+			}
+			out, err := d.kubectl(ctx, "-n", env.Namespace, "get", "deployment", deployment, "-o", "json")
+			if err != nil {
+				return err
+			}
+			image, complete, err := rolledOutImage(out, phase.name)
+			if err != nil {
+				return fmt.Errorf("%s: %w", deployment, err)
+			}
+			if complete {
+				if !strings.HasSuffix(image, "@"+digest) {
+					return fmt.Errorf("%s runs %q, not %s", deployment, image, digest)
+				}
+				return nil
+			}
+			if !d.tools.now().Before(deadline) {
+				return fmt.Errorf("%s did not finish rolling out %q within %s", deployment, image, d.cfg.RolloutTimeout)
+			}
+			if err := d.tools.wait(ctx, time.Second); err != nil {
+				return err
+			}
 		}
-		image, err := d.kubectl(ctx, "-n", env.Namespace, "get", "deployment", deployment, "-o",
-			`jsonpath={.spec.template.spec.containers[?(@.name=="`+phase.name+`")].image}`)
-		if err != nil {
-			return err
-		}
-		if !strings.HasSuffix(strings.TrimSpace(image), "@"+digest) {
-			return fmt.Errorf("%s runs %q, not %s", deployment, strings.TrimSpace(image), digest)
-		}
-		return nil
 	})
+}
+
+// rolledOutImage reads a container's image and whether the Deployment has
+// fully rolled out its current template, both from the same object.
+func rolledOutImage(deploymentJSON, container string) (string, bool, error) {
+	var dep struct {
+		Metadata struct{ Generation int64 }
+		Spec     struct {
+			Replicas *int32
+			Template struct {
+				Spec struct {
+					Containers []struct{ Name, Image string }
+				}
+			}
+		}
+		Status struct {
+			ObservedGeneration                                int64
+			UpdatedReplicas, ReadyReplicas, AvailableReplicas int32
+		}
+	}
+	if err := json.Unmarshal([]byte(deploymentJSON), &dep); err != nil {
+		return "", false, err
+	}
+	image := ""
+	for _, c := range dep.Spec.Template.Spec.Containers {
+		if c.Name == container {
+			image = c.Image
+		}
+	}
+	if image == "" {
+		return "", false, fmt.Errorf("no %s container", container)
+	}
+	want := int32(1)
+	if dep.Spec.Replicas != nil {
+		want = *dep.Spec.Replicas
+	}
+	st := dep.Status
+	complete := st.ObservedGeneration >= dep.Metadata.Generation &&
+		st.UpdatedReplicas == want && st.ReadyReplicas == want && st.AvailableReplicas == want
+	return image, complete, nil
 }
 
 func (d *deployer) gitopsEnvironmentUnchanged(ctx context.Context, env deployEnv, commit, observed string, gitEnv map[string]string) (bool, error) {
