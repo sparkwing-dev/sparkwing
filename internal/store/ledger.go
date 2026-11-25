@@ -118,6 +118,7 @@ func (l *ledgerTx) exec(ctx context.Context, q string, args ...any) (sql.Result,
 		return nil, l.err
 	}
 	l.wrote = true
+	l.forgetAuthority()
 	return l.tx.ExecContext(ctx, rewritePh(l.dialect, q), args...)
 }
 
