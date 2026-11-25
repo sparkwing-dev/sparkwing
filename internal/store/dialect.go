@@ -154,6 +154,10 @@ type storeTx struct {
 	operatorTeamAdmin *TeamInfo
 	blobIO            *blobIO
 	matchingRuns      map[matchingRunKey]*matchingRun
+	verifiedAuthority map[authorityMemoKey]verifiedAuthority
+	// safety: set only by snapshotTx for a real read snapshot. Callers may set snapshotRead on a copy of a
+	// write transaction, whose unlocked reads must never reach that transaction's remembered authority.
+	fixedSnapshot bool
 }
 
 func (s *Store) now() time.Time {
@@ -165,7 +169,7 @@ func (s *Store) now() time.Time {
 
 // Read-only decisions may never commit, so clock failure must refuse construction.
 func (s *Store) snapshotTx(ctx context.Context, raw *sql.Tx, read bool) (*storeTx, error) {
-	t := &storeTx{ctx: ctx, operator: &Operator{s: s}, tx: raw, dialect: s.dialect, store: s, snapshotRead: read}
+	t := &storeTx{ctx: ctx, operator: &Operator{s: s}, tx: raw, dialect: s.dialect, store: s, snapshotRead: read, fixedSnapshot: read}
 	if read && s.dialect == DialectSQLite {
 		// SQLite establishes its snapshot on the first table read.
 		var version int
@@ -344,15 +348,25 @@ func (t *storeTx) Commit() error {
 }
 func (t *storeTx) Rollback() error { return rollbackTx(t.tx) }
 
-// safety: a query writes only through RETURNING, and a missed write would leave
-// a held claim asleep until its bound.
+// safety: a query writes only through RETURNING, in any letter case. A missed write would leave a held claim
+// asleep until its bound, or let remembered authority outlive the transaction's own change.
 func (t *storeTx) noteReturningWrite(q string) {
-	if !t.store.commits.tracking.Load() {
+	if !containsFold(q, "returning") {
 		return
 	}
-	if strings.Contains(q, "RETURNING") || strings.Contains(q, "returning") {
+	t.forgetAuthority()
+	if t.store.commits.tracking.Load() {
 		t.wrote = true
 	}
+}
+
+func containsFold(s, word string) bool {
+	for i := 0; i+len(word) <= len(s); i++ {
+		if strings.EqualFold(s[i:i+len(word)], word) {
+			return true
+		}
+	}
+	return false
 }
 
 // Cancellation may have already rolled back the transaction in database/sql.
@@ -390,6 +404,7 @@ func (t *storeTx) execContext(ctx context.Context, q string, args ...any) (sql.R
 		return nil, err
 	}
 	t.wrote = true
+	t.forgetAuthority()
 	return t.tx.ExecContext(ctx, rewritePh(t.dialect, q), args...)
 }
 

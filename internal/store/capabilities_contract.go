@@ -388,11 +388,14 @@ func (op *Operator) readAuthorityTx(ctx context.Context, tx *storeTx, ref capabi
 	if err != nil {
 		return node, err
 	}
-
-	c := node.principal.Capability
-	if !capability.CredentialAlive(c, tx.now(ctx)) {
+	if !capability.CredentialAlive(node.principal.Capability, tx.now(ctx)) {
 		return node, authorityError(hosterr.Unauthenticated, "authority has ended")
 	}
+	return verifyAuthorityNodeTx(ctx, tx, node)
+}
+
+func verifyAuthorityNodeTx(ctx context.Context, tx *storeTx, node authorityNode) (authorityNode, error) {
+	c := node.principal.Capability
 	if node.requirement != nil {
 		if err := checkAuthorityRequirementTx(ctx, tx, c.Team, *node.requirement); err != nil {
 			return node, err
@@ -439,37 +442,90 @@ func (node authorityNode) readsMembership() bool {
 	return c.Subject.Kind == capability.SubjectAccount && !(c.Team == "" && node.principal.Class == capability.CredentialSession && c.Parent == nil)
 }
 
+// perf: a locked resolution discovers, locks, then verifies once; the verified nodes serve later resolutions
+// in the same transaction until it writes.
 func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, lock bool, writes ...string) ([]authorityNode, error) {
 	// perf: read snapshots fix authority and time without acquiring locks to revalidate.
 	if lock && !tx.snapshotRead {
-		if _, err := authorityChainTx(ctx, tx, ref, false); err != nil {
-			return nil, err
-		}
-		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, writes...); err != nil {
-			return nil, err
-		}
+		return lockedAuthorityChainTx(ctx, tx, ref, writes)
 	}
+	_, chain, fresh, err := verifyAuthorityChainTx(ctx, tx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if tx.fixedSnapshot {
+		tx.rememberAuthority(fresh)
+	}
+	return finishAuthorityChainTx(ctx, tx, chain)
+}
+
+func lockedAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef, writes []string) ([]authorityNode, error) {
+	// safety: discovery validates the whole chain before locking, so ended authority or lost membership is
+	// refused without taking a team row; its reads never stand in for the locked verification.
+	discovered, chain, _, err := verifyAuthorityChainTx(ctx, tx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := finishAuthorityChainTx(ctx, tx, chain); err != nil {
+		return nil, err
+	}
+	set := authorityChainLocks(tx, lockSet{}, discovered, writes).normalized()
+	if err := acquireLockRows(ctx, tx, set); err != nil {
+		return nil, err
+	}
+	raw, chain, fresh, err := verifyAuthorityChainTx(ctx, tx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Equal(set.rows, authorityChainLocks(tx, lockSet{}, raw, writes).normalized().rows) {
+		return nil, errAuthorityChanged
+	}
+	// safety: only reads fenced by the lock set they were compared against may be kept.
+	tx.rememberAuthority(fresh)
+	return finishAuthorityChainTx(ctx, tx, chain)
+}
+
+// safety: fresh reads are returned for the caller to keep only once they are fenced by held locks or a fixed
+// snapshot; discovery reads never are.
+func verifyAuthorityChainTx(ctx context.Context, tx *storeTx, ref capability.AuthorityRef) (raw, chain []authorityNode, fresh []rememberedAuthority, err error) {
 	seen := map[capability.AuthorityRef]bool{}
-	var chain []authorityNode
 	for {
 		if seen[ref] {
-			return nil, authorityError(hosterr.IntegrityFailure, "cyclic authority ancestry")
+			return nil, nil, nil, authorityError(hosterr.IntegrityFailure, "cyclic authority ancestry")
 		}
 		seen[ref] = true
-		node, err := tx.operator.readAuthorityTx(ctx, tx, ref, false, ancestrySessionChild(ref, chain)...)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, authorityError(hosterr.Unauthenticated, "authority ancestry is unavailable")
+		sessionChild := ancestrySessionChild(ref, chain)
+		key := newAuthorityMemoKey(ref, sessionChild)
+		entry, ok := tx.verifiedAuthority[key]
+		if !ok {
+			entry.raw, err = tx.operator.readAuthorityNodeTx(ctx, tx, ref, sessionChild...)
+			if err == nil && !capability.CredentialAlive(entry.raw.principal.Capability, tx.now(ctx)) {
+				err = authorityError(hosterr.Unauthenticated, "authority has ended")
+			}
+			if err == nil {
+				entry.verified, err = verifyAuthorityNodeTx(ctx, tx, entry.raw)
+			}
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, nil, nil, authorityError(hosterr.Unauthenticated, "authority ancestry is unavailable")
+			}
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			fresh = append(fresh, rememberedAuthority{key: key, entry: entry})
 		}
-		if err != nil {
-			return nil, err
-		}
-		chain = append(chain, node)
-		parent := node.principal.Capability.Parent
+		raw = append(raw, cloneAuthorityNode(entry.raw))
+		chain = append(chain, cloneAuthorityNode(entry.verified))
+		parent := entry.verified.principal.Capability.Parent
 		if parent == nil {
-			break
+			return raw, chain, fresh, nil
 		}
 		ref = *parent
 	}
+}
+
+// safety: checks that depend on time or on the whole chain run on every use, so a remembered node is judged as
+// a fresh read would be.
+func finishAuthorityChainTx(ctx context.Context, tx *storeTx, chain []authorityNode) ([]authorityNode, error) {
 	now := tx.now(ctx)
 	for _, node := range chain {
 		c := node.principal.Capability
