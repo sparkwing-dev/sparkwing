@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"slices"
 	"syscall"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
@@ -75,12 +74,13 @@ func HasJobCapacity(state wingwire.QueueState) bool {
 	return true
 }
 
-// JobFits reports whether the ledger would grant a native job charging cores
-// right now, judged from the daemon's own queue state. Zero cores is charged
-// the daemon's default, and a charge above the machine's capacity is judged at
-// that capacity. An idle machine always fits, as it does in the ledger, so an
-// estimate stricter than the ledger can delay a job until the holders finish
-// but never strand it; admission stays authoritative either way.
+// JobFits is an advisory estimate of whether the ledger could grant a native job
+// charging cores right now, judged from the daemon's queue state. It reports
+// false only when the charge certainly cannot fit, and true whenever it cannot
+// tell, because admission stays authoritative and a wrong "fits" costs one
+// refused claim while a wrong "full" would hold the job back. Zero cores is
+// charged the daemon's default, and an idle machine always fits, as in the
+// ledger.
 func JobFits(state wingwire.QueueState, cores float64) bool {
 	if state.AdmissionMode == string(admission.ModeOff) {
 		return true
@@ -95,16 +95,10 @@ func JobFits(state wingwire.QueueState, cores float64) bool {
 	if idle {
 		return true
 	}
-	for _, waiter := range state.Waiters {
-		// safety: the ledger admits host resources first in, first out, so an earlier waiter goes first.
-		if slices.Contains(waiter.WaitingOn, "cores") {
-			return false
-		}
-	}
 	for _, resource := range state.Resources {
-		// safety: Reserved is a share of the whole machine while a budget caps Capacity, so the daemon's
-		// idle clamp is never above Capacity and judging at Capacity is never more lenient than the ledger.
-		if resource.Key == "cores" && resource.Capacity > 0 && resource.Available < min(cores, resource.Capacity) {
+		// safety: the daemon clamps a charge to its idle grantable cores, which are never below the ledger's current
+		// room (Available plus Held), so that room bounds the charge from below without the daemon's private state.
+		if resource.Key == "cores" && resource.Capacity > 0 && resource.Available < min(cores, resource.Available+resource.Held) {
 			return false
 		}
 	}
