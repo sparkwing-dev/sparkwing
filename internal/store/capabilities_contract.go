@@ -449,7 +449,7 @@ func authorityChainTx(ctx context.Context, tx *storeTx, ref capability.Authority
 	if lock && !tx.snapshotRead {
 		return lockedAuthorityChainTx(ctx, tx, ref, writes)
 	}
-	_, chain, err := verifyAuthorityChainTx(ctx, tx, ref, false)
+	_, chain, err := verifyAuthorityChainTx(ctx, tx, ref, tx.snapshotRead)
 	if err != nil {
 		return nil, err
 	}

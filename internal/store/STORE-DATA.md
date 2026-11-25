@@ -920,8 +920,9 @@ that order with shuffled authority and unit inputs.
    from that read, then reads and verifies each ancestor once under the locks.
    A changed set restarts the transaction. The verified ancestors serve later
    resolutions in the same transaction until it writes; they never stand in for
-   a lock it does not hold. Authority and membership locks after a ledger lock
-   are refused, as team locks are.
+   a lock it does not hold. A read snapshot reuses each ancestor it verified
+   for every later resolution in that snapshot. Authority and membership locks
+   after a ledger lock are refused, as team locks are.
 8. GitHub installations.
 9. Subscriptions, automation, bindings, pool rules, secrets and credentials.
 10. Schedules, then the intake advisory.

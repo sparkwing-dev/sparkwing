@@ -340,3 +340,21 @@ func sharedMemory(a, b reflect.Value, path string) string {
 	}
 	return ""
 }
+
+func TestOwnerSnapshotReadsEachAncestorOnce(t *testing.T) {
+	tenant, actor := ownerPlacementFixture(t)
+	trace := countClaimVisits(t, tenant.s, func(string) {}, nil)
+	trace.allStatements, trace.enabled = true, true
+	if _, err := tenant.ReadOwnerSnapshot(t.Context(), actor.Authority, "run"); err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	for _, statement := range trace.statements {
+		if strings.Contains(statement.query, "SELECT digest,authority_json,") {
+			reads++
+		}
+	}
+	if reads != 2 {
+		t.Fatalf("owner snapshot read its two ancestors %d times, want once each", reads)
+	}
+}
