@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"testing"
@@ -213,4 +214,29 @@ func (f *RankingFixture) Place(t *testing.T, policy runspec.RepositoryPlacement)
 	t.Helper()
 	policy.Revision = rankingSHA
 	f.Request(t, func(r *runspec.Request) { r.Origin, r.Placement = runspec.OriginApp, &policy })
+}
+
+// ClearQueue finishes the plan unit and withdraws the job's readiness, so no claimant finds work.
+func (f *RankingFixture) ClearQueue(t *testing.T) {
+	t.Helper()
+	f.Store.testOnlyExec(t, `UPDATE triggers SET status='done',finished_at=?`, f.ReadyAt.UnixNano())
+	f.Store.testOnlyExec(t, `UPDATE nodes SET ready_at=NULL`)
+}
+
+// PollIn records a claimant's poll under the supplied context's placement policy.
+func (f *RankingFixture) PollIn(ctx context.Context, t *testing.T, prefix string, slots int) {
+	t.Helper()
+	if err := f.Store.AsOperator().RecordRunnerPoll(ctx, UnitDemand{CapabilityPrefix: prefix, Kinds: []capability.UnitKind{capability.UnitNode}, Labels: []string{"team-4cpu"}, FreeSlots: &slots}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// OtherTeamRunner registers a shared machine claimant of team b.
+func (f *RankingFixture) OtherTeamRunner(t *testing.T) string {
+	t.Helper()
+	root := authorityRoot("other", "b")
+	root.Digest = sha256.Sum256([]byte("ranking-other-b"))
+	root.Grants = []capability.Grant{capability.NodesClaim, capability.TriggersClaim}
+	authorityPersist(t, f.Store, root)
+	return root.Prefix
 }

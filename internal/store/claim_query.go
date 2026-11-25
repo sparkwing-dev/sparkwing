@@ -805,6 +805,11 @@ func claimInputsTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []
 	if err != nil {
 		return err
 	}
+	return claimInputsForTx(ctx, tx, demand, kinds, current, q)
+}
+
+func claimInputsForTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []capability.UnitKind, current claimFacts, q *claimSQL) error {
+	var err error
 	current.Current = 1
 	scopeTeam := ""
 	if current.Cloud == 0 {
@@ -853,6 +858,42 @@ func claimInputsTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []
 	q.dialect = tx.dialect
 	q.facts, q.teams, q.rates, q.kinds, q.now = facts, teams, rates, kinds, tx.now(ctx).UnixNano()
 	return nil
+}
+
+// perf: a team-wide claimant's empty poll answers from the partial claim
+// indexes before the full search loads observers, credit and ranking.
+//
+// safety: each branch is the claim source of its kind with every condition
+// but the team scope and the index predicate dropped, so any unit the search
+// can return for this claimant makes this true in the same snapshot.
+func claimableUnitQueuedTx(ctx context.Context, tx *storeTx, team string, kinds []capability.UnitKind) (bool, error) {
+	var checks, triggerKinds []string
+	var args []any
+	for _, kind := range kinds {
+		switch kind {
+		case capability.UnitNode:
+			checks = append(checks, `EXISTS (SELECT 1 FROM nodes n WHERE n.team=? AND n.status='pending' AND n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL)`)
+			args = append(args, team)
+		case capability.UnitEval:
+			checks = append(checks, `EXISTS (SELECT 1 FROM eval_units e WHERE e.team=? AND e.status='pending' AND e.claimed_by IS NULL AND e.capability_prefix='')`)
+			args = append(args, team)
+		default:
+			triggerKinds = append(triggerKinds, string(kind))
+		}
+	}
+	if len(triggerKinds) > 0 {
+		checks = append(checks, `EXISTS (SELECT 1 FROM triggers t WHERE t.team=? AND t.status='pending' AND t.claimed_by IS NULL AND t.capability_prefix='' AND t.cancel_requested_at IS NULL AND t.unit_kind IN (`+strings.Repeat("?,", len(triggerKinds)-1)+`?))`)
+		args = append(args, team)
+		for _, kind := range triggerKinds {
+			args = append(args, kind)
+		}
+	}
+	if len(checks) == 0 {
+		return false, nil
+	}
+	var queued int
+	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN `+strings.Join(checks, ` OR `)+` THEN 1 ELSE 0 END`, args...).Scan(&queued)
+	return queued == 1, err
 }
 
 func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []capability.UnitKind, q *claimSQL) (string, error) {

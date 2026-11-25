@@ -91,8 +91,23 @@ func (o *Operator) searchClaimUnit(ctx context.Context, demand UnitDemand) (clai
 	if demand.FreeSlots != nil && *demand.FreeSlots <= 0 {
 		return claimHead{}, notFound("eligible work", "")
 	}
+	current, err := claimFactsTx(ctx, tx, demand)
+	if err != nil {
+		return claimHead{}, err
+	}
+	// Bound claimants already look up their one run directly, and the Cloud
+	// launcher's search across teams carries its own fairness bounds.
+	if current.Cloud == 0 && current.BindRun == "" && len(current.Pushes) == 0 {
+		queued, err := claimableUnitQueuedTx(ctx, tx, current.Team, kinds)
+		if err != nil {
+			return claimHead{}, err
+		}
+		if !queued {
+			return claimHead{}, notFound("eligible work", "")
+		}
+	}
 	q := claimSQL{}
-	if err := claimInputsTx(ctx, tx, demand, kinds, &q); err != nil {
+	if err := claimInputsForTx(ctx, tx, demand, kinds, current, &q); err != nil {
 		return claimHead{}, err
 	}
 	tx.groupWaits = make(map[UnitRef]groupWaitObservation)
