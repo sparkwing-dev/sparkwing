@@ -22,11 +22,11 @@ import (
 
 var installedExecutable = os.Executable
 
-// UseInstalledExecutableForTest makes replacement pins resolve to path instead of the running executable. A go test
-// binary records its main package as <package>.test, which the retained-engine check refuses, so a CLI test suite
-// that drives replacement pins in process supplies a real build of the CLI.
-func UseInstalledExecutableForTest(path string) {
-	installedExecutable = func() (string, error) { return path, nil }
+// UseInstalledExecutableForTest makes replacement pins resolve to the executable locate returns instead of the
+// running one. A go test binary records its main package as <package>.test, which the retained-engine check refuses,
+// so a CLI test suite that drives replacement pins in process supplies a real build of the CLI.
+func UseInstalledExecutableForTest(locate func() (string, error)) {
+	installedExecutable = locate
 }
 
 func installedEngineVersion() (string, error) {

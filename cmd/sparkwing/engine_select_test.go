@@ -27,7 +27,7 @@ func TestReplacementPinWarnsAndKeepsInstalledCLI(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module fixture\nrequire "+engine.GoModule+" v0.0.0\nreplace "+engine.GoModule+" => ../sdk\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	current, err := os.Executable()
+	current, err := testEngine()
 	if err != nil {
 		t.Fatal(err)
 	}

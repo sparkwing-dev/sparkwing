@@ -262,7 +262,8 @@ func writeSDKFixture(t *testing.T, sparkwingDir, source string) {
 func TestMain(m *testing.M) { os.Exit(testmanager.Run(func() int { return runCLITestMain(m) })) }
 
 func runCLITestMain(m *testing.M) int {
-	inherited := useInheritedTestEngine()
+	sdkFixtureEnvironment = os.Environ()
+	defer useTestEngine()()
 	if !testmanager.Enabled() {
 		fixtureUseUnmanagedUserManager()
 	}
@@ -290,15 +291,6 @@ func runCLITestMain(m *testing.M) int {
 			return 0
 		}
 	}
-	if !inherited && os.Getenv("SPARKWING_TEST_DAEMON_ENTRYPOINT") != "1" {
-		cleanup, err := useBuiltTestEngine()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-		defer cleanup()
-	}
-	sdkFixtureEnvironment = os.Environ()
 	code := m.Run()
 	for _, directory := range []string{submitCLIDir, sdkFixtureDir} {
 		if err := os.RemoveAll(directory); err != nil {
