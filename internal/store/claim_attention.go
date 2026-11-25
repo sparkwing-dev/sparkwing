@@ -147,8 +147,6 @@ type runnerPollStamp struct {
 	authority []byte
 }
 
-// perf: an unchanged poll restamps its observation in one statement instead of the locked write.
-//
 // safety: it applies only while its own row holds the observation, last_used_at and authority the snapshot read,
 // so a concurrent poll, an award or a label change misses. False means nothing was written; an error once commit
 // was attempted is returned, because the restamp may have landed and the locked write would write again.
