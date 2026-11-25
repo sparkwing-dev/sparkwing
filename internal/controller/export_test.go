@@ -116,6 +116,13 @@ func (s *SyncBuffer) String() string {
 // IdleSince sets every team's idle poll clock to at.
 func IdleSince(s *Server, at time.Time) { s.recordQueueActivity(at) }
 
+// ResetQueueActivity sets every idle poll clock to at and forgets every team's own clock.
+func ResetQueueActivity(s *Server, at time.Time) {
+	s.queueActivity.mu.Lock()
+	defer s.queueActivity.mu.Unlock()
+	s.queueActivity.all, s.queueActivity.any, s.queueActivity.teams = at.UnixNano(), at.UnixNano(), nil
+}
+
 // TeamIdleSince sets one team's idle poll clock to at, even when it is older than the clock's reading.
 func TeamIdleSince(s *Server, team store.Team, at time.Time) {
 	s.queueActivity.mu.Lock()

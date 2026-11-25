@@ -10,6 +10,7 @@ import (
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
+	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
@@ -152,15 +153,18 @@ func (e *intakeRunToken) Error() string { return "intake requires a run-cap toke
 
 type intakeRunTokenKey struct{}
 
-// admitWithFlood runs every controller run admission for team: CLI and API
-// submissions, retries, child runs, schedules and App webhooks. An admitted
-// run queues claimable work, so it resets the team's idle poll clock.
-func admitWithFlood[T any](ctx context.Context, s *Server, team store.Team, admit func(context.Context) (T, error)) (T, error) {
+// safety: only an admission that queued fresh claimable work resets the team's idle poll clock; a replay
+// or a publish-only intake queues none, and resetting on them would keep idle runners polling fast.
+func admitWithFlood[T any](ctx context.Context, s *Server, team store.Team, admit func(context.Context) (T, error), queued func(T) bool) (T, error) {
 	response, err := admitOnce(ctx, s, admit)
-	if err == nil {
+	if err == nil && queued(response) {
 		s.recordTeamQueueActivity(team, time.Now())
 	}
 	return response, err
+}
+
+func queuedAdmission(r store.AdmissionResult) bool {
+	return !r.Replayed && r.Request.Request.Mode != runspec.IntakePublish
 }
 
 func admitOnce[T any](ctx context.Context, s *Server, admit func(context.Context) (T, error)) (T, error) {

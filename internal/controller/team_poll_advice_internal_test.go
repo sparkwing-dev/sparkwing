@@ -16,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
-// twoTeamAdviceServer has two runners in team a and one in team b; queueJob queues one job in team a.
 func twoTeamAdviceServer(t *testing.T) (srv *Server, queueJob func()) {
 	t.Helper()
 	engine, _ := engineRuntimeStore(t)
@@ -184,5 +183,80 @@ func TestAnApprovedJobReturnsItsTeamsRunnersToTheirOwnCadence(t *testing.T) {
 	}
 	if got := f.s.claimPollAdvice("another-team", time.Now()); got == 0 {
 		t.Fatal("another team's runners lost their idle advice to this team's approval")
+	}
+}
+
+func TestAReplayedApprovalLeavesTheIdleClockAlone(t *testing.T) {
+	f := newScheduleHTTPFixture(t)
+	f.facts.snapshot.Authorities[0].Principal.Capability.Grants = []capability.Grant{capability.RunsControl, capability.ApprovalsWrite}
+	f.s.WithEngineController(&EngineController{ResolveTenant: selectorTenant(store.DefaultTeam, nil)})
+	testOnlyTenantPort[runControlWriter](f.s, func(context.Context, store.Team) (runControlWriter, error) {
+		return &runControlWriterFake{team: store.DefaultTeam, replayed: true}, nil
+	})
+	f.s.recordQueueActivity(time.Now().Add(-testIdleWindow))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/runs/bound-run/approvals/bound-job", strings.NewReader(`{"resolution":"approved"}`))
+	r.Header.Set("Authorization", "Bearer "+f.raw)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Idempotency-Key", "approve")
+	w := httptest.NewRecorder()
+	f.s.Handler().ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("replayed approval: %d %s", w.Code, w.Body)
+	}
+	for _, team := range []store.Team{store.DefaultTeam, ""} {
+		if got := f.s.claimPollAdvice(team, time.Now()); got == 0 {
+			t.Fatalf("a replayed approval, which releases nothing new, returned claimants of team %q to their own cadence", team)
+		}
+	}
+}
+
+func TestPruneNeverChangesAdviceOrEnforcementWhateverTheCeiling(t *testing.T) {
+	for _, ceiling := range []time.Duration{time.Second, 2 * time.Second, 2500 * time.Millisecond, DefaultMaxIdleClaimPoll, 7300 * time.Millisecond} {
+		srv := New(nil, nil).WithIdleClaimPoll(ceiling)
+		now := time.Now()
+		srv.recordQueueActivity(now.Add(-time.Hour))
+		for idle := time.Duration(0); idle <= 60*time.Second; idle += 250 * time.Millisecond {
+			team := store.Team(idle.String())
+			srv.recordTeamQueueActivity(team, now.Add(-idle))
+		}
+		read := func(team store.Team) [2]time.Duration {
+			return [2]time.Duration{srv.claimPollAdvice(team, now), srv.claimPollAdvice(team, now.Add(-ceiling))}
+		}
+		before := map[store.Team][2]time.Duration{}
+		for team := range srv.queueActivity.teams {
+			before[team] = read(team)
+		}
+		srv.queueActivity.prune(now, ceiling)
+		for team, want := range before {
+			if got := read(team); got != want {
+				t.Errorf("ceiling %s: pruning team idle %s changed advice and the enforcement lookback from %v to %v", ceiling, team, want, got)
+			}
+		}
+	}
+}
+
+func TestAReplayedScheduledRunLeavesTheIdleClocksAlone(t *testing.T) {
+	st := newStoreForTick(t)
+	sched := armPushedForTick(t, st)
+	srv := New(st, nil)
+	launcher := cronLauncher{server: srv}
+	due := time.Date(2026, 3, 1, 3, 0, 0, 0, time.UTC)
+	first, err := launcher.Launch(t.Context(), sched, due)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idle := time.Now().Add(-testIdleWindow).UnixNano()
+	srv.queueActivity.mu.Lock()
+	srv.queueActivity.all, srv.queueActivity.any, srv.queueActivity.teams = idle, idle, nil
+	srv.queueActivity.mu.Unlock()
+
+	replayed, err := launcher.Launch(t.Context(), sched, due)
+	if err != nil || replayed != first {
+		t.Fatalf("the repeated instant started %s (%v), want the replay of %s", replayed, err, first)
+	}
+	for _, team := range []store.Team{sched.Team, ""} {
+		if got := srv.claimPollAdvice(team, time.Now()); got == 0 {
+			t.Fatalf("a replayed scheduled run, which queues nothing new, returned claimants of team %q to their own cadence", team)
+		}
 	}
 }

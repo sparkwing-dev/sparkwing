@@ -43,15 +43,12 @@ func (s *Server) WithIdleClaimPoll(max time.Duration) *Server {
 	return s
 }
 
-// queueActivity keeps the idle clocks behind claim poll advice. Each team
-// idles on its own clock, so one team's work never shortens the advice
-// another team's runners get.
+// safety: each team idles on its own clock, so one team's work never shortens the advice another team's runners
+// get; all is a controller start, which concerns every team, and any is the latest activity of any team, which a
+// claimant serving every team's queue follows.
 type queueActivity struct {
-	mu sync.Mutex
-	// all is activity that concerns every team, such as a controller start.
-	all int64
-	// any is the latest activity of any team, for a claimant that serves
-	// every team's queue.
+	mu    sync.Mutex
+	all   int64
 	any   int64
 	teams map[store.Team]int64
 }
@@ -72,17 +69,13 @@ func (q *queueActivity) record(team store.Team, at int64) {
 	q.teams[team] = max(q.teams[team], at)
 }
 
-// prune forgets team clocks that can no longer change advice or enforcement:
-// a clock older than the controller-start clock, or idle long enough that
-// the advice, read one ceiling in the past, is already at the ceiling. A
-// forgotten team falls back to the older controller-start clock, which gives
-// the same advice.
+// safety: a forgotten team falls back to the older controller-start clock, so prune drops only a clock whose advice,
+// read one ceiling back as the enforcement gate reads it, already sits at the ceiling and so can no longer change.
 func (q *queueActivity) prune(now time.Time, ceiling time.Duration) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	settled := now.Add(-(idleClaimPollFraction + 1) * ceiling).UnixNano()
 	for team, at := range q.teams {
-		if ceiling <= 0 || at <= q.all || at <= settled {
+		if ceiling <= 0 || at <= q.all || idleAdvice(now.Sub(time.Unix(0, at))-ceiling, ceiling) == ceiling {
 			delete(q.teams, team)
 		}
 	}
@@ -97,8 +90,7 @@ func (q *queueActivity) last(team store.Team) int64 {
 	return max(q.teams[team], q.all)
 }
 
-// recordQueueActivity resets every team's idle clock, as a controller start
-// does, so no runner is advised to wait on a queue nobody has read yet.
+// safety: a controller start resets every team's clock, so no runner is advised to wait on a queue nobody has read.
 func (s *Server) recordQueueActivity(now time.Time) {
 	s.queueActivity.record("", now.UnixNano())
 }
@@ -110,14 +102,12 @@ func (s *Server) recordTeamQueueActivity(team store.Team, now time.Time) {
 	s.queueActivity.record(team, now.UnixNano())
 }
 
-// recordPlanAccepted resets a team's idle clock once the hosted controller
-// commits a plan, whose first jobs are new claimable work.
+// safety: a newly accepted plan's first jobs are claimable work, so the hosted controller resets the team's idle clock.
 func (s *Server) recordPlanAccepted(team store.Team) {
 	s.recordTeamQueueActivity(team, time.Now())
 }
 
-// claimPollAdvice suggests an idle interval to a claimant of team, or to a
-// claimant of every team when team is empty.
+// safety: an empty team is a claimant that serves every team, so it follows any team's activity.
 func (s *Server) claimPollAdvice(team store.Team, now time.Time) time.Duration {
 	if s.idleClaimPoll <= 0 {
 		return 0
@@ -126,14 +116,17 @@ func (s *Server) claimPollAdvice(team store.Team, now time.Time) time.Duration {
 	if last == 0 {
 		return 0
 	}
-	idle := now.Sub(time.Unix(0, last))
+	return idleAdvice(now.Sub(time.Unix(0, last)), s.idleClaimPoll)
+}
+
+func idleAdvice(idle, ceiling time.Duration) time.Duration {
 	advice := idle / idleClaimPollFraction
 	// safety: the advice is a floor a runner may only widen to, so it is withheld
 	// until it would be worth a runner's while to widen at all.
 	if advice < store.MinIdleClaimPoll {
 		return 0
 	}
-	return min(advice.Truncate(time.Second), s.idleClaimPoll)
+	return min(advice.Truncate(time.Second), ceiling)
 }
 
 // WithIdleClaimPollEnforced answers a claim poll that arrives while this

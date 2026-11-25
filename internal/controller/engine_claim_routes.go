@@ -108,7 +108,7 @@ func (s *Server) claimHandler(engine *EngineController) func(http.ResponseWriter
 		response, err := engine.Claim(ctx, a, body)
 		team := store.Team(a.Principal.Capability.Team)
 		if response.Claim != nil {
-			// A launcher serving every team holds no team, so its award counts for the unit's team.
+			// safety: a Cloud launcher holds no team, so its award counts for the awarded unit's team.
 			if team == "" {
 				team = store.Team(response.Claim.Request.Request.Team)
 			}

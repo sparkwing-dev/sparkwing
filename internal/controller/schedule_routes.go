@@ -183,7 +183,7 @@ func (s *Server) handleRunCronNow(w http.ResponseWriter, r *http.Request, a capa
 		id, run, replayed, err := writer.RunAuthorizedSchedule(ctx, a, r.PathValue("schedule"), key)
 		scheduleID = id
 		return controllerwire.ScheduleRun{RunID: run, Replayed: replayed}, err
-	})
+	}, func(r controllerwire.ScheduleRun) bool { return !r.Replayed })
 	if err != nil {
 		return engineLookupError(err)
 	}

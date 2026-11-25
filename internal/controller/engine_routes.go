@@ -243,6 +243,8 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		//nolint:contextcheck // ctx carries r.Context() with the verified intake source.
 		response, err := admitWithFlood(ctx, s, store.Team(a.Target.Team), func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.admitRun(ctx, a.Target.Team, request)
+		}, func(r controllerwire.CreateRunResponse) bool {
+			return !r.Replayed && request.Request.Mode != runspec.IntakePublish
 		})
 		if err != nil {
 			if refusal := publicQueueDepthRefusal(err); refusal != nil {
@@ -268,7 +270,7 @@ func (s *EngineController) handlePlan(w http.ResponseWriter, r *http.Request, a 
 	if err != nil {
 		return err
 	}
-	// A replayed plan releases no jobs, so it leaves the team's idle clock alone.
+	// safety: a replayed plan releases no jobs, so it leaves the team's idle clock alone.
 	if !response.Replayed && s.planAccepted != nil {
 		s.planAccepted(store.Team(a.Target.Team))
 	}

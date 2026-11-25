@@ -52,7 +52,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	}
 	admitted, err := admitWithFlood(ctx, l.server, s.Team, func(ctx context.Context) (store.AdmissionResult, error) {
 		return writer.AdmitScheduledRun(ctx, s, due)
-	})
+	}, queuedAdmission)
 	if err != nil {
 		return "", err
 	}
