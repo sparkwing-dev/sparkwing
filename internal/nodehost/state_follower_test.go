@@ -5,7 +5,9 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
@@ -257,6 +259,82 @@ func TestStateFollowerRejectsRegressedOrForeignState(t *testing.T) {
 			if err := f.wait(t.Context(), before); err == nil {
 				t.Fatal("invalid persistence view accepted")
 			}
+		})
+	}
+}
+
+type localFollow int
+
+const (
+	followIdle localFollow = iota
+	followChangeAt
+	followChangeAfterPoll
+)
+
+func followLocalState(t *testing.T, at time.Duration, mode localFollow) (reads int, delay time.Duration) {
+	t.Helper()
+	before := followerSnapshot()
+	var armed atomic.Bool
+	var changedAt time.Time
+	f := stateFollower{
+		Store: followerReader{snapshot: func(context.Context, string) (store.RunSnapshot, error) {
+			reads++
+			current := followerSnapshot()
+			switch {
+			case !armed.Load():
+			case mode == followChangeAt || !changedAt.IsZero():
+				current.Run.StateSeq++
+			default:
+				changedAt = time.Now()
+			}
+			return current, nil
+		}},
+		Subscribe: localStateSubscription,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	started := time.Now()
+	switch mode {
+	case followIdle:
+		time.AfterFunc(at, cancel)
+	case followChangeAt:
+		changedAt = started.Add(at)
+		time.AfterFunc(at, func() { armed.Store(true) })
+	case followChangeAfterPoll:
+		time.AfterFunc(at, func() { armed.Store(true) })
+	}
+	err := f.wait(ctx, before)
+	delay = time.Since(changedAt)
+	if mode != followIdle && err != nil || mode == followIdle && !errors.Is(err, context.Canceled) {
+		t.Fatalf("wait = %v", err)
+	}
+	return reads, delay
+}
+
+func TestLocalStateFollowerReadsLessWhileIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		if reads, _ := followLocalState(t, time.Minute, followIdle); reads > 125 {
+			t.Fatalf("idle minute made %d snapshot reads, want at most 125", reads)
+		}
+	})
+}
+
+func TestLocalStateFollowerSeesChangesPromptly(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		at     time.Duration
+		mode   localFollow
+		within time.Duration
+	}{
+		{"first wake", 200 * time.Millisecond, followChangeAt, 50 * time.Millisecond},
+		{"after idle poll", 30 * time.Second, followChangeAfterPoll, 500 * time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				if _, delay := followLocalState(t, test.at, test.mode); delay > test.within {
+					t.Fatalf("change seen %s after it committed, want within %s", delay, test.within)
+				}
+			})
 		})
 	}
 }

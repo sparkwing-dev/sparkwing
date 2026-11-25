@@ -253,6 +253,50 @@ func TestInvitationEmailNamesTheInviterAndTeamAndStopsAtTheDailyCap(t *testing.T
 	}
 }
 
+// A display name or angle brackets around a real address would give one
+// mailbox a fresh per-recipient daily allowance for every spelling.
+func TestInvitationRefusesAddressFormsOtherThanAPlainAddress(t *testing.T) {
+	mail := &mailFake{}
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
+		s.WithMailer(mail)
+	}})
+	owner := f.user("o", "olga@example.com")
+	for _, email := range []string{
+		`"pay-invoice-at-evil.example"<target@example.com>`,
+		`x<target@example.com>`,
+		`<target@example.com>`,
+		`target@example.com (x)`,
+	} {
+		var refusal struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		code := f.call("POST", "/api/v1/team/invitations", owner.auth,
+			map[string]string{"email": email, "role": "reader"}, &refusal)
+		if code != http.StatusBadRequest || !strings.Contains(refusal.Error.Message, "plain email address") {
+			t.Errorf("invite %s = %d %q, want 400 asking for a plain email address", email, code, refusal.Error.Message)
+		}
+	}
+	if sent := mail.messages(); len(sent) != 0 {
+		t.Fatalf("sent %+v for refused addresses", sent)
+	}
+}
+
+// A local part that needs quotes is still a plain address.
+func TestInvitationAcceptsAQuotedLocalPart(t *testing.T) {
+	mail := &mailFake{}
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
+		s.WithMailer(mail)
+	}})
+	owner := f.user("o", "olga@example.com")
+	var inv inviteBody
+	if code := f.call("POST", "/api/v1/team/invitations", owner.auth,
+		map[string]string{"email": `"qa..alerts"@example.com`, "role": "reader"}, &inv); code != http.StatusCreated {
+		t.Fatalf("invite quoted local part = %d, want 201", code)
+	}
+}
+
 func TestInvitationWithoutAMailServiceSendsNothing(t *testing.T) {
 	f := newIdentityFixture(t)
 	owner := f.user("o", "olga@example.com")

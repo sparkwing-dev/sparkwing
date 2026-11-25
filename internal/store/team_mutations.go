@@ -89,7 +89,10 @@ func (t *Tenant) CreateAuthorizedInvitation(ctx context.Context, a capability.Au
 			return bindingRefusal()
 		}
 		email = normalizeEmail(email)
-		if !looksLikeEmail(email) || !role.Valid() || strings.TrimSpace(key) == "" {
+		if !looksLikeEmail(email) || !plainEmailAddress(email) {
+			return ErrInvitationAddress
+		}
+		if !role.Valid() || strings.TrimSpace(key) == "" {
 			return ErrInvalidInput
 		}
 		var created, expires int64
