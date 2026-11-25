@@ -136,6 +136,11 @@ PIPELINE
 done
 exit 1
 `
+			// safety: the child resolves the CLI engine; it must receive the parent's build before PATH reaches the fake go.
+			engineBinary, err := testEngine()
+			if err != nil {
+				t.Fatal(err)
+			}
 			testshell.Install(t, filepath.Join(bin, "go"), strings.ReplaceAll(script, "go1.26.8", selected))
 			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv("SPARKWING_HOME", filepath.Join(root, "home"))
@@ -151,7 +156,7 @@ exit 1
 			t.Setenv("FIXTURE_SELECTED_MODULE", string(selectedModule))
 			t.Setenv("SPARKWING_GITCACHE_URL", "")
 			child := exec.Command(os.Args[0], "-test.run=^TestPipelineToolchainOverrideStaysInTheBuild$")
-			child.Env = append(os.Environ(), "SPARKWING_TEST_TOOLCHAIN_CHILD_DIR="+dir,
+			child.Env = append(os.Environ(), testEngineVariable+"="+engineBinary, "SPARKWING_TEST_TOOLCHAIN_CHILD_DIR="+dir,
 				fmt.Sprintf("SPARKWING_TEST_TOOLCHAIN_UNCACHED=%t", uncached))
 			if out, err := child.CombinedOutput(); err != nil {
 				t.Fatalf("launch: %v: %s", err, out)
