@@ -53,7 +53,7 @@ type deployRegistry interface {
 	tag(ctx context.Context, password string, pin imagePin, tag string) error
 	digest(ctx context.Context, password, ref string) (string, error)
 	revision(ctx context.Context, password, ref string) (string, error)
-	publish(ctx context.Context, password string, in PublishImagesArgs) error
+	publish(ctx context.Context, password string, in PublishImagesArgs, engine string) error
 }
 
 type deployTools struct {
@@ -503,8 +503,8 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 		}
 		if err := d.tools.registry.publish(ctx, d.ecrPass, PublishImagesArgs{
 			Dist: dist, Version: out.Version, Revision: out.Commit, Registry: d.cfg.Registry,
-			ControllerBase: d.cfg.ControllerBase, RunnerBase: d.cfg.RunnerBase, Engine: d.shippedEngine(ctx, out.Version),
-		}); err != nil {
+			ControllerBase: d.cfg.ControllerBase, RunnerBase: d.cfg.RunnerBase,
+		}, d.shippedEngine(ctx, out.Version)); err != nil {
 			return err
 		}
 		if out.Controller.Digest, err = d.tools.registry.digest(ctx, d.ecrPass, out.Controller.Repository+":"+out.Version); err != nil {
@@ -568,6 +568,9 @@ func (d *deployer) shippedEngine(ctx context.Context, build string) string {
 		return ""
 	}
 	release, err := fetchShippedEngine(ctx, d.tools.fetch, version, filepath.Join(d.tmp, "shipped-engine"))
+	if err == nil {
+		_, err = d.cmd(ctx, deployCommand{Dir: d.repoDir, Name: "go", Args: []string{"run", "./cmd/verify-release", "--engine-bundle", release}, Env: map[string]string{"GOWORK": "off"}})
+	}
 	if err != nil {
 		d.tools.say(ctx, fmt.Sprintf("the runner image ships no engine, so Pods download %s: %v", version, err))
 		return ""
@@ -1395,8 +1398,8 @@ func (r ecrRegistry) revision(ctx context.Context, password, ref string) (string
 	return cfg.Config.Labels["org.opencontainers.image.revision"], nil
 }
 
-func (r ecrRegistry) publish(ctx context.Context, password string, in PublishImagesArgs) error {
-	refs, err := publishReleaseImages(ctx, in, remote.WithAuth(&authn.Basic{Username: "AWS", Password: password}))
+func (r ecrRegistry) publish(ctx context.Context, password string, in PublishImagesArgs, engine string) error {
+	refs, err := publishReleaseImages(ctx, in, engine, remote.WithAuth(&authn.Basic{Username: "AWS", Password: password}))
 	for _, ref := range refs {
 		sparkwing.Info(ctx, "published %s (linux/amd64, linux/arm64)", ref)
 	}

@@ -1102,10 +1102,12 @@ pinned runtime-base manifests exist before compiling the dashboard or binaries. 
 fails with its reference and a repair hint. Reusing published candidate images needs no base lookup.
 The runner image also ships the candidate's stable release base, such as `v0.79.0` for
 `v0.79.1-0.<time>-<sha>`: that release's SHA256SUMS, its signature, and each platform's `sparkwing`
-executable and signature, read-only under `/usr/local/share/sparkwing/releases/<version>/`. Cloud Pods
-verify those files exactly like a download and skip the engine download when the signed policy
-selects that release. When the bundle cannot be downloaded, the deploy says so and publishes
-without it, so Pods download the engine as before.
+executable and signature, read-only under `/usr/local/share/sparkwing/releases/<version>/`. The
+deploy first checks them with `go run ./cmd/verify-release --engine-bundle`, the runner's own release
+verification under the production keys. Cloud Pods verify those files again exactly like a download
+and skip the engine download when the signed policy selects that release. When the bundle cannot be
+downloaded or fails verification, the deploy says so and publishes without it, so Pods download the
+engine as before.
 `staging-gate` pins the
 digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the
 controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the

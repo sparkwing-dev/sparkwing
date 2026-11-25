@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -99,8 +100,8 @@ func imageFile(t *testing.T, img v1.Image, path string) (*tar.Header, []byte) {
 func TestPublishImagesShipsTheEngineReadOnlyInTheRunnerOnly(t *testing.T) {
 	in, host := publishFixture(t, "amd64", "arm64")
 	files := engineRelease("v0.79.0")
-	in.Engine = writeEngineRelease(t, "v0.79.0", files)
-	if _, err := publishReleaseImages(t.Context(), in); err != nil {
+	engine := writeEngineRelease(t, "v0.79.0", files)
+	if _, err := publishReleaseImages(t.Context(), in, engine); err != nil {
 		t.Fatal(err)
 	}
 	for _, arch := range releaseImageArches {
@@ -136,8 +137,8 @@ func TestPublishImagesPushesNothingForAnEngineThatFailsItsSum(t *testing.T) {
 	in, host := publishFixture(t, "amd64", "arm64")
 	files := engineRelease("v0.79.0")
 	files["sparkwing-linux-arm64"] = []byte("torn download")
-	in.Engine = writeEngineRelease(t, "v0.79.0", files)
-	if _, err := publishReleaseImages(t.Context(), in); err == nil {
+	engine := writeEngineRelease(t, "v0.79.0", files)
+	if _, err := publishReleaseImages(t.Context(), in, engine); err == nil {
 		t.Fatal("published an engine bundle that differs from its SHA256SUMS")
 	}
 	if _, err := remote.Index(mustTag(t, host+"/sparkwing/sparkwing-runner:v0.68.0-qa.1")); err == nil {
@@ -145,39 +146,62 @@ func TestPublishImagesPushesNothingForAnEngineThatFailsItsSum(t *testing.T) {
 	}
 }
 
-func TestDeployShipsTheReleaseBaseEngineOrDownloadsInstead(t *testing.T) {
-	for _, available := range []bool{true, false} {
-		t.Run(fmt.Sprintf("available=%t", available), func(t *testing.T) {
+func TestDeployShipsOnlyAVerifiedReleaseBaseEngine(t *testing.T) {
+	for _, outcome := range []string{"verified", "unavailable", "forged"} {
+		t.Run(outcome, func(t *testing.T) {
 			f := newFakeDeploy(t)
 			deployGitIn(t, f.repo, "tag", "v0.68.3")
 			deployGitIn(t, f.repo, "commit", "--quiet", "--allow-empty", "-m", "main change")
 			f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
 			deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
 			f.releases = map[string][]byte{}
-			if available {
+			if outcome != "unavailable" {
 				for name, body := range engineRelease("v0.68.3") {
 					f.releases[shippedEngineOrigin+"v0.68.3/"+name] = body
 				}
 			}
+			f.forged = outcome == "forged"
 			if _, err := f.deployer(false).buildCandidate(t.Context(), ""); err != nil {
 				t.Fatal(err)
 			}
 			if len(f.registry.published) != 1 {
 				t.Fatalf("published %d times", len(f.registry.published))
 			}
-			engine := f.registry.published[0].Engine
-			if !available {
+			engine := f.registry.engines[0]
+			verified := slices.ContainsFunc(f.calls, func(call string) bool {
+				return call == "go run ./cmd/verify-release --engine-bundle "+engine
+			})
+			if outcome != "verified" {
 				if engine != "" || !slices.ContainsFunc(f.said, func(msg string) bool { return strings.Contains(msg, "ships no engine") }) {
-					t.Fatalf("an unavailable release shipped %q without saying so: %v", engine, f.said)
+					t.Fatalf("a %s release shipped %q without saying so: %v", outcome, engine, f.said)
 				}
 				return
 			}
-			if filepath.Base(engine) != "v0.68.3" {
-				t.Fatalf("shipped engine %q, want the release base v0.68.3", engine)
-			}
-			if _, err := checkShippedEngine(engine); err != nil {
-				t.Fatal(err)
+			if filepath.Base(engine) != "v0.68.3" || !verified {
+				t.Fatalf("shipped engine %q, verified=%t; want the verified release base v0.68.3", engine, verified)
 			}
 		})
+	}
+}
+
+func TestShippedEngineFetchStaysOnReleaseHostsAndBounded(t *testing.T) {
+	for address, want := range map[string]bool{
+		shippedEngineOrigin + "v0.79.0/SHA256SUMS":                         true,
+		"https://release-assets.githubusercontent.com/github-production/1": true,
+		"https://objects.githubusercontent.com/x":                          true,
+		"https://github.com/someone/else/releases/download/v1/x":           false,
+		"http://github.com/sparkwing-dev/sparkwing/releases/download/v1":   false,
+		"https://example.com/sparkwing-linux-amd64":                        false,
+	} {
+		u, err := url.Parse(address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if releaseAssetURL(u) != want {
+			t.Errorf("releaseAssetURL(%s) = %t, want %t", address, !want, want)
+		}
+	}
+	if _, err := fetchHTTPS(t.Context(), "https://example.com/sparkwing-linux-amd64"); err == nil {
+		t.Fatal("fetched from a host outside the release origins")
 	}
 }

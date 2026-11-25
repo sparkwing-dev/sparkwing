@@ -35,7 +35,6 @@ type PublishImagesArgs struct {
 	Registry       string `flag:"registry" desc:"Registry prefix the images are pushed under, e.g. ghcr.io/sparkwing-dev or an ECR host."`
 	ControllerBase string `flag:"controller-base" desc:"Multi-arch runtime base for the controller, by digest: build/Dockerfile.binary's runtime stage built with BINARY=sparkwing-controller."`
 	RunnerBase     string `flag:"runner-base" desc:"Multi-arch runtime base for the runner, by digest: build/Dockerfile.runner's runtime stage."`
-	Engine         string `flag:"engine" desc:"Optional directory named by a stable release version, holding its SHA256SUMS, SHA256SUMS.sig and each linux sparkwing executable with its .sig. The runner image ships them read-only so its Pods skip the engine download."`
 }
 
 // PublishImages assembles the release images from signed binaries and
@@ -52,9 +51,8 @@ func (PublishImages) ShortHelp() string {
 func (PublishImages) Help() string {
 	return "Appends each signed linux binary in --dist, checked against its SHA256SUMS, as one layer onto the matching platform of a multi-arch runtime base, " +
 		"the Dockerfile's runtime stage pushed by digest. Each architecture is tagged <version>-<arch>, so a registry that expires untagged images keeps it, " +
-		"and both are joined under one index tagged <version>. With --engine, each runner platform also carries that release's signed engine files " +
-		"read-only under /usr/local/share/sparkwing/releases/<version>/. It then reads every published platform back and refuses unless the index lists exactly " +
-		"linux/amd64 and linux/arm64 and each image's binary, and any shipped engine, matches its SHA256SUMS. The work is registry operations only: no Docker daemon, builder or emulation. " +
+		"and both are joined under one index tagged <version>. It then reads every published platform back and refuses unless the index lists exactly " +
+		"linux/amd64 and linux/arm64 and each image's binary matches SHA256SUMS. The work is registry operations only: no Docker daemon, builder or emulation. " +
 		"Registry credentials come from the Docker config (docker login or crane auth login). Rebuild a base, with build-images --runtime-base on a builder " +
 		"that runs both architectures, only when a Dockerfile's runtime stage or its pinned images change."
 }
@@ -75,7 +73,7 @@ func (p *PublishImages) Plan(_ context.Context, plan *sparkwing.Plan, in Publish
 
 func (p *PublishImages) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "publish", func(ctx context.Context) error {
-		refs, err := publishReleaseImages(ctx, p.args, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+		refs, err := publishReleaseImages(ctx, p.args, "", remote.WithAuthFromKeychain(authn.DefaultKeychain))
 		for _, ref := range refs {
 			sparkwing.Info(ctx, "published %s (linux/amd64, linux/arm64)", ref)
 		}
@@ -86,7 +84,8 @@ func (p *PublishImages) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 
 var releaseImageArches = []string{"amd64", "arm64"}
 
-func publishReleaseImages(ctx context.Context, in PublishImagesArgs, opts ...remote.Option) ([]string, error) {
+// safety: engine stays off the pipeline flags; only the deploy passes it, after verifying the release bundle.
+func publishReleaseImages(ctx context.Context, in PublishImagesArgs, engine string, opts ...remote.Option) ([]string, error) {
 	for _, input := range []struct{ flag, value string }{
 		{"--dist", in.Dist},
 		{"--version", in.Version},
@@ -118,8 +117,8 @@ func publishReleaseImages(ctx context.Context, in PublishImagesArgs, opts ...rem
 		}
 	}
 	var engineSums map[string]string
-	if in.Engine != "" {
-		if engineSums, err = checkShippedEngine(in.Engine); err != nil {
+	if engine != "" {
+		if engineSums, err = checkShippedEngine(engine); err != nil {
 			return nil, err
 		}
 	}
@@ -128,7 +127,7 @@ func publishReleaseImages(ctx context.Context, in PublishImagesArgs, opts ...rem
 	published := make([]string, len(components))
 	for i, c := range components {
 		group.Go(func() error {
-			ref, err := publishComponent(in, c.binary, c.base, sums, engineSums, opts)
+			ref, err := publishComponent(in, c.binary, c.base, engine, sums, engineSums, opts)
 			if err != nil {
 				return fmt.Errorf("%s: %w", c.binary, err)
 			}
@@ -140,8 +139,8 @@ func publishReleaseImages(ctx context.Context, in PublishImagesArgs, opts ...rem
 	return slices.DeleteFunc(published, func(ref string) bool { return ref == "" }), err
 }
 
-func publishComponent(in PublishImagesArgs, binary, base string, sums, engineSums map[string]string, opts []remote.Option) (string, error) {
-	shipsEngine := binary == "sparkwing-runner" && in.Engine != ""
+func publishComponent(in PublishImagesArgs, binary, base, engine string, sums, engineSums map[string]string, opts []remote.Option) (string, error) {
+	shipsEngine := binary == "sparkwing-runner" && engine != ""
 	baseRef, err := name.NewDigest(base)
 	if err != nil {
 		return "", fmt.Errorf("base %q must be a reference by digest: %w", base, err)
@@ -166,7 +165,7 @@ func publishComponent(in PublishImagesArgs, binary, base string, sums, engineSum
 			return "", err
 		}
 		if shipsEngine {
-			if baseImage, err = withShippedEngine(baseImage, in.Engine, arch); err != nil {
+			if baseImage, err = withShippedEngine(baseImage, engine, arch); err != nil {
 				return "", err
 			}
 		}
@@ -199,7 +198,7 @@ func publishComponent(in PublishImagesArgs, binary, base string, sums, engineSum
 	}
 	engineVersion := ""
 	if shipsEngine {
-		engineVersion = filepath.Base(in.Engine)
+		engineVersion = filepath.Base(engine)
 	}
 	if err := verifyPublishedIndex(tag, binary, sums, engineVersion, engineSums, opts); err != nil {
 		return "", err

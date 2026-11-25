@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
@@ -92,14 +94,42 @@ func checkShippedEngine(release string) (map[string]string, error) {
 	return sums, nil
 }
 
-func fetchHTTPS(ctx context.Context, url string) ([]byte, error) {
+// safety: about three times today's largest engine executable, so a hostile response cannot exhaust memory.
+const shippedEngineFetchLimit = 256 << 20
+
+var shippedEngineClient = &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 || !releaseAssetURL(req.URL) {
+		return fmt.Errorf("refused redirect to %s outside the GitHub release asset hosts", req.URL.Host)
+	}
+	return nil
+}}
+
+// safety: mirrors the runner's production release origins, so the deploy reads only what a Pod would download.
+func releaseAssetURL(u *url.URL) bool {
+	if u.Scheme != "https" || u.User != nil || u.Port() != "" {
+		return false
+	}
+	switch u.Host {
+	case "github.com":
+		return strings.HasPrefix(u.Path, "/sparkwing-dev/sparkwing/releases/download/")
+	case "release-assets.githubusercontent.com", "objects.githubusercontent.com":
+		return true
+	default:
+		return false
+	}
+}
+
+func fetchHTTPS(ctx context.Context, address string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	if !releaseAssetURL(req.URL) {
+		return nil, fmt.Errorf("refused %s outside the GitHub release asset hosts", address)
+	}
+	resp, err := shippedEngineClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +137,11 @@ func fetchHTTPS(ctx context.Context, url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, shippedEngineFetchLimit+1))
+	if err == nil && len(body) > shippedEngineFetchLimit {
+		err = fmt.Errorf("response exceeds %d bytes", shippedEngineFetchLimit)
+	}
+	return body, err
 }
 
 // safety: root-owned read-only files with zero times give a rerun the same layer digest,

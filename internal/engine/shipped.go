@@ -52,7 +52,8 @@ func (r *Resolver) shippedRelease(identity engineid.Identity, target releaseasse
 	return verified, true
 }
 
-// safety: a link could name any file the process can read, so only regular files are release input.
+// safety: a linked file could name anything the process can read; directories are not checked because the
+// signatures reject any bytes a link substitutes.
 func readShippedFile(path string) ([]byte, error) {
 	info, err := os.Lstat(path)
 	if err != nil {

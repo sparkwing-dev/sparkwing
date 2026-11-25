@@ -118,8 +118,8 @@ The machine caches verified engines under its user cache directory in
 `SPARKWING_TOOLCHAIN=local` requires the exact verified cached release. Cloud
 runner images ship the release files of one engine read-only. A Cloud Pod verifies
 them exactly like a download before caching them, and downloads any other release,
-or a shipped release that fails verification. Current
-Available policy is checked before every execution, including cache hits. Pipeline binaries
+or a shipped release that fails verification. The current
+signed policy is checked before every execution, including cache hits. Pipeline binaries
 are compiled and cached locally rather than downloaded from a controller.
 
 ## Support and security policy

@@ -401,6 +401,7 @@ type fakeDeployRegistry struct {
 	digests   map[string]string
 	revisions map[string]string
 	published []PublishImagesArgs
+	engines   []string
 	retained  []imagePin
 	retainErr error
 	tagged    []string
@@ -436,13 +437,14 @@ func (r *fakeDeployRegistry) revision(_ context.Context, _, ref string) (string,
 	return r.revisions[ref], nil
 }
 
-func (r *fakeDeployRegistry) publish(_ context.Context, _ string, in PublishImagesArgs) error {
+func (r *fakeDeployRegistry) publish(_ context.Context, _ string, in PublishImagesArgs, engine string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, err := os.Stat(filepath.Join(in.Dist, "SHA256SUMS")); err != nil {
 		return err
 	}
 	r.published = append(r.published, in)
+	r.engines = append(r.engines, engine)
 	for _, c := range []string{"sparkwing-controller", "sparkwing-runner"} {
 		d := testDigest(in.Version + c)
 		r.digests[in.Registry+"/"+c+":"+in.Version] = d
@@ -472,6 +474,7 @@ type fakeDeploy struct {
 	oidcDown     bool
 	onSmoke      func(run string) error
 	releases     map[string][]byte
+	forged       bool
 }
 
 func testPins(version, ctl, run string) valuesPins {
@@ -785,6 +788,13 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 		}
 		return "", nil
 	case name == "bitwing":
+		return "", nil
+	case name == "go" && slices.Contains(c.Args, "./cmd/verify-release"):
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if f.forged {
+			return "", errors.New("engine v0.68.3 sparkwing-linux-amd64: release signature is invalid")
+		}
 		return "", nil
 	case name == "go":
 		return "", os.WriteFile(arg("-o"), []byte("candidate CLI"), 0o700)
