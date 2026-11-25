@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
@@ -36,5 +38,20 @@ func TestAnAcceptedPlanReturnsItsTeamsRunnersToTheirOwnCadence(t *testing.T) {
 	}
 	if got := srv.claimPollAdvice("another-team", time.Now()); got == 0 {
 		t.Fatal("another team's runners lost their idle advice to this team's plan")
+	}
+
+	idle := time.Now().Add(-testIdleWindow).UnixNano()
+	srv.queueActivity.mu.Lock()
+	srv.queueActivity.all, srv.queueActivity.any, srv.queueActivity.teams = idle, idle, nil
+	srv.queueActivity.mu.Unlock()
+	w := engineClaimHTTP(t, h, raw, http.MethodPost, "/api/v1/runs/run/plan", string(body), http.StatusOK)
+	var replay controllerwire.PlanAccepted
+	if err := json.Unmarshal(w.Body.Bytes(), &replay); err != nil || !replay.Replayed {
+		t.Fatalf("the identical plan was not answered as a replay: %s (%v)", w.Body, err)
+	}
+	for _, team := range []store.Team{"a", ""} {
+		if got := srv.claimPollAdvice(team, time.Now()); got == 0 {
+			t.Fatalf("a replayed plan, which releases no jobs, returned claimants of team %q to their own cadence", team)
+		}
 	}
 }

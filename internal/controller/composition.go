@@ -59,6 +59,7 @@ func NewDeployment(st *store.Store, cfg deployment.Config, logger *slog.Logger) 
 		srv.credentialIssuer = srv.operator
 	}
 	srv.engineController.cancelCommitted = srv.nudgeReaper
+	srv.engineController.planAccepted = srv.recordPlanAccepted
 	srv.authorization = srv.storeRouteAuthorization()
 	srv.recordQueueActivity(time.Now())
 	return srv

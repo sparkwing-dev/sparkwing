@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/ratelimit"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -111,17 +110,10 @@ func (s *Server) recordTeamQueueActivity(team store.Team, now time.Time) {
 	s.queueActivity.record(team, now.UnixNano())
 }
 
-// recordingTeamQueueActivity resets the target team's idle clock after handle
-// commits and answers, for routes that make queued work claimable. A refused
-// request resets nothing.
-func (s *Server) recordingTeamQueueActivity(handle func(http.ResponseWriter, *http.Request, capability.Authorized) error) func(http.ResponseWriter, *http.Request, capability.Authorized) error {
-	return func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-		if err := handle(w, r, a); err != nil {
-			return err
-		}
-		s.recordTeamQueueActivity(store.Team(a.Target.Team), time.Now())
-		return nil
-	}
+// recordPlanAccepted resets a team's idle clock once the hosted controller
+// commits a plan, whose first jobs are new claimable work.
+func (s *Server) recordPlanAccepted(team store.Team) {
+	s.recordTeamQueueActivity(team, time.Now())
 }
 
 // claimPollAdvice suggests an idle interval to a claimant of team, or to a

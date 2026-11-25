@@ -17,6 +17,7 @@ import (
 type EngineController struct {
 	authority         engineAuthority
 	cancelCommitted   func()
+	planAccepted      func(store.Team)
 	operator          AuthorityRevoker
 	authorization     routepolicy.Authorization
 	RunnerPolicy      RunnerAdmissionPolicy

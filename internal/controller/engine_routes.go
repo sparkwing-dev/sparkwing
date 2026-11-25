@@ -30,6 +30,7 @@ func (s *Server) WithEngineController(engine *EngineController) *Server {
 	s.engineController = engine
 	if engine != nil {
 		engine.cancelCommitted = s.nudgeReaper
+		engine.planAccepted = s.recordPlanAccepted
 	}
 	if engine != nil && engine.ResolveTenant != nil {
 		s.resolveTenant = engine.ResolveTenant
@@ -47,7 +48,7 @@ func (s *Server) engineEndpoints() []controllerwire.Endpoint {
 		},
 		{
 			Method: "POST", Pattern: "/api/v1/runs/{run}/plan", Authentication: capability.AuthCapability,
-			Decode: engine.runResultTarget, ResolveTarget: engine.resolveRunSelector, Handle: s.recordingTeamQueueActivity(engine.handlePlan),
+			Decode: engine.runResultTarget, ResolveTarget: engine.resolveRunSelector, Handle: engine.handlePlan,
 		},
 		{
 			Method: "GET", Pattern: "/api/v1/runs/{run}", Authentication: capability.AuthCapability,
@@ -266,6 +267,10 @@ func (s *EngineController) handlePlan(w http.ResponseWriter, r *http.Request, a 
 	response, err := s.AcceptPlan(r.Context(), a, body)
 	if err != nil {
 		return err
+	}
+	// A replayed plan releases no jobs, so it leaves the team's idle clock alone.
+	if !response.Replayed && s.planAccepted != nil {
+		s.planAccepted(store.Team(a.Target.Team))
 	}
 	writeJSON(w, http.StatusOK, response)
 	return nil
