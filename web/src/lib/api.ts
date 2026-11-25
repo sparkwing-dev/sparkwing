@@ -92,8 +92,9 @@ function endSession() {
 export interface AuthFetchOptions {
   speaksForSession?: boolean;
   timeoutMs?: number | null;
-  // A polled read sets this so a body that stalls after its headers still ends
-  // at the deadline; otherwise the poll would wait on it forever.
+  // A polled read sets this so authFetch reads the whole body within the
+  // deadline; a body that stalls after its headers would otherwise hold the
+  // poll forever. The body is buffered, so this suits short JSON reads only.
   deadlineCoversBody?: boolean;
 }
 
@@ -131,6 +132,7 @@ export function authFetch(
     });
   const signIn = ensureLocalSignIn();
   return (signIn ? signIn.then(send) : send())
+    .then((res) => (deadlineCoversBody ? readWithinDeadline(res) : res))
     .then((res) => {
       if (res.status === 429) {
         _backoffUntil = Date.now() + 10_000;
@@ -152,15 +154,25 @@ export function authFetch(
       return res;
     })
     .catch((err) => {
-      // A controller that is slow to answer was still reached; the caller's
-      // message says it is busy rather than the banner calling it down.
+      // Once the deadline fires, every rejection is that timeout: browsers raise
+      // a plain AbortError from a body read whatever the signal's reason. A slow
+      // controller was still reached, so the banner does not call it down.
       if (controller.signal.reason instanceof RequestTimeoutError) throw controller.signal.reason;
       setConnectionStatus("unreachable");
       throw err;
     })
-    .finally(() => {
-      if (!deadlineCoversBody) clearTimeout(timeout);
-    });
+    .finally(() => clearTimeout(timeout));
+}
+
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
+
+async function readWithinDeadline(res: Response): Promise<Response> {
+  const body = await res.arrayBuffer();
+  return new Response(NULL_BODY_STATUSES.has(res.status) ? null : body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers: res.headers,
+  });
 }
 
 function serverErrorMessage(res: Response): string {
@@ -1079,7 +1091,11 @@ export async function getApproval(
 }
 
 export async function getPendingApprovals(): Promise<Approval[]> {
-  const res = await listPages(`${API_URL}/api/v1/approvals`, ["approvals"], (path) => authFetch(path, { cache: "no-store" })).catch(() => null);
+  const res = await listPages(
+    `${API_URL}/api/v1/approvals`,
+    ["approvals"],
+    (path) => authFetch(path, { cache: "no-store" }, { deadlineCoversBody: true }),
+  ).catch(() => null);
   if (!res || !res.ok) return [];
   const body = await res.json();
   return body.approvals || [];

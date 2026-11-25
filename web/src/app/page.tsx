@@ -44,35 +44,35 @@ export default function Home() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [includeFeatureBranches, setIncludeFeatureBranches] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const activeAnchor = useRef(anchorMs);
-  useEffect(() => {
-    activeAnchor.current = anchorMs;
-  }, [anchorMs]);
+  // Only the newest refresh may update the page: an older one may belong to a
+  // comparison the reader left, even one they have since returned to.
+  const latestRefresh = useRef(0);
 
   const refresh = useCallback(async () => {
+    const request = ++latestRefresh.current;
+    const isLatest = () => request === latestRefresh.current;
     const sinceHrs = Math.ceil((anchorMs + WEEK_MS) / (60 * 60 * 1000)) + 24;
-    let rs: Run[];
-    let ap: Approval[];
+    // Approvals only fill Needs Attention, so the overview does not wait on them.
+    const approvalsRead = getPendingApprovals().then((ap) => {
+      if (isLatest()) setApprovals(ap);
+    });
     try {
-      [rs, ap] = await Promise.all([
-        getRuns(
-          { since: `${sinceHrs}h`, limit: OVERVIEW_RUN_LIMIT },
-          { timeoutMs: OVERVIEW_TIMEOUT_MS },
-        ),
-        getPendingApprovals(),
-      ]);
+      const rs = await getRuns(
+        { since: `${sinceHrs}h`, limit: OVERVIEW_RUN_LIMIT },
+        { timeoutMs: OVERVIEW_TIMEOUT_MS },
+      );
+      if (isLatest()) {
+        setRuns(rs);
+        setNow(Date.now());
+        setLoaded(true);
+        setLoadError(null);
+      }
     } catch (e) {
-      if (activeAnchor.current !== anchorMs) return;
-      setLoadError(`${e instanceof Error ? e.message : String(e)} Retrying automatically.`);
-      return;
+      if (isLatest()) {
+        setLoadError(`${e instanceof Error ? e.message : String(e)} Retrying automatically.`);
+      }
     }
-    // A read for a comparison the reader has since left would relabel its runs.
-    if (activeAnchor.current !== anchorMs) return;
-    setRuns(rs);
-    setApprovals(ap);
-    setNow(Date.now());
-    setLoaded(true);
-    setLoadError(null);
+    await approvalsRead;
   }, [anchorMs]);
 
   useEffect(() => startPoll(refresh, POLL_MS), [refresh]);
@@ -105,7 +105,13 @@ export default function Home() {
       </div>
       <div className="flex items-center gap-2 mb-5">
         <span className="text-xs text-[var(--muted)]">compared to</span>
-        <AnchorSelect value={anchorMs} onChange={setAnchorMs} />
+        <AnchorSelect
+          value={anchorMs}
+          onChange={(ms) => {
+            setAnchorMs(ms);
+            setLoadError(null);
+          }}
+        />
       </div>
 
       {loadError && (

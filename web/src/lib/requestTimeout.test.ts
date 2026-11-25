@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it, type TestContext } from "node:test";
-import { authFetch, getConnectionStatus, getRunners, getRuns } from "./api";
+import { authFetch, getConnectionStatus, getPendingApprovals, getRunners, getRuns } from "./api";
 
 function hangUntilAborted(seen: { signal?: AbortSignal | null }) {
   return (_input: unknown, init?: RequestInit) => {
@@ -87,4 +87,81 @@ describe("request deadline", () => {
     t.mock.timers.tick(10_000);
     await assert.rejects(pending, (err: Error) => err.name === "RequestTimeoutError");
   });
+
+  it("reports a body that a browser aborts at the deadline as the timeout", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    withFetch(t, stallBodyLikeChromium('{"runners":['));
+    const pending = getRunners();
+    await settle();
+    t.mock.timers.tick(10_000);
+    await assert.rejects(pending, (err: Error) => err.name === "RequestTimeoutError");
+  });
+
+  it("ends a stalled approvals body at the deadline", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    withFetch(t, stallBodyLikeChromium('{"approvals":['));
+    const pending = getPendingApprovals();
+    await settle();
+    t.mock.timers.tick(10_000);
+    assert.deepEqual(await pending, []);
+  });
+
+  it("leaves no deadline timer armed once a read settles", async (t) => {
+    const armed = trackTimers(t);
+    withFetch(t, (async () =>
+      new Response(JSON.stringify({ runs: [{ id: "one" }] }), { status: 200 })) as typeof globalThis.fetch);
+    await getRuns();
+    assert.equal(armed.size, 0, "deadline still armed after a successful read");
+    withFetch(t, (async () => new Response("unavailable", { status: 503 })) as typeof globalThis.fetch);
+    await getRuns();
+    assert.equal(armed.size, 0, "deadline still armed after an error status");
+    withFetch(t, (async () => {
+      throw new TypeError("network down");
+    }) as typeof globalThis.fetch);
+    await assert.rejects(getRuns());
+    assert.equal(armed.size, 0, "deadline still armed after an early failure");
+  });
 });
+
+async function settle() {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
+
+// Chromium errors a stalled body with a plain AbortError, whatever the signal's reason.
+function stallBodyLikeChromium(prefix: string): typeof globalThis.fetch {
+  return (async (_input: unknown, init?: RequestInit) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(stream) {
+        stream.enqueue(new TextEncoder().encode(prefix));
+        init?.signal?.addEventListener("abort", () =>
+          stream.error(new DOMException("The user aborted a request.", "AbortError")),
+        );
+      },
+    });
+    return new Response(body, { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof globalThis.fetch;
+}
+
+function trackTimers(t: TestContext): Set<unknown> {
+  const armed = new Set<unknown>();
+  const realSet = globalThis.setTimeout;
+  const realClear = globalThis.clearTimeout;
+  globalThis.setTimeout = ((handler: () => void, ms?: number) => {
+    const id = realSet(() => {
+      armed.delete(id);
+      handler();
+    }, ms);
+    armed.add(id);
+    return id;
+  }) as typeof globalThis.setTimeout;
+  globalThis.clearTimeout = ((id?: Parameters<typeof clearTimeout>[0]) => {
+    armed.delete(id);
+    realClear(id);
+  }) as typeof globalThis.clearTimeout;
+  t.after(() => {
+    globalThis.setTimeout = realSet;
+    globalThis.clearTimeout = realClear;
+    for (const id of armed) realClear(id as Parameters<typeof clearTimeout>[0]);
+  });
+  return armed;
+}
