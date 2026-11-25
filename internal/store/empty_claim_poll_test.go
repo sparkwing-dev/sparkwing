@@ -227,3 +227,39 @@ func TestARevokedCredentialsUnchangedPollDoesNotAdvanceItsLastSeenTime(t *testin
 		t.Fatal("a poll from a credential revoked mid-poll was recorded")
 	}
 }
+
+func TestAWithdrawnLabelBetweenAnUnchangedPollsReadAndItsRestampSendsItToTheLockedWrite(t *testing.T) {
+	f := rankingFixture(t, true)
+	ctx := preferRunner(t.Context(), 30*time.Second)
+	f.At(0)
+	f.PollIn(ctx, t, f.Personal, 1)
+	_, before := f.Store.TestOnlyRunnerPollRow(ctx, t, f.Personal)
+	f.At(2 * time.Second)
+	slots := 1
+	err := f.Store.TestOnlyRecordRunnerPollWith(ctx, store.UnitDemand{CapabilityPrefix: f.Personal, Kinds: nodeKinds, Labels: []string{"team-4cpu"}, FreeSlots: &slots}, func() {
+		f.Store.TestOnlyWithdrawRunnerLabels(ctx, t, f.Personal)
+	})
+	if _, after := f.Store.TestOnlyRunnerPollRow(ctx, t, f.Personal); after != before {
+		t.Fatalf("a restamp refreshed an observation whose label was withdrawn before it: last seen %d to %d (poll error %v)", before, after, err)
+	}
+	if err == nil {
+		t.Fatal("a poll advertising a withdrawn label was recorded")
+	}
+}
+
+func TestACredentialInRotationGraceKeepsTheUnchangedPollFastPath(t *testing.T) {
+	f := rankingFixture(t, true)
+	ctx := preferRunner(t.Context(), 30*time.Second)
+	f.At(0)
+	f.PollIn(ctx, t, f.Self, 1)
+	f.Store.TestOnlyRevokeAfter(t, f.Self, time.Hour)
+	f.At(2 * time.Second)
+	count := f.Store.TestOnlyCountStatements(t)
+	f.PollIn(ctx, t, f.Self, 1)
+	if took := count.Take(); took.TeamLocks != 0 {
+		t.Fatalf("a poll from a credential still inside its rotation grace took the locked write: %+v", took)
+	}
+	if _, seen := f.Store.TestOnlyRunnerPollRow(ctx, t, f.Self); seen != f.ReadyAt.Add(2*time.Second).UnixNano() {
+		t.Fatalf("the grace-period poll did not restamp the last-seen time: %d", seen)
+	}
+}
