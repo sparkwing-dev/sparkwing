@@ -239,7 +239,8 @@ func (s *Server) handleIntake(engine *EngineController) func(http.ResponseWriter
 		}
 		request.SourceCredentialVerified = credentialVerified
 		request.UnverifiedReason = unverifiedReason
-		response, err := admitWithFlood(ctx, s, func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
+		//nolint:contextcheck // ctx carries r.Context() with the verified intake source.
+		response, err := admitWithFlood(ctx, s, store.Team(a.Target.Team), func(ctx context.Context) (controllerwire.CreateRunResponse, error) {
 			return engine.admitRun(ctx, a.Target.Team, request)
 		})
 		if err != nil {

@@ -50,7 +50,7 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	if err != nil {
 		return "", err
 	}
-	admitted, err := admitWithFlood(ctx, l.server, func(ctx context.Context) (store.AdmissionResult, error) {
+	admitted, err := admitWithFlood(ctx, l.server, s.Team, func(ctx context.Context) (store.AdmissionResult, error) {
 		return writer.AdmitScheduledRun(ctx, s, due)
 	})
 	if err != nil {
@@ -58,9 +58,6 @@ func (l cronLauncher) Launch(ctx context.Context, s store.CronSchedule, due time
 	}
 	if admitted.RunID == "" {
 		return "", routepolicy.MissingEndpointPolicy()
-	}
-	if !admitted.Replayed {
-		l.server.recordTeamQueueActivity(s.Team, admitted.Request.AdmittedAt)
 	}
 	return admitted.RunID, nil
 }

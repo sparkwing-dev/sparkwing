@@ -152,7 +152,18 @@ func (e *intakeRunToken) Error() string { return "intake requires a run-cap toke
 
 type intakeRunTokenKey struct{}
 
-func admitWithFlood[T any](ctx context.Context, s *Server, admit func(context.Context) (T, error)) (T, error) {
+// admitWithFlood runs every controller run admission for team: CLI and API
+// submissions, retries, child runs, schedules and App webhooks. An admitted
+// run queues claimable work, so it resets the team's idle poll clock.
+func admitWithFlood[T any](ctx context.Context, s *Server, team store.Team, admit func(context.Context) (T, error)) (T, error) {
+	response, err := admitOnce(ctx, s, admit)
+	if err == nil {
+		s.recordTeamQueueActivity(team, time.Now())
+	}
+	return response, err
+}
+
+func admitOnce[T any](ctx context.Context, s *Server, admit func(context.Context) (T, error)) (T, error) {
 	response, err := admit(ctx)
 	var pending *intakeRunToken
 	if !errors.As(err, &pending) {

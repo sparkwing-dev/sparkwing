@@ -1041,7 +1041,7 @@ func (s *Server) startGitHubAppRun(
 		// safety: deliveries are not retried, so an outage must seal less trust instead of dropping the run.
 		unverifiedReason = "Run is unverified because " + unavailable.Error()
 	}
-	result, err := admitWithFlood(r.Context(), s, func(ctx context.Context) (store.AdmissionResult, error) {
+	result, err := admitWithFlood(r.Context(), s, tenant.Team(), func(ctx context.Context) (store.AdmissionResult, error) {
 		return tenant.AdmitGitHubAppRun(ctx, store.GitHubAppAdmission{Request: request, Installation: installation, Subscription: plan.subscription, Automation: plan.automation, Event: r.Header.Get("X-GitHub-Event"), SourceCredentialVerified: credentialVerified, UnverifiedReason: unverifiedReason, RepositoryPlacement: placement})
 	})
 	if errors.Is(err, store.ErrGitHubAppAutomationRevoked) {
@@ -1053,8 +1053,6 @@ func (s *Server) startGitHubAppRun(
 	status := "dispatched"
 	if result.Replayed {
 		status = "duplicate"
-	} else {
-		s.recordTeamQueueActivity(tenant.Team(), now)
 	}
 	return githubAppRun{Pipeline: plan.pipeline, RunID: result.RunID, Status: status}, nil
 }

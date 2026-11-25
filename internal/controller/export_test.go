@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -110,4 +111,15 @@ func (s *SyncBuffer) String() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.b.String()
+}
+
+// IdleSince sets every team's idle poll clock to at.
+func IdleSince(s *Server, at time.Time) { s.recordQueueActivity(at) }
+
+// TeamIdleSince sets one team's idle poll clock to at.
+func TeamIdleSince(s *Server, team store.Team, at time.Time) { s.recordTeamQueueActivity(team, at) }
+
+// ClaimPollAdvice is the idle interval s would advise a claimant of team now.
+func ClaimPollAdvice(s *Server, team store.Team) time.Duration {
+	return s.claimPollAdvice(team, time.Now())
 }
