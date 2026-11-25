@@ -101,10 +101,9 @@ func TestCloudLauncherHeldSearchCoalescesCommits(t *testing.T) {
 				start := time.Now()
 				done := f.claim(t.Context(), "/api/v1/launcher/claim", 5*time.Second)
 				synctest.Wait()
-				for i := range commits {
+				for range commits {
 					time.Sleep(100 * time.Millisecond)
-					// safety: each poll reports a new concurrency, so each one commits a changed observation.
-					if err := f.e.Store.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Kinds: []capability.UnitKind{capability.UnitNode}, MaxConcurrent: i + 1}); err != nil {
+					if err := f.e.Store.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Kinds: []capability.UnitKind{capability.UnitNode}}); err != nil {
 						t.Fatal(err)
 					}
 					synctest.Wait()

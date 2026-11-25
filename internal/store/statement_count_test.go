@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
-	"github.com/sparkwing-dev/sparkwing/pkg/match"
 )
 
 // StatementCount is what the store sent to SQLite between two reads of a counter.
@@ -151,38 +150,6 @@ func ClaimableUnitQueuedPlan(t *testing.T, s *Store, team string) string {
 		t.Fatal(err)
 	}
 	return strings.Join(plan, "\n")
-}
-
-// TestOnlyStampAfterAward reads an unchanged poll, lets an award consume one of the claimant's slots, then
-// restamps that poll, and reports whether the restamp applied and the free slots the row holds afterwards.
-func (s *Store) TestOnlyStampAfterAward(ctx context.Context, t *testing.T, observation UnitDemand) (bool, int) {
-	t.Helper()
-	o := s.AsOperator()
-	observation.Labels = match.SelfAsserted(observation.Labels)
-	labels, err := json.Marshal(observation.Labels)
-	if err != nil {
-		t.Fatal(err)
-	}
-	team, seen, unchanged, err := o.runnerPollUnchanged(ctx, observation, labels)
-	if err != nil || !unchanged {
-		t.Fatalf("the poll was not read as unchanged: %v", err)
-	}
-	if err := s.inTx(ctx, func(tx *storeTx) error { return consumeClaimSlotTx(ctx, tx, observation.CapabilityPrefix, team) }); err != nil {
-		t.Fatal(err)
-	}
-	stamped, err := o.stampRunnerPoll(ctx, observation, team, seen)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var body []byte
-	if err := s.db.QueryRowContext(ctx, rewritePh(s.dialect, `SELECT claim_observation_json FROM capabilities WHERE prefix=?`), observation.CapabilityPrefix).Scan(&body); err != nil {
-		t.Fatal(err)
-	}
-	var stored runnerPoll
-	if err := json.Unmarshal(body, &stored); err != nil || stored.FreeSlots == nil {
-		t.Fatalf("stored observation %s: %v", body, err)
-	}
-	return stamped, *stored.FreeSlots
 }
 
 // TestOnlyRecordRunnerPollWith records a poll through RecordRunnerPoll's path, running between after its

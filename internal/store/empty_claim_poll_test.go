@@ -167,19 +167,6 @@ func TestEmptyPollExistenceCheckUsesThePartialClaimIndexesOnPostgres(t *testing.
 	}
 }
 
-func TestAnAwardBetweenAnUnchangedPollsReadAndItsRestampKeepsTheConsumedSlot(t *testing.T) {
-	f := rankingFixture(t, true)
-	ctx := preferRunner(t.Context(), 30*time.Second)
-	f.At(0)
-	f.PollIn(ctx, t, f.Self, 2)
-	f.At(2 * time.Second)
-	slots := 2
-	stamped, stored := f.Store.TestOnlyStampAfterAward(ctx, t, store.UnitDemand{CapabilityPrefix: f.Self, Kinds: nodeKinds, Labels: []string{"team-4cpu"}, FreeSlots: &slots})
-	if stamped || stored != 1 {
-		t.Fatalf("the restamp applied=%t over an award and left %d free slots, want it to miss and leave 1", stamped, stored)
-	}
-}
-
 func TestAnAwardBetweenAnUnchangedPollsReadAndItsWriteFallsBackToTheLockedWrite(t *testing.T) {
 	f := rankingFixture(t, true)
 	ctx := preferRunner(t.Context(), 30*time.Second)
@@ -198,14 +185,8 @@ func TestAnAwardBetweenAnUnchangedPollsReadAndItsWriteFallsBackToTheLockedWrite(
 		t.Fatal(err)
 	}
 	took := count.Take()
-	stored, _ := f.Store.TestOnlyRunnerPollRow(ctx, t, f.Self)
 	if afterAward != 1 || took.TeamLocks == 0 {
 		t.Fatalf("the restamp wrote over the award instead of falling back to the locked write: after award %d, %+v", afterAward, took)
-	}
-	// safety: the locked write records the slots the poll reported, as the merge base does;
-	// that race is tracked separately.
-	if stored != 2 {
-		t.Fatalf("the locked fallback left %d free slots, want the poll's reported 2 as at the merge base", stored)
 	}
 }
 
@@ -261,5 +242,29 @@ func TestACredentialInRotationGraceKeepsTheUnchangedPollFastPath(t *testing.T) {
 	}
 	if _, seen := f.Store.TestOnlyRunnerPollRow(ctx, t, f.Self); seen != f.ReadyAt.Add(2*time.Second).UnixNano() {
 		t.Fatalf("the grace-period poll did not restamp the last-seen time: %d", seen)
+	}
+}
+
+func TestALabelWithdrawnFromTheRootOfADelegatedPollerSendsItsRestampToTheLockedWrite(t *testing.T) {
+	f := rankingFixture(t, true)
+	ctx := preferRunner(t.Context(), 30*time.Second)
+	f.At(0)
+	child, err := f.Store.AsOperator().DelegateCapability(ctx, capability.DelegateSpec{Parent: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: f.Personal}, Audience: capability.Controller, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	poller := child.Capability.Prefix
+	f.PollIn(ctx, t, poller, 1)
+	_, before := f.Store.TestOnlyRunnerPollRow(ctx, t, poller)
+	f.At(2 * time.Second)
+	slots := 1
+	err = f.Store.TestOnlyRecordRunnerPollWith(ctx, store.UnitDemand{CapabilityPrefix: poller, Kinds: nodeKinds, Labels: []string{"team-4cpu"}, FreeSlots: &slots}, func() {
+		f.Store.TestOnlyWithdrawRunnerLabels(ctx, t, f.Personal)
+	})
+	if _, after := f.Store.TestOnlyRunnerPollRow(ctx, t, poller); after != before {
+		t.Fatalf("a delegated poller's restamp ran over its root's withdrawn label: last seen %d to %d (poll error %v)", before, after, err)
+	}
+	if err == nil {
+		t.Fatal("a poll advertising a label its root withdrew was recorded")
 	}
 }

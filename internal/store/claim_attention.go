@@ -67,7 +67,7 @@ func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand,
 		if err := tx.operator.lockAuthorityTx(ctx, tx, []capability.AuthorityRef{ref}, ref.ID); err != nil {
 			return err
 		}
-		c, err := checkRunnerPollTx(ctx, tx, observation)
+		c, _, err := checkRunnerPollTx(ctx, tx, observation)
 		if err != nil {
 			return err
 		}
@@ -80,27 +80,27 @@ func (o *Operator) recordRunnerPoll(ctx context.Context, observation UnitDemand,
 	})
 }
 
-func checkRunnerPollTx(ctx context.Context, tx *storeTx, observation UnitDemand) (capability.Capability, error) {
+func checkRunnerPollTx(ctx context.Context, tx *storeTx, observation UnitDemand) (leaf, root capability.Capability, err error) {
 	chain, err := authorityChainTx(ctx, tx, capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: observation.CapabilityPrefix}, false)
 	if err != nil {
-		return capability.Capability{}, err
+		return capability.Capability{}, capability.Capability{}, err
 	}
 	principal := chain[0].principal
 	facts, err := claimantFactsTx(ctx, tx, chain, runspec.Request{})
 	if err != nil {
-		return capability.Capability{}, err
+		return capability.Capability{}, capability.Capability{}, err
 	}
 	here, err := hereObserverTx(ctx, tx, principal)
 	if err != nil {
-		return capability.Capability{}, err
+		return capability.Capability{}, capability.Capability{}, err
 	}
 	if err := checkRunnerLabelsTx(ctx, tx, chain, observation.Labels); err != nil {
-		return capability.Capability{}, err
+		return capability.Capability{}, capability.Capability{}, err
 	}
 	if !facts.Observable && !here {
-		return capability.Capability{}, authorityError(hosterr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
+		return capability.Capability{}, capability.Capability{}, authorityError(hosterr.Forbidden, "runner observations require a machine, Actions, local or launcher claimant")
 	}
-	return principal.Capability, nil
+	return principal.Capability, chain[len(chain)-1].principal.Capability, nil
 }
 
 // safety: for an unchanged observation of a live credential, the read-only snapshot applies the locked write's
@@ -111,13 +111,17 @@ func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDema
 		return "", runnerPollStamp{}, false, err
 	}
 	defer func() { err = errors.Join(err, tx.Rollback()) }()
-	c, err := checkRunnerPollTx(ctx, tx, observation)
+	c, root, err := checkRunnerPollTx(ctx, tx, observation)
 	if err != nil {
 		return "", runnerPollStamp{}, false, err
 	}
 	var advertised, body, authority []byte
 	var seen sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT advertised_labels_json,claim_observation_json,last_used_at,authority_json FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, c.Team, observation.CapabilityPrefix).Scan(&advertised, &body, &seen, &authority); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT advertised_labels_json,claim_observation_json,last_used_at FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, c.Team, observation.CapabilityPrefix).Scan(&advertised, &body, &seen); err != nil {
+		return "", runnerPollStamp{}, false, err
+	}
+	// safety: allowed labels live on the chain root, which is a different row when a machine root delegated the poller.
+	if err := tx.QueryRowContext(ctx, `SELECT authority_json FROM capabilities WHERE COALESCE(team,'')=? AND prefix=?`, root.Team, root.Prefix).Scan(&authority); err != nil {
 		return "", runnerPollStamp{}, false, err
 	}
 	var stored runnerPoll
@@ -129,20 +133,21 @@ func (o *Operator) runnerPollUnchanged(ctx context.Context, observation UnitDema
 		return "", runnerPollStamp{}, false, err
 	}
 	have, err := json.Marshal(stored.UnitDemand)
-	return c.Team, runnerPollStamp{lastUsed: seen.Int64, body: body, authority: authority}, err == nil && bytes.Equal(want, have), err
+	return c.Team, runnerPollStamp{lastUsed: seen.Int64, body: body, rootTeam: root.Team, rootPrefix: root.Prefix, rootAuthority: authority}, err == nil && bytes.Equal(want, have), err
 }
 
 // safety: a restamp must still find the stored observation and last-seen time the unchanged poll read.
 type runnerPollStamp struct {
-	lastUsed  int64
-	body      []byte
-	authority []byte
+	lastUsed             int64
+	body                 []byte
+	rootTeam, rootPrefix string
+	rootAuthority        []byte
 }
 
 // perf: an unchanged poll restamps its observation in one statement instead of the locked write.
 //
-// safety: the update applies only while the row holds the observation, last_used_at and authority the snapshot
-// read, so a concurrent poll, an award lowering the free slots or a label policy change sends it to the locked write.
+// safety: the update applies only while the row holds the observation and last_used_at, and the chain root the
+// authority, the snapshot read, so a concurrent poll, an award or a label change sends it to the locked write.
 func (o *Operator) stampRunnerPoll(ctx context.Context, observation UnitDemand, team string, seen runnerPollStamp) (bool, error) {
 	var stamped bool
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
@@ -153,7 +158,7 @@ func (o *Operator) stampRunnerPoll(ctx context.Context, observation UnitDemand, 
 		}
 		// safety: an ancestor's revocation is not fenced here: the read-only check walked the chain just before,
 		// and a stamp that slips past one only advances a timestamp that authorization ignores.
-		result, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=? AND last_used_at=? AND claim_observation_json=? AND authority_json=? AND `+liveCredentialSQL(""), body, now.UnixNano(), team, observation.CapabilityPrefix, seen.lastUsed, seen.body, seen.authority, now.UnixNano(), now.UnixNano())
+		result, err := tx.execContext(ctx, `UPDATE capabilities SET claim_observation_json=?,last_used_at=? WHERE COALESCE(team,'')=? AND prefix=? AND last_used_at=? AND claim_observation_json=? AND `+liveCredentialSQL("")+` AND EXISTS (SELECT 1 FROM capabilities root WHERE COALESCE(root.team,'')=? AND root.prefix=? AND root.authority_json=?)`, body, now.UnixNano(), team, observation.CapabilityPrefix, seen.lastUsed, seen.body, now.UnixNano(), now.UnixNano(), seen.rootTeam, seen.rootPrefix, seen.rootAuthority)
 		if err != nil {
 			return err
 		}

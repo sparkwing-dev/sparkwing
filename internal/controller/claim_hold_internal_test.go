@@ -87,10 +87,9 @@ func TestHeldClaimAwardsWorkTheMomentACommitMakesItClaimable(t *testing.T) {
 	case w := <-done:
 		t.Fatalf("an empty claim that asked to wait answered at once: %d %s", w.Code, w.Body.String())
 	}
-	// safety: the direct write is invisible to the commit signal;
-	// the changed observation below is the commit that wakes the hold.
+	// safety: the direct write is invisible to the commit signal; the observation below is the commit that wakes the hold.
 	engineSQL(t, f.e.Store, `UPDATE nodes SET ready_at=1,queue_started_at=? WHERE run_id='run' AND node_id='job'`, time.Now().UnixNano())
-	if err := f.e.Store.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Kinds: []capability.UnitKind{capability.UnitNode}, MaxConcurrent: 1}); err != nil {
+	if err := f.e.Store.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: "root", Kinds: []capability.UnitKind{capability.UnitNode}}); err != nil {
 		t.Fatal(err)
 	}
 	w := <-done
