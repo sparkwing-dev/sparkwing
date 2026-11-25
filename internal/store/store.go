@@ -278,7 +278,6 @@ func openPostgresConfig(ctx context.Context, cfg *pgx.ConnConfig, opts ...Option
 	return st, nil
 }
 
-// postgresMaxConns bounds the controller's PostgreSQL pool.
 const postgresMaxConns = 25
 
 // perf: the idle bound matches the open bound, so connections a burst opened
