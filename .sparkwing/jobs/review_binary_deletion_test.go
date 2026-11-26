@@ -33,6 +33,9 @@ func TestReviewDeletingABinaryNeedsAPersonOnlyOnAStrictPath(t *testing.T) {
 			if flagged != tc.block {
 				t.Fatalf("deleting %s: human-review finding = %v, want %v; findings %+v", tc.path, flagged, tc.block, rec.Findings)
 			}
+			if !tc.block && rec.Result != resultPass {
+				t.Fatalf("deleting %s should land: %+v", tc.path, rec)
+			}
 		})
 	}
 }
