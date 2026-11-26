@@ -298,10 +298,9 @@ func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpC
 	return signUpDecision{}, nil
 }
 
-// decideAdmissionTx applies the deployment's waitlist and the stored gate's
-// mode, launch capacity and velocity limits to one admission, from a sign-up
-// or from a waitlisted account accepting an invitation. g must be the row this
-// transaction locked.
+// safety: sign-ups and invitation acceptances share this one decision, so an
+// acceptance cannot admit past a gate a sign-up would stop. g must be the row
+// this transaction locked.
 func decideAdmissionTx(ctx context.Context, tx *storeTx, g SignUpGate, c SignUpConditions, now time.Time) (signUpDecision, error) {
 	if c.ForceWaitlist {
 		return signUpDecision{reason: WaitlistReasonDeployment}, nil
