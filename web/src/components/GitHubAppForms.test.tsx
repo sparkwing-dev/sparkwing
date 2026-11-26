@@ -45,6 +45,13 @@ describe("ConnectGitHubForm", () => {
     assert.match(html, /Already installed the app\?/);
     assert.match(html, /Connect an existing installation/);
     assert.match(html, /action="\/github\/app\/connect\/existing"/);
+    assert.doesNotMatch(html, /<details[^>]* open=""/);
+  });
+  it("opens the existing-installation path when asked", () => {
+    const html = renderToStaticMarkup(
+      <ConnectGitHubForm csrfToken="session-csrf" connected={false} existingOpen />,
+    );
+    assert.match(html, /<details[^>]* open=""/);
   });
   it("posts the session CSRF token to the dashboard server", () => {
     const html = renderToStaticMarkup(

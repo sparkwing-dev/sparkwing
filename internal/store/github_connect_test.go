@@ -81,15 +81,15 @@ func TestGitHubConnectRechecksSessionAndIdentityProperty(t *testing.T) {
 
 func TestGitHubConnectRechecksBindingAndStoreClock(t *testing.T) {
 	s, tenant, a, now := githubConnectFixture(t)
-	if err := tenant.ConsumeGitHubConnect(t.Context(), a, "expired", *now); err == nil {
-		t.Fatal("expired nonce accepted")
+	if err := tenant.ConsumeGitHubConnect(t.Context(), a, "expired", *now); !errors.Is(err, ErrGitHubConnectSpent) {
+		t.Fatalf("expired nonce = %v, want spent", err)
 	}
 	expires := now.Add(time.Hour)
 	if err := tenant.ConsumeGitHubConnect(t.Context(), a, "once", expires); err != nil {
 		t.Fatal(err)
 	}
-	if err := tenant.ConsumeGitHubConnect(t.Context(), a, "once", expires); err == nil {
-		t.Fatal("replayed nonce accepted")
+	if err := tenant.ConsumeGitHubConnect(t.Context(), a, "once", expires); !errors.Is(err, ErrGitHubConnectSpent) {
+		t.Fatalf("replayed nonce = %v, want spent", err)
 	}
 	row := GitHubAppInstallation{InstallationID: 7, AccountID: 42, AccountLogin: "member", AccountType: "User", GitHubUserID: 42}
 	for _, change := range []func(*GitHubAppInstallation){
@@ -184,7 +184,7 @@ func TestGitHubConnectionRequiresSameLiveOwnerSessionProperty(t *testing.T) {
 		if err := s.db.QueryRow(`SELECT COUNT(*) FROM flow_nonces`).Scan(&nonces); err != nil {
 			t.Fatal(err)
 		}
-		return read != nil && consume != nil && bind != nil && subject == "" && out == (GitHubAppInstallation{}) && nonces == 0 && reflect.DeepEqual(before, purgeRows(t, s, "a", true))
+		return read != nil && consume != nil && !errors.Is(consume, ErrGitHubConnectSpent) && bind != nil && subject == "" && out == (GitHubAppInstallation{}) && nonces == 0 && reflect.DeepEqual(before, purgeRows(t, s, "a", true))
 	}
 	if err := quick.Check(property, quicktest.Config(&quick.Config{MaxCount: 52})); err != nil {
 		t.Fatal(err)

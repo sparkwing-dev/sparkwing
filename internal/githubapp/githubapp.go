@@ -69,6 +69,9 @@ var (
 	// permission the request needs, as when its owner has not yet accepted
 	// one the App added.
 	ErrPermissionMissing = errors.New("githubapp: the installation has not granted the permission")
+	// ErrAppJWT means the App's own JWT could not be built, so no request
+	// reached GitHub.
+	ErrAppJWT = errors.New("githubapp: the App JWT could not be signed")
 )
 
 type apiError struct {
@@ -943,13 +946,13 @@ func (c *Client) appJWT(now time.Time) (string, error) {
 		"iss": strconv.FormatInt(c.cfg.AppID, 10),
 	})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %w", ErrAppJWT, err)
 	}
 	signing := header + "." + enc.EncodeToString(claims)
 	sum := sha256.Sum256([]byte(signing))
 	sig, err := rsa.SignPKCS1v15(rand.Reader, c.cfg.PrivateKey, crypto.SHA256, sum[:])
 	if err != nil {
-		return "", fmt.Errorf("githubapp: sign app jwt: %w", err)
+		return "", fmt.Errorf("%w: %w", ErrAppJWT, err)
 	}
 	return signing + "." + enc.EncodeToString(sig), nil
 }

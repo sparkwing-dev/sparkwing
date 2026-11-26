@@ -20,6 +20,7 @@ import {
   type GitHubAppRepository,
   type GitHubAppSubscription,
   type SubscriptionDraft,
+  connectExistingRequested,
   connectedAccount,
   deleteSubscription,
   disconnectInstallation,
@@ -63,6 +64,7 @@ function emptyToken() {
 function ConnectedGitHub({ me }: { me: Me }) {
   const canManage = canManageTeam(me.active_team.role);
   const [accessUpdated, setAccessUpdated] = useState(false);
+  const [existingOpen, setExistingOpen] = useState(false);
   const csrfToken = useSyncExternalStore(
     noSubscribe,
     readCSRFCookie,
@@ -117,6 +119,11 @@ function ConnectedGitHub({ me }: { me: Me }) {
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("access_updated") === "1") {
       setAccessUpdated(true);
+      window.history.replaceState(null, "", window.location.pathname);
+      return;
+    }
+    if (connectExistingRequested(window.location.search)) {
+      setExistingOpen(true);
       window.history.replaceState(null, "", window.location.pathname);
       return;
     }
@@ -205,14 +212,15 @@ function ConnectedGitHub({ me }: { me: Me }) {
       {installations.length === 0 ? <section className="mb-6 space-y-4 rounded-lg bg-[var(--surface)] p-5">
         <h3 className="text-base font-semibold">1. Connect GitHub</h3>
         <p className="text-sm text-[var(--muted)]">Choose your GitHub account and the repositories Sparkwing can read. GitHub will return you here to enable runs. Installing the app alone does not start pipelines.</p>
-        {canManage ? <ConnectGitHubForm csrfToken={csrfToken} connected={false} /> : <p className="text-sm text-amber-200">A team owner needs to connect GitHub.</p>}
-      </section> : <details className="mb-6">
+        {canManage ? <ConnectGitHubForm csrfToken={csrfToken} connected={false} existingOpen={existingOpen} /> : <p className="text-sm text-amber-200">A team owner needs to connect GitHub.</p>}
+      </section> : <details className="mb-6" open={existingOpen}>
         <summary className="min-h-11 cursor-pointer py-3 text-sm text-[var(--muted)]">GitHub connected · {installations.map((inst) => inst.account_login).join(", ")} · manage accounts</summary>
       <Panel title="Connected accounts">
           {canManage ? (
             <ConnectGitHubForm
               csrfToken={csrfToken}
               connected={installations.length > 0}
+              existingOpen={existingOpen}
             />
           ) : null}
           <ul>

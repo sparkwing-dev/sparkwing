@@ -132,14 +132,39 @@ func (s *Server) verifyGitHubAppReturn(r *http.Request) error {
 	if r.URL.Path == "/github/app/setup" && (query.Get("setup_action") == "request" || (query.Get("setup_action") == "update" && query.Get("state") == "")) {
 		return nil
 	}
+	flow, proof := s.githubAppReturnProof(r)
+	switch {
+	case proof == githubReturnValid:
+		return nil
+	// safety: these returns reach their handler only to render a page that offers the existing installation;
+	// it changes no flow and sets no cookie.
+	case r.URL.Path == "/github/app/setup" && query.Get("installation_id") != "",
+		r.URL.Path == githubAppCallbackPath && proof == githubReturnExpired && !flow.Existing && flow.InstallationID > 0:
+		return nil
+	}
+	return hosterr.Authorization(hosterr.ReasonReauthRequired, errConnectState.Error())
+}
+
+type githubReturnProof int
+
+const (
+	githubReturnUnverified githubReturnProof = iota
+	githubReturnExpired
+	githubReturnValid
+)
+
+func (s *Server) githubAppReturnProof(r *http.Request) (githubAppFlow, githubReturnProof) {
 	flow, ok := s.readGitHubAppFlow(r)
-	if !ok || s.githubApp == nil || !constantTimeEqual(query.Get("state"), flow.State) {
-		return hosterr.Authorization(hosterr.ReasonReauthRequired, errConnectState.Error())
+	if !ok || s.githubApp == nil || !constantTimeEqual(r.URL.Query().Get("state"), flow.State) {
+		return flow, githubReturnUnverified
 	}
 	var state githubConnectState
-	if !openFlowState(s.githubApp.stateKey, flow.State, &state) || state.Nonce == "" || time.Now().Unix() >= state.Expires ||
+	if !openFlowState(s.githubApp.stateKey, flow.State, &state) || state.Nonce == "" ||
 		!constantTimeEqual(state.Verifier, verifierDigest(flow.Verifier)) {
-		return hosterr.Authorization(hosterr.ReasonReauthRequired, errConnectState.Error())
+		return flow, githubReturnUnverified
 	}
-	return nil
+	if time.Now().Unix() >= state.Expires {
+		return flow, githubReturnExpired
+	}
+	return flow, githubReturnValid
 }
