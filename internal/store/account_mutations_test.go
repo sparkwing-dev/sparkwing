@@ -97,7 +97,7 @@ func TestAccountMutationsRequireTheSameLiveDirectSessionProperty(t *testing.T) {
 		before := accountMutationRows(t, s)
 		selectErr := s.AsOperator().SelectAccountTeam(t.Context(), a, Team(a.Principal.Capability.Team))
 		_, createErr := s.AsOperator().CreateAccountTeam(t.Context(), a, TeamInfo{Slug: "created"})
-		_, acceptErr := s.AsOperator().AcceptAccountInvitation(t.Context(), a, "missing")
+		_, acceptErr := s.AsOperator().AcceptAccountInvitation(t.Context(), a, "missing", SignUpConditions{})
 		_, unlinkErr := s.AsOperator().UnlinkAccountIdentity(t.Context(), a, ProviderGoogle)
 		return selectErr != nil && createErr != nil && acceptErr != nil && unlinkErr != nil && reflect.DeepEqual(before, accountMutationRows(t, s))
 	}
@@ -201,16 +201,16 @@ func TestAccountInvitationCommitsMembershipAndSessionTogether(t *testing.T) {
 	invitation := accountMutationInvitation(t, s)
 	before := accountMutationRows(t, s)
 	rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_invitation_session BEFORE UPDATE OF team ON sessions BEGIN SELECT RAISE(ABORT,'session refused'); END`)
-	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); err == nil || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
+	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID, SignUpConditions{}); err == nil || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
 		t.Fatalf("invitation escaped session rollback: %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_invitation_session`)
 	rewriteSchemaExec(t, s.db, `DELETE FROM email_owners WHERE account_id=?`, a.Principal.Capability.Subject.ID)
-	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrNotFound) {
+	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID, SignUpConditions{}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unverified acceptance: %v", err)
 	}
 	rewriteSchemaExec(t, s.db, `INSERT INTO email_owners(email,account_id,updated_at) VALUES ('member@example.test',?,1)`, a.Principal.Capability.Subject.ID)
-	accepted, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID)
+	accepted, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID, SignUpConditions{})
 	if err != nil || accepted.Team != invitation.Team {
 		t.Fatalf("accepted=%+v: %v", accepted, err)
 	}
@@ -226,7 +226,7 @@ func TestAccountInvitationCommitsMembershipAndSessionTogether(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrInvitationClosed) {
+	if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID, SignUpConditions{}); !errors.Is(err, ErrInvitationClosed) {
 		t.Fatalf("invitation replay: %v", err)
 	}
 }
@@ -247,7 +247,7 @@ func TestAccountInvitationHasOneWinnerAcrossSessions(t *testing.T) {
 	results := make(chan error, 2)
 	for _, actor := range []capability.Authorized{a, b} {
 		wg.Go(func() {
-			_, err := s.AsOperator().AcceptAccountInvitation(t.Context(), actor, invitation.ID)
+			_, err := s.AsOperator().AcceptAccountInvitation(t.Context(), actor, invitation.ID, SignUpConditions{})
 			results <- err
 		})
 	}
@@ -274,7 +274,7 @@ func TestAccountInvitationExpiresOnStoreClock(t *testing.T) {
 			*now = invitation.ExpiresAt.Add(elapsed)
 			rewriteSchemaExec(t, s.db, `UPDATE sessions SET expires_at=? WHERE hash=?`, now.Add(time.Hour).UnixNano(), a.Principal.Authority.ID)
 			before := accountMutationRows(t, s)
-			if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); !errors.Is(err, ErrInvitationClosed) || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
+			if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID, SignUpConditions{}); !errors.Is(err, ErrInvitationClosed) || !reflect.DeepEqual(before, accountMutationRows(t, s)) {
 				t.Fatalf("acceptance at %s: %v", elapsed, err)
 			}
 		})
@@ -335,7 +335,7 @@ func TestSessionCannotSelectRemovedTeamAfterFreshSessionRejoins(t *testing.T) {
 			accountID := member.Principal.Capability.Subject.ID
 			personal := Team(member.Principal.Capability.Team)
 			invitation := accountMutationInvitation(t, s)
-			if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), member, invitation.ID); err != nil {
+			if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), member, invitation.ID, SignUpConditions{}); err != nil {
 				t.Fatal(err)
 			}
 			if !previouslySelected {
@@ -380,7 +380,7 @@ func TestSessionCannotSelectRemovedTeamAfterFreshSessionRejoins(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), fresh, rejoin.ID); err != nil {
+			if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), fresh, rejoin.ID, SignUpConditions{}); err != nil {
 				t.Fatal(err)
 			}
 			if current, err := s.AsOperator().LookupSession(t.Context(), freshRaw); err != nil || current.Team != invitation.Team {

@@ -61,7 +61,7 @@ func TestTeamDeletionClosesTheTeamAndKeepsFinancialRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	memberSession, _, _, err := st.AsOperator().CreateAccountSession(ctx, member.Account, "acme", time.Hour)
@@ -274,7 +274,7 @@ func TestAccountDeletionRefusesALastOwnerWithMembersAndNamesTheTeams(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	st.SetTestClock(t, func() time.Time { return now })
@@ -299,7 +299,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	session, _, _, err := st.AsOperator().CreateAccountSession(ctx, leaver.Account, owner.PersonalTeam, time.Hour)
@@ -369,17 +369,21 @@ func TestInvitationEmailsToOneAddressAreCappedAcrossTeams(t *testing.T) {
 			t.Fatal(err)
 		}
 		st.SetTestClock(t, func() time.Time { return now })
-		ok, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID)
+		withheld, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ok {
+		switch withheld {
+		case "":
 			claimed++
+		case store.InvitationEmailRecipientLimit:
+		default:
+			t.Fatalf("invitation email %d withheld as %q, want the recipient limit", i+1, withheld)
 		}
 		if i == 0 {
 			st.SetTestClock(t, func() time.Time { return now })
-			if twice, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID); err != nil || twice {
-				t.Fatalf("claiming one invitation twice = %v, %v; want false", twice, err)
+			if twice, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID); err != nil || twice != store.InvitationEmailClosed {
+				t.Fatalf("claiming one invitation twice = %q, %v; want it closed", twice, err)
 			}
 		}
 	}
@@ -392,16 +396,16 @@ func TestInvitationEmailsToOneAddressAreCappedAcrossTeams(t *testing.T) {
 		t.Fatal(err)
 	}
 	st.SetTestClock(t, func() time.Time { return now })
-	if ok, err := st.AsOperator().ClaimInvitationEmail(ctx, other.ID); err != nil || !ok {
-		t.Fatalf("another address = %v, %v; want claimed", ok, err)
+	if withheld, err := st.AsOperator().ClaimInvitationEmail(ctx, other.ID); err != nil || withheld != "" {
+		t.Fatalf("another address = %q, %v; want claimed", withheld, err)
 	}
 	later, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "target@example.com", store.RoleReader, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	st.SetTestClock(t, func() time.Time { return now.Add(25 * time.Hour) })
-	if ok, err := st.AsOperator().ClaimInvitationEmail(ctx, later.ID); err != nil || !ok {
-		t.Fatalf("the same address a day later = %v, %v; want claimed", ok, err)
+	if withheld, err := st.AsOperator().ClaimInvitationEmail(ctx, later.ID); err != nil || withheld != "" {
+		t.Fatalf("the same address a day later = %q, %v; want claimed", withheld, err)
 	}
 }
 
@@ -458,7 +462,7 @@ func TestAccountDeletionTouchesOnlyRowsNamingTheAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	other := signIn(t, st, "o2", "owner2@example.com")

@@ -867,7 +867,8 @@ CREATE TABLE team_deletions (
 
 CREATE TABLE invitation_email_log (
     address TEXT NOT NULL,
-    sent_at BIGINT NOT NULL
+    sent_at BIGINT NOT NULL,
+    inviter TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE signup_gate (
@@ -1557,6 +1558,7 @@ CREATE TABLE billing_awards (
 
 CREATE UNIQUE INDEX idx_billing_awards_capability ON billing_awards(team,capability_prefix);
 CREATE INDEX idx_billing_awards_requester ON billing_awards(team,requester_account);
+CREATE INDEX idx_billing_awards_unsettled ON billing_awards(team) WHERE settled_at IS NULL;
 
 CREATE UNIQUE INDEX idx_billing_awards_unit_generation ON billing_awards(team,run_id,node_id,unit_kind,generation);
 
@@ -1700,6 +1702,8 @@ CREATE INDEX idx_team_deletions_state ON team_deletions(state);
 
 CREATE INDEX idx_invitation_email_log_address ON invitation_email_log(address, sent_at);
 
+CREATE INDEX idx_invitation_email_log_inviter ON invitation_email_log(inviter, sent_at);
+
 CREATE INDEX idx_triggers_team_created ON triggers(team, created_at);
 
 CREATE INDEX idx_signup_admissions_at ON signup_admissions(at);
@@ -1730,7 +1734,7 @@ CREATE INDEX idx_uploads_staging ON uploads(expires_at) WHERE staging_deleted_at
 
 CREATE INDEX idx_cron_schedules_github_identity ON cron_schedules(team, github_installation_id, github_repository_id);
 
-CREATE INDEX idx_credit_charges_team_amount ON credit_charges(team, amount_micro);
+CREATE INDEX idx_credit_charges_team_mode_amount ON credit_charges(team, payment_mode, amount_micro);
 
 
 CREATE INDEX idx_audit_events_retention ON audit_events(recorded_at,id);

@@ -283,10 +283,29 @@ func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpC
 	if err != nil {
 		return signUpDecision{}, err
 	}
-	switch {
-	case c.ForceWaitlist:
+	d, err := decideAdmissionTx(ctx, tx, g, c, now)
+	if err != nil || d.reason != "" {
+		return d, err
+	}
+	if p.Provider == ProviderGitHub && g.Limits.GitHubMinAccountDays > 0 {
+		minAge := time.Duration(g.Limits.GitHubMinAccountDays) * 24 * time.Hour
+		// safety: an account whose age GitHub did not state cannot show it is
+		// old enough, so it waits rather than slipping through.
+		if p.ProviderAccountCreatedAt.IsZero() || now.Sub(p.ProviderAccountCreatedAt) < minAge {
+			return signUpDecision{reason: WaitlistReasonGitHubAge}, nil
+		}
+	}
+	return signUpDecision{}, nil
+}
+
+// safety: sign-ups and invitation acceptances share this one decision, so an
+// acceptance cannot admit past a gate a sign-up would stop. g must be the row
+// this transaction locked.
+func decideAdmissionTx(ctx context.Context, tx *storeTx, g SignUpGate, c SignUpConditions, now time.Time) (signUpDecision, error) {
+	if c.ForceWaitlist {
 		return signUpDecision{reason: WaitlistReasonDeployment}, nil
-	case g.Mode == SignUpWaitlist:
+	}
+	if g.Mode == SignUpWaitlist {
 		reason := g.Source
 		if reason == "" {
 			reason = WaitlistReasonOperator
@@ -306,14 +325,6 @@ func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpC
 	}
 	if tripped != nil {
 		return signUpDecision{reason: tripped.Source, tripped: tripped}, nil
-	}
-	if p.Provider == ProviderGitHub && g.Limits.GitHubMinAccountDays > 0 {
-		minAge := time.Duration(g.Limits.GitHubMinAccountDays) * 24 * time.Hour
-		// safety: an account whose age GitHub did not state cannot show it is
-		// old enough, so it waits rather than slipping through.
-		if p.ProviderAccountCreatedAt.IsZero() || now.Sub(p.ProviderAccountCreatedAt) < minAge {
-			return signUpDecision{reason: WaitlistReasonGitHubAge}, nil
-		}
 	}
 	return signUpDecision{}, nil
 }

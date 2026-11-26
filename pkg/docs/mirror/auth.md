@@ -448,6 +448,12 @@ controller refuses a display name or angle brackets around the address with
 Sparkwing"; the inviter's name and the team name appear only in the body, in
 quotation marks, as names Sparkwing users chose.
 
+Each account sends at most 100 invitation emails in any 24 hours, counted
+across every team it has invited from, and each address receives at most 5.
+Past either limit the invitation is created without an email. Deleting, leaving
+or creating teams does not reset the account's count. See
+[invitation limits](limits.md#invitation-limits).
+
 `GET /api/v1/team/settings` returns `members_can_add_machines`,
 `claim_ranking`, `max_children_per_root` and `high_trust` under `runs.read`. `PUT /api/v1/team/settings` requires
 `team.admin` and names at least one of them. `claim_ranking` takes distinct
@@ -1273,7 +1279,13 @@ account admitted and logs the account ID with a failure class, never the
 address. An account without a verified address is admitted without an email.
 Admission at sign-in, as a listed operator account, sends no email because the
 person is already in the console. Accepting a team invitation joins that team
-at once and leaves the account waiting for its own workspace. Without
+at once and leaves the account waiting for its own workspace. A waitlisted
+account's join counts as an admission toward the hourly and daily sign-up
+limits only while the deployment does not force the waitlist, the operator's
+sign-up mode is open, fewer than 100 accounts are admitted and the join stays
+within those limits. Otherwise the account joins without counting. When the
+mode and capacity allow admission but the join would cross a limit, it closes
+the gate as a sign-up would. Without
 `--email-sender`, the controller logs the email's subject instead of sending
 it. `/api/v1/me` returns `admission_email: true` for a waitlisted account when
 the deployment has a sender and the account's address is verified, and the

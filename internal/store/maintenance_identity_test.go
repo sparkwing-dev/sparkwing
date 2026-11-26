@@ -133,8 +133,8 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 		t.Fatalf("invitation read: %+v %v", listed, err)
 	}
 	s.SetTestClock(t, func() time.Time { return *now })
-	if claimed, err := s.AsOperator().ClaimInvitationEmail(t.Context(), invitation.ID); err != nil || !claimed {
-		t.Fatalf("invitation email: %v %v", claimed, err)
+	if withheld, err := s.AsOperator().ClaimInvitationEmail(t.Context(), invitation.ID); err != nil || withheld != "" {
+		t.Fatalf("invitation email: %q %v", withheld, err)
 	}
 	var created, expires, emailed, sent int64
 	if err := s.db.QueryRow(`SELECT created_at,expires_at,emailed_at FROM invitations WHERE id=?`, invitation.ID).Scan(&created, &expires, &emailed); err != nil {
@@ -158,7 +158,7 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 		t.Fatal(err)
 	}
 	route, _ := capability.LookupRoute("POST", "/api/v1/invitations/{invitation}/accept")
-	accepted, err := s.AsOperator().AcceptAccountInvitation(t.Context(), capability.Authorized{Principal: p, Access: route.Access[0]}, invitation.ID)
+	accepted, err := s.AsOperator().AcceptAccountInvitation(t.Context(), capability.Authorized{Principal: p, Access: route.Access[0]}, invitation.ID, SignUpConditions{})
 	if err != nil || accepted.Team != tenant.team {
 		t.Fatalf("invitation acceptance: %+v %v", accepted, err)
 	}

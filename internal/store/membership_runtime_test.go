@@ -132,7 +132,7 @@ func TestMembershipDowngradeRechecksInviterAuthority(t *testing.T) {
 			t.Fatal(err)
 		}
 		authorized := capability.Authorized{Principal: principal, Target: capability.Target{AccountID: account}, Access: capability.AccessRule{Credential: capability.CredentialAccount, Binding: capability.BindNone, Liveness: capability.LiveCredential}}
-		if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), authorized, invitation); !errors.Is(err, ErrInvitationClosed) {
+		if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), authorized, invitation, SignUpConditions{}); !errors.Is(err, ErrInvitationClosed) {
 			t.Fatalf("%s invitation accepted after inviter demotion: %v", account, err)
 		}
 	}

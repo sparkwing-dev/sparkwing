@@ -73,6 +73,20 @@ var schemaUpgrades = []schemaUpgrade{
 	{from: 38, release: "schema 38", digest: "d7d89dd6049c6139e01bae0a845983414393d5b7c622a2172c60fa1292e5d7da", statements: schema39RunEventStatements},
 	{from: 39, release: "schema 39", digest: "bd376ce39b5fdee54f286dd73111f3644264b8cc4cb864a887cd589436eae19b", statements: []string{`CREATE TABLE audit_privacy_migrations (version BIGINT NOT NULL PRIMARY KEY CHECK(version=1), completed BIGINT NOT NULL CHECK(completed IN (0,1)))`, `INSERT INTO audit_privacy_migrations(version,completed) VALUES (1,0)`}},
 	{from: 40, release: "schema 40", digest: "1bcc048252e13edb35021084dd24ad1d7f7adf9eb9cd9ee5fbc291a0ef7df189"},
+	{from: 41, release: "schema 41", digest: "1bcc048252e13edb35021084dd24ad1d7f7adf9eb9cd9ee5fbc291a0ef7df189", statements: []string{
+		`ALTER TABLE invitation_email_log ADD COLUMN inviter TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX idx_invitation_email_log_inviter ON invitation_email_log(inviter, sent_at)`,
+	}},
+	{from: 42, release: "schema 42", digest: "0674849f24548cae23bd6c39f3634113014b66559f193af9522ed30a3dcb523d", statements: schema43CreditIndexStatements},
+}
+
+// safety: in the upgrade transaction PostgreSQL blocks ledger writes during each build (about 2 s per million
+// credit_charges rows, extrapolated) and all credit_charges access from the drop until commit. That is safe only
+// because the controller opens the store before it serves; past about a million rows, build CONCURRENTLY outside it.
+var schema43CreditIndexStatements = []string{
+	`CREATE INDEX idx_credit_charges_team_mode_amount ON credit_charges(team, payment_mode, amount_micro)`,
+	`DROP INDEX idx_credit_charges_team_amount`,
+	`CREATE INDEX idx_billing_awards_unsettled ON billing_awards(team) WHERE settled_at IS NULL`,
 }
 
 var schema39RunEventStatements = []string{`CREATE TABLE run_event_subscriptions (

@@ -49,7 +49,7 @@ func (f *accountWrites) CreateAccountTeam(_ context.Context, a capability.Author
 	return info, f.called(a, string(info.Slug)+"/"+info.DisplayName)
 }
 
-func (f *accountWrites) AcceptAccountInvitation(_ context.Context, a capability.Authorized, id string) (store.InvitationAcceptance, error) {
+func (f *accountWrites) AcceptAccountInvitation(_ context.Context, a capability.Authorized, id string, _ store.SignUpConditions) (store.InvitationAcceptance, error) {
 	return store.InvitationAcceptance{Team: "next-team"}, f.called(a, id)
 }
 
