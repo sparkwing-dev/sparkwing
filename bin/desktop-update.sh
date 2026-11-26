@@ -133,7 +133,8 @@ for home in "${restart_homes[@]}"; do
         unset "$name"
       fi
     done
-    SPARKWING_HOME="$home" timeout 40s "$dest/sparkwing" daemon restart --force -o json
+    # safety: a restarted controller inherits open fds; closing the install lock keeps it from holding the lock for life.
+    SPARKWING_HOME="$home" timeout 40s "$dest/sparkwing" daemon restart --force -o json 9>&-
   )
 done
 complete=1

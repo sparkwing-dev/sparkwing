@@ -90,6 +90,8 @@ chmod +x "$SPARKWING_INSTALL_BIN/sparkwing-runner"
 set -eu
 [ "$1 $2 $3" = 'daemon restart --force' ]
 [ "$SPARKWING_HOME" = "$HOME/state" ] || [ "$SPARKWING_HOME" = "$HOME/delivery" ]
+# safety: a restarted controller that inherits the install lock holds it for life, refusing every later update.
+[ ! -e "/proc/$$/fd/9" ] || { echo 'install lock fd 9 leaked into the restart' >&2; exit 1; }
 echo restart >> "$HOME/calls"
 [ "$MODE" != restart-error ]
 `)
