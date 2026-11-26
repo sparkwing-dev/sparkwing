@@ -34,7 +34,7 @@ func testClaimCreditReadIndexes(t *testing.T, st *store.Store, chargeIndex, awar
 func TestSchemaUpgradeIndexesCreditReadsFromVersion42(t *testing.T) {
 	target := storetest.New(t)
 	st := target.Open(t)
-	store.RevertCreditIndexesForTest(t, st)
+	store.RewindToSchema42ForTest(t, st)
 	for _, statement := range []string{
 		`INSERT INTO teams(name,created_at,updated_at) VALUES ('history',1,1)`,
 		`INSERT INTO billing_awards(team,reservation_id,capability_prefix,run_id,node_id,generation,payer_team,metered,executor_class,billing_start,unit_kind,billing_unit,awarded_at) VALUES ('history','res-1','cap-1','run-1','node-1',1,'history',1,'cloud','at_award','node','job',1)`,

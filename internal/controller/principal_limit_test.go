@@ -17,6 +17,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -101,8 +102,12 @@ func TestRequestBudgetHeartbeatUsesAuthenticatedHolderProperty(t *testing.T) {
 }
 
 func TestRequestBudgetRecommendationsClearShippedCadence(t *testing.T) {
-	if CompliantClaimPollsPerMinute() != int(time.Minute/ClaimPollInterval) || RecommendedHeartbeatsPerMinute < 2*int(time.Minute/(3*time.Second)) {
-		t.Fatal("recommended budget cannot sustain the runner cadence")
+	if CompliantClaimPollsPerMinute() != int(time.Minute/ClaimPollInterval) {
+		t.Fatal("recommended claim budget does not follow the claim poll cadence")
+	}
+	renewalsPerClaimMinute := int(time.Minute / limits.Renew(limits.DefaultLease))
+	if claims := RecommendedHeartbeatsPerMinute / (10 * renewalsPerClaimMinute); claims != 120 {
+		t.Fatalf("recommended heartbeat budget covers %d concurrent claims at ten times the renewal cadence, documented as 120", claims)
 	}
 }
 
