@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -131,29 +133,48 @@ func ClaimableUnitQueuedPlan(t *testing.T, s *Store, team string) string {
 	return explainWithoutSeqScan(t, s, query, args)
 }
 
-// LauncherClaimTeamsPlan is PostgreSQL's executed plan, with buffer counts, for the Cloud launcher's team list over
-// every launcher unit kind, under the default planner settings.
-func LauncherClaimTeamsPlan(t *testing.T, s *Store) (plan string, teams []string) {
+// LauncherClaimTeams runs the Cloud launcher's team list over its unit kinds under the default planner settings and
+// returns the teams it lists and the plan. On PostgreSQL it also returns the shared buffers the executed plan touched
+// from its root, and the unit rows that plan nodes reading nodes, triggers or eval_units read and then rejected.
+func LauncherClaimTeams(t *testing.T, s *Store) (teams []string, plan string, buffers, rejected int) {
 	t.Helper()
-	if s.dialect != DialectPostgres {
-		t.Skip("the plan guard reads the PostgreSQL planner")
-	}
 	query, args := claimTeamsSQL("", []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode})
-	query = rewritePh(DialectPostgres, query)
-	rows, err := s.db.QueryContext(t.Context(), `EXPLAIN (ANALYZE, BUFFERS) `+query, args...)
+	query = rewritePh(s.dialect, query)
+	explain := `EXPLAIN QUERY PLAN `
+	if s.dialect == DialectPostgres {
+		explain = `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) `
+	}
+	rows, err := s.db.QueryContext(t.Context(), explain+query, args...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var lines []string
 	for rows.Next() {
 		var line string
-		if err := rows.Scan(&line); err != nil {
+		if s.dialect == DialectPostgres {
+			err = rows.Scan(&line)
+		} else {
+			var id, parent, unused int
+			err = rows.Scan(&id, &parent, &unused, &line)
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
 		lines = append(lines, line)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		t.Fatal(err)
+	}
+	plan = strings.Join(lines, "\n")
+	if s.dialect == DialectPostgres {
+		var executed []struct {
+			Plan executedPlan `json:"Plan"`
+		}
+		if err := json.Unmarshal([]byte(plan), &executed); err != nil || len(executed) != 1 {
+			t.Fatalf("unreadable plan %v:\n%s", err, plan)
+		}
+		buffers = executed[0].Plan.Hit + executed[0].Plan.Read
+		rejected = executed[0].Plan.unitRowsRejected()
 	}
 	listed, err := s.db.QueryContext(t.Context(), query, args...)
 	if err != nil {
@@ -170,7 +191,28 @@ func LauncherClaimTeamsPlan(t *testing.T, s *Store) (plan string, teams []string
 	if err := errors.Join(listed.Err(), listed.Close()); err != nil {
 		t.Fatal(err)
 	}
-	return strings.Join(lines, "\n"), teams
+	return teams, plan, buffers, rejected
+}
+
+type executedPlan struct {
+	Relation  string         `json:"Relation Name"`
+	Hit       int            `json:"Shared Hit Blocks"`
+	Read      int            `json:"Shared Read Blocks"`
+	Filtered  int            `json:"Rows Removed by Filter"`
+	Rechecked int            `json:"Rows Removed by Index Recheck"`
+	Loops     int            `json:"Actual Loops"`
+	Plans     []executedPlan `json:"Plans"`
+}
+
+func (p executedPlan) unitRowsRejected() int {
+	n := 0
+	if slices.Contains([]string{"nodes", "triggers", "eval_units"}, p.Relation) {
+		n = (p.Filtered + p.Rechecked) * max(p.Loops, 1)
+	}
+	for _, child := range p.Plans {
+		n += child.unitRowsRejected()
+	}
+	return n
 }
 
 func explainWithoutSeqScan(t *testing.T, s *Store, query string, args []any) string {

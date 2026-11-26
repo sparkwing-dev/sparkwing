@@ -910,7 +910,18 @@ func claimableUnitQueuedSQL(team string, kinds []capability.UnitKind) (string, [
 	q := claimSQL{}
 	var checks []string
 	for _, source := range queuedSources(kinds) {
-		checks = append(checks, `EXISTS (SELECT 1 FROM `+source.table+` a WHERE a.team=`+q.param(team)+` AND `+source.queued+`)`)
+		check := `EXISTS (SELECT 1 FROM ` + source.table + ` a WHERE a.team=` + q.param(team) + ` AND ` + source.queued
+		if len(source.kinds) > 0 {
+			check += ` AND a.unit_kind IN (`
+			for i, kind := range source.kinds {
+				if i > 0 {
+					check += `,`
+				}
+				check += q.param(kind)
+			}
+			check += `)`
+		}
+		checks = append(checks, check+`)`)
 	}
 	if len(checks) == 0 {
 		return "", nil
@@ -918,41 +929,46 @@ func claimableUnitQueuedSQL(team string, kinds []capability.UnitKind) (string, [
 	return `SELECT CASE WHEN ` + strings.Join(checks, ` OR `) + ` THEN 1 ELSE 0 END`, q.args
 }
 
-// perf: each recursive step seeks the next team holding a queued unit in a team-leading partial claim index, so
-// listing the teams with work costs one seek per such team, never a read of any team's backlog.
+// perf: each recursive step seeks the next team holding a queued unit, ordered so that only the partial claim index
+// whose predicate is the source's own can serve it; that index holds no row the check would reject, so listing the
+// teams with work costs one seek per such team, never a read of any team's backlog.
 func (q *claimSQL) queuedTeamsSQL(kinds []capability.UnitKind) (string, string) {
 	var ctes, unions []string
 	for i, source := range queuedSources(kinds) {
 		name := fmt.Sprintf("queued_%d", i)
 		next := func(after string) string {
-			return `(SELECT a.team FROM ` + source.table + ` a WHERE ` + source.queued + after + ` ORDER BY a.team LIMIT 1)`
+			return `(SELECT a.team FROM ` + source.table + ` a WHERE ` + source.queued + after + ` ORDER BY ` + source.order + ` LIMIT 1)`
 		}
-		ctes = append(ctes, name+`(team) AS (SELECT `+next(``)+` UNION ALL SELECT `+next(` AND a.team>`+name+`.team`)+` FROM `+name+` WHERE `+name+`.team IS NOT NULL)`)
+		// hack: the first seek also bounds the team, so SQLite's planner treats it like each next seek.
+		ctes = append(ctes, name+`(team) AS (SELECT `+next(` AND a.team>''`)+` UNION ALL SELECT `+next(` AND a.team>`+name+`.team`)+` FROM `+name+` WHERE `+name+`.team IS NOT NULL)`)
 		unions = append(unions, `SELECT team FROM `+name+` WHERE team IS NOT NULL`)
 	}
 	return strings.Join(ctes, `,`), strings.Join(unions, ` UNION `)
 }
 
-type queuedSource struct{ table, queued string }
+type queuedSource struct {
+	table, queued, order string
+	kinds                []string
+}
 
-// safety: each source keeps a subset of its claim source's conditions, so any unit a search can return passes in
-// the same snapshot. Triggers drop the kind, which the partial index orders after claim_requirements, so a team's
-// backlog of other-kind triggers is never read; pending eval units are unclaimed by the table's checks.
+// safety: queued keeps a subset of the claim source's conditions, so any unit a search can return passes in the same
+// snapshot; it equals one partial claim index's predicate, and order is served only by that index. The launcher's
+// list skips the trigger kind, which that index orders after claim_requirements; team-wide checks keep it.
 func queuedSources(kinds []capability.UnitKind) []queuedSource {
 	var sources []queuedSource
-	triggers := false
+	var triggerKinds []string
 	for _, kind := range kinds {
 		switch kind {
 		case capability.UnitNode:
-			sources = append(sources, queuedSource{"nodes", `a.status='pending' AND a.ready_at IS NOT NULL AND a.claimed_by IS NULL AND a.capability_prefix='' AND a.cancel_requested_at IS NULL`})
+			sources = append(sources, queuedSource{table: "nodes", order: "a.team,a.claim_requirements", queued: `a.status='pending' AND a.ready_at IS NOT NULL AND a.claimed_by IS NULL AND a.capability_prefix='' AND a.cancel_requested_at IS NULL`})
 		case capability.UnitEval:
-			sources = append(sources, queuedSource{"eval_units", `a.status='pending'`})
+			sources = append(sources, queuedSource{table: "eval_units", order: "a.team,a.status", queued: `a.status='pending'`})
 		default:
-			triggers = true
+			triggerKinds = append(triggerKinds, string(kind))
 		}
 	}
-	if triggers {
-		sources = append(sources, queuedSource{"triggers", `a.status='pending' AND a.claimed_by IS NULL AND a.capability_prefix='' AND a.cancel_requested_at IS NULL`})
+	if len(triggerKinds) > 0 {
+		sources = append(sources, queuedSource{table: "triggers", order: "a.team,a.claim_requirements", kinds: triggerKinds, queued: `a.status='pending' AND a.claimed_by IS NULL AND a.capability_prefix='' AND a.cancel_requested_at IS NULL`})
 	}
 	return sources
 }

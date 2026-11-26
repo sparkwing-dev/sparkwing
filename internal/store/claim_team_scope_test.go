@@ -4,7 +4,6 @@ import (
 	"errors"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -157,31 +156,40 @@ func TestCloudLauncherSearchKeepsEveryTeamWithClaimableWork(t *testing.T) {
 	}
 }
 
-// The launcher's team list must cost the same whatever one team's backlog holds: a seek per team with work.
-func TestLauncherTeamListStaysBoundedOnASkewedBacklogOnPostgres(t *testing.T) {
-	s := storetest.OpenPostgres(t)
-	store.SeedSkewedBacklog(t, s, 100000)
-	plan, teams := store.LauncherClaimTeamsPlan(t, s)
-	t.Log(plan)
+// The launcher's team list must cost a seek per team with work, however many rejected units sit ahead of it.
+func TestLauncherTeamListReadsNoRejectedUnit(t *testing.T) {
+	s := storetest.Open(t)
+	store.SeedSkewedBacklog(t, s, 20000)
+	teams, plan, buffers, rejected := store.LauncherClaimTeams(t, s)
+	t.Logf("buffers=%d rejected=%d\n%s", buffers, rejected, plan)
 	if want := []string{"skew-00", "skew-01", "skew-02", "skew-03"}; !slices.Equal(teams, want) {
 		t.Fatalf("the launcher would search %v, want %v", teams, want)
 	}
-	for _, scan := range []string{"Seq Scan on nodes", "Seq Scan on triggers", "Seq Scan on eval_units", "Bitmap Heap Scan", "hashed SubPlan"} {
-		if strings.Contains(plan, scan) {
-			t.Fatalf("the team list reads a backlog (%s):\n%s", scan, plan)
+	if s.Dialect() == store.DialectPostgres {
+		if rejected > 0 || buffers > 200 || strings.Contains(plan, `"Seq Scan"`) && regexp.MustCompile(`"Node Type": "(Seq|Bitmap Heap) Scan",[^{}]*"Relation Name": "(nodes|triggers|eval_units)"`).MatchString(plan) {
+			t.Fatalf("the team list read %d rejected units and %d buffers:\n%s", rejected, buffers, plan)
+		}
+		return
+	}
+	// safety: a partial index whose predicate is the source's own holds no unit the check rejects.
+	exact := []string{"idx_nodes_claim_requirements", "idx_nodes_claim_context", "idx_triggers_claim_requirements", "idx_triggers_claim_context", "idx_eval_units_claimable"}
+	lines := strings.Split(plan, "\n")
+	seeks := 0
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "SCAN a ") && !strings.HasPrefix(line, "SEARCH a ") {
+			continue
+		}
+		seeks++
+		if !slices.ContainsFunc(exact, func(index string) bool {
+			return strings.Contains(line, "INDEX "+index+" ") || strings.HasSuffix(line, "INDEX "+index)
+		}) {
+			t.Fatalf("a seek reads an index holding rejected units (%s):\n%s", line, plan)
+		}
+		if i+1 < len(lines) && strings.Contains(lines[i+1], "TEMP B-TREE") {
+			t.Fatalf("a seek sorts its source instead of reading it in order (%s):\n%s", line, plan)
 		}
 	}
-	match := regexp.MustCompile(`Buffers: shared hit=(\d+)(?: read=(\d+))?`).FindStringSubmatch(plan)
-	if match == nil {
-		t.Fatalf("no buffer count in the plan:\n%s", plan)
-	}
-	pages := 0
-	for _, count := range match[1:] {
-		if n, err := strconv.Atoi(count); err == nil {
-			pages += n
-		}
-	}
-	if pages > 500 {
-		t.Fatalf("the team list touched %d pages over a 100,000-unit backlog; a seek per team needs far fewer:\n%s", pages, plan)
+	if seeks != 6 {
+		t.Fatalf("the team list made %d source reads, want a first seek and a next seek for each of 3 sources:\n%s", seeks, plan)
 	}
 }

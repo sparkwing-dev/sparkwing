@@ -83,32 +83,57 @@ func (f *RankingFixture) ReadyJobAgain(t *testing.T, id string) {
 	f.Store.testOnlyExec(t, `UPDATE nodes SET ready_at=?,queue_started_at=COALESCE(queue_started_at,?) WHERE team='a' AND run_id='run' AND node_id=?`, f.now.UnixNano(), f.now.UnixNano(), id)
 }
 
-// SeedSkewedBacklog adds 48 live teams on PostgreSQL: skew-00 holds backlog ready jobs, skew-01 backlog pending plan
-// units, skew-02 backlog pending trigger-kind units and skew-03 backlog pending eval units; the rest hold nothing.
-func SeedSkewedBacklog(t testing.TB, s *Store, backlog int) {
+// SeedSkewedBacklog adds 48 live teams. Ahead of one eligible unit, skew-00 holds backlog approval-pending, claimed
+// and cancelled jobs, skew-01 cancelled and claimed plans, and skew-03 claimed and finished evals; skew-02 holds
+// backlog trigger-kind units. skew-04, skew-05 and skew-06 hold only rejected jobs, plans and evals; the rest nothing.
+func SeedSkewedBacklog(t *testing.T, s *Store, backlog int) {
 	t.Helper()
-	if s.dialect != DialectPostgres {
-		t.Skip("the skewed backlog seeds through PostgreSQL's generate_series")
+	for i := range 48 {
+		s.testOnlyExec(t, `INSERT INTO teams(name,created_at,updated_at) VALUES (?,1,1)`, fmt.Sprintf("skew-%02d", i))
 	}
-	run := `INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT $1,$2||i,i,'ci','pending',convert_to('{}','UTF8'),'request',1,'gh:1','https://github.com/acme/repo','controller','execute','account',1,'r30',30 FROM generate_series(1,$3::int) i`
-	for _, statement := range []struct {
-		sql  string
-		args []any
-	}{
-		{`INSERT INTO teams(name,created_at,updated_at) SELECT 'skew-'||lpad(i::text,2,'0'),1,1 FROM generate_series(0,47) i`, nil},
-		{run, []any{"skew-00", "jobs-", 1}},
-		{`INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) SELECT 'skew-00','jobs-1','job-'||i,'pending',1,convert_to('{}','UTF8'),convert_to('{}','UTF8') FROM generate_series(1,$1::int) i`, []any{backlog}},
-		{run, []any{"skew-01", "plans-", backlog}},
-		{`INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,needs_labels,prefers_labels) SELECT 'skew-01','plans-'||i,'pending','plan',1,1,convert_to('[]','UTF8'),convert_to('[]','UTF8') FROM generate_series(1,$1::int) i`, []any{backlog}},
-		{run, []any{"skew-02", "triggers-", backlog}},
-		{`INSERT INTO triggers(team,id,status,unit_kind,available_at,created_at,needs_labels,prefers_labels) SELECT 'skew-02','triggers-'||i,'pending','trigger',1,1,convert_to('[]','UTF8'),convert_to('[]','UTF8') FROM generate_series(1,$1::int) i`, []any{backlog}},
-		{run, []any{"skew-03", "evals-", 1}},
-		{`INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES ('skew-03','evals-1','job','pending',convert_to('{}','UTF8'),convert_to('{}','UTF8'))`, nil},
-		{`INSERT INTO eval_units(team,run_id,source_node_id,source_generation,status) SELECT 'skew-03','evals-1','job',i,'pending' FROM generate_series(1,$1::int) i`, []any{backlog}},
-		{`ANALYZE teams,runs,nodes,triggers,eval_units`, nil},
-	} {
-		if _, err := s.db.ExecContext(t.Context(), statement.sql, statement.args...); err != nil {
-			t.Fatalf("%s: %v", statement.sql, err)
-		}
+	series := `WITH RECURSIVE series(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM series WHERE i<?) `
+	numbers := map[string]int{}
+	runs := func(team, prefix string, n int) {
+		prefix = team + "-" + prefix
+		first := numbers[team]
+		numbers[team] += n
+		s.testOnlyExec(t, series+`INSERT INTO runs(team,id,number,pipeline,status,request_json,request_hash,request_sealed_at,repo_key,repo_display,dispatch,intake_mode,created_principal,created_at,log_retention_class,log_retention_days) SELECT ?,CAST(? AS TEXT)||i,i+?,'ci','pending',?,'request',1,'gh:1','https://github.com/acme/repo','controller','execute','account',1,'r30',30 FROM series`, n, team, prefix, first, []byte(`{}`))
+	}
+	nodes := func(team, tag, columns, values string, n int) {
+		s.testOnlyExec(t, series+`INSERT INTO nodes(team,run_id,node_id,spec_json,execution_json,`+columns+`) SELECT ?,?,CAST(? AS TEXT)||i,?,?,`+values+` FROM series`, n, team, team+"-jobs-1", tag, []byte(`{}`), []byte(`{}`))
+	}
+	triggers := func(team, prefix, columns, values string, n int) {
+		runs(team, prefix, n)
+		prefix = team + "-" + prefix
+		s.testOnlyExec(t, series+`INSERT INTO triggers(team,id,available_at,created_at,needs_labels,prefers_labels,`+columns+`) SELECT ?,CAST(? AS TEXT)||i,1,1,?,?,`+values+` FROM series`, n, team, prefix, []byte(`[]`), []byte(`[]`))
+	}
+	evals := func(team, columns, values string, n, offset int) {
+		s.testOnlyExec(t, series+`INSERT INTO eval_units(team,run_id,source_node_id,source_generation,`+columns+`) SELECT ?,?,'job',i+?,`+values+` FROM series`, n, team, team+"-evals-1", offset)
+	}
+	claimed := `claimed_by,capability_prefix,lease_expires_at,generation`
+	held := `'holder','held-'||i,1,1`
+	for _, team := range []string{"skew-00", "skew-04"} {
+		runs(team, "jobs-", 1)
+		nodes(team, "approval-", `status,ready_at`, `'approval_pending',1`, backlog)
+	}
+	nodes("skew-00", "claimed-", `status,ready_at,`+claimed, `'pending',1,`+held, backlog)
+	nodes("skew-00", "cancelled-", `status,ready_at,cancel_requested_at`, `'pending',1,1`, backlog)
+	nodes("skew-00", "eligible-", `status,ready_at`, `'pending',2`, 1)
+	for _, team := range []string{"skew-01", "skew-05"} {
+		triggers(team, "cancelled-", `status,unit_kind,cancel_requested_at`, `'pending','plan',1`, backlog)
+	}
+	triggers("skew-01", "claimed-", `status,unit_kind,claimed_at,`+claimed, `'claimed','plan',1,`+held, backlog)
+	triggers("skew-01", "plan-", `status,unit_kind`, `'pending','plan'`, 1)
+	triggers("skew-02", "trigger-", `status,unit_kind`, `'pending','trigger'`, backlog)
+	for _, team := range []string{"skew-03", "skew-06"} {
+		runs(team, "evals-", 1)
+		s.testOnlyExec(t, `INSERT INTO nodes(team,run_id,node_id,status,spec_json,execution_json) VALUES (?,?,'job','pending',?,?)`, team, team+"-evals-1", []byte(`{}`), []byte(`{}`))
+		evals(team, `status,finished_at`, `'done',1`, backlog, 0)
+	}
+	evals("skew-03", `status,claimed_at,`+claimed, `'claimed',1,`+held, backlog, backlog)
+	evals("skew-03", `status`, `'pending'`, 1, 2*backlog)
+	// hack: PostgreSQL's autovacuum gathers planner statistics in production and the store never analyzes SQLite.
+	if s.dialect == DialectPostgres {
+		s.testOnlyExec(t, `ANALYZE`)
 	}
 }
