@@ -69,7 +69,7 @@ export function decideRelease(version, digest, entries, { recovery = false, engi
   if (!/^0\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$/.test(version) || version === "0.0.0")
     throw new Error("package.json must select an independent SDK version in major 0");
   if (existing && existing.source_digest !== digest)
-    throw new Error("SDK version already names different source; bump sdk/typescript/package.json");
+    throw new Error("SDK version already names different source; bump the version in sdk/typescript/package.json, sdk/typescript/package-lock.json and typeScriptSDKVersion in cmd/sparkwing/action_new_typescript.go");
   if (latest && compareVersions(`v${version}`, latest.version) <= 0)
     throw new Error("changed or revoked SDK requires a version newer than the latest SDK entry");
   if (engineVersion.includes("-"))

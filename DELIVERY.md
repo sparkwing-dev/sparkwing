@@ -327,8 +327,20 @@ the formatters, changed-package Windows test compilation, em dashes, tracker IDs
 binaries, home resolution, the docs mirror, changelog lint and links, the
 required changelog entry, the docs sidebar, the OpenAPI and API-snapshot checks and the
 generated CLI reference (`bin/gen-cli-docs.sh --check`), Markdown lint, config-reference
-drift and wire-cut coverage. Each answers in
+drift, wire-cut coverage and the TypeScript SDK version. Each answers in
 seconds with a warm build cache.
+
+The `sdk-version` policy step runs only when the change touches
+`sdk/typescript/` or `.github/workflows/release.yaml`, the inputs of the SDK's
+release source digest. It verifies the signed public version index and runs the
+release cut's SDK decision, so a change to that source under an already
+published SDK version fails at land and names the version to bump in
+`sdk/typescript/package.json`, its lockfile and `typeScriptSDKVersion`. When the
+index cannot be downloaded or verified, the step passes with an `UNVERIFIED`
+warning, because an outage is not something the change can clear; the release
+cut's `typescript-release` check still refuses without a verified index. A
+change outside those paths does not fetch the index, so a main branch that
+already needs a bump fails only the next change that touches SDK release input.
 
 The `windows-compile` policy step uses the existing changed Go package and
 committed module selection. It compiles tests with `GOOS=windows GOARCH=amd64`
@@ -658,7 +670,8 @@ version once. Recoveries of pre-change SDK entries also refuse the new hash;
 the signed identities are not rewritten. An unchanged digest retains the existing SDK entry
 and skips native assembly and npm publication. Changed source requires a new
 SDK version. Bump both package manifests before cutting the engine release.
-The first independent SDK version is `0.72.0`.
+The land gate's `sdk-version` policy step reports a missing bump when the change
+lands. The first independent SDK version is `0.72.0`.
 
 The decision emits `sdk-entry-typescript.json` for the signed language-neutral policy.
 The immutable engine release retains that entry, including the existing version
