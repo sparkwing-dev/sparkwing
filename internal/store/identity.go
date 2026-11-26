@@ -838,8 +838,10 @@ func scanInvitations(rows rowCursor) ([]Invitation, error) {
 // InvitationAcceptance reports what accepting an invitation did.
 type InvitationAcceptance struct {
 	Team Team
-	// Admitted is true when a waitlisted account joined, which counts toward
-	// the sign-up gate's velocity limits as an admission.
+	// Admitted is true when a waitlisted account joined while the sign-up gate
+	// was open and under its limits, so the join counts toward the gate's
+	// velocity limits as an admission. The account stays on the waitlist
+	// either way.
 	Admitted bool
 	// GateClosed is the gate this acceptance closed by crossing a velocity
 	// limit, or nil when it closed nothing.
@@ -870,7 +872,7 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 		return none, err
 	}
 	// safety: serialize admission counts so waitlisted acceptances cannot
-	// race past the sign-up velocity limit.
+	// race past the sign-up gate's capacity or velocity limits.
 	gate, err := lockSignUpGateTx(ctx, tx)
 	if err != nil {
 		return none, err
@@ -923,13 +925,17 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	}
 	out := InvitationAcceptance{Team: Team(team)}
 	if acct.Waitlisted {
-		if out.GateClosed, err = tripVelocityTx(ctx, tx, gate, now); err != nil {
+		var d signUpDecision
+		if d, err = decideAdmissionTx(ctx, tx, gate, now); err != nil {
 			return none, err
 		}
-		if err := recordAdmissionTx(ctx, tx, accountID, admissionInvitation, now); err != nil {
-			return none, err
+		out.GateClosed = d.tripped
+		if d.reason == "" {
+			if err := recordAdmissionTx(ctx, tx, accountID, admissionInvitation, now); err != nil {
+				return none, err
+			}
+			out.Admitted = true
 		}
-		out.Admitted = true
 	}
 	if err := op.recordAudit(ctx, tx, auditContext{At: now, Team: Team(team), Actor: auditAccountActor(accountID)}, auditInvitationAcceptance{InvitationID: invitationID}); err != nil {
 		return none, err

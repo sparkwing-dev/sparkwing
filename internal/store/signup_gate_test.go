@@ -103,25 +103,31 @@ func TestOperatorWaitlistGatesOnlyNewAccounts(t *testing.T) {
 	requireAdmitted(t, signIn(t, st, "s-next", "next@example.com"))
 }
 
-// A team inviting a waitlisted person vouches for them: the invitation still
-// works, and it grants that one team and nothing more.
+// A team inviting a waitlisted person vouches for them: while the gate is
+// closed the invitation still works, grants that one team and nothing more,
+// and is no admission. An admitted account joins as it would with the gate open.
 func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 	ctx := context.Background()
 	st := storetest.Open(t)
 	owner := signIn(t, st, "s-owner", "owner@example.com")
+	member := signIn(t, st, "s-m", "m@example.com")
 	if _, err := st.SetSignUpMode(ctx, store.SignUpWaitlist, "", "root"); err != nil {
 		t.Fatal(err)
 	}
 	waiting := signIn(t, st, "s-w", "w@example.com")
 	requireWaitlisted(t, waiting, store.WaitlistReasonOperator)
 
+	joined, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), invite(t, st, owner, "m@example.com").ID)
+	if err != nil || joined.Team != owner.Account.ActiveTeam || joined.Admitted || joined.GateClosed != nil {
+		t.Fatalf("an admitted account accepting while the gate is closed = %+v, %v", joined, err)
+	}
 	inv, err := tenant(t, st, owner.Account.ActiveTeam).InviteForTest(t, ctx, owner.Account.ID, "w@example.com", store.RoleEditor, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	acc, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, waiting.Account.ID), inv.ID)
-	if err != nil || acc.Team != owner.Account.ActiveTeam || !acc.Admitted {
-		t.Fatalf("AcceptInvitation = %+v, %v", acc, err)
+	if err != nil || acc.Team != owner.Account.ActiveTeam || acc.Admitted || acc.GateClosed != nil {
+		t.Fatalf("AcceptInvitation while the gate is closed = %+v, %v; want a join that is no admission", acc, err)
 	}
 	acct, err := st.AsOperator().Account(ctx, waiting.Account.ID)
 	if err != nil || acct.ActiveTeam != owner.Account.ActiveTeam || !acct.Waitlisted {
@@ -449,11 +455,33 @@ func TestWaitlistedInvitationAcceptsCountAsAdmissions(t *testing.T) {
 		t.Fatalf("the third admission against a limit of 3 = %+v, %v; want it counted and the gate open", first, err)
 	}
 	second, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, bots[1].Account.ID), invite(t, st, owner, "bot1@example.com").ID)
-	if err != nil || second.GateClosed == nil || second.GateClosed.Source != store.WaitlistReasonHourly {
-		t.Fatalf("the accept past the limit = %+v, %v; want it to close the gate", second, err)
+	if err != nil || second.Admitted || second.GateClosed == nil || second.GateClosed.Source != store.WaitlistReasonHourly {
+		t.Fatalf("the accept past the limit = %+v, %v; want it held back and the gate closed", second, err)
 	}
 	requireWaitlisted(t, signUpAt(t, st, googleProfile("late", "late@example.com"), store.SignUpConditions{}, now),
 		store.WaitlistReasonHourly)
+}
+
+func TestAnInvitationAtLaunchCapacityIsNoAdmission(t *testing.T) {
+	st := storetest.Open(t)
+	setLimits(t, st, store.SignUpLimits{})
+	now := time.Now()
+	var owner, last store.SignInResult
+	for i := range store.LaunchAccountLimit + 1 {
+		last = signUpAt(t, st, googleProfile(fmt.Sprint(i), fmt.Sprintf("cap%d@example.com", i)), store.SignUpConditions{}, now)
+		if i == 0 {
+			owner = last
+		}
+	}
+	requireWaitlisted(t, last, store.WaitlistReasonLaunchCapacity)
+	acc, err := st.AsOperator().AcceptAccountInvitation(t.Context(), storetest.AccountAuthority(t, st, last.Account.ID), invite(t, st, owner, last.Account.Email).ID)
+	if err != nil || acc.Team != owner.Account.ActiveTeam || acc.Admitted || acc.GateClosed != nil {
+		t.Fatalf("AcceptInvitation at launch capacity = %+v, %v; want a join that is no admission", acc, err)
+	}
+	acct, err := st.AsOperator().Account(t.Context(), last.Account.ID)
+	if err != nil || !acct.Waitlisted {
+		t.Fatalf("account after accepting at capacity = %+v, %v; want it still waitlisted", acct, err)
+	}
 }
 
 func TestTeamMembershipHasNoCap(t *testing.T) {
