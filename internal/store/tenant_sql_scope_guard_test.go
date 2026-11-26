@@ -173,11 +173,16 @@ var reviewedForeignKeyedJoins = map[string]string{
 	"(*Tenant).recordSessionMembershipTx": "a session is keyed by its hash across teams; m.team binds the tenant the row is written for",
 }
 
+// safety: a schema upgrade backfill reads one tenant table across every team once, inside the open transaction
+// that migrates the store. Each entry is keyed function|table and covers only a plain read of that one table.
+var reviewedUpgradeBackfillSQL = map[string]string{
+	"backfillTeamInvitationEventsTx|invitations": "the schema 44 upgrade reads every team's invitations of the last day " +
+		"to record each in limit_events under its own team's digest",
+}
+
 // safety: claim search reads every claimable team; this statement binds each row's team from the
 // proof heads the caller passed as one JSON parameter, so the guard cannot see the binding.
 var reviewedClaimSearchSQL = map[string]string{
-	"backfillTeamInvitationEventsTx": "the schema 43 upgrade reads every team's invitations of the last day once, " +
-		"to record each in limit_events under its own team's digest",
 	"claimProofFactsTx": "joins requirement terms on each proof head's own team and requirements, both bound per head",
 }
 
@@ -237,6 +242,12 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 		if stmt.key == "actionsTeamForeignKeyUpgrade" && preservesSchema35ActionsRows(stmt.text) {
 			continue
 		}
+		if len(tables) == 1 && strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt.text)), "SELECT ") && len(unscopedSubqueries(stmt.text)) == 0 {
+			if _, ok := reviewedUpgradeBackfillSQL[stmt.key+"|"+tables[0]]; ok {
+				seen["backfill "+stmt.key+"|"+tables[0]] = true
+				continue
+			}
+		}
 		unscoped := unscopedSubqueries(stmt.text)
 		if outerCarriesTeam(stmt.text) && len(unscoped) == 0 {
 			continue
@@ -293,6 +304,11 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	for key, why := range reviewedRuntimeRelations {
 		if strings.TrimSpace(why) == "" || !seen["runtime "+key] {
 			t.Errorf("reviewedRuntimeRelations entry %q is stale or has no reason; delete it", key)
+		}
+	}
+	for key, why := range reviewedUpgradeBackfillSQL {
+		if strings.TrimSpace(why) == "" || !seen["backfill "+key] {
+			t.Errorf("reviewedUpgradeBackfillSQL entry %q is stale or has no reason; delete it", key)
 		}
 	}
 	for key, why := range reviewedClaimSearchSQL {
