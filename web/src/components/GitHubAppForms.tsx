@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   buttonClass,
   dangerButtonClass,
@@ -26,10 +26,16 @@ import {
 export function ConnectGitHubForm({
   csrfToken,
   connected,
+  existingOpen = false,
 }: {
   csrfToken: string;
   connected: boolean;
+  existingOpen?: boolean;
 }) {
+  const existingButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (existingOpen) existingButton.current?.focus();
+  }, [existingOpen]);
   return (
     <div className="flex flex-wrap items-center gap-3">
       <form method="POST" action={connectFormAction}>
@@ -38,12 +44,12 @@ export function ConnectGitHubForm({
           {connected ? "Connect another account" : "Connect GitHub"}
         </button>
       </form>
-      <details className="text-sm text-[var(--muted)]">
+      <details className="text-sm text-[var(--muted)]" open={existingOpen}>
       <summary className="min-h-11 cursor-pointer py-3">Already installed the app?</summary>
       <p className="mb-2 max-w-sm">Link the installation to this team. Choosing repositories on GitHub gives access to code. You enable runs here next.</p>
       <form method="POST" action="/github/app/connect/existing">
         <input type="hidden" name="csrf_token" value={csrfToken} />
-        <button type="submit" className={`${quietButtonClass} min-h-11`} disabled={!csrfToken}>
+        <button ref={existingButton} type="submit" className={`${quietButtonClass} min-h-11 focus-visible:ring-2 focus-visible:ring-[var(--accent)]`} disabled={!csrfToken}>
           Connect an existing installation
         </button>
       </form>

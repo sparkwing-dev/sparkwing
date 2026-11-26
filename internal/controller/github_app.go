@@ -125,7 +125,10 @@ func (a *githubAppState) signState(st githubConnectState) (string, error) {
 	return signFlowState(a.stateKey, st)
 }
 
-var errConnectState = errors.New("the connect flow's state is not valid; start connecting again")
+var (
+	errConnectState   = errors.New("the connect flow's state is not valid; start connecting again")
+	errConnectExpired = errors.New("the connect flow expired; start connecting again")
+)
 
 // safety: the state proves this controller started the flow for this account
 // session and team, and the verifier proves this browser started it;
@@ -137,7 +140,7 @@ func (a *githubAppState) openState(raw, verifier string, p capability.Authorized
 	}
 	switch {
 	case now.Unix() >= st.Expires:
-		return githubConnectState{}, errors.New("the connect flow expired; start connecting again")
+		return githubConnectState{}, errConnectExpired
 	case st.Account != p.Principal.Capability.Subject.ID || st.Team != p.Target.Team:
 		return githubConnectState{}, errors.New("the connect flow was started by another account or for another team")
 	case st.Session != p.Principal.Authority.ID:
@@ -202,7 +205,12 @@ func (s *Server) githubIdentitySubject(ctx context.Context, p capability.Authori
 	return subject, nil
 }
 
-const githubIdentityMissing = "github_identity_missing"
+// Refusal codes the connect pages choose their wording and next step from.
+const (
+	githubIdentityMissing = "github_identity_missing"
+	githubUnreachable     = "github_unreachable"
+	githubConnectSpent    = "github_connect_spent"
+)
 
 var errNoGitHubIdentity = errors.New("link a GitHub sign-in to this account before connecting the GitHub App")
 
@@ -435,9 +443,17 @@ func (s *Server) githubAppConnectFinish(ctx context.Context, p capability.Author
 	st, err := s.githubApp.openState(flow.State, flow.Verifier, p, now)
 	if err != nil {
 		s.logger.Info("github app connect refused", "team", p.Target.Team, "account", p.Principal.Capability.Subject.ID, "reason", err.Error())
-		return store.GitHubAppInstallation{}, refuse(http.StatusForbidden, "", err.Error())
+		code := ""
+		if errors.Is(err, errConnectExpired) {
+			code = githubConnectSpent
+		}
+		return store.GitHubAppInstallation{}, refuse(http.StatusForbidden, code, err.Error())
 	}
 	if err := writer.ConsumeGitHubConnect(ctx, p, st.Nonce, time.Unix(st.Expires, 0)); err != nil {
+		var refused *apierr.Error
+		if errors.As(err, &refused) && refused.Code == hosterr.Forbidden {
+			return store.GitHubAppInstallation{}, errors.Join(refuse(http.StatusForbidden, githubConnectSpent, refused.Message), err)
+		}
 		return store.GitHubAppInstallation{}, err
 	}
 	subject, err := s.githubIdentitySubject(ctx, p)
@@ -479,7 +495,7 @@ func (s *Server) githubAppConnectRefusal(err error) error {
 	case errors.Is(err, errGitHubInstallationAccess), errors.Is(err, errGitHubUserMismatch):
 		return refuse(http.StatusForbidden, "", err.Error())
 	default:
-		return errors.Join(refuse(http.StatusBadGateway, "", "GitHub could not be reached to finish connecting"), err)
+		return errors.Join(refuse(http.StatusBadGateway, githubUnreachable, "GitHub could not be reached to finish connecting"), err)
 	}
 }
 

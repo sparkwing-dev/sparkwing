@@ -539,3 +539,84 @@ func TestGitHubBrowserAvailableRetry(t *testing.T) {
 		})
 	}
 }
+
+func TestGitHubBrowserFailedFreshConnectOffersExistingInstallation(t *testing.T) {
+	const existing = `href="/team/github?connect=existing"`
+	for name, c := range map[string]struct {
+		fail      func(*githubBrowserFixture)
+		replay    bool
+		status    int
+		recovered bool
+	}{
+		"GitHub unreachable": {fail: func(f *githubBrowserFixture) {
+			f.providerError = func(r *http.Request) error {
+				if r.URL.Path == "/app/installations/7" {
+					return errors.New("connection reset")
+				}
+				return nil
+			}
+		}, status: http.StatusBadGateway, recovered: true},
+		"server failure":       {fail: func(f *githubBrowserFixture) { f.writer.bindErr = errors.New("database is locked") }, status: http.StatusInternalServerError, recovered: true},
+		"state already used":   {replay: true, status: http.StatusForbidden, recovered: true},
+		"held by another team": {fail: func(f *githubBrowserFixture) { f.writer.bindErr = store.ErrInstallationBoundElsewhere }, status: http.StatusConflict},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newGitHubBrowserFixture(t)
+			flow := f.start(t, false)
+			flow.Code, flow.InstallationID = "code", 7
+			if c.replay {
+				if w := f.request("GET", githubAppCompletePath, nil, &flow, nil); w.Code != http.StatusSeeOther {
+					t.Fatalf("first complete = %d %s", w.Code, w.Body)
+				}
+			}
+			if c.fail != nil {
+				c.fail(f)
+			}
+			w := f.request("GET", githubAppCompletePath, nil, &flow, nil)
+			if w.Code != c.status || strings.Contains(w.Body.String(), existing) != c.recovered {
+				t.Fatalf("complete = %d, want %d offering the existing installation %v: %s", w.Code, c.status, c.recovered, w.Body)
+			}
+		})
+	}
+	t.Run("setup return after the flow expired", func(t *testing.T) {
+		f := newGitHubBrowserFixture(t)
+		query := url.Values{"state": {"expired"}, "installation_id": {"7"}, "setup_action": {"install"}}
+		w := f.request("GET", "/github/app/setup?"+query.Encode(), nil, nil, nil)
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), existing) {
+			t.Fatalf("setup = %d %s", w.Code, w.Body)
+		}
+		w = f.request("GET", "/github/app/setup?"+url.Values{"state": {"expired"}, "setup_action": {"install"}}.Encode(), nil, nil, nil)
+		if w.Code != http.StatusForbidden || strings.Contains(w.Body.String(), existing) {
+			t.Fatalf("setup without an installation = %d %s", w.Code, w.Body)
+		}
+	})
+}
+
+func TestGitHubBrowserRefusalBlamesGitHubOnlyForGitHubFailures(t *testing.T) {
+	for name, c := range map[string]struct {
+		bindErr       error
+		providerError error
+		status        int
+		github        bool
+	}{
+		"GitHub transport failure": {providerError: errors.New("connection reset"), status: http.StatusBadGateway, github: true},
+		"Sparkwing unavailable":    {bindErr: &apierr.Error{Code: hosterr.Unavailable, Message: "store draining"}, status: http.StatusServiceUnavailable},
+		"Sparkwing rate limit":     {bindErr: &apierr.Error{Code: hosterr.RateLimited, Message: "slow down"}, status: http.StatusTooManyRequests},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newGitHubBrowserFixture(t)
+			flow := f.start(t, false)
+			flow.Code, flow.InstallationID = "code", 7
+			f.writer.bindErr = c.bindErr
+			if c.providerError != nil {
+				f.providerError = func(*http.Request) error { return c.providerError }
+			}
+			w := f.request("GET", githubAppCompletePath, nil, &flow, nil)
+			page := w.Body.String()
+			if w.Code != c.status || strings.Contains(page, "GitHub could not be reached") != c.github ||
+				strings.Contains(page, "Connecting failed on this server") == c.github {
+				t.Fatalf("complete = %d, want %d blaming GitHub %v: %s", w.Code, c.status, c.github, page)
+			}
+		})
+	}
+}

@@ -21,10 +21,12 @@ import (
 const githubAppFlowCookieName = hostPrefix + "sw_github_app"
 
 const (
-	githubAppSettingsPath  = "/team/github"
-	githubAppCallbackPath  = "/github/app/callback"
-	githubAppCompletePath  = "/github/app/complete"
-	githubAppAvailablePath = "/github/app/available"
+	githubAppSettingsPath = "/team/github"
+	// The settings page opens its existing-installation path for this query.
+	githubAppConnectExistingPath = githubAppSettingsPath + "?connect=existing"
+	githubAppCallbackPath        = "/github/app/callback"
+	githubAppCompletePath        = "/github/app/complete"
+	githubAppAvailablePath       = "/github/app/available"
 )
 
 type githubAppFlow struct {
@@ -74,7 +76,7 @@ func (s *Server) handleGitHubAppConnect(existing bool) http.HandlerFunc {
 		}
 		grant, err := s.githubAppConnectBegin(r.Context(), sess.authorized, browserURL(r, githubAppCallbackPath))
 		if err != nil {
-			s.renderGitHubAppRefusal(w, err)
+			s.renderGitHubAppRefusal(w, err, false)
 			return
 		}
 		if !s.setGitHubAppFlow(w, githubAppFlow{State: grant.State, Verifier: grant.Verifier, AuthorizeURL: grant.AuthorizeURL, Existing: existing}) {
@@ -121,6 +123,10 @@ func (s *Server) handleGitHubAppSetup(w http.ResponseWriter, r *http.Request) {
 			ActionHref:  githubAppSettingsPath + "?access_updated=1",
 			ActionLabel: "Continue to GitHub settings",
 		})
+		return
+	}
+	if !s.githubAppReturnFlowValid(r) && query.Get("installation_id") != "" {
+		s.renderGitHubAppRefusal(w, refuse(http.StatusForbidden, githubConnectSpent, errConnectState.Error()), true)
 		return
 	}
 	if !ok {
@@ -189,7 +195,7 @@ func (s *Server) handleGitHubAppCallback(w http.ResponseWriter, r *http.Request)
 				return err
 			})
 		if err != nil {
-			s.renderGitHubAppRefusal(w, s.githubAppConnectRefusal(err))
+			s.renderGitHubAppRefusal(w, s.githubAppConnectRefusal(err), false)
 			return
 		}
 		flow.Code = ""
@@ -228,7 +234,7 @@ func (s *Server) handleGitHubAppAvailable(w http.ResponseWriter, r *http.Request
 	}
 	available, err := s.githubAppAvailable(r.Context(), sess.authorized, flow.proof(), flow.Authorization)
 	if err != nil {
-		s.renderGitHubAppRefusal(w, err)
+		s.renderGitHubAppRefusal(w, err, false)
 		return
 	}
 	flow.Code = ""
@@ -270,7 +276,7 @@ func (s *Server) handleGitHubAppSelect(w http.ResponseWriter, r *http.Request) {
 	clearFlowCookie(w, githubAppFlowCookieName)
 	bound, err := s.githubAppSelect(r.Context(), sess.authorized, flow.proof(), flow.Authorization, id)
 	if err != nil {
-		s.renderGitHubAppRefusal(w, err)
+		s.renderGitHubAppRefusal(w, err, false)
 		return
 	}
 	connected := url.URL{Path: githubAppSettingsPath, RawQuery: url.Values{"connected": {bound.AccountLogin}}.Encode()}
@@ -292,7 +298,7 @@ func (s *Server) handleGitHubAppComplete(w http.ResponseWriter, r *http.Request)
 	bound, err := s.githubAppConnectFinish(r.Context(), sess.authorized, flow.proof(), flow.InstallationID,
 		browserURL(r, githubAppCallbackPath))
 	if err != nil {
-		s.renderGitHubAppRefusal(w, err)
+		s.renderGitHubAppRefusal(w, err, true)
 		return
 	}
 	noteAuditWrite(r.Context())
@@ -311,7 +317,11 @@ func refuseGitHubAppFlow(w http.ResponseWriter, status int, message string) {
 
 // safety: a refusal's message is written for the person in the flow, so the page shows it; a fault shows no
 // internal text.
-func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error) {
+//
+// installed says GitHub already reported an installation for this flow. Starting a new install then stops on
+// GitHub's settings page, which returns nothing until a setting changes, so a page that would offer a retry
+// offers the existing installation instead.
+func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error, installed bool) {
 	if errors.Is(err, context.Canceled) {
 		s.logger.Info("github app connection canceled")
 		return
@@ -321,16 +331,12 @@ func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error) {
 	refused, ok := refusalOf(err)
 	var failure *apierr.Error
 	if !ok && errors.As(err, &failure) {
-		refused = &flowRefusal{status: hosterr.Status(failure.Code), message: failure.Message}
-		ok = true
+		refused, ok = &flowRefusal{status: hosterr.Status(failure.Code), message: failure.Message}, true
 	}
 	if !ok {
-		page.Title = "GitHub could not be connected"
-		page.Message = "Connecting failed on this server. Try again."
-		renderFlowPage(w, http.StatusInternalServerError, page)
-		return
+		refused = &flowRefusal{status: http.StatusInternalServerError}
 	}
-	status := refused.status
+	status, cause := refused.status, ""
 	switch {
 	case refused.code == githubIdentityMissing:
 		page.Title = "Link GitHub first"
@@ -338,6 +344,10 @@ func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error) {
 			"Sparkwing connects an installation only for an account whose linked GitHub sign-in administers it."
 		page.ActionHref = signInsSettingsPath
 		page.ActionLabel = "Link GitHub"
+	case refused.code == githubUnreachable:
+		page.Title, cause = "GitHub could not be reached", "GitHub could not be reached to finish connecting."
+	case refused.code == githubConnectSpent:
+		page.Title, cause = "GitHub was not connected", "This connection was already used or expired."
 	case refused.status == http.StatusForbidden:
 		page.Title = "GitHub was not connected"
 		page.Message = orDefault(refused.message, "Only a team owner who administers the GitHub account can connect it.")
@@ -356,9 +366,14 @@ func (s *Server) renderGitHubAppRefusal(w http.ResponseWriter, err error) {
 		page.Title = "GitHub was not connected"
 		page.Message = orDefault(refused.message, "The request was refused. Start again.")
 	default:
-		status = http.StatusBadGateway
-		page.Title = "GitHub could not be reached"
-		page.Message = "GitHub could not be reached to finish connecting. Try again."
+		page.Title, cause = "GitHub could not be connected", "Connecting failed on this server."
+	}
+	switch {
+	case cause != "" && installed:
+		page.Message = cause + " The App is already installed on GitHub, so connect that installation to finish."
+		page.ActionHref, page.ActionLabel = githubAppConnectExistingPath, "Connect an existing installation"
+	case cause != "":
+		page.Message = cause + " Try again."
 	}
 	renderFlowPage(w, status, page)
 }

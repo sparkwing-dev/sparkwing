@@ -61,7 +61,9 @@ Only a team owner connects, and only as a signed-in account with a linked GitHub
 
 The `installation_id` the controller binds is the one step 2 recorded in the cookie, never one from the callback URL. The callback keeps GitHub's code in the flow cookie and resumes on the controller's own origin before the session is used. A setup return with `setup_action=request` means an organization owner must approve the install; the controller's page says so and the owner connects again after the approval.
 
-A refused connection shows its reason without attributing every refusal to GitHub ownership. An already-used or expired connection asks the owner to start again from the team's GitHub settings.
+A refused connection shows its reason. The page says GitHub could not be reached only when a call to GitHub failed; a failure inside Sparkwing, such as a 503 or 429, says connecting failed on this server.
+
+Once GitHub reports an installation, a new **Connect GitHub** opens that installation's settings page on GitHub, which returns to Sparkwing only after a setting changes. So when a setup return names an installation but its connection expired or was already used, or when `/github/app/complete` fails because GitHub could not be reached, the server failed or the connection was already used or expired, the page offers **Connect an existing installation**. That opens **Team -> GitHub** with the existing-installation path expanded (`/team/github?connect=existing`). Other refusals lead back to the team's GitHub settings.
 
 When an administrator changes repository access on GitHub outside a connect flow,
 GitHub returns to the setup URL with `setup_action=update`, and the controller
