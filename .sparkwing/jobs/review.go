@@ -1,7 +1,6 @@
 package jobs
 
 import (
-	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -134,7 +133,7 @@ func (j *reviewJob) run(ctx context.Context) (reviewRecord, error) {
 		root:       root,
 		git:        git,
 		showTicket: showTicket,
-		standards:  func(ctx context.Context, diff string) (string, error) { return overwingStandards(ctx, root, diff) },
+		standards:  func(ctx context.Context, files []string) (string, error) { return overwingStandards(ctx, root, files) },
 		reviewer:   newReviewer,
 		recordDir:  filepath.Join(strings.TrimSpace(common), "sparkwing-review"),
 		now:        time.Now,
@@ -156,7 +155,7 @@ type reviewDeps struct {
 	root       string
 	git        func(ctx context.Context, args ...string) (string, error)
 	showTicket func(ctx context.Context, id string) (string, error)
-	standards  func(ctx context.Context, diff string) (string, error)
+	standards  func(ctx context.Context, files []string) (string, error)
 	reviewer   func(model string) (reviewer, error)
 	recordDir  string
 	now        func() time.Time
@@ -241,7 +240,7 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 
 	if sameTree {
 		rec.Notes = append(rec.Notes, "tree and objective unchanged since the last review, so no reviewer ran; skips were reapplied")
-	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree, diff, changes); err != nil {
+	} else if err := reviewPassForTree(ctx, d, p, &rec, in, base, head, tree, diff, changes, modified); err != nil {
 		return reviewRecord{}, "", err
 	}
 	diff.enforceBinaryReview(&rec, p, changes)
@@ -256,7 +255,7 @@ func runReview(ctx context.Context, d reviewDeps, p reviewPolicy, in reviewInput
 	return rec, file, nil
 }
 
-func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree string, diff reviewDiffResult, changes [][]string) error {
+func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *reviewRecord, in reviewInputs, base, head, tree string, diff reviewDiffResult, changes [][]string, modified []string) error {
 	started := d.now()
 	var err error
 	var files []string
@@ -301,7 +300,7 @@ func reviewPassForTree(ctx context.Context, d reviewDeps, p reviewPolicy, rec *r
 	}
 	standards := ""
 	if p.usesStandards() {
-		if standards, err = d.standards(ctx, diff.text); err != nil {
+		if standards, err = d.standards(ctx, modified); err != nil {
 			rec.Notes = append(rec.Notes, "house standards unavailable, so the standards rule was judged without them: "+err.Error())
 			standards = ""
 		}
@@ -528,14 +527,19 @@ func showTicket(ctx context.Context, id string) (string, error) {
 	return fmt.Sprintf("%s: %s\n\n%s", id, t.Title, clip(t.Body, maxTicketBody)), nil
 }
 
-func overwingStandards(ctx context.Context, root, _ string) (string, error) {
+func overwingStandards(ctx context.Context, root string, files []string) (string, error) {
 	listing, err := sparkwing.Exec(ctx, "overwing", "standards", "list", "-o", "json").String()
+	if err != nil {
+		return "", err
+	}
+	// hack: the cursor export is the only command that resolves each card's path globs.
+	rules, err := sparkwing.Exec(ctx, "overwing", "standards", "export", "--harness", "cursor", "--dry-run", "--repo", root, "-o", "json").String()
 	if err != nil {
 		return "", err
 	}
 	origin, _ := sparkwing.Exec(ctx, "git", "-C", root, "remote", "get-url", "origin").String()
 	owner, repo := repoOwnerAndName(strings.TrimSpace(origin), root)
-	names := reviewerCardNames(listing, owner, repo)
+	names := reviewerCardNames(listing, rules, owner, repo, files)
 	if len(names) == 0 {
 		return "", nil
 	}
@@ -546,7 +550,7 @@ func overwingStandards(ctx context.Context, root, _ string) (string, error) {
 	return reviewStandardBodies(cards)
 }
 
-// safety: card scopes name the hosting owner and repository, so read them from origin.
+// safety: card scopes name the hosting repository, which a worktree directory name need not match.
 func repoOwnerAndName(origin, root string) (owner, repo string) {
 	path := origin
 	if path == "" {
@@ -569,34 +573,53 @@ func repoOwnerAndName(origin, root string) (owner, repo string) {
 	return "", filepath.Base(root)
 }
 
-func reviewerCardNames(ndjson, owner, repo string) []string {
+// safety: a reviewer takes only cards whose apply_type names review and whose
+// scope fits origin. An always-apply review card loads every time, a review-only
+// card whenever in scope, and any other review card only when a changed file
+// matches one of the globs overwing's export gives it.
+func reviewerCardNames(listing, rules, owner, repo string, files []string) []string {
+	globs := map[string][]string{}
+	for _, line := range strings.Split(rules, "\n") {
+		var rule struct {
+			Kind  string   `json:"kind"`
+			Card  string   `json:"card"`
+			Globs []string `json:"globs"`
+		}
+		if json.Unmarshal([]byte(line), &rule) == nil && rule.Kind == "rule" && rule.Card != "" {
+			globs[rule.Card] = rule.Globs
+		}
+	}
 	var names []string
-	sc := bufio.NewScanner(strings.NewReader(ndjson))
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		var rec struct {
+	for _, line := range strings.Split(listing, "\n") {
+		var card struct {
 			Name        string   `json:"name"`
-			Mode        string   `json:"mode"`
 			ApplyAlways bool     `json:"apply_always"`
 			ApplyType   []string `json:"apply_type"`
 			ScopeRepo   []string `json:"scope_repo"`
 			ScopeOwner  []string `json:"scope_owner"`
 		}
-		if json.Unmarshal(sc.Bytes(), &rec) != nil || rec.Name == "" || rec.Mode == "runbook" {
+		if json.Unmarshal([]byte(line), &card) != nil || !slices.Contains(card.ApplyType, "review") {
 			continue
 		}
-		if !rec.ApplyAlways && !slices.Contains(rec.ApplyType, "review") {
+		if len(card.ScopeRepo) > 0 && !containsFold(card.ScopeRepo, repo) || len(card.ScopeOwner) > 0 && !containsFold(card.ScopeOwner, owner) {
 			continue
 		}
-		if len(rec.ScopeRepo) > 0 && !containsFold(rec.ScopeRepo, repo) {
-			continue
+		reviewOnly := !slices.ContainsFunc(card.ApplyType, func(surface string) bool { return surface != "review" })
+		if card.ApplyAlways || reviewOnly || anyFileMatches(globs[card.Name], files) {
+			names = append(names, card.Name)
 		}
-		if len(rec.ScopeOwner) > 0 && !containsFold(rec.ScopeOwner, owner) {
-			continue
-		}
-		names = append(names, rec.Name)
 	}
 	return names
+}
+
+func containsFold(values []string, want string) bool {
+	return want != "" && slices.ContainsFunc(values, func(v string) bool { return strings.EqualFold(v, want) })
+}
+
+func anyFileMatches(globs, files []string) bool {
+	return slices.ContainsFunc(globs, func(glob string) bool {
+		return slices.ContainsFunc(files, func(file string) bool { return globMatch(glob, file) })
+	})
 }
 
 var standardBacklink = regexp.MustCompile(`^- \[\[[^\]]+\]\] \x{2014} (ai|semantic)$`)
@@ -634,10 +657,6 @@ func reviewStandardBodies(cards string) (string, error) {
 		}
 		bodies = append(bodies, strings.TrimSpace(body))
 	}
-}
-
-func containsFold(values []string, want string) bool {
-	return want != "" && slices.ContainsFunc(values, func(v string) bool { return strings.EqualFold(v, want) })
 }
 
 type reviewPrompt struct {
