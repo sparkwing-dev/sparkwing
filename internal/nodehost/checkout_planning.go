@@ -168,6 +168,15 @@ func checkoutPlanningSettings(input CheckoutPlanningInput) (settings.Inputs, str
 	return inputs, entrypoint, nil
 }
 
+// LocalRunContext returns the RunContext a local run's Plan receives for git
+// and the acquired entry, so a plan preview selects the jobs the run would.
+func LocalRunContext(runID, pipeline string, git runspec.Git, entry *source.Entry) nodewire.RunContext {
+	var resolved runspec.Resolved
+	resolveDefaultBranch(&resolved, git, entry.DefaultBranch)
+	request := runspec.SealedRequest{RunID: runID, Request: runspec.Request{Pipeline: pipeline, Origin: runspec.OriginLocal, Git: git}}
+	return executorRunContext(runspec.Spec{Request: request, Resolved: resolved})
+}
+
 func resolveDefaultBranch(resolved *runspec.Resolved, git runspec.Git, acquired string) {
 	branch, origin := acquired, runspec.DefaultBranchOriginHEAD
 	if git.DefaultBranch.Set {
