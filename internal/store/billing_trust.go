@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 const (
@@ -41,6 +43,14 @@ func (t *Tenant) BillingStanding(ctx context.Context) (out BillingStanding, err 
 }
 
 func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time) (BillingStanding, error) {
+	mode, err := creditPaymentMode(ctx, q)
+	if err != nil {
+		return BillingStanding{}, err
+	}
+	return trustStandingInModeTx(ctx, q, team, now, mode)
+}
+
+func trustStandingInModeTx(ctx context.Context, q rowQuerier, team Team, now time.Time, mode capability.PaymentMode) (BillingStanding, error) {
 	var b BillingStanding
 	var at int64
 	err := q.QueryRowContext(ctx, `SELECT billing_trust,billing_trust_by,billing_trust_at,billing_trust_reason FROM teams WHERE name=?`, team).Scan(&b.Trust, &b.TrustBy, &at, &b.TrustReason)
@@ -53,10 +63,10 @@ func trustStandingTx(ctx context.Context, q rowQuerier, team Team, now time.Time
 	if at > 0 {
 		b.TrustAt = time.Unix(0, at)
 	}
-	if b.HoldCause, err = teamHoldTx(ctx, q, team); err != nil {
+	if b.HoldCause, err = teamHoldInModeTx(ctx, q, team, mode); err != nil {
 		return b, err
 	}
-	policy, err := standingPolicyTx(ctx, q, team, now, b.Trust, b.HoldCause != "")
+	policy, err := standingPolicyTx(ctx, q, team, now, b.Trust, b.HoldCause != "", mode)
 	if err != nil {
 		return b, err
 	}

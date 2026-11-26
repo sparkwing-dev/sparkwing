@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 const (
@@ -340,6 +342,10 @@ func creditBalanceTx(ctx context.Context, tx rowQuerier, team Team) (int64, erro
 	if err != nil {
 		return 0, err
 	}
+	return creditBalanceInModeTx(ctx, tx, team, mode)
+}
+
+func creditBalanceInModeTx(ctx context.Context, tx rowQuerier, team Team, mode capability.PaymentMode) (int64, error) {
 	var granted, charged sql.NullInt64
 	if err := tx.QueryRowContext(ctx, creditBalanceSQL,
 		string(team), mode, string(team), mode).Scan(&granted, &charged); err != nil {
@@ -450,12 +456,14 @@ func (u CreditSettingsUpdate) validate() error {
 		return fmt.Errorf(
 			"%w: name at least one of the rate, the rate table, "+
 				"the storage rate, or the free storage allowance",
-			ErrInvalidCreditSetting)
+			ErrInvalidCreditSetting,
+		)
 	}
 	if u.RateMicroPerSecond != nil && u.RateTable != nil {
 		return fmt.Errorf(
 			"%w: rate_micro_per_second is the four-core entry of the rate table; name one or the other",
-			ErrInvalidCreditSetting)
+			ErrInvalidCreditSetting,
+		)
 	}
 	if u.RateTable != nil {
 		if err := u.RateTable.Validate(); err != nil {

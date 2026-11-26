@@ -479,14 +479,20 @@ type claimTeamFacts struct {
 	Held      int    `json:"held"`
 }
 
-func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]claimTeamFacts, error) {
-	query := `SELECT name,claim_award_ordinal FROM teams WHERE name IN (` + liveTeamsSQL + `)`
+// perf: claimable kinds keep only teams holding a queued unit of one of them, so idle teams cost no facts.
+func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string, claimable []capability.UnitKind) ([]claimTeamFacts, error) {
+	query := `SELECT tm.name,tm.claim_award_ordinal FROM teams tm WHERE tm.name IN (` + liveTeamsSQL + `)`
 	var args []any
 	if scopeTeam != "" {
-		query += ` AND name=?`
+		query += ` AND tm.name=?`
 		args = append(args, scopeTeam)
 	}
-	rows, err := tx.queryContext(ctx, query+` ORDER BY claim_award_ordinal,name`, args...)
+	if len(claimable) > 0 {
+		q := claimSQL{}
+		query += ` AND (` + q.queuedUnitSQL(func() string { return "tm.name" }, claimable) + `)`
+		args = append(args, q.args...)
+	}
+	rows, err := tx.queryContext(ctx, query+` ORDER BY tm.claim_award_ordinal,tm.name`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -501,17 +507,20 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]cla
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
+	if len(teams) == 0 {
+		return nil, nil
+	}
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	for i := range teams {
 		team := Team(teams[i].Team)
-		standing, err := trustStandingTx(ctx, tx, team, tx.now(ctx))
+		standing, err := trustStandingInModeTx(ctx, tx, team, tx.now(ctx), mode)
 		if err != nil {
 			return nil, err
 		}
-		balance, err := creditBalanceTx(ctx, tx, team)
-		if err != nil {
-			return nil, err
-		}
-		mode, err := creditPaymentMode(ctx, tx)
+		balance, err := creditBalanceInModeTx(ctx, tx, team, mode)
 		if err != nil {
 			return nil, err
 		}
@@ -526,7 +535,7 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]cla
 	return teams, nil
 }
 
-func (o *Operator) claimObserversTx(ctx context.Context, tx *storeTx, current claimFacts, scopeTeam string) ([]claimFacts, error) {
+func (o *Operator) claimObserversTx(ctx context.Context, tx *storeTx, current claimFacts, teams []string) ([]claimFacts, error) {
 	policy, _ := claimPlacementFromContext(ctx)
 	horizon := policy.Liveness
 	if horizon <= 0 {
@@ -535,9 +544,13 @@ func (o *Operator) claimObserversTx(ctx context.Context, tx *storeTx, current cl
 	now := tx.now(ctx)
 	query := `SELECT prefix,claim_observation_json FROM capabilities WHERE claim_observation_json IS NOT NULL AND last_used_at>=? AND prefix<>?`
 	args := []any{now.Add(-horizon).UnixNano(), current.Prefix}
-	if scopeTeam != "" {
-		query += ` AND (team=? OR subject_kind='service')`
-		args = append(args, scopeTeam)
+	scope := `subject_kind='service'`
+	if len(teams) > 0 {
+		scope = `team IN (` + strings.Repeat("?,", len(teams)-1) + `?) OR ` + scope
+	}
+	query += ` AND (` + scope + `)`
+	for _, team := range teams {
+		args = append(args, team)
 	}
 	rows, err := tx.queryContext(ctx, query+` ORDER BY prefix`, args...)
 	if err != nil {
@@ -831,16 +844,32 @@ func claimInputsForTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds
 			}
 		}
 	}
+	// perf: an unscoped search builds facts only for teams with queued work, and a queue with none answers empty.
+	// A projection also reads jobs that are not ready yet, so it keeps every live team.
+	var claimable []capability.UnitKind
+	if scopeTeam == "" && !q.projected {
+		claimable = kinds
+	}
+	teams, err := claimTeamFactsTx(ctx, tx, scopeTeam, claimable)
+	if err != nil {
+		return err
+	}
+	if claimable != nil && len(teams) == 0 {
+		return notFound("eligible work", "")
+	}
+	observed := []string{scopeTeam}
+	if scopeTeam == "" {
+		observed = make([]string, 0, len(teams))
+		for _, team := range teams {
+			observed = append(observed, team.Team)
+		}
+	}
 	facts := []claimFacts{current}
 	if !q.placementFree {
-		facts, err = tx.operator.claimObserversTx(ctx, tx, current, scopeTeam)
+		facts, err = tx.operator.claimObserversTx(ctx, tx, current, observed)
 		if err != nil {
 			return err
 		}
-	}
-	teams, err := claimTeamFactsTx(ctx, tx, scopeTeam)
-	if err != nil {
-		return err
 	}
 	rates, err := creditRateTableTx(ctx, tx)
 	if err != nil {
@@ -862,8 +891,6 @@ func claimInputsForTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds
 
 // perf: a team-wide claimant's empty poll answers from the partial claim indexes, skipping the full search's
 // reads of every other live runner's facts and authority, the team's credit balance, rates and ranking.
-// safety: each branch is its kind's claim source with only the team scope and index predicate kept, so any unit
-// the search can return for this claimant makes this true in the same snapshot.
 func claimableUnitQueuedTx(ctx context.Context, tx *storeTx, team string, kinds []capability.UnitKind) (bool, error) {
 	query, args := claimableUnitQueuedSQL(team, kinds)
 	if query == "" {
@@ -875,31 +902,39 @@ func claimableUnitQueuedTx(ctx context.Context, tx *storeTx, team string, kinds 
 }
 
 func claimableUnitQueuedSQL(team string, kinds []capability.UnitKind) (string, []any) {
+	q := claimSQL{}
+	queued := q.queuedUnitSQL(func() string { return q.param(team) }, kinds)
+	if queued == "" {
+		return "", nil
+	}
+	return `SELECT CASE WHEN ` + queued + ` THEN 1 ELSE 0 END`, q.args
+}
+
+// safety: each branch is its kind's claim source with only the team scope and index predicate kept, so any unit
+// a search can return makes this true in the same snapshot. team renders the team expression once per use.
+func (q *claimSQL) queuedUnitSQL(team func() string, kinds []capability.UnitKind) string {
 	var checks, triggerKinds []string
-	var args []any
 	for _, kind := range kinds {
 		switch kind {
 		case capability.UnitNode:
-			checks = append(checks, `EXISTS (SELECT 1 FROM nodes n WHERE n.team=? AND n.status='pending' AND n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL)`)
-			args = append(args, team)
+			checks = append(checks, `EXISTS (SELECT 1 FROM nodes n WHERE n.team=`+team()+` AND n.status='pending' AND n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL)`)
 		case capability.UnitEval:
-			checks = append(checks, `EXISTS (SELECT 1 FROM eval_units e WHERE e.team=? AND e.status='pending' AND e.claimed_by IS NULL AND e.capability_prefix='')`)
-			args = append(args, team)
+			checks = append(checks, `EXISTS (SELECT 1 FROM eval_units e WHERE e.team=`+team()+` AND e.status='pending' AND e.claimed_by IS NULL AND e.capability_prefix='')`)
 		default:
 			triggerKinds = append(triggerKinds, string(kind))
 		}
 	}
 	if len(triggerKinds) > 0 {
-		checks = append(checks, `EXISTS (SELECT 1 FROM triggers t WHERE t.team=? AND t.status='pending' AND t.claimed_by IS NULL AND t.capability_prefix='' AND t.cancel_requested_at IS NULL AND t.unit_kind IN (`+strings.Repeat("?,", len(triggerKinds)-1)+`?))`)
-		args = append(args, team)
-		for _, kind := range triggerKinds {
-			args = append(args, kind)
+		check := `EXISTS (SELECT 1 FROM triggers t WHERE t.team=` + team() + ` AND t.status='pending' AND t.claimed_by IS NULL AND t.capability_prefix='' AND t.cancel_requested_at IS NULL AND t.unit_kind IN (`
+		for i, kind := range triggerKinds {
+			if i > 0 {
+				check += `,`
+			}
+			check += q.param(kind)
 		}
+		checks = append(checks, check+`))`)
 	}
-	if len(checks) == 0 {
-		return "", nil
-	}
-	return `SELECT CASE WHEN ` + strings.Join(checks, ` OR `) + ` THEN 1 ELSE 0 END`, args
+	return strings.Join(checks, ` OR `)
 }
 
 func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []capability.UnitKind, q *claimSQL) (string, error) {

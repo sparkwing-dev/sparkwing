@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // errUnknownPayment is returned when a provider payment has no settled grant.
@@ -41,6 +43,14 @@ const (
 
 // safety: the one reader of whether a team is held: revoked standing, or else its oldest open hold.
 func teamHoldTx(ctx context.Context, q rowQuerier, team Team) (string, error) {
+	mode, err := creditPaymentMode(ctx, q)
+	if err != nil {
+		return "", err
+	}
+	return teamHoldInModeTx(ctx, q, team, mode)
+}
+
+func teamHoldInModeTx(ctx context.Context, q rowQuerier, team Team, mode capability.PaymentMode) (string, error) {
 	var trust string
 	if err := q.QueryRowContext(ctx, `SELECT billing_trust FROM teams WHERE name = ?`, string(team)).Scan(&trust); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -51,12 +61,8 @@ func teamHoldTx(ctx context.Context, q rowQuerier, team Team) (string, error) {
 	if trust == billingTrustRevoked {
 		return holdCauseRevoked, nil
 	}
-	mode, err := creditPaymentMode(ctx, q)
-	if err != nil {
-		return "", err
-	}
 	var cause string
-	err = q.QueryRowContext(ctx, `SELECT cause FROM credit_freezes WHERE team = ? AND payment_mode = ? AND released_at IS NULL
+	err := q.QueryRowContext(ctx, `SELECT cause FROM credit_freezes WHERE team = ? AND payment_mode = ? AND released_at IS NULL
 	    ORDER BY created_at, dispute_id LIMIT 1`, string(team), mode).Scan(&cause)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil

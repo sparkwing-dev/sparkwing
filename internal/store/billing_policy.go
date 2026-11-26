@@ -6,6 +6,7 @@ import (
 	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
@@ -66,14 +67,10 @@ func prepayCeiling(earned int) int {
 	return earned
 }
 
-func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Time, trust string, held bool) (standingPolicy, error) {
-	mode, err := creditPaymentMode(ctx, q)
-	if err != nil {
-		return standingPolicy{}, err
-	}
+func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Time, trust string, held bool, mode capability.PaymentMode) (standingPolicy, error) {
 	var paid, first, incident sql.NullInt64
 	var p standingPolicy
-	err = q.QueryRowContext(ctx, `SELECT
+	err := q.QueryRowContext(ctx, `SELECT
  (SELECT SUM(amount_micro) FROM credit_grants WHERE team=? AND payment_mode=? AND (kind=? OR (kind=? AND reverses_kind='paid'))),
  (SELECT MIN(g.created_at) FROM credit_grants g WHERE g.team=? AND g.payment_mode=? AND g.kind=? AND
  g.amount_micro+COALESCE((SELECT SUM(r.amount_micro) FROM credit_grants r WHERE r.team=g.team AND r.payment_mode=g.payment_mode AND r.kind='reversal' AND r.reverses_kind='paid' AND r.reverses=g.reference AND g.reference<>''),0)>0),
@@ -88,7 +85,7 @@ func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Tim
 	if incident.Valid {
 		p.history.LastIncidentAt = time.Unix(0, incident.Int64)
 	}
-	balance, err := creditBalanceTx(ctx, q, team)
+	balance, err := creditBalanceInModeTx(ctx, q, team, mode)
 	if err != nil {
 		return p, err
 	}

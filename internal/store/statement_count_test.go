@@ -11,9 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
-// StatementCount is what the store sent to SQLite between two reads of a counter.
+// StatementCount is what the store sent to SQLite between two reads of a counter. StandingReads counts the
+// teams whose Cloud standing was read, and PaymentModeReads the reads of the payment mode setting.
 type StatementCount struct {
-	Statements, ReadTransactions, WriteTransactions, Writes, TeamLocks int
+	Statements, ReadTransactions, WriteTransactions, Writes, TeamLocks, StandingReads, PaymentModeReads int
 }
 
 // StatementCounter counts the statements and transactions a store sends to SQLite.
@@ -42,6 +43,12 @@ func (c *StatementCounter) statement(query string) {
 	}
 	if strings.HasPrefix(query, "SELECT name FROM teams WHERE name=?") {
 		c.count.TeamLocks++
+	}
+	if strings.HasPrefix(query, "SELECT billing_trust,billing_trust_by,") {
+		c.count.StandingReads++
+	}
+	if strings.Contains(query, "FROM settings WHERE key='payment_mode'") {
+		c.count.PaymentModeReads++
 	}
 }
 
@@ -119,10 +126,24 @@ func (c *countingConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driv
 // planned with sequential scans disabled so that only an index the predicates match avoids one.
 func ClaimableUnitQueuedPlan(t *testing.T, s *Store, team string) string {
 	t.Helper()
+	query, args := claimableUnitQueuedSQL(team, []capability.UnitKind{capability.UnitNode, capability.UnitEval, capability.UnitTrigger, capability.UnitPlan})
+	return explainWithoutSeqScan(t, s, query, args)
+}
+
+// LauncherClaimTeamsPlan is PostgreSQL's plan for the Cloud launcher's existence check across live teams over every
+// unit kind, planned with sequential scans disabled.
+func LauncherClaimTeamsPlan(t *testing.T, s *Store) string {
+	t.Helper()
+	q := claimSQL{}
+	queued := q.queuedUnitSQL(func() string { return "tm.name" }, []capability.UnitKind{capability.UnitNode, capability.UnitEval, capability.UnitPlan})
+	return explainWithoutSeqScan(t, s, `SELECT tm.name FROM teams tm WHERE `+queued, q.args)
+}
+
+func explainWithoutSeqScan(t *testing.T, s *Store, query string, args []any) string {
+	t.Helper()
 	if s.dialect != DialectPostgres {
 		t.Skip("the plan guard reads the PostgreSQL planner")
 	}
-	query, args := claimableUnitQueuedSQL(team, []capability.UnitKind{capability.UnitNode, capability.UnitEval, capability.UnitTrigger, capability.UnitPlan})
 	tx, err := s.db.BeginTx(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)
