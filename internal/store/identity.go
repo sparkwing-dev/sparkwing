@@ -848,7 +848,7 @@ type InvitationAcceptance struct {
 	GateClosed *SignUpGate
 }
 
-func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invitationID string) (InvitationAcceptance, error) {
+func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, accountID, invitationID string, c SignUpConditions) (InvitationAcceptance, error) {
 	var none InvitationAcceptance
 	var team, email, role, inviter string
 	var expires int64
@@ -926,7 +926,7 @@ func (op *Operator) acceptAccountInvitationTx(ctx context.Context, tx *storeTx, 
 	out := InvitationAcceptance{Team: Team(team)}
 	if acct.Waitlisted {
 		var d signUpDecision
-		if d, err = decideAdmissionTx(ctx, tx, gate, now); err != nil {
+		if d, err = decideAdmissionTx(ctx, tx, gate, c, now); err != nil {
 			return none, err
 		}
 		out.GateClosed = d.tripped

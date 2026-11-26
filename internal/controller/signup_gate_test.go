@@ -202,6 +202,33 @@ func TestWaitlistedSignUpThroughTheAPI(t *testing.T) {
 	}
 }
 
+// Under the deployment waitlist a waitlisted invitee still joins the team, but
+// no join counts as an admission, so invitations cannot close the stored gate.
+func TestInvitationsUnderTheDeploymentWaitlistAreNoAdmissions(t *testing.T) {
+	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) { s.WithSignUpWaitlist(true) }})
+	f.setSignUp(map[string]any{"hourly_limit": 1})
+	first := f.signIn(person("g-o", "owner@example.com", "Owner"))
+	if code := f.call("POST", "/api/v1/operator/waitlist/approve", f.operatorAuth(),
+		map[string]any{"account_ids": []string{first.User.ID}}, nil); code != http.StatusOK {
+		t.Fatalf("approve owner = %d", code)
+	}
+	owner := f.user("g-o", "owner@example.com")
+	for _, email := range []string{"w1@example.com", "w2@example.com"} {
+		out := f.signIn(person("g-"+email, email, "W"))
+		if !out.Waitlisted {
+			t.Fatalf("sign-up %s under the deployment waitlist was admitted", email)
+		}
+		joiner := signedIn{auth: sessionAuth(out.SessionID), id: out.User.ID}
+		f.join(owner, joiner, email, "reader")
+		if me := f.me(joiner.auth); !me.Waitlisted || me.ActiveTeam == nil || me.ActiveTeam.Slug != owner.team {
+			t.Fatalf("/me for %s after accepting = %+v, want a waitlisted member of %s", email, me, owner.team)
+		}
+	}
+	if st := f.signUpStatus(); st.Mode != "open" || st.Source == store.WaitlistReasonHourly {
+		t.Fatalf("stored gate after two invitation joins = %+v, want it still open", st)
+	}
+}
+
 func TestApprovingTheOldestEmailsEachAdmittedAccountOnce(t *testing.T) {
 	mail := &mailFake{}
 	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {

@@ -283,10 +283,7 @@ func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpC
 	if err != nil {
 		return signUpDecision{}, err
 	}
-	if c.ForceWaitlist {
-		return signUpDecision{reason: WaitlistReasonDeployment}, nil
-	}
-	d, err := decideAdmissionTx(ctx, tx, g, now)
+	d, err := decideAdmissionTx(ctx, tx, g, c, now)
 	if err != nil || d.reason != "" {
 		return d, err
 	}
@@ -301,10 +298,14 @@ func decideSignUpTx(ctx context.Context, tx *storeTx, p SignInProfile, c SignUpC
 	return signUpDecision{}, nil
 }
 
-// decideAdmissionTx applies the stored gate's mode, launch capacity and
-// velocity limits to one admission, from a sign-up or from a waitlisted
-// account accepting an invitation. g must be the row this transaction locked.
-func decideAdmissionTx(ctx context.Context, tx *storeTx, g SignUpGate, now time.Time) (signUpDecision, error) {
+// decideAdmissionTx applies the deployment's waitlist and the stored gate's
+// mode, launch capacity and velocity limits to one admission, from a sign-up
+// or from a waitlisted account accepting an invitation. g must be the row this
+// transaction locked.
+func decideAdmissionTx(ctx context.Context, tx *storeTx, g SignUpGate, c SignUpConditions, now time.Time) (signUpDecision, error) {
+	if c.ForceWaitlist {
+		return signUpDecision{reason: WaitlistReasonDeployment}, nil
+	}
 	if g.Mode == SignUpWaitlist {
 		reason := g.Source
 		if reason == "" {

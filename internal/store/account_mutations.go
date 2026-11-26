@@ -90,8 +90,14 @@ func (o *Operator) CreateAccountTeam(ctx context.Context, a capability.Authorize
 	return out, nil
 }
 
-// AcceptAccountInvitation commits verified invitation membership and session selection together.
-func (o *Operator) AcceptAccountInvitation(ctx context.Context, a capability.Authorized, id string) (InvitationAcceptance, error) {
+// AcceptAccountInvitation commits verified invitation membership and session selection together. A
+// waitlisted account's join counts as a sign-up admission only when the gate would admit a sign-up under
+// the deployment's conditions; a caller without a deployment waitlist may omit them.
+func (o *Operator) AcceptAccountInvitation(ctx context.Context, a capability.Authorized, id string, conditions ...SignUpConditions) (InvitationAcceptance, error) {
+	var c SignUpConditions
+	for _, given := range conditions {
+		c.ForceWaitlist = c.ForceWaitlist || given.ForceWaitlist
+	}
 	var out InvitationAcceptance
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		var team Team
@@ -106,7 +112,7 @@ func (o *Operator) AcceptAccountInvitation(ctx context.Context, a capability.Aut
 		if lookupErr != nil {
 			return lookupErr
 		}
-		out, err = tx.operator.acceptAccountInvitationTx(ctx, tx, p.Capability.Subject.ID, id)
+		out, err = tx.operator.acceptAccountInvitationTx(ctx, tx, p.Capability.Subject.ID, id, c)
 		if err != nil {
 			return err
 		}
