@@ -461,6 +461,11 @@ function InviteForm({
       </form>
       {created ? (
         <div className="px-4 pb-4 space-y-2">
+          {created.email_note ? (
+            <div className="text-xs text-[var(--foreground)]">
+              {created.email_note}
+            </div>
+          ) : null}
           <div className="text-xs text-[var(--muted)]">
             {created.email_sent
               ? "Emailed an invitation to "

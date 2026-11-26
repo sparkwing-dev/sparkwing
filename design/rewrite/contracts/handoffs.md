@@ -1495,6 +1495,29 @@ unpaid teams an account may take on at a time, not their lifetime count, and
 refunds can leave more in place. Per-account free allowances would
 close that gap and remain a later choice.
 
+## 2026-11-25 Korey decision 104: an account sends at most 100 invitation emails a day
+
+Before this, one admitted account could send unlimited invitation emails from
+the deployment's sender: deleting a team freed its unpaid-team place, and each
+new team started a fresh 100-a-day invitation budget.
+
+- Each account sends at most 100 invitation emails in a rolling 24 hours,
+  counted across every team it has invited from. The account is the inviter.
+  Deleting a team, leaving it or creating a new one does not reset the count.
+- Past the cap the invitation is created without an email, as for the
+  existing 5-a-day cap per recipient address. The response carries
+  `email_sent: false` and an `email_note` that names the limit and the UTC
+  minute after which the account can send again; the recipient cap stays
+  unexplained because other teams' invitations fill it.
+- The invitation email log records a SHA-256 digest of the inviting account
+  (schema 42), because the log outlives the account and its teams. The claim
+  counts and inserts in one transaction under a PostgreSQL advisory lock per
+  account, taken before the per-address lock.
+
+For comparison, GitHub allows an organization 50 invitations in 24 hours, or
+500 once it is over a month old or on a paid plan; that limit is per
+organization, not per inviting account. CircleCI's behavior was not checked.
+
 ## 2026-11-09 lead amendment to decision 87: narrow Argo refresh permission
 
 Tonight's lead decision supersedes decision 87's removal of Argo application

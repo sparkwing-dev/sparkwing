@@ -759,44 +759,74 @@ func (op *Operator) grantCreatorTeamsTx(ctx context.Context, tx *storeTx, name s
 // deployment's sender to flood an inbox.
 const MaxInvitationEmailsPerDay = 5
 
-// safety: a send counts toward the cap for this window, and the retention pass drops each log row after it.
+// MaxInvitationEmailsPerAccountPerDay bounds how many invitation emails one
+// inviting account sends in a day from every team it has belonged to, so
+// deleting and creating teams cannot multiply the deployment's outbound mail.
+const MaxInvitationEmailsPerAccountPerDay = 100
+
+// safety: a send counts toward the caps for this window, and the retention pass drops each log row after it.
 const invitationEmailWindow = 24 * time.Hour
 
-// ClaimInvitationEmail records that an invitation is about to be mailed, and
-// reports false instead when its address has already been mailed
-// [MaxInvitationEmailsPerDay] times in the last 24 hours, counting every
-// team. A claimed invitation is never claimed twice.
+// InvitationEmailLimitError reports that the inviting account has sent
+// [MaxInvitationEmailsPerAccountPerDay] invitation emails in the last 24
+// hours. RetryAt is when the oldest of them leaves the window, so the account
+// may send again.
+type InvitationEmailLimitError struct {
+	RetryAt time.Time
+}
+
+func (e *InvitationEmailLimitError) Error() string {
+	return fmt.Sprintf("store: the inviting account sent %d invitation emails in 24 hours; it may send another after %s",
+		MaxInvitationEmailsPerAccountPerDay, e.RetryAt.UTC().Format(time.RFC3339))
+}
+
+// ClaimInvitationEmail records that an invitation is about to be mailed. It
+// returns an [*InvitationEmailLimitError] when the inviting account has
+// already sent [MaxInvitationEmailsPerAccountPerDay] invitation emails in the
+// last 24 hours, and reports false when the address has already been mailed
+// [MaxInvitationEmailsPerDay] times in that window. Both caps count every
+// team, including deleted ones. A claimed invitation is never claimed twice.
 func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string) (bool, error) {
 	tx, err := o.s.beginTx(ctx)
 	if err != nil {
 		return false, err
 	}
 	defer rollbackOrLog(tx)
-	var email string
-	err = tx.QueryRowContext(ctx, `SELECT email FROM invitations WHERE id = ?`, invitationID).Scan(&email)
+	var email, inviter string
+	err = tx.QueryRowContext(ctx, `SELECT email, invited_by FROM invitations WHERE id = ?`, invitationID).Scan(&email, &inviter)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrNotFound
 	}
 	if err != nil {
 		return false, err
 	}
-	// safety: two teams inviting one address at once would each count the
-	// other's send as not yet made; the lock orders them. SQLite already
-	// serializes every writer.
-	address := invitationEmailKey(email)
+	// safety: concurrent sends from one account, or to one address, would each count the other's as not yet made;
+	// the locks order them, account before address in every claim. SQLite already serializes every writer.
+	account, address := invitationEmailKey(inviter), invitationEmailKey(normalizeEmail(email))
 	if tx.dialect == DialectPostgres {
-		if _, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, "sparkwing/invitation-email/"+address); err != nil {
-			return false, err
+		for _, key := range []string{"sparkwing/invitation-email-account/" + account, "sparkwing/invitation-email/" + address} {
+			if _, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, key); err != nil {
+				return false, err
+			}
 		}
 	}
-	at := tx.now(ctx).UTC().UnixNano()
-	since := tx.now(ctx).Add(-invitationEmailWindow).UnixNano()
-	var sent int
+	now := tx.now(ctx)
+	at, since := now.UTC().UnixNano(), now.Add(-invitationEmailWindow).UnixNano()
+	var fromAccount int
+	var oldest sql.NullInt64
 	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM invitation_email_log WHERE address = ? AND sent_at > ?`, address, since).Scan(&sent); err != nil {
+		`SELECT COUNT(*), MIN(sent_at) FROM invitation_email_log WHERE inviter = ? AND sent_at > ?`, account, since).Scan(&fromAccount, &oldest); err != nil {
 		return false, err
 	}
-	if sent >= MaxInvitationEmailsPerDay {
+	if fromAccount >= MaxInvitationEmailsPerAccountPerDay {
+		return false, &InvitationEmailLimitError{RetryAt: time.Unix(0, oldest.Int64).Add(invitationEmailWindow).UTC()}
+	}
+	var toAddress int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM invitation_email_log WHERE address = ? AND sent_at > ?`, address, since).Scan(&toAddress); err != nil {
+		return false, err
+	}
+	if toAddress >= MaxInvitationEmailsPerDay {
 		return false, nil
 	}
 	res, err := tx.execContext(ctx,
@@ -808,18 +838,16 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 		return false, err
 	}
 	if _, err := tx.execContext(ctx,
-		`INSERT INTO invitation_email_log (address, sent_at) VALUES (?, ?)`, address, at); err != nil {
+		`INSERT INTO invitation_email_log (address, inviter, sent_at) VALUES (?, ?, ?)`, address, account, at); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
 }
 
-// safety: the log outlives the invitation and the team that sent it, so it
-// keeps a digest of the address rather than the address; the cap still
-// counts one inbox however its case was typed, because the address is
-// normalized before it is hashed.
-func invitationEmailKey(email string) string {
-	sum := sha256.Sum256([]byte(normalizeEmail(email)))
+// safety: the log outlives the invitation, the team that sent it and the inviting account, so it keeps digests of
+// the address and the account ID rather than either value.
+func invitationEmailKey(value string) string {
+	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
 

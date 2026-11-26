@@ -55,6 +55,28 @@ reserved names and the signup waitlist still apply.
 Quota refusals name the limit, usage and a remedy. Contact
 support@sparkwing.dev to request a higher limit.
 
+## Invitation limits
+
+A team may create 100 invitations in any 24 hours and hold 50 open
+invitations at once. A refusal names the limit and the team's usage; withdraw
+unused invitations or wait for the window to pass.
+
+Sparkwing emails an invitation only within two daily limits, each counted over
+the last 24 hours across every team, including teams since deleted or left:
+
+- One account sends at most 100 invitation emails. Deleting a team, leaving
+  it or creating a new one does not reset the count.
+- One recipient address receives at most 5 invitation emails, whatever its
+  letter case.
+
+Past either limit the invitation is still created, and its link works for the
+invited address; only the email is withheld. The response has
+`email_sent: false`. When the inviting account reached its own limit, the
+response's `email_note` and the console say so and name the time, in UTC, after
+which the account can send invitation emails again. Share the invitation link
+yourself in the meantime. The recipient limit is not explained, because other
+teams' invitations fill it.
+
 ## Operational guards
 
 Read deployment guards and request budgets with
