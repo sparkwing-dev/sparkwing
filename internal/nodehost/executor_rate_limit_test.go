@@ -85,6 +85,10 @@ func TestReportOutlastsRateLimitedTransitions(t *testing.T) {
 		if calls, committed := host.record(); len(calls) != 6 || committed != 1 {
 			t.Fatalf("attempts=%d committed=%d, want the result recorded on the sixth", len(calls), committed)
 		}
+		accepted := host.committed[0]
+		if accepted.Cause != runstate.CauseReport || accepted.To != runstate.NodeSuccess || accepted.Extra.Result == nil || accepted.Extra.Result.Outcome != runstate.NodeSuccess {
+			t.Fatalf("accepted transition = %+v, want the successful report the refusals delayed", accepted)
+		}
 	})
 }
 
