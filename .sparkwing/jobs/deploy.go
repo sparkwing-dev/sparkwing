@@ -18,8 +18,8 @@ type DeployArgs struct {
 	Version         string `flag:"version" desc:"Version to build and tag the images as. Default: Go's canonical pseudo-version for main. A real deploy takes it only from sparkwing.yaml args."`
 	StopAfter       string `flag:"stop-after" desc:"Stop after this stage: staging deploys and gates staging only. Default: promote to production. A real deploy takes it only from sparkwing.yaml args."`
 	PromoteProven   bool   `flag:"promote-proven" desc:"Skip staging and promote to production on the staging-gate record of the last successful default-branch deploy run, which must name the same image digests. A real deploy takes it only from sparkwing.yaml args."`
-	ControllerBase  string `flag:"controller-base" desc:"Controller runtime base by digest (build-images --runtime-base). Default: the qa.20 base."`
-	RunnerBase      string `flag:"runner-base" desc:"Runner runtime base by digest (build-images --runtime-base). Default: the qa.20 base."`
+	ControllerBase  string `flag:"controller-base" desc:"Controller runtime base by digest (build-images --runtime-base). Default: the base pinned in deploy_env.go."`
+	RunnerBase      string `flag:"runner-base" desc:"Runner runtime base by digest (build-images --runtime-base). Default: the base pinned in deploy_env.go."`
 	ProvenRecordAge string `flag:"proven-max-age" desc:"Oldest staging-gate record --promote-proven accepts, as a Go duration. Default: 168h."`
 }
 
