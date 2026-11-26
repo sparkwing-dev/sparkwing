@@ -22,7 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-const typeScriptSDKVersion = "0.74.0"
+const typeScriptSDKVersion = "0.75.0"
 
 // safety: `pipeline upgrade` type-checks with the project's own tsc, so the scaffold locks
 // the compiler beside the SDK rather than relying on whatever tsc is on PATH.

@@ -80,6 +80,22 @@ func (l *Limiter) AllowWithRetry(key string, now time.Time) (bool, time.Duration
 	return false, max(wait, 0)
 }
 
+// AllowOrWait consumes a token for key as [Limiter.Allow] does, and on
+// refusal reports how long until one refills without charging the bucket.
+// Refused callers therefore never lengthen the wait of the callers they share
+// the bucket with; use [Limiter.AllowWithRetry] where a caller that ignores
+// the wait must be told to wait longer.
+func (l *Limiter) AllowOrWait(key string, now time.Time) (bool, time.Duration) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b := l.refill(key, now, true)
+	if b.tokens >= 1 {
+		b.tokens--
+		return true, 0
+	}
+	return false, time.Duration((1 - b.tokens) / l.burst * float64(l.window))
+}
+
 // Peek reports whether key has a token without consuming one. An
 // untracked key reports true; it has spent nothing yet.
 func (l *Limiter) Peek(key string, now time.Time) bool {

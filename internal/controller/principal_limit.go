@@ -205,14 +205,25 @@ func credentialBudgetKey(p capability.Principal) string {
 	return "authority:" + string(p.Authority.Kind) + ":" + p.Authority.ID
 }
 
+var inflightWriteRoutes = map[string]bool{
+	"/api/v1/claims/{claim}/heartbeat":                     true,
+	"/api/v1/runs/{run}/heartbeat":                         true,
+	"/api/v1/runs/{run}/jobs/{job}/heartbeat":              true,
+	"/api/v1/runs/{run}/jobs/{job}/transition":             true,
+	"/api/v1/runs/{run}/local-host/nodes/{job}/transition": true,
+	"/api/v1/runs/{run}/jobs/{job}/steps/start":            true,
+	"/api/v1/runs/{run}/jobs/{job}/steps/finish":           true,
+}
+
 func (s *Server) budgetEndpoint(endpoint controllerwire.Endpoint) controllerwire.Endpoint {
 	if endpoint.Authentication != capability.AuthCapability {
 		return endpoint
 	}
 	next := endpoint.Handle
 	launcherRoute := endpoint.Method == http.MethodPost && (endpoint.Pattern == "/api/v1/launcher/claim" || endpoint.Pattern == "/api/v1/launcher/sync")
+	inflightRoute := endpoint.Method == http.MethodPost && inflightWriteRoutes[endpoint.Pattern]
 	endpoint.Handle = func(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-		if !s.allowTokenRequest(w, r, a.Principal, launcherRoute) {
+		if !s.allowTokenRequest(w, r, a, launcherRoute, inflightRoute) {
 			return nil
 		}
 		switch endpoint.Pattern {
