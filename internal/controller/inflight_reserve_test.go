@@ -134,11 +134,12 @@ func TestInflightReserveRefusesUnboundCredentials(t *testing.T) {
 			method, pattern string
 			a               capability.Authorized
 		}{
-			"publisher transition": {http.MethodPost, routeJobTransition, teamCaller("a", "publisher", routeRule(t, http.MethodPost, routeJobTransition, capability.CredentialPublisher))},
-			"publisher step":       {http.MethodPost, routeStepFinish, teamCaller("a", "publisher", routeRule(t, http.MethodPost, routeStepFinish, capability.CredentialPublisher))},
-			"run-host snapshot":    {http.MethodGet, routeRunSnapshot, teamCaller("a", "node", routeRule(t, http.MethodGet, routeRunSnapshot, capability.CredentialClaim))},
-			"claim poll":           {http.MethodPost, routeRunnerClaim, teamCaller("a", "runner", routeRule(t, http.MethodPost, routeRunnerClaim, capability.CredentialAny))},
-			"result replay":        {http.MethodPost, routeJobTransition, replay},
+			"publisher transition":               {http.MethodPost, routeJobTransition, teamCaller("a", "publisher", routeRule(t, http.MethodPost, routeJobTransition, capability.CredentialPublisher))},
+			"publisher step":                     {http.MethodPost, routeStepFinish, teamCaller("a", "publisher", routeRule(t, http.MethodPost, routeStepFinish, capability.CredentialPublisher))},
+			"run-host snapshot":                  {http.MethodGet, routeRunSnapshot, teamCaller("a", "node", routeRule(t, http.MethodGet, routeRunSnapshot, capability.CredentialClaim))},
+			"claim poll":                         {http.MethodPost, routeRunnerClaim, teamCaller("a", "runner", routeRule(t, http.MethodPost, routeRunnerClaim, capability.CredentialAny))},
+			"result replay":                      {http.MethodPost, routeJobTransition, replay},
+			"publisher on a lease-liveness rule": {http.MethodPost, routeJobTransition, teamCaller("a", "publisher", capability.AccessRule{Credential: capability.CredentialPublisher, Grants: []capability.Grant{capability.DataWrite}, Binding: capability.BindData, Liveness: capability.LiveResult})},
 		} {
 			if w := budgetedCall(s, tc.method, tc.pattern, tc.a); w.Code != http.StatusTooManyRequests {
 				t.Errorf("%s past the budget = %d, want 429", name, w.Code)
@@ -184,6 +185,28 @@ func TestInflightReserveIsSharedByDefaultTeamCredentials(t *testing.T) {
 			if w := budgetedCall(s, http.MethodPost, routeClaimHeartbeat, tc.a); w.Code != tc.want {
 				t.Fatalf("renewal %d = %d, want %d: %s", i+1, w.Code, tc.want, w.Body)
 			}
+		}
+	})
+}
+
+func TestInflightRetriesKeepTheTeamBucketAvailable(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s := New(nil, slog.New(slog.DiscardHandler)).WithTokenRequestBudget(TokenRequestBudget{PerTokenMinute: 16})
+		node := teamCaller("a", "node", routeRule(t, http.MethodPost, routeClaimHeartbeat, capability.CredentialClaim))
+		read := teamCaller("a", "node", routeRule(t, http.MethodGet, routeRunSnapshot, capability.CredentialClaim))
+		drainTeamBucket(t, s, node)
+		admitted := 0
+		for i := range 600 {
+			if budgetedCall(s, http.MethodPost, routeClaimHeartbeat, node).Code == http.StatusNoContent {
+				admitted++
+			}
+			if i%10 == 0 {
+				budgetedCall(s, http.MethodGet, routeRunSnapshot, read)
+			}
+			time.Sleep(time.Second)
+		}
+		if reserveOnly := 10 * inflightReserve(16); admitted < 100 {
+			t.Fatalf("renewals retried each second for 10 minutes: %d of 600 admitted, near the reserve's %d; refused renewals are pinning the team bucket", admitted, reserveOnly)
 		}
 	})
 }

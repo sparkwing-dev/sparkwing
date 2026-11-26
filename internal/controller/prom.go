@@ -87,6 +87,13 @@ var (
 		[]string{"route_class"},
 	)
 
+	inflightReserveAdmittedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "sparkwing_inflight_reserve_admitted_total",
+			Help: "Lease renewals and running job results admitted from a team's in-flight reserve after its request budget refused them.",
+		},
+	)
+
 	requestRateAlarmTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "sparkwing_request_rate_alarm_total",
@@ -168,6 +175,10 @@ func observeRequestRateAlarm() {
 	requestRateAlarmTotal.Inc()
 }
 
+func observeInflightReserveAdmitted() {
+	inflightReserveAdmittedTotal.Inc()
+}
+
 // safety: named rather than passed inline so the drift check can ask the same
 // collectors the registry serves what they export.
 var sparkwingCollectors = []prometheus.Collector{
@@ -179,6 +190,7 @@ var sparkwingCollectors = []prometheus.Collector{
 	httpRequestsTotal,
 	httpRequestDurationSeconds,
 	principalThrottledTotal,
+	inflightReserveAdmittedTotal,
 	requestRateAlarmTotal,
 	queueDepthGauge,
 	claimUnavailableTotal,

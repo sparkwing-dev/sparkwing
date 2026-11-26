@@ -82,12 +82,17 @@ func (s *Server) allowTokenRequest(w http.ResponseWriter, r *http.Request, a cap
 		return true
 	}
 	key := credentialBudgetKey(a.Principal)
+	if inflightRoute && a.LeaseBound() && a.Target.Team != "" {
+		// safety: an in-flight write is told the reserve's wait, never this bucket's, so debt here would only
+		// lengthen the wait of the team's other callers and, under retries, pin the bucket at its floor.
+		if allowed, _ := t.requests.AllowOrWait(key, now); allowed {
+			return true
+		}
+		return s.allowInflightReserve(w, a.Target.Team, now)
+	}
 	allowed, wait := t.requests.AllowWithRetry(key, now)
 	if allowed {
 		return true
-	}
-	if inflightRoute && a.LeaseBound() && a.Target.Team != "" {
-		return s.allowInflightReserve(w, a.Target.Team, now)
 	}
 	observePrincipalThrottled(budgetClassToken)
 	s.logger.Warn("request shed",
@@ -104,6 +109,7 @@ func (s *Server) allowInflightReserve(w http.ResponseWriter, team string, now ti
 	t := s.tokenBudget
 	allowed, wait := t.inflight.AllowOrWait("team:"+team, now)
 	if allowed {
+		observeInflightReserveAdmitted()
 		return true
 	}
 	observePrincipalThrottled(budgetClassInflight)
