@@ -171,8 +171,11 @@ func run(args []string) error {
 			"caller that varies the runner it says it is, which the per-runner "+
 			"budgets above cannot. The deployment's Cloud launcher credential is "+
 			"exempt on its claim and sync routes only. Past the bucket a request "+
-			"is answered 429 with a Retry-After naming the refill delay. Zero is "+
-			"unlimited.")
+			"is answered 429 with a Retry-After naming the refill delay, except "+
+			"that a team reserve of N/8 more a minute admits live leases' "+
+			"renewals, node transitions and step reports, so a team's sustained "+
+			"ceiling is 9N/8 a minute and its worst one-minute window 9N/4. Zero "+
+			"is unlimited.")
 	requestsPerMinuteAlarm := fs.Int(flagRequestsPerMinuteAlarm, 0,
 		"request rate, across every caller, past which this controller logs at "+
 			"warn and counts sparkwing_request_rate_alarm_total. It refuses "+

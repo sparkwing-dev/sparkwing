@@ -12,6 +12,7 @@ import (
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
 	"github.com/sparkwing-dev/sparkwing/internal/engineid"
 	"github.com/sparkwing-dev/sparkwing/internal/lease"
@@ -393,11 +394,34 @@ func (h *nodeExecutor) transition(ctx context.Context, input NodeInput, command 
 		return runstate.Applied{}, err
 	}
 	command = store.BindNodeCommand(command, runspec.NodeRef{RunID: runspec.RunID(input.Accepted.RunID), NodeID: runspec.NodeID(input.NodeID)}, executorActor(input))
-	applied, err := h.deps.Store.TransitionNode(ctx, command)
-	if err != nil {
-		return applied, &executorTransitionError{err: err}
+	var refusedAt time.Time
+	for attempt := 0; ; attempt++ {
+		applied, err := h.deps.Store.TransitionNode(ctx, command)
+		if err == nil {
+			return applied, nil
+		}
+		delay, limited := rateLimitedDelay(err, attempt)
+		if limited && refusedAt.IsZero() {
+			refusedAt = time.Now()
+		}
+		// safety: a context with no lease keeper never ends, so one lease length after the first refusal bounds the wait.
+		if !limited || time.Since(refusedAt)+delay > limits.DefaultLease {
+			return applied, &executorTransitionError{err: err}
+		}
+		if err := executorWait(ctx, delay); err != nil {
+			return runstate.Applied{}, err
+		}
 	}
-	return applied, nil
+}
+
+func rateLimitedDelay(err error, attempt int) (time.Duration, bool) {
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != hosterr.RateLimited {
+		return 0, false
+	}
+	advised, _ := hosterr.RetryDelay(err)
+	// safety: jitter above the whole-second advice keeps nodes refused together from returning in the same instant.
+	return max(client.RetryBackoff(attempt, time.Second), advised+client.RetryBackoff(attempt, 0)), true
 }
 
 func executorActor(input NodeInput) runstate.Actor {

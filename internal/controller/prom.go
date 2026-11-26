@@ -82,7 +82,7 @@ var (
 	principalThrottledTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "sparkwing_principal_throttled_total",
-			Help: "Requests refused by a per-principal request budget, by route class (claim, heartbeat, idle_poll, token).",
+			Help: "Requests refused by a per-principal request budget, by route class (claim, heartbeat, idle_poll, token, inflight_reserve).",
 		},
 		[]string{"route_class"},
 	)

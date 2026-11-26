@@ -100,7 +100,10 @@ controller:
   # which the per-runner budgets cannot. A refused request gets 429 with a
   # Retry-After. The deployment's Cloud launcher credential is not budgeted on
   # its claim and sync routes, and the agent liveness heartbeat is never
-  # budgeted. Empty is unlimited.
+  # budgeted. When the bucket refuses, a team reserve of N/8 more a minute
+  # admits live leases' renewals, node transitions and step reports, so a
+  # team's sustained ceiling is 9N/8 a minute and its worst one-minute window
+  # 9N/4. Empty is unlimited.
   requestsPerTokenMinute: ""
 
   # Request rate, across every caller, past which the controller logs at warn
