@@ -14,18 +14,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// publicSiteURL serves the signed release index and the published docs.
 const publicSiteURL = "https://sparkwing.dev/"
 
-// publishedDocsTitleRe matches the first line sparkwing-product's
-// bin/generate-llms.mjs writes for the release the site documents.
+// safety: sparkwing-product's bin/generate-llms.mjs writes exactly this first line.
 var publishedDocsTitleRe = regexp.MustCompile(`^# sparkwing -- (v\S+) \(latest\)$`)
 
-// safety: a release's docs publish from sparkwing-product, which nothing else
-// checks. The baseline is the signed index's latest stable release, which the
-// hosted release workflow writes only after the GitHub release publishes, so a
-// tag whose hosted build failed, a prerelease or an unpushed tag never demands
-// docs that cannot publish yet, and the repairing patch cut stays possible.
+// safety: the baseline is the signed index's latest stable release, written only after
+// a GitHub release publishes, so a failed hosted build, a prerelease or an unpushed tag
+// never demands docs that cannot publish yet, and the repairing patch cut stays possible.
 func checkPublishedDocs(ctx context.Context, repo string) error {
 	dir, err := os.MkdirTemp("", "sparkwing-published-docs-")
 	if err != nil {
@@ -94,8 +90,7 @@ func releaseVersion(v string) bool {
 	return semver.IsValid(v) && semver.Canonical(v) == v && semver.Prerelease(v) == ""
 }
 
-// publicSiteFetchSeconds bounds each download so a stalled response fails the
-// check instead of holding the cut until its job timeout.
+// safety: a stalled response must fail the check, not hold the cut until its job timeout.
 const publicSiteFetchSeconds = "30"
 
 func downloadPublicSiteFile(ctx context.Context, repo, dir, name string, extra ...string) error {
@@ -107,8 +102,6 @@ func downloadPublicSiteFile(ctx context.Context, repo, dir, name string, extra .
 	return nil
 }
 
-// downloadVerifiedReleaseIndex writes the public versions.json and its
-// signature into dir and verifies them with the keys shipped updaters trust.
 func downloadVerifiedReleaseIndex(ctx context.Context, repo, dir string) error {
 	for _, name := range []string{"versions.json", "versions.json.sig"} {
 		if err := downloadPublicSiteFile(ctx, repo, dir, name); err != nil {

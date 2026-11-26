@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
-// The signed index fixture names v0.72.4 as its latest stable release.
 const publishedDocsFixtureLatest = "v0.72.4"
 
 type publishedDocsSite struct {
