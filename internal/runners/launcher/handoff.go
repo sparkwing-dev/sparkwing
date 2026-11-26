@@ -107,29 +107,34 @@ func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJ
 	return ending, errors.Join(errs...)
 }
 
-func (l *Launcher) handoffEvent(event watch.Event) (until time.Time, gone, awaited bool) {
+func (l *Launcher) handoffEvent(event watch.Event) (until time.Time, gone string, awaited bool) {
 	pod, ok := event.Object.(*corev1.Pod)
 	if !ok || pod.Labels[JobLabel] == "" {
-		return time.Time{}, false, false
+		return time.Time{}, "", false
 	}
+	job := pod.Labels[JobLabel]
 	now := time.Now()
 	for _, award := range l.waitingAwards() {
-		if now.Before(award.handoffUntil) && slices.Contains(award.handoffJobs, pod.Labels[JobLabel]) {
-			return award.handoffUntil, event.Type == watch.Deleted, true
+		if now.Before(award.handoffUntil) && slices.Contains(award.handoffJobs, job) {
+			if event.Type == watch.Deleted {
+				gone = job
+			}
+			return award.handoffUntil, gone, true
 		}
 	}
-	return time.Time{}, false, false
+	return time.Time{}, "", false
 }
 
 // safety: Release refuses while any Pod remains on the node, so a successor placed here never shares it.
-func (l *Launcher) finishHandoffs(ctx context.Context) error {
+func (l *Launcher) finishHandoffs(ctx context.Context, gone []string) error {
 	var errs []error
 	now := time.Now()
 	for _, award := range l.waitingAwards() {
-		if !now.Before(award.handoffUntil) {
+		matched := slices.DeleteFunc(slices.Clone(award.handoffJobs), func(job string) bool { return !slices.Contains(gone, job) })
+		if !now.Before(award.handoffUntil) || len(matched) == 0 {
 			continue
 		}
-		released, err := l.releasePredecessors(ctx, award.handoffJobs)
+		released, err := l.releasePredecessors(ctx, matched)
 		if err != nil || !released {
 			errs = append(errs, err)
 			continue

@@ -195,15 +195,23 @@ func (l *Launcher) Run(ctx context.Context) error {
 	var synced error
 	nextReconcile := time.Now()
 	claimed := 0
-	handoff := false
+	var gone []string
+	var handoffErr error
+	finishHandoffs := func() {
+		if len(gone) > 0 && blocking(synced) == nil {
+			// perf: a predecessor's Pod is gone, so its successor places before the slower reconciliation.
+			if err := l.finishHandoffs(ctx, gone); handoffErr == nil {
+				handoffErr = err
+			} else if err != nil {
+				handoffErr = errors.Join(handoffErr, err)
+			}
+		}
+		gone = nil
+	}
 	for ctx.Err() == nil {
 		claims.receive()
-		var handoffErr error
-		if handoff && blocking(synced) == nil {
-			// perf: a predecessor's Pod is gone, so its successor places before this pass's slower reconciliation.
-			handoffErr = l.finishHandoffs(ctx)
-		}
-		handoff = false
+		handoffErr = nil
+		finishHandoffs()
 		reconcile = reconcile || !time.Now().Before(nextReconcile)
 		// perf: consume a ready award before slow reconciliation; the burst bound still yields to safety work.
 		applyClaim := claims.result != nil && claims.result.award != nil && claimed < maxClaimsPerCycle && blocking(synced) == nil && !time.Now().Before(cooldown)
@@ -228,18 +236,23 @@ func (l *Launcher) Run(ctx context.Context) error {
 				reconcile = true
 			}
 		}
-		if reconcile && !applyClaim {
+		passed := reconcile && !applyClaim
+		if passed {
 		drainWatch:
 			for {
 				select {
 				case event, ok := <-changes:
 					observeWatch(event, ok)
+					if _, job, _ := l.handoffEvent(event); job != "" {
+						gone = append(gone, job)
+					}
 				case <-ctx.Done():
 					return nil
 				default:
 					break drainWatch
 				}
 			}
+			finishHandoffs()
 			if pods != nil && time.Since(watchStarted) >= poll {
 				watchWarned = false
 			}
@@ -276,7 +289,7 @@ func (l *Launcher) Run(ctx context.Context) error {
 		if blocking(synced) == nil {
 			// safety: held awards without a Job or capacity Pod renew only here, so claim backoff must not skip them.
 			err := handoffErr
-			if reconcile && !applyClaim {
+			if passed {
 				if placed := l.placeWaiting(ctx); err == nil {
 					err = placed
 				} else if placed != nil {
@@ -334,6 +347,10 @@ func (l *Launcher) Run(ctx context.Context) error {
 		if applyClaim && reconcile {
 			continue
 		}
+		if passed {
+			// perf: the pass is done, so only a new event, the timer or a deferred deadline starts the next.
+			reconcile = false
+		}
 		wait := min(poll, max(time.Until(nextReconcile), 0))
 		if pods == nil {
 			// perf: draining can close the watch after this pass's connection check.
@@ -362,11 +379,13 @@ func (l *Launcher) Run(ctx context.Context) error {
 		case event, ok := <-changes:
 			timer.Stop()
 			observeWatch(event, ok)
-			until, gone, awaited := l.handoffEvent(event)
-			handoff = handoff || gone
+			until, job, awaited := l.handoffEvent(event)
+			if job != "" {
+				gone = append(gone, job)
+			}
 			// perf: an awaited predecessor's own teardown events must not start a full pass ahead of its handoff;
 			// if its Pod outlasts the wait, reconciliation resumes when the wait ends.
-			if awaited && !gone {
+			if awaited && job == "" {
 				if until.Before(nextReconcile) {
 					nextReconcile = until
 				}
@@ -526,11 +545,15 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	// reconciliation. Retiring the plan while Prepare runs starts the teardown that reuse waits on
 	// before the first reservation; one award per run finds a live plan, so the rest pay one list.
 	var retiring chan []string
+	// safety: a stalled controller or API server can delay retirement by at most this bound, and a
+	// refused preparation cancels it without waiting, so the loop never waits on an ended award.
+	retireCtx, cancelRetire := context.WithTimeout(ctx, handoffWait)
+	defer cancelRetire()
 	if !award.WaitedForFreshNode && award.teardownDeadline.IsZero() {
 		retiring = make(chan []string, 1)
 		go func() {
 			// safety: a failed retirement keeps this attempt's result, and the reconciliation loop reports it.
-			ending, err := l.retireEndedPredecessors(ctx, award.Binding, true)
+			ending, err := l.retireEndedPredecessors(retireCtx, award.Binding, true)
 			if err != nil {
 				l.logger().DebugContext(ctx, "claim-time plan retirement deferred to reconciliation", "error", err)
 			}
@@ -539,15 +562,18 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	}
 	started := time.Now()
 	prepared, stop, expires, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
-	var predecessors []string
-	if retiring != nil {
-		predecessors = <-retiring
-	}
 	if !errors.Is(err, ErrNoDedicatedNode) && !errors.Is(err, errCapacityUnconfigured) {
 		l.recordStartupStage(ctx, award.Binding, "launcher_preparation", started, err == nil)
 	}
 	if err != nil {
 		return true, err
+	}
+	var predecessors []string
+	if retiring != nil {
+		select {
+		case predecessors = <-retiring:
+		case <-retireCtx.Done():
+		}
 	}
 	ctx = prepared
 	defer func() {

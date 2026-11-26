@@ -1,14 +1,17 @@
 package launcher
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -25,7 +28,8 @@ import (
 type handoffControl struct {
 	*controlFake
 	deliveries chan *CloudJobAward
-	prepare    func(context.Context)
+	prepare    func(context.Context, capability.LeaseRef)
+	stallSync  atomic.Bool
 
 	mu        sync.Mutex
 	planEnded bool
@@ -44,7 +48,7 @@ func (c *handoffControl) waitClaim(ctx context.Context, _ string, _ []string, _ 
 
 func (c *handoffControl) Prepare(ctx context.Context, refs []capability.LeaseRef) (time.Time, error) {
 	if c.prepare != nil {
-		c.prepare(ctx)
+		c.prepare(ctx, refs[0])
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -55,7 +59,11 @@ func (c *handoffControl) Prepare(ctx context.Context, refs []capability.LeaseRef
 	return time.Now().Add(time.Minute), context.Cause(ctx)
 }
 
-func (c *handoffControl) Sync(_ context.Context, observations []CloudJobObservation) ([]CloudJobState, error) {
+func (c *handoffControl) Sync(ctx context.Context, observations []CloudJobObservation) ([]CloudJobState, error) {
+	if c.stallSync.CompareAndSwap(true, false) {
+		<-ctx.Done()
+		return nil, context.Cause(ctx)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	states := make([]CloudJobState, len(observations))
@@ -168,6 +176,38 @@ func (f *handoffFixture) deletePlanPod(t *testing.T) {
 	}
 }
 
+// hack: a second run needs its own fresh node, because a used node serves only the run that first used it.
+func (f *handoffFixture) otherRun(t *testing.T) *CloudJobAward {
+	t.Helper()
+	node, err := f.kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	karpenter := f.l.Boundary.(*KubernetesBoundary).Karpenter.Resource(nodeClaims)
+	claim, err := karpenter.Get(t.Context(), "claim", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim = claim.DeepCopy()
+	claim.SetName("spare-claim")
+	claim.SetUID("spare-claim-uid")
+	claim.SetResourceVersion("")
+	claim.Object["status"] = map[string]any{"nodeName": "spare", "providerID": "aws:///zone/i-spare"}
+	if _, err = karpenter.Create(t.Context(), claim, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	owners := []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "spare-claim", UID: "spare-claim-uid"}}
+	spare := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "spare", UID: "spare-uid", ResourceVersion: "1", OwnerReferences: owners, Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm", NodeClassLabel: "sparkwing-jobs"}}, Spec: *node.Spec.DeepCopy(), Status: *node.Status.DeepCopy()}
+	spare.Spec.Taints = []corev1.Taint{{Key: DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}
+	spare.Spec.ProviderID = "aws:///zone/i-spare"
+	if err = f.kube.Tracker().Add(spare); err != nil {
+		t.Fatal(err)
+	}
+	other := *f.first
+	other.Binding.RunID, other.Binding.UnitID, other.Binding.NodeID = "other-run", "other", "other"
+	return &other
+}
+
 func TestClaimMeetingLivePlanPlacesOnPodDeletionWithoutReconcilePass(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newHandoffFixture(t)
@@ -211,7 +251,7 @@ func TestClaimRetiresEndedPlanWhilePreparing(t *testing.T) {
 			return false, nil, nil
 		})
 		overlapped := false
-		f.control.prepare = func(ctx context.Context) {
+		f.control.prepare = func(ctx context.Context, _ capability.LeaseRef) {
 			select {
 			case <-retired:
 				overlapped = true
@@ -235,32 +275,7 @@ func TestClaimRetiresEndedPlanWhilePreparing(t *testing.T) {
 func TestHandoffWaitLeavesOtherAwardsUnblocked(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newHandoffFixture(t)
-		node, err := f.kube.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		karpenter := f.l.Boundary.(*KubernetesBoundary).Karpenter.Resource(nodeClaims)
-		claim, err := karpenter.Get(t.Context(), "claim", metav1.GetOptions{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		claim = claim.DeepCopy()
-		claim.SetName("spare-claim")
-		claim.SetUID("spare-claim-uid")
-		claim.SetResourceVersion("")
-		claim.Object["status"] = map[string]any{"nodeName": "spare", "providerID": "aws:///zone/i-spare"}
-		if _, err = karpenter.Create(t.Context(), claim, metav1.CreateOptions{}); err != nil {
-			t.Fatal(err)
-		}
-		owners := []metav1.OwnerReference{{APIVersion: "karpenter.sh/v1", Kind: "NodeClaim", Name: "spare-claim", UID: "spare-claim-uid"}}
-		spare := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "spare", UID: "spare-uid", ResourceVersion: "1", OwnerReferences: owners, Labels: map[string]string{CloudClassLabel: "2", PoolNamespaceLabel: "cloud", WarmNamespaceLabel: "warm", NodeClassLabel: "sparkwing-jobs"}}, Spec: *node.Spec.DeepCopy(), Status: *node.Status.DeepCopy()}
-		spare.Spec.Taints = []corev1.Taint{{Key: DedicatedTaint, Value: "true", Effect: corev1.TaintEffectNoSchedule}}
-		spare.Spec.ProviderID = "aws:///zone/i-spare"
-		if err = f.kube.Tracker().Add(spare); err != nil {
-			t.Fatal(err)
-		}
-		other := *f.first
-		other.Binding.RunID, other.Binding.UnitID, other.Binding.NodeID = "other-run", "other", "other"
+		other := f.otherRun(t)
 		defer f.run(t)()
 		f.control.endPlan()
 		f.control.deliveries <- f.first
@@ -268,12 +283,12 @@ func TestHandoffWaitLeavesOtherAwardsUnblocked(t *testing.T) {
 		if f.first.handoffUntil.IsZero() || f.job(t, f.first) {
 			t.Fatal("first job is not waiting for its plan's Pod")
 		}
-		f.control.deliveries <- &other
+		f.control.deliveries <- other
 		synctest.Wait()
 		if !time.Now().Before(f.first.handoffUntil) {
 			t.Fatal("another claim waited for the first job's handoff to end")
 		}
-		if !f.job(t, &other) {
+		if !f.job(t, other) {
 			t.Fatal("another award was not placed while the first job waited")
 		}
 	})
@@ -419,4 +434,134 @@ type countingSync struct {
 func (c *countingSync) Sync(ctx context.Context, observations []CloudJobObservation) ([]CloudJobState, error) {
 	c.syncs.Add(1)
 	return c.CloudControl.Sync(ctx, observations)
+}
+
+func TestRefusedPreparationDoesNotWaitForStalledRetirement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newHandoffFixture(t)
+		f.l.Poll = 2 * time.Second
+		other := f.otherRun(t)
+		defer f.run(t)()
+		initial := f.passes.Load()
+		f.control.endPlan()
+		f.control.refuse(f.first)
+		f.control.stallSync.Store(true)
+		f.control.deliveries <- f.first
+		select {
+		case f.control.deliveries <- other:
+		case <-time.After(time.Minute):
+			t.Fatal("a refused award's stalled retirement stopped further claims")
+		}
+		synctest.Wait()
+		if !f.job(t, other) {
+			t.Fatal("another award was not placed after a refused award")
+		}
+		time.Sleep(f.l.Poll)
+		synctest.Wait()
+		if f.passes.Load() == initial {
+			t.Fatal("reconciliation stopped behind a refused award's stalled retirement")
+		}
+		if f.job(t, f.first) {
+			t.Fatal("refused award created a Job")
+		}
+	})
+}
+
+func TestQueuedPredecessorDeletionHandsOffBeforeTheFullPass(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newHandoffFixture(t)
+		unrelated := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "unrelated", Namespace: "cloud", Labels: map[string]string{"app.kubernetes.io/managed-by": managedByLauncher, JobLabel: "unrelated"}}}
+		if _, err := f.kube.CoreV1().Pods("cloud").Create(t.Context(), unrelated, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		other := f.otherRun(t)
+		gate := make(chan struct{})
+		f.control.prepare = func(ctx context.Context, ref capability.LeaseRef) {
+			if ref == other.Binding.LeaseRef() {
+				select {
+				case <-gate:
+				case <-ctx.Done():
+				}
+			}
+		}
+		var passesAtCreate atomic.Int32
+		passesAtCreate.Store(-1)
+		f.kube.PrependReactor("create", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+			if action.(ktesting.CreateAction).GetObject().(*batchv1.Job).Name == jobName(f.first.Binding) {
+				passesAtCreate.Store(f.passes.Load())
+			}
+			return false, nil, nil
+		})
+		defer f.run(t)()
+		f.control.endPlan()
+		f.control.deliveries <- f.first
+		synctest.Wait()
+		if f.job(t, f.first) || f.first.handoffUntil.IsZero() {
+			t.Fatal("first job is not waiting for its plan's Pod")
+		}
+		f.control.deliveries <- other
+		synctest.Wait()
+		// safety: the loop is held in the other award's Prepare, so both events queue in order.
+		unrelated.Status.Phase = corev1.PodRunning
+		if _, err := f.kube.CoreV1().Pods("cloud").UpdateStatus(t.Context(), unrelated, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		f.deletePlanPod(t)
+		close(gate)
+		synctest.Wait()
+		if !f.job(t, f.first) {
+			t.Fatal("first job still waiting after its plan's Pod was deleted")
+		}
+		if got, passes := passesAtCreate.Load(), f.passes.Load(); got >= passes {
+			t.Fatalf("Job created after the full pass (passes at create=%d, after=%d)", got, passes)
+		}
+	})
+}
+
+func TestAwaitedPodUpdateAfterATimerPassStartsNoExtraPass(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newHandoffFixture(t)
+		f.l.Poll = 300 * time.Millisecond
+		defer f.run(t)()
+		f.control.endPlan()
+		f.control.deliveries <- f.first
+		synctest.Wait()
+		if f.job(t, f.first) || f.first.handoffUntil.IsZero() {
+			t.Fatal("first job is not waiting for its plan's Pod")
+		}
+		time.Sleep(f.l.Poll + 50*time.Millisecond)
+		synctest.Wait()
+		before := f.passes.Load()
+		updated := f.plan.DeepCopy()
+		updated.Status.Phase = corev1.PodSucceeded
+		if _, err := f.kube.CoreV1().Pods("cloud").UpdateStatus(t.Context(), updated, metav1.UpdateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if got := f.passes.Load(); got != before {
+			t.Fatalf("the awaited Pod's update after a timer pass started %d extra passes", got-before)
+		}
+	})
+}
+
+func TestPreparationStageExcludesClaimTimeRetirement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newHandoffFixture(t)
+		var logs bytes.Buffer
+		f.l.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
+		f.kube.PrependReactor("list", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+			if !reconcileList(action) {
+				time.Sleep(500 * time.Millisecond)
+			}
+			return false, nil, nil
+		})
+		f.control.endPlan()
+		if _, err := f.l.launch(t.Context(), f.first); !errors.Is(err, ErrNoDedicatedNode) {
+			t.Fatalf("first job did not wait for the live planning Pod: %v", err)
+		}
+		stages := startupRecords(t, &logs)["launcher_preparation"]
+		if len(stages) != 1 || stages[0]["duration_ms"] != float64(0) {
+			t.Fatalf("preparation stage=%v, want Prepare's own instant duration", stages)
+		}
+	})
 }
