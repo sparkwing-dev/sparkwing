@@ -111,7 +111,7 @@ func defaultDeployConfig() deployConfig {
 		// safety: retain both runtime indexes with cloud-* and commit-* tags so
 		// the registry keeps them outside its rolling 100-image release window.
 		ControllerBase: ecr + "/sparkwing-controller@sha256:e3fba647556534dac6af3877ac5cb2b7f3de374eb2fbc4c0000085e5b43264ac",
-		RunnerBase:     ecr + "/sparkwing-runner@sha256:28e9290a277d8009ac3016026825a90a4d4dcfebb7cd592bd27cfe8c23ac16c5",
+		RunnerBase:     ecr + "/sparkwing-runner@sha256:f3fb110a6d6aca18949cd74036943203cd7f9cba0956e87eeff4a2972d0f4ec5",
 		RoleARN:        "arn:aws:iam::633280902600:role/sparkwing-deploy",
 		GitopsURL:      "git@github.com:sparkwing-dev/sparkwing-gitops.git",
 		GitopsBranch:   "main",
