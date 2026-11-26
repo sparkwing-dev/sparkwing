@@ -149,7 +149,6 @@ type githubReturnProof int
 
 const (
 	githubReturnUnverified githubReturnProof = iota
-	// githubReturnExpired is this browser's own signed flow, past its expiry.
 	githubReturnExpired
 	githubReturnValid
 )

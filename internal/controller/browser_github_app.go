@@ -21,8 +21,7 @@ import (
 const githubAppFlowCookieName = hostPrefix + "sw_github_app"
 
 const (
-	githubAppSettingsPath = "/team/github"
-	// The settings page opens its existing-installation path for this query.
+	githubAppSettingsPath        = "/team/github"
 	githubAppConnectExistingPath = githubAppSettingsPath + "?connect=existing"
 	githubAppCallbackPath        = "/github/app/callback"
 	githubAppCompletePath        = "/github/app/complete"
@@ -319,16 +318,14 @@ func refuseGitHubAppFlow(w http.ResponseWriter, status int, message string) {
 	})
 }
 
-// githubInstallationEvidence says what a failed flow knows about an installation on GitHub. Once one exists,
-// starting a new install stops on GitHub's settings page, which returns nothing until a setting changes, so a
-// page that would offer a retry offers the existing installation instead.
+// safety: once an installation exists, a new install stops on GitHub's settings page and returns nothing until
+// a setting changes, so a page that would offer a retry offers the existing installation instead. A reported
+// installation is named by a return whose flow could not be verified; a recorded one by this browser's verified flow.
 type githubInstallationEvidence int
 
 const (
 	noInstallation githubInstallationEvidence = iota
-	// reportedInstallation is named by a return whose flow could not be verified.
 	reportedInstallation
-	// recordedInstallation is one this browser's verified flow recorded.
 	recordedInstallation
 )
 

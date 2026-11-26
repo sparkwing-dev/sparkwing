@@ -205,12 +205,10 @@ func (s *Server) githubIdentitySubject(ctx context.Context, p capability.Authori
 	return subject, nil
 }
 
-// Refusal codes the connect pages choose their wording and next step from.
 const (
-	githubIdentityMissing = "github_identity_missing"
-	githubUnreachable     = "github_unreachable"
-	githubConnectSpent    = "github_connect_spent"
-	// githubConnectUnverified marks a return whose flow could not be verified, so what it names is unconfirmed.
+	githubIdentityMissing   = "github_identity_missing"
+	githubUnreachable       = "github_unreachable"
+	githubConnectSpent      = "github_connect_spent"
 	githubConnectUnverified = "github_connect_unverified"
 )
 

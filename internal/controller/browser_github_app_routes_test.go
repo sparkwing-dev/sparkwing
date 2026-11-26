@@ -650,7 +650,7 @@ func expireGitHubFlow(t *testing.T, f *githubBrowserFixture, flow githubAppFlow)
 }
 
 func TestGitHubBrowserRefusalBlamesGitHubOnlyForGitHubFailures(t *testing.T) {
-	// N=35 is too small for a SHA-256 PKCS#1 signature, so the App JWT fails to sign before any App call.
+	// hack: N=35 is too small for a SHA-256 PKCS#1 signature, so the App JWT fails to sign before any App call.
 	unsignable := &rsa.PrivateKey{PublicKey: rsa.PublicKey{N: big.NewInt(35), E: 5}, D: big.NewInt(5), Primes: []*big.Int{big.NewInt(5), big.NewInt(7)}}
 	for name, c := range map[string]struct {
 		bindErr       error
