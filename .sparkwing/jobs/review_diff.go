@@ -30,8 +30,8 @@ type reviewDiffResult struct {
 }
 
 type reviewBinaryChange struct {
-	path                string
-	executable, shebang bool
+	path                         string
+	executable, shebang, deleted bool
 }
 
 // safety: model replies and cached verdicts cannot clear an omitted-content block.
@@ -55,7 +55,8 @@ func (d reviewDiffResult) enforceBinaryReview(rec *reviewRecord, p reviewPolicy,
 				strict = strict || len(p.strictFor(endpoint)) > 0
 			}
 		}
-		if !strict && !file.executable && !file.shebang && reviewAssetPath(file.path) {
+		// safety: a deletion adds no bytes to inspect, so only a strict path still needs a person.
+		if !strict && (file.deleted || !file.executable && !file.shebang && reviewAssetPath(file.path)) {
 			continue
 		}
 		rec.Findings = append(rec.Findings, reviewFinding{
@@ -108,7 +109,7 @@ func reviewDiff(ctx context.Context, d reviewDeps, base, head string) (reviewDif
 			fmt.Fprintf(&part, "Changed file %q has no rendered diff; requires human review.\n", path)
 		}
 		binary, invalid := false, false
-		change := reviewBinaryChange{path: path}
+		change := reviewBinaryChange{path: path, deleted: strings.TrimPrefix(fields[1], ":") == "000000"}
 		metadata := make([]string, 2)
 		for side := range 2 {
 			mode := strings.TrimPrefix(fields[side], ":")
