@@ -1129,7 +1129,8 @@ func scanPrefixes(rows rowCursor) (_ []string, err error) {
 }
 
 // safety: counting and then inserting is a race unless the team row is locked first; Postgres
-// serializes on it and SQLite's single connection already serializes every writer.
+// serializes on it, and SQLite's _txlock=immediate takes the write lock at BEGIN, with busy_timeout
+// queueing every other writer.
 func (t *Tenant) lockTeamTx(ctx context.Context, tx *storeTx) error {
 	err := acquireLockSet(ctx, tx, func() lockSet {
 		var set lockSet
