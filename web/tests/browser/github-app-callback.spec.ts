@@ -35,3 +35,35 @@ test("an existing App callback requests available once", async ({ page }) => {
     await dashboard.close();
   }
 });
+
+test("a fresh connect that cannot finish offers the existing installation", async ({ page }) => {
+  const dashboard = await startAuthenticatedDashboard({ githubApp: true });
+  try {
+    await page.goto(`${dashboard.origin}/login?next=/team/github`);
+    await page.getByRole("link", { name: "Sign in with GitHub" }).click();
+    await expect(page).toHaveURL(`${dashboard.origin}/team/github`);
+
+    // GitHub installs the App but returns a state this browser's flow no longer holds.
+    await page.route("**/apps/sparkwing-test/installations/new**", (route) =>
+      route.fulfill({
+        status: 303,
+        headers: {
+          location: `${dashboard.origin}/github/app/setup?installation_id=7&setup_action=install&state=expired`,
+        },
+      }),
+    );
+    await page.getByRole("button", { name: "Connect GitHub", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "GitHub was not connected" })).toBeVisible();
+    await expect(page.getByText("If the App is already installed on GitHub, connect that installation.")).toBeVisible();
+    await page.getByRole("link", { name: "Connect an existing installation" }).click();
+    await expect(page).toHaveURL(new RegExp(`^${dashboard.origin}/team/github(\\?connect=existing)?$`));
+    const existing = page.getByRole("button", { name: "Connect an existing installation", exact: true });
+    await expect(existing).toBeFocused();
+    await existing.click();
+    await expect(
+      page.getByRole("heading", { name: "No existing installations" }),
+    ).toBeVisible();
+  } finally {
+    await dashboard.close();
+  }
+});

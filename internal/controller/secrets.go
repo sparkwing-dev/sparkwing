@@ -47,7 +47,7 @@ type secretJSON struct {
 
 // secretRepository resolves the GitHub repository a pipeline secret belongs
 // to, as owner/name or its gh: key, to the key a proven run's provenance
-// seals. Only runs GitHub proved read pipeline secrets (decision 68), so no
+// seals. Only runs GitHub proved read pipeline secrets, so no
 // other host's repository can hold one.
 func (s *Server) secretRepository(ctx context.Context, team, repo, pipeline string) (runspec.Repository, error) {
 	if (repo == "") != (pipeline == "") {

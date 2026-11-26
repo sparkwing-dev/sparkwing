@@ -26,7 +26,7 @@ func trustedConfig(t *testing.T, runner string) string {
 // clean checkout whose HEAD is the pushed branch head; each other case is
 // refused before submission, since that run could not count.
 func TestTrustedRunnerRefusesWhatCannotCount(t *testing.T) {
-	enrolled := "runner:\n  controller: " + trustedController + "/\n  holder_prefix: moonborn\n  repos: [github.com/acme/repo]\n"
+	enrolled := "runner:\n  controller: " + trustedController + "/\n  holder_prefix: mybox\n  repos: [github.com/acme/repo]\n"
 	for name, tc := range map[string]struct {
 		config  string
 		prepare func(t *testing.T, work string)
@@ -67,8 +67,8 @@ func TestTrustedRunnerRefusesWhatCannotCount(t *testing.T) {
 			}
 			runner, err := trustedRunner(t.Context(), trustedController, trustedConfig(t, tc.config), work)
 			if tc.want == "" {
-				if err != nil || runner != "moonborn" {
-					t.Fatalf("runner = %q, %v; want moonborn", runner, err)
+				if err != nil || runner != "mybox" {
+					t.Fatalf("runner = %q, %v; want mybox", runner, err)
 				}
 				return
 			}
@@ -100,7 +100,7 @@ func TestTrustedTriggerRequestIsProofEligible(t *testing.T) {
 		t.Fatal(err)
 	}
 	inputs := settings.Inputs{Context: settings.Context{NumCPU: 4}, Flags: settings.Values{Options: runspec.Options{Profile: runspec.Setting[string]{Optional: runspec.Optional[string]{Set: true, Value: "prod"}}}}}
-	inputs.Flags.Runner.Set, inputs.Flags.Runner.Value = true, runnerFlagSelection("moonborn")
+	inputs.Flags.Runner.Set, inputs.Flags.Runner.Value = true, runnerFlagSelection("mybox")
 	declarations := declarationFixture(t, []nodewire.PipelineDescription{{Name: "deploy-prod"}, {Name: "Deploy", Args: []nodewire.ArgumentDescription{{Name: "region", Type: "string"}}}})
 	input := triggerRequestInput{home: t.TempDir(), source: selection, settings: inputs, args: []string{"--region", "west"}, declarations: declarations}
 	request, err := prepareTriggerRequest(input)

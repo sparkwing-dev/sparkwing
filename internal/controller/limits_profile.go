@@ -77,7 +77,7 @@ const cloudRequestRateAlarm = 5000
 
 // safety: the shed depth bounds each team's unclaimed triggers so one queue scan stays a fraction of a
 // second. No profile sets an hourly run cap: a refused GitHub App delivery needs an admin to process it
-// again (decision 41), so the cap stays an operator's explicit --max-runs-per-principal-hour.
+// again, so the cap stays an operator's explicit --max-runs-per-principal-hour.
 const (
 	cloudShedQueueDepth     = 5000
 	cloudFreeShedQueueDepth = 1000
@@ -132,7 +132,8 @@ func LimitsProfile(name string) (LimitsProfileValues, error) {
 	values, ok := limitsProfiles[name]
 	if !ok {
 		return LimitsProfileValues{}, fmt.Errorf(
-			"unknown limits profile %q; want one of %s", name, strings.Join(LimitsProfileNames(), ", "))
+			"unknown limits profile %q; want one of %s", name, strings.Join(LimitsProfileNames(), ", "),
+		)
 	}
 	return values, nil
 }

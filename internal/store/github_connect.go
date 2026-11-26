@@ -54,6 +54,10 @@ func (t *Tenant) LinkedGitHubSubject(ctx context.Context, a capability.Authorize
 	return out, nil
 }
 
+// ErrGitHubConnectSpent reports a connection nonce that was already used or has expired. Other refusals from
+// [Tenant.ConsumeGitHubConnect] mean the caller's authority no longer holds.
+var ErrGitHubConnectSpent = errors.New("store: this GitHub connection was already used or expired")
+
 // ConsumeGitHubConnect commits a live administrator's unexpired connection nonce once.
 func (t *Tenant) ConsumeGitHubConnect(ctx context.Context, a capability.Authorized, nonce string, expires time.Time) error {
 	return t.githubConnectTx(ctx, a, func(tx *storeTx, _ capability.Principal, _ string) error {
@@ -62,7 +66,7 @@ func (t *Tenant) ConsumeGitHubConnect(ctx context.Context, a capability.Authoriz
 			return err
 		}
 		if !used {
-			return hosterr.Authorization(hosterr.ReasonBinding, "This connection was already used or expired. Start again from your team's GitHub settings.")
+			return errors.Join(ErrGitHubConnectSpent, hosterr.Authorization(hosterr.ReasonBinding, "This connection was already used or expired. Start again from your team's GitHub settings."))
 		}
 		return nil
 	})

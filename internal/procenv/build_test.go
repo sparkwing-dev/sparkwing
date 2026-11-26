@@ -114,7 +114,7 @@ func TestRemoteBasePathsRemainReadable(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			masker := secrets.NewMasker()
 			base := Base{Ambient: []string{
-				"HOME=/home/bombuntu",
+				"HOME=/home/dev",
 				"PATH=/opt/toolchain/bin:/usr/bin",
 				"HTTPS_PROXY=https://alice:proxy-password@proxy.example",
 				"CUSTOM=operator-private-value",
@@ -122,7 +122,7 @@ func TestRemoteBasePathsRemainReadable(t *testing.T) {
 			if _, err := Build(kind, base, Runtime{}); err != nil {
 				t.Fatal(err)
 			}
-			for _, path := range []string{"/home/bombuntu", "/opt/toolchain/bin:/usr/bin"} {
+			for _, path := range []string{"/home/dev", "/opt/toolchain/bin:/usr/bin"} {
 				if got := masker.Mask(path); got != path {
 					t.Fatalf("public path %q masked to %q", path, got)
 				}

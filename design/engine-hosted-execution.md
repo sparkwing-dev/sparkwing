@@ -65,9 +65,9 @@ One process per run was the alternative. It saves plan evaluations, but a crash 
 
 `skip_if`, `cache_key` and `generator` closures run in an eval process before an attempt exists. A skipped or memoized node therefore never claims a pod or a runner slot. A remote run evaluates them on the host that runs the scheduler.
 
-## Decisions
+## Design choices
 
-These choices go beyond the protocol's shape. Each needs Korey's ratification.
+These choices go beyond the protocol's shape.
 
 1. **Every attempt process answers `plan` before `run_node`.** `run_node` then needs no pipeline, args or run context, and drift becomes a host-side check rather than something each SDK must implement.
 2. **The host computes `spec_hash`.** It hashes the canonical JSON of each node document with one function on both sides of the comparison. SDKs in different languages never have to produce byte-identical JSON.
@@ -127,9 +127,3 @@ An internal spike, reachable only from tests, ran a two-node plan with the engin
 - Each node ran in its own process. The dependent started only after its dependency succeeded, and a failed dependency skipped its dependent without starting it.
 - A node read its dependency's typed output through the engine, and its log records reached the host unchanged.
 - Plan evaluation coupled to a controller does not fit the model. The spike's `plan --json` read the run row through a controller, and its `run-node` re-read the run row and wrote its own terminal row. That is why `plan` takes its run context in the request and `run_node` answers with a result.
-
-## Open questions
-
-- **TypeScript discovery.** How the CLI recognizes a TypeScript entry, and whether the runner image ships Node. The proposal is a `.sparkwing/package.json` that depends on `@sparkwing/sdk`, and Node LTS in the runner image.
-- **Cleanup time limit.** How long the host lets one cleanup command run before it kills it. Customers would notice this limit, so the value needs Korey's approval and a comparison with GitHub Actions and CircleCI.
-- **Node output size.** A node's output travels inside one reply line, and a line is at most 16 MiB, while the store accepts outputs up to 64 MiB. Either the smaller limit is accepted, which customers would notice and so needs Korey's approval, or a larger output takes another path, such as a file the SDK names in its result.

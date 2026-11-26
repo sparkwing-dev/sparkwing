@@ -22,13 +22,13 @@ func TestLocalClaimAdvertisesConfiguredMachineLabels(t *testing.T) {
 		requested  string
 		awarded    bool
 	}{
-		{name: "configured", configured: []string{"host=moonborn"}, awarded: true},
+		{name: "configured", configured: []string{"host=mybox"}, awarded: true},
 		{name: "unconfigured", awarded: false},
-		{name: "requested only", requested: `"labels":["host=moonborn"],`, awarded: false},
+		{name: "requested only", requested: `"labels":["host=mybox"],`, awarded: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e, _ := engineRuntimeStore(t)
-			engineSQL(t, e.Store, `UPDATE triggers SET needs_labels=? WHERE id='run'`, []byte(`["host=moonborn"]`))
+			engineSQL(t, e.Store, `UPDATE triggers SET needs_labels=? WHERE id='run'`, []byte(`["host=mybox"]`))
 			var body []byte
 			if err := teststore.SQL(t, e.Store).QueryRow(`SELECT request_json FROM runs WHERE id='run'`).Scan(&body); err != nil {
 				t.Fatal(err)
@@ -37,7 +37,7 @@ func TestLocalClaimAdvertisesConfiguredMachineLabels(t *testing.T) {
 			if err := json.Unmarshal(body, &sealed); err != nil {
 				t.Fatal(err)
 			}
-			sealed.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"host=moonborn"}}}
+			sealed.Request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"host=mybox"}}}
 			body, err := json.Marshal(sealed)
 			if err != nil {
 				t.Fatal(err)

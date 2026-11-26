@@ -16,7 +16,7 @@ func TestConsoleTriggerKeepsRepositoryRequirements(t *testing.T) {
 	f := newDeploymentAppFixture(t, deploymenttest.Cloud(t, "https://controller.test"))
 	owner := f.ghUser(501, "olga")
 	f.connect(owner, 501, 7, acmeAdmin)
-	config := []byte("pipelines:\n  - name: deploy\n    entrypoint: Deploy\n    requires: [deploy-kikd-prod]\n  - name: deploy-scan\n    entrypoint: DeployScan\n    requires: [deploy-kikd-prod]\n")
+	config := []byte("pipelines:\n  - name: deploy\n    entrypoint: Deploy\n    requires: [deploy-prod]\n  - name: deploy-scan\n    entrypoint: DeployScan\n    requires: [deploy-prod]\n")
 	f.app.SetCommit("acme/widgets", "main", headSHA)
 	f.app.SetFile("acme/widgets", headSHA, ".sparkwing/sparkwing.yaml", config)
 	for _, pipeline := range []string{"deploy", "deploy-scan"} {
@@ -27,7 +27,7 @@ func TestConsoleTriggerKeepsRepositoryRequirements(t *testing.T) {
 					Git:    runspec.Git{Repository: runspec.Repository{Key: "gh:701", Display: "acme/widgets"}, Ref: "main"},
 					Source: runspec.Source{Ref: "main", Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/widgets", PipelineDir: ".sparkwing"}},
 				}}
-				expected := []string{"deploy-kikd-prod"}
+				expected := []string{"deploy-prod"}
 				if supplied != "repository" {
 					expected = []string{"caller-runner"}
 					if supplied == "empty" {

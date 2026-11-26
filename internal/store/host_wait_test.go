@@ -17,14 +17,14 @@ import (
 func TestRunViewExplainsLocalJobItsHostCannotExecute(t *testing.T) {
 	view := localHostWaitView(t, []string{"host=laptop"})
 	reason := view.HostIneligible["elsewhere"]
-	if _, explained := view.HostIneligible["here"]; explained || !strings.Contains(reason, "requires runner labels host=moonborn") || !strings.Contains(reason, "host=laptop") || !strings.Contains(reason, "runner.labels") {
+	if _, explained := view.HostIneligible["here"]; explained || !strings.Contains(reason, "requires runner labels host=mybox") || !strings.Contains(reason, "host=laptop") || !strings.Contains(reason, "runner.labels") {
 		t.Fatalf("host ineligibility = %+v", view.HostIneligible)
 	}
 }
 
 // A local machine whose configuration lists a job's custom label executes that job itself.
 func TestLocalOwnerExecutesJobWithConfiguredMachineLabel(t *testing.T) {
-	view := localHostWaitView(t, []string{"host=laptop", "host=moonborn"})
+	view := localHostWaitView(t, []string{"host=laptop", "host=mybox"})
 	if len(view.HostIneligible) != 0 {
 		t.Fatalf("configured label left jobs waiting: %+v", view.HostIneligible)
 	}
@@ -49,7 +49,7 @@ func TestLocalLabelsGrantNoAuthority(t *testing.T) {
 		profile.Labels = nil
 		return profile
 	}
-	bare, withLabels := read(nil), read([]string{"host=moonborn", "pool=prod", "location=cloud", "class=cloud", "name=other", "team=b"})
+	bare, withLabels := read(nil), read([]string{"host=mybox", "pool=prod", "location=cloud", "class=cloud", "name=other", "team=b"})
 	if !reflect.DeepEqual(bare, withLabels) || len(withLabels.ReservedPools) != 0 || withLabels.Class != match.ClassCoordinator || withLabels.Name != root.Subject.ID {
 		t.Fatalf("labels changed authority: %+v != %+v", withLabels, bare)
 	}
@@ -79,7 +79,7 @@ func localHostWaitView(t *testing.T, labels []string) RunView {
 	actor := runstate.Actor{Kind: runstate.ActorRunHost, Authority: capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: award.Award.CapabilityPrefix}, CapabilityPrefix: award.Award.CapabilityPrefix, Owner: award.Owner}
 	plan := nodewire.PlanDoc{Jobs: []nodewire.JobSpec{
 		{ID: "here", Inline: true, ResultStep: "run", Steps: []nodewire.StepSpec{{ID: "run"}}},
-		{ID: "elsewhere", Inline: true, ResultStep: "run", Steps: []nodewire.StepSpec{{ID: "run"}}, Requires: []string{"host=moonborn"}},
+		{ID: "elsewhere", Inline: true, ResultStep: "run", Steps: []nodewire.StepSpec{{ID: "run"}}, Requires: []string{"host=mybox"}},
 	}}
 	declarations := runspec.CheckoutDeclarations{Version: runspec.CheckoutDeclarationsVersion}
 	resolved, err := settings.ResolvePlan(settings.PlanInputs{Request: admitted.Request, Declarations: declarations, Plan: plan, Context: settings.Context{Local: true}})

@@ -158,7 +158,7 @@ describe("runDetailView", () => {
     assert.deepEqual(test.annotations, ["warn: coverage.out:1:2 (to line 3): coverage fell 2%"]);
     assert.deepEqual(
       test.execution_attempts?.map((a) => [a.attempt, a.executor_kind, a.executor_name, a.location, a.outcome, a.failure_reason]),
-      [[1, "agent", "moonborn", "local", "failed", "step_failed"], [2, "agent", "moonborn", "local", "success", undefined]],
+      [[1, "agent", "mybox", "local", "failed", "step_failed"], [2, "agent", "mybox", "local", "success", undefined]],
     );
     assert.equal(test.failure_reason, undefined);
     assert.deepEqual(

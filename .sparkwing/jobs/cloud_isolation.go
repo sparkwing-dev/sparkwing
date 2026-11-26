@@ -73,8 +73,8 @@ func (CloudIsolation) Help() string {
 // Examples shows how to run the conformance check.
 func (CloudIsolation) Examples() []sparkwing.Example {
 	return []sparkwing.Example{{
-		Comment: "Attack staging from the two conformance teams and keep the evidence",
-		Command: `sparkwing run cloud-isolation -- --database "$STAGING_DATABASE" --vpc-resolver "$STAGING_VPC_RESOLVER" --evidence ~/evidence/cloud-isolation/$(date +%F)`,
+		Comment: "Attack staging from the two conformance teams; the report goes to a new temporary directory",
+		Command: `sparkwing run cloud-isolation -- --database "$STAGING_DATABASE" --vpc-resolver "$STAGING_VPC_RESOLVER"`,
 	}}
 }
 

@@ -74,7 +74,7 @@ func consoleRunFixture(t *testing.T) *consoleRun {
 		t.Fatal(err)
 	}
 	c.tenant = tenant
-	engineHTTPRoot(t, e, "acme", "moonborn", []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
+	engineHTTPRoot(t, e, "acme", "mybox", []capability.Grant{capability.NodesClaim, capability.TriggersClaim})
 	c.reader, _, err = teststore.ProvisionCredential(t.Context(), e.Store, capability.ProvisionSpec{Kind: capability.ProvisionMember, Team: "acme", Subject: capability.Subject{Kind: capability.SubjectAccount, ID: "reader"}, Binding: capability.Binding{Kind: capability.BindingNone}, Grants: []capability.Grant{capability.RunsRead}})
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +161,7 @@ func (c *consoleRun) seedPlan(t *testing.T) {
 
 func (c *consoleRun) claim(t *testing.T, kind capability.UnitKind, run, job string) capability.Authorized {
 	t.Helper()
-	award, err := c.e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "moonborn", Target: &store.UnitRef{Kind: kind, RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)}})
+	award, err := c.e.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: "mybox", Target: &store.UnitRef{Kind: kind, RunID: runspec.RunID(run), NodeID: runspec.NodeID(job)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func handBuiltConsoleFixtures() map[string]any {
 		"runs-list.json":   map[string]any{"runs": []runstate.RunSummary{summary}},
 		"run-created.json": controllerwire.CreateRunResponse{RunID: "run-retry", Number: 16, Inputs: inputs, WriteScope: "team"},
 		"runners.json": controllerwire.Runners{Runners: []controllerwire.RunnerDetail{{
-			Name: "moonborn", Class: "runner", Location: "local", Labels: []string{"os=linux", "arch=amd64"}, ReservedPools: []string{}, Repos: []string{},
+			Name: "mybox", Class: "runner", Location: "local", Labels: []string{"os=linux", "arch=amd64"}, ReservedPools: []string{}, Repos: []string{},
 			LastSeen: "2026-10-28T05:01:19Z", Status: "busy", ActiveJobs: []controllerwire.RunnerJob{{RunID: "run-jobs", JobID: "test"}}, MaxConcurrent: 2,
 			Capacity: controllerwire.RunnerResources{Cores: 8, MemoryBytes: 16 << 30},
 			Headroom: &controllerwire.RunnerHeadroom{RunnerResources: controllerwire.RunnerResources{Cores: 6, MemoryBytes: 12 << 30}, QueueDepth: 0, ObservedAt: "2026-10-28T05:01:19Z"},
@@ -346,7 +346,7 @@ func handBuiltConsoleFixtures() map[string]any {
 		},
 		"git-credential-releases.json": map[string]any{"releases": []gitCredentialReleaseJSON{{
 			Host: "gitlab.com", Repository: "git:gitlab.com/acme/app", RunID: "run-jobs", JobID: "build", Generation: 1,
-			Runner: "moonborn", CapabilityPrefix: "swk_abc123", ReleasedAt: 1793250079,
+			Runner: "mybox", CapabilityPrefix: "swk_abc123", ReleasedAt: 1793250079,
 		}}},
 	}
 }

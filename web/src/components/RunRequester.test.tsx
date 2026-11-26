@@ -6,17 +6,17 @@ import RunRequester from "./RunRequester";
 describe("RunRequester", () => {
   it("names the agent beside the requester with an accessible label", () => {
     const html = renderToStaticMarkup(
-      <RunRequester requester="korey" agent="claude-code:land-agent" />,
+      <RunRequester requester="avery" agent="claude-code:land-agent" />,
     );
-    assert.match(html, /by korey/);
+    assert.match(html, /by avery/);
     assert.match(html, /aria-label="started by an agent: claude-code:land-agent"/);
     assert.match(html, /<svg/);
     assert.match(html, />claude-code:land-agent</);
   });
 
   it("shows no agent icon when no agent started the run", () => {
-    const html = renderToStaticMarkup(<RunRequester requester="korey" />);
-    assert.match(html, /by korey/);
+    const html = renderToStaticMarkup(<RunRequester requester="avery" />);
+    assert.match(html, /by avery/);
     assert.doesNotMatch(html, /agent/);
     assert.doesNotMatch(html, /<svg/);
   });

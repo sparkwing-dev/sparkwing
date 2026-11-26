@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [main, tenancy]
-  # perf: pushes verify only what changed; the full suite runs nightly (decision 96).
+  # perf: pushes verify only what changed; the full suite runs nightly.
   schedule:
     - cron: "17 9 * * *"
   workflow_dispatch:

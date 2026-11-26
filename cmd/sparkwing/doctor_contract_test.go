@@ -282,7 +282,7 @@ func sameDoctorFindings(got []doctorFinding, want []localhostwire.LocalDoctorFin
 
 func TestDoctorNamesIgnoredRunnerLabels(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("runner:\n  labels: [host=moonborn, location=local]\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("runner:\n  labels: [host=mybox, location=local]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("SPARKWING_CONFIG", path)

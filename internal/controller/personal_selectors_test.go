@@ -15,7 +15,7 @@ import (
 )
 
 func TestPersonalRunnerClaimsControllerPlanRunSelector(t *testing.T) {
-	for _, selector := range []string{"os=darwin", "host=moonborn"} {
+	for _, selector := range []string{"os=darwin", "host=mybox"} {
 		for _, selection := range []string{"runner", "requires"} {
 			t.Run(selector+"/"+selection, func(t *testing.T) {
 				e, tenant := engineRuntimeStore(t)
@@ -52,15 +52,15 @@ func TestPersonalRunnerClaimsControllerPlanRunSelector(t *testing.T) {
 				engineSQL(t, e.Store, `INSERT INTO sessions(hash,principal,scopes,created_at,expires_at,team,account_id) VALUES ('personal-session','account','runs.read,runs.write',1,?,'a','account')`, time.Now().Add(time.Hour).UnixNano())
 				engineSQL(t, e.Store, `INSERT INTO session_membership_epochs(session_hash,team,epoch) VALUES ('personal-session','a',0)`)
 				authority := capability.AuthorityRef{Kind: capability.AuthoritySession, ID: "personal-session"}
-				machine, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:moonborn", AllowedLabels: []string{"host=moonborn", "os=darwin", "arch=arm64"}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "moonborn"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
+				machine, err := e.Store.AsOperator().ProvisionCapability(t.Context(), capability.ProvisionSpec{Kind: capability.ProvisionMachine, Personal: true, Authority: &authority, RegistrationID: "runner:a:mybox", AllowedLabels: []string{"host=mybox", "os=darwin", "arch=arm64"}, Team: "a", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "mybox"}, Grants: []capability.Grant{capability.NodesClaim, capability.TriggersClaim}, Binding: capability.Binding{Kind: capability.BindingNone}})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := e.Store.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: machine.Capability.Prefix, Labels: []string{"host=moonborn", "os=darwin", "arch=arm64"}, OS: "darwin", Arch: "arm64"}); err != nil {
+				if err := e.Store.AsOperator().RecordRunnerPoll(t.Context(), store.UnitDemand{CapabilityPrefix: machine.Capability.Prefix, Labels: []string{"host=mybox", "os=darwin", "arch=arm64"}, OS: "darwin", Arch: "arm64"}); err != nil {
 					t.Fatal(err)
 				}
 				h := server.WithEngineController(e.EngineController).Handler()
-				response := engineClaimHTTP(t, h, machine.Raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["plan"],"labels":["host=moonborn","os=darwin","arch=arm64"],"os":"darwin","arch":"arm64"}`, 200)
+				response := engineClaimHTTP(t, h, machine.Raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["plan"],"labels":["host=mybox","os=darwin","arch=arm64"],"os":"darwin","arch":"arm64"}`, 200)
 				var planClaim controllerwire.ClaimResponse
 				if err := json.Unmarshal(response.Body.Bytes(), &planClaim); err != nil || planClaim.Claim == nil {
 					t.Fatalf("matching personal planner left plan pending: %s %v", response.Body, err)
@@ -81,7 +81,7 @@ func TestPersonalRunnerClaimsControllerPlanRunSelector(t *testing.T) {
 				if err := json.Unmarshal(empty.Body.Bytes(), &unmatched); err != nil || unmatched.Claim != nil {
 					t.Fatalf("unmatched runner received selected job: %s %v", empty.Body, err)
 				}
-				response = engineClaimHTTP(t, h, machine.Raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"labels":["host=moonborn","os=darwin","arch=arm64"],"os":"darwin","arch":"arm64"}`, 200)
+				response = engineClaimHTTP(t, h, machine.Raw, "POST", "/api/v1/runners/claim", `{"runner_version":"v1","kinds":["node"],"labels":["host=mybox","os=darwin","arch=arm64"],"os":"darwin","arch":"arm64"}`, 200)
 				var claim controllerwire.ClaimResponse
 				if err := json.Unmarshal(response.Body.Bytes(), &claim); err != nil || claim.Claim == nil || claim.Claim.JobID != "where" {
 					t.Fatalf("matching personal runner left job pending: %s %v", response.Body, err)

@@ -205,7 +205,7 @@ func TestIdlePollBudgetSeparatesPersonalAndHereClaimants(t *testing.T) {
 	s := New(nil, nil).WithIdleClaimPollEnforced(true)
 	s.recordQueueActivity(time.Now().Add(-testIdleWindow))
 	for _, c := range []capability.Capability{
-		{Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "moonborn"}},
+		{Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "mybox"}},
 		{Team: "team", Subject: capability.Subject{Kind: capability.SubjectMachine, ID: "desktop"}},
 		{Team: "team", Purpose: capability.PurposeHere, Binding: capability.Binding{RunID: "here-run"}},
 	} {

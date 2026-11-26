@@ -51,7 +51,7 @@ func TestProvenanceRoundTripsAndRefusesForgedSeals(t *testing.T) {
 	if trigger, id, ref, sha := asserted.OIDC(); trigger != "manual" || id != 0 || ref != "" || sha != "" {
 		t.Fatalf("asserted run claims %s %d %q %q", trigger, id, ref, sha)
 	}
-	// Decision 72: a fetched run claims the head the App resolved, and only that.
+	// safety: a fetched run claims the head the App resolved, and only that.
 	fetched, err := asserted.FetchedFrom(7, "acme/app", "refs/heads/main", provenanceSHA)
 	if err != nil {
 		t.Fatal(err)

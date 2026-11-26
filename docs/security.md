@@ -251,7 +251,7 @@ decides whether the pass counts; `--trusted` adds no trust of its own. A plain
 `sparkwing run gate` stays asserted and never counts.
 
 On a developer's machine the trust boundary is the OS account the runner
-service runs as (decision 89): any process running as that user (the
+service runs as: any process running as that user (the
 developer, coding agents, tests and tools from asserted local runs) can read
 the runner's credential and report a pass directly, and shares its HOME, Go
 configuration and build cache, Sparkwing home and PATH with the runner. Enroll

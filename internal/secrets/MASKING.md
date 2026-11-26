@@ -33,12 +33,13 @@ run's logs. Common lines such as `-----BEGIN PRIVATE KEY-----`,
 belong to a secret, including when other tools print them as ordinary output.
 The marker is `***`. Overlapping matches merge,
 and replacement closure uses at most four passes. If ambiguity remains, the
-remaining payload is replaced as a whole. Secrets containing `***` are accepted
-under decision 49. Replacement can form a registered value containing `***`,
-or a value containing `*` beside a replacement marker, across already published
-emissions. For example, a published `aab` followed by a marker forms `aab*`.
-Decision 49 accepts this residual. Replacement closure excludes these values,
-and stream and batch masking may differ at these marker edges.
+remaining payload is replaced as a whole. Secrets containing `***` are
+accepted. Replacement can form a registered value containing `***`, or a value
+containing `*` beside a replacement marker, across already published emissions.
+For example, a published `aab` followed by a marker forms `aab*`. Masking
+accepts this residual because those emissions are already published and cannot
+be recalled. Replacement closure excludes these values, and stream and batch
+masking may differ at these marker edges.
 JSON escape views cover serialized attributes whose string values themselves contain
 escaped spellings.
 

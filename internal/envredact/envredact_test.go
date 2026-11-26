@@ -80,7 +80,7 @@ func TestRedactValue(t *testing.T) {
 		{"https", "https://u:p@api.example/v1", "https://redacted@api.example/v1"},
 		{"no userinfo", "https://api.example/v1", "https://api.example/v1"},
 		{"not a url", "/usr/local/bin:/usr/bin", "/usr/local/bin:/usr/bin"},
-		{"plain email", "korey@example.com", "korey@example.com"},
+		{"plain email", "avery@example.com", "avery@example.com"},
 		{
 			"query signature", "https://cache.example.com/objects?sig=abc&region=us",
 			"https://cache.example.com/objects?sig=redacted&region=us",

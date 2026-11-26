@@ -198,8 +198,7 @@ the compiled pipeline binary, which is often 20 to 40 MB for Go) is stored once
 per digest. The first 256 MiB of a run's first prepared pipeline upload, and its
 object, count toward none of these limits. Bytes past 256 MiB, and any further
 upload from the run's planning credentials, count as usual. Retained-storage
-billing still counts every byte. Korey decided these limits on
-2026-11-07.
+billing still counts every byte.
 
 For comparison, GitHub Actions caches 10 GB per repository by default, and GitLab
 gives free namespaces 10 GiB of storage. GitHub's free plan includes 500 MB of
@@ -240,10 +239,10 @@ See [self-hosting](self-hosting.md#bound-storage-growth).
 
 A limit shared by every team refuses healthy customers once aggregate demand
 grows, so the shipped defaults leave these off and keep each one as explicit
-operator configuration. Korey decided each on 2026-11-04.
+operator configuration.
 
-- Object-store request budget: no per-minute stop by default, extending
-  decision 56.2, which made the per-day stop opt-in. Set
+- Object-store request budget: no per-minute stop by default, and the
+  per-day stop is opt-in. Set
   `--object-store-budget` for an emergency brake. GitHub scopes cache request
   limits to a repository, and CircleCI limits concurrency per account and
   resource class; neither stops every customer on aggregate traffic.
@@ -255,7 +254,7 @@ operator configuration. Korey decided each on 2026-11-04.
   queues work at its concurrency limit instead of refusing it.
 - Hourly run cap: the limits profiles no longer cap runs per principal (600 an
   hour, 60 on `cloud-free`). A GitHub App delivery the cap refused became a
-  failed delivery an admin had to process again (decision 41), so ordinary
+  failed delivery an admin had to process again, so ordinary
   push volume turned into manual recovery. The team queue shed depth stays,
   and `--max-runs-per-principal-hour` remains an operator setting. GitHub
   allows 500 workflow runs per ten seconds per repository, and CircleCI queues
@@ -264,7 +263,7 @@ operator configuration. Korey decided each on 2026-11-04.
   and none of 20 live Actions credentials per team. A credential lives about an
   hour after its job ends, so the credential cap limited workflow throughput,
   not concurrency. Verified OIDC identity, one exchange per workflow run
-  attempt, and the one-hour credential lifetime of decision 67 stay. GitHub
+  attempt, and the one-hour credential lifetime stay. GitHub
   permits far higher workflow concurrency, and CircleCI bounds active
   execution through plan and resource-class limits rather than credentials.
 

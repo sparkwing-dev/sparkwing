@@ -138,7 +138,7 @@ type hostExecBenchSpec struct {
 	Dir     string `json:"dir"`
 }
 
-// TestHostExecBenchmark measures one cell for design/rewrite/proposals/thin-sdk-step3/bench.py.
+// TestHostExecBenchmark measures one benchmark cell named by HOSTEXEC_BENCH.
 // D spawns directly; T and TC are today's SDK-run Run and Capture, whose output
 // reaches the masked log through SDK frames; P1 and P2 are the same calls run by the host.
 func TestHostExecBenchmark(t *testing.T) {
