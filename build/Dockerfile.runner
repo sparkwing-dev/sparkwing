@@ -15,8 +15,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       ./cmd/sparkwing-runner
 
 FROM golang:1.27.4-bookworm@sha256:ce59b41415e2524ae99926fe1f37ce48ba8c194dcbd2a56a65436cdcefa2bd34 AS tools
-# perf: Go's regression corpus, API baselines and HTML docs are not pipeline build inputs.
-RUN rm -rf /usr/local/go/test /usr/local/go/api /usr/local/go/doc
+# perf: Go's regression corpus, API baselines, HTML docs and package test fixtures are not
+# pipeline build inputs; src/cmd stays because pipelines may build the Go tools.
+RUN rm -rf /usr/local/go/test /usr/local/go/api /usr/local/go/doc && \
+    find /usr/local/go -type d -name testdata -prune -exec rm -rf {} +
 ARG TARGETARCH
 # safety: pins cover every downloaded executable, including both Docker CLI plugins.
 RUN set -eu; \
