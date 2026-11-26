@@ -66,10 +66,27 @@ func TestReleaseCLIWithConcurrentMainActor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			writeDeliveryTool(t, filepath.Join(tools, "go"), fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n 'run ./internal/doccheck --sidebar docs'|'test ./cmd/sparkwing -run ^TestPipelineScaffoldDoesNotRequireGoPatch$ -count=1'|'run ./cmd/verify-release --index-out '*|'mod download %s@v0.1.0') exit 0;;\nesac\nexec %q \"$@\"\n", sdkModulePath, realGo))
-			for _, tool := range []string{"curl", "node"} {
-				writeDeliveryTool(t, filepath.Join(tools, tool), "#!/bin/sh\nexit 0\n")
-			}
+			writeDeliveryTool(t, filepath.Join(tools, "go"), fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n 'run ./internal/doccheck --sidebar '*|'test ./cmd/sparkwing -run ^TestPipelineScaffoldDoesNotRequireGoPatch$ -count=1'|'run ./cmd/verify-release --index-out '*|'mod download %s@v0.1.0') exit 0;;\nesac\nexec %q \"$@\"\n", sdkModulePath, realGo))
+			writeDeliveryTool(t, filepath.Join(tools, "node"), "#!/bin/sh\nexit 0\n")
+			// safety: the site fixture publishes and documents the previous release, so the published-docs check must pass the cut.
+			docsRead := filepath.Join(t.TempDir(), "docs-read")
+			writeDeliveryTool(t, filepath.Join(tools, "curl"), fmt.Sprintf(`#!/bin/sh
+set -eu
+url= output=
+while [ "$#" -gt 0 ]; do
+ case "$1" in
+  https://*) url=$1; shift ;;
+  -o) output=$2; shift 2 ;;
+  *) shift ;;
+ esac
+done
+case "$url" in
+ https://sparkwing.dev/llms.txt) printf '# sparkwing -- %%s (latest)\n' %[1]s >"$output"; touch %[2]s ;;
+ https://sparkwing.dev/versions.json) printf '{"latest":"%%s"}\n' %[1]s >"$output" ;;
+ https://sparkwing.dev/versions.json.sig) : >"$output" ;;
+ *) exit 41 ;;
+esac
+`, pin, shellQuote(docsRead)))
 			for _, module := range []string{".sparkwing", kubernetesE2EPipelineModuleRel} {
 				cmd := exec.CommandContext(ctx, realGo, "-C", filepath.Join(repo, module), "mod", "tidy")
 				if out, err := cmd.CombinedOutput(); err != nil {
@@ -107,7 +124,7 @@ func TestReleaseCLIWithConcurrentMainActor(t *testing.T) {
 			barrier := t.TempDir()
 			writeDeliveryTool(t, filepath.Join(tools, "git"), fmt.Sprintf(`#!/bin/sh
 set -eu
-if [ "$1" = push ] && [ "${2-}" = --atomic ] && [ ! -e %q/once ]; then
+if [ "$1" = push ] && case " $* " in *" --atomic "*) true ;; *) false ;; esac && [ ! -e %q/once ]; then
  touch %q/once %q/publishing
  while [ ! -e %q/advanced ]; do sleep 0.02; done
 fi
@@ -173,6 +190,9 @@ exec %q -c user.name=Acceptance -c user.email=acceptance@example.invalid -c comm
 				}
 				t.Logf("source=%s actor=%s: rejected tag left main at the actor commit", source, advanced)
 				return
+			}
+			if _, err := os.Stat(docsRead); err != nil {
+				t.Fatalf("the cut did not read the published docs index: %v", err)
 			}
 			cut := strings.TrimSpace(gitRun(t, origin, "rev-parse", version+"^{commit}"))
 			if strings.TrimSpace(gitRun(t, origin, "rev-parse", cut+"^")) != source {

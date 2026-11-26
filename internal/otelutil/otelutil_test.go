@@ -310,3 +310,18 @@ func TestInitRefusesMalformedOTLPEndpoint(t *testing.T) {
 		})
 	}
 }
+
+func TestTelemetryResourceReadsEnvironmentAttributes(t *testing.T) {
+	t.Setenv("OTEL_RESOURCE_ATTRIBUTES", "k8s.namespace.name=sparkwing-staging,service.name=ignored")
+	res, err := telemetryResource(t.Context(), "sparkwing-controller", "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, kv := range res.Attributes() {
+		got[string(kv.Key)] = kv.Value.Emit()
+	}
+	if got["k8s.namespace.name"] != "sparkwing-staging" || got["service.name"] != "sparkwing-controller" {
+		t.Fatalf("resource attributes = %v; want the namespace from the environment and the explicit service name", got)
+	}
+}

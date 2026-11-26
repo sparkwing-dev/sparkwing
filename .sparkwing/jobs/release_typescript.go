@@ -19,16 +19,8 @@ func checkTypeScriptRelease(ctx context.Context, repo string) error {
 			sparkwing.Warn(ctx, "remove SDK policy scratch: %v", err)
 		}
 	}()
-	for _, name := range []string{"versions.json", "versions.json.sig"} {
-		if _, err := sparkwing.Exec(ctx, "curl", "--fail", "--silent", "--show-error", "--location",
-			"https://sparkwing.dev/"+name, "-o", filepath.Join(dir, name)).Dir(repo).Run(); err != nil {
-			return fmt.Errorf("release TypeScript SDK policy download: %w", err)
-		}
-	}
-	// safety: publication decisions must use the same authenticated policy as the hosted release.
-	if _, err := sparkwing.Exec(ctx, "go", "run", "./cmd/verify-release", "--index-out", dir, "--verify").
-		Dir(repo).Env("GOWORK", "off").Run(); err != nil {
-		return fmt.Errorf("release TypeScript SDK policy verification: %w", err)
+	if err := downloadVerifiedReleaseIndex(ctx, repo, dir); err != nil {
+		return fmt.Errorf("release TypeScript SDK policy: %w", err)
 	}
 	if _, err := sparkwing.Exec(ctx, "node", "bin/typescript-release.mjs", repo,
 		filepath.Join(dir, "versions.json"), filepath.Join(dir, "sdk-entry.json"), repo).

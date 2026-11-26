@@ -91,7 +91,7 @@ func TestIdentityLastOwnerCannotLeaveAndAMemberKeepsTheirTeams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, joiner.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, joiner.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tenant(t, st, joiner.PersonalTeam).UpdateMembership(ctx, membershipActor(t, st, joiner.Account.ID, tenant(t, st, joiner.PersonalTeam).Team()), store.MembershipUpdate{AccountID: joiner.Account.ID}); !errors.Is(err, store.ErrLastOwner) {
@@ -116,14 +116,14 @@ func TestIdentityInvitationNeedsTheInvitedVerifiedEmail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, y.Account.ID), inv.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, y.Account.ID), inv.ID, store.SignUpConditions{}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("y accepting x's invitation = %v, want ErrNotFound", err)
 	}
-	acc, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, x.Account.ID), inv.ID)
+	acc, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, x.Account.ID), inv.ID, store.SignUpConditions{})
 	if err != nil || acc.Team != owner.PersonalTeam || acc.Admitted {
 		t.Fatalf("x accepting = %+v, %v", acc, err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, x.Account.ID), inv.ID); !errors.Is(err, store.ErrInvitationClosed) {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, x.Account.ID), inv.ID, store.SignUpConditions{}); !errors.Is(err, store.ErrInvitationClosed) {
 		t.Fatalf("second accept = %v, want ErrInvitationClosed", err)
 	}
 	role, err := tenant(t, st, owner.PersonalTeam).MemberRole(ctx, x.Account.ID)
@@ -155,7 +155,7 @@ func TestIdentityRolesCannotEscalateOrOrphanATeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, ed.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, ed.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := tn.UpdateMembership(ctx, membershipActor(t, st, ed.Account.ID, tn.Team()), store.MembershipUpdate{AccountID: ed.Account.ID, Role: rolePointer(store.RoleOwner)}); err == nil {
@@ -284,7 +284,7 @@ func TestIdentitySecondSubjectFromTheSameProviderGetsItsOwnAccount(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, first.Account.ID), inv.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, first.Account.ID), inv.ID, store.SignUpConditions{}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("the account that lost the address accepted its invitation: %v", err)
 	}
 }
@@ -392,7 +392,7 @@ func TestIdentityWithdrawnInvitationCannotBeAccepted(t *testing.T) {
 	if err := tn.WithdrawInvitationForTest(t, ctx, inv.ID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, x.Account.ID), inv.ID); !errors.Is(err, store.ErrInvitationClosed) {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, x.Account.ID), inv.ID, store.SignUpConditions{}); !errors.Is(err, store.ErrInvitationClosed) {
 		t.Fatalf("accepting a withdrawn invitation = %v, want ErrInvitationClosed", err)
 	}
 	if err := tn.WithdrawInvitationForTest(t, ctx, inv.ID, time.Now()); !errors.Is(err, store.ErrNotFound) {
@@ -412,7 +412,7 @@ func TestIdentityOnlyASessionLeavesATeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	token := own.MemberCapabilityForTest(t, member.Account.ID, time.Now()).Capability

@@ -75,7 +75,7 @@ func TestReleaseDryRunRunsTheReadOnlyCutChecks(t *testing.T) {
 	for _, step := range doc.Steps {
 		safe[step.ID] = step.SafeWithoutDryRun
 	}
-	for _, id := range []string{"version-freshness", "typescript-release", "go-directives", "sdk-pins", "changelog-links", "docs-sidebar"} {
+	for _, id := range []string{"version-freshness", "typescript-release", "go-directives", "sdk-pins", "changelog-links", "docs-sidebar", "published-docs"} {
 		if !safe[id] {
 			t.Errorf("release-cut-checks step %s skips under --dry-run, so a preview passes a cut it refuses", id)
 		}

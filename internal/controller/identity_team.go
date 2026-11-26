@@ -202,7 +202,7 @@ func (s *Server) handleAcceptInvitation(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		return err
 	}
-	acc, err := writer.AcceptAccountInvitation(r.Context(), a, r.PathValue("invitation"))
+	acc, err := writer.AcceptAccountInvitation(r.Context(), a, r.PathValue("invitation"), s.signUpConditions(r.Context()))
 	if err != nil {
 		return invitationRefusal(err)
 	}

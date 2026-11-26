@@ -84,7 +84,7 @@ func TestSecurityMutationsRequireAudit(t *testing.T) {
 		s, a, _, _ := accountMutationFixture(t)
 		invitation := accountMutationInvitation(t, s)
 		rewriteSchemaExec(t, s.db, `CREATE TRIGGER refuse_security_audit BEFORE INSERT ON audit_events BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
-		if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); err == nil {
+		if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID, SignUpConditions{}); err == nil {
 			t.Fatal("unaudited invitation acceptance committed")
 		}
 		var membership int
@@ -92,7 +92,7 @@ func TestSecurityMutationsRequireAudit(t *testing.T) {
 			t.Fatalf("acceptance escaped rollback: members=%d %v", membership, err)
 		}
 		rewriteSchemaExec(t, s.db, `DROP TRIGGER refuse_security_audit`)
-		if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID); err != nil {
+		if _, err := s.AsOperator().AcceptAccountInvitation(t.Context(), a, invitation.ID, SignUpConditions{}); err != nil {
 			t.Fatal(err)
 		}
 		securityAuditEvent(t, s, "invitation.accepted")

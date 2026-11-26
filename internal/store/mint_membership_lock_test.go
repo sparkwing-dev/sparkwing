@@ -25,7 +25,7 @@ func TestCapabilityMintWaitsOnAnUncommittedMembershipDrop(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
+			if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 				t.Fatal(err)
 			}
 

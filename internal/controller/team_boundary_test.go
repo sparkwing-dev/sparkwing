@@ -196,7 +196,7 @@ func (f *tenancyFixture) member(owner store.Account, name string, role store.Rol
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	if _, err := f.st.AsOperator().AcceptAccountInvitation(ctx, fixtureAccountAuthority(f.t, f.st, acct), inv.ID); err != nil {
+	if _, err := f.st.AsOperator().AcceptAccountInvitation(ctx, fixtureAccountAuthority(f.t, f.st, acct), inv.ID, store.SignUpConditions{}); err != nil {
 		f.t.Fatal(err)
 	}
 	return session(f.t, f.st, acct, f.teamA.Team())
