@@ -1017,20 +1017,33 @@ boundaries. Purge's account timestamp uses the same unit.
 
 ## Windowed limits
 
-`window_limit.go` owns every durable cap of the form "at most N events per key
-in a sliding window". `claimWindowLimitTx` runs in the caller's transaction:
-it takes an advisory lock on the limit's kind and key digest on PostgreSQL
-(SQLite already serializes writers), counts the key's `limit_events` rows
-newer than the window, refuses at the limit without writing, and otherwise
-inserts one row. Rolling the transaction back releases the slot, so a request
+`window_limit.go` owns the durable caps that count events in a log of their
+own: the daily invitation cap per team, and the invitation email caps per
+inviting account and per recipient address. `claimWindowLimitsTx` runs in the
+caller's transaction: it takes an advisory lock on each limit's kind and key
+digest on PostgreSQL, in the order given (SQLite already serializes writers),
+reads the clock once after the locks, counts each key's `limit_events` rows
+newer than its window, refuses at the first full limit without writing, and
+otherwise inserts one row per key at that time. Rolling the transaction back releases the slot, so a request
 refused after the claim consumes nothing. A row keeps the limit kind, the
 SHA-256 digest of the key and the event time, so the log outlives the teams,
 accounts and addresses it counts without keeping their identifiers; callers
 normalize a key with several spellings before claiming. Each limit is declared
 in `windowLimits`, the claim refuses an undeclared one, and the retention pass
-deletes rows older than the longest declared window. The daily invitation cap
-per team and the invitation email caps per inviting account and per recipient
-address use it; an email claim takes the account before the address.
+deletes rows older than the longest declared window. An email claim takes the
+account before the address. Schema 44 backfills the team invitation events of
+the last day from `invitations`, so the upgrade keeps each team's count.
+
+Three windowed caps count their own records instead. Stripe Checkout Sessions
+per team per hour (`billing_pages.go`, `Tenant.CreateBillingPage`) count
+`billing_pages` rows, which also carry the request's idempotency key and page,
+so the row is the event. Runs per principal per hour (`compute_limits.go`,
+`runsPerHourRefusal`) count `runs` by admission subject under the compute-guard
+lock the other create-side guards share, and the limit is a team setting. The
+sign-up gate (`signup_gate.go`, `tripVelocityTx`) counts `signup_admissions`
+over an hour and a day whose start is clamped to the operator's last reset,
+trips the gate to the waitlist rather than refusing, and locks the gate row
+that mode changes share.
 
 ## Durable admission
 
