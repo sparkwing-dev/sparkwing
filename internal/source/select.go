@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
@@ -36,6 +37,10 @@ func (c *SelectedConfig) Project() *projectconfig.Config {
 
 // Select resolves the execution commit, reads its configuration for the pipeline's code pin and resolves the code commit.
 func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, code runspec.Source, override string, options Options) (runspec.Git, runspec.Source, *SelectedConfig, error) {
+	repository := git.Repository.Display
+	if repository == "" {
+		repository = spec.RepoKey
+	}
 	lookup := func(ref string) (string, error) {
 		var sha string
 		var err error
@@ -56,13 +61,9 @@ func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, co
 		}
 		var dns *net.DNSError
 		if errors.Is(err, errRefUnavailable) || spec.RemoteURL != "" && (gitExit(err, 128) || errors.As(err, &dns) && dns.IsNotFound) {
-			repository := git.Repository.Display
-			if repository == "" {
-				repository = spec.RepoKey
-			}
 			return "", errors.Join(&apierr.Error{Code: apierr.PlanFailed, Message: fmt.Sprintf("cannot resolve source repository %q at ref %q; check the repository URL, access credentials and that the ref exists", repository, ref)}, err)
 		}
-		return sha, err
+		return sha, hostLookupFailure(err, repository)
 	}
 	git, _, err := ResolveRevisions(ctx, git, runspec.Source{}, "", lookup)
 	if err != nil {
@@ -80,7 +81,7 @@ func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, co
 	}
 	raw, found, err := read(ctx, git.SHA, path.Join(directory, projectconfig.Filename))
 	if err != nil {
-		return git, code, nil, err
+		return git, code, nil, hostLookupFailure(err, repository)
 	}
 	var cfg *projectconfig.Config
 	code.RequestedRef = ""
@@ -97,6 +98,20 @@ func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, co
 		return git, code, nil, err
 	}
 	return git, code, &SelectedConfig{Config: cfg, Raw: raw}, err
+}
+
+// safety: only a resolver's definite "no such host" is the caller's input to fix; any other
+// lookup failure is a temporary outage that clients retry, never an internal error.
+func hostLookupFailure(err error, repository string) error {
+	var dns *net.DNSError
+	switch {
+	case !errors.As(err, &dns):
+		return err
+	case dns.IsNotFound:
+		return errors.Join(&apierr.Error{Code: apierr.PlanFailed, Message: fmt.Sprintf("source repository %q names a host that does not exist; check the repository URL", repository)}, err)
+	default:
+		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: fmt.Sprintf("cannot resolve the host of source repository %q right now; retry shortly", repository), Details: map[string]any{"retry_after_ms": 1000}}, err)
+	}
 }
 
 func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Options) (_ []byte, _ bool, err error) {
