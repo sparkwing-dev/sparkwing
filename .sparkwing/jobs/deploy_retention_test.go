@@ -107,7 +107,7 @@ func TestDeployPrepullTagFollowsEachRunnerIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 		pin := imagePin{Repository: ref.Context().Name(), Digest: ref.DigestStr()}
-		if err := (ecrRegistry{}).tag(t.Context(), "", pin, "cloud-prepull"); err != nil {
+		if err := (ecrRegistry{host: ref.Context().RegistryStr()}).tag(t.Context(), "", pin, "cloud-prepull"); err != nil {
 			t.Fatal(err)
 		}
 		got, err := remote.Head(ref.Context().Tag("cloud-prepull"))

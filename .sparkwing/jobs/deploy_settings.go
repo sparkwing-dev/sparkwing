@@ -345,6 +345,10 @@ func (d *deployer) signIn(ctx context.Context) error {
 		return fmt.Errorf("deploy settings %s: %w", source, err)
 	}
 	d.cfg.applySettings(settings)
+	if registry, ok := d.tools.registry.(ecrRegistry); ok {
+		registry.host = d.cfg.Registry
+		d.tools.registry = registry
+	}
 	d.settled = true
 	return nil
 }

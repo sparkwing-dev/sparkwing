@@ -1426,10 +1426,22 @@ func (d *deployer) observeClaims(ctx context.Context, runs []string, claims []ma
 	return nil
 }
 
-type ecrRegistry struct{}
+// safety: host is the registry the deploy settings validated against the
+// role's account; the ECR credential goes to no other host, whatever a
+// GitOps pin or a flag names. Until sign-in sets it, every call is refused.
+type ecrRegistry struct{ host string }
 
-func (ecrRegistry) options(ctx context.Context, password string) []remote.Option {
-	return []remote.Option{remote.WithContext(ctx), remote.WithAuth(&authn.Basic{Username: "AWS", Password: password})}
+type ecrKeychain struct{ host, password string }
+
+func (k ecrKeychain) Resolve(target authn.Resource) (authn.Authenticator, error) {
+	if k.host == "" || target.RegistryStr() != k.host {
+		return nil, fmt.Errorf("refusing to send the ECR credential to %s; the deploy registry is %q", target.RegistryStr(), k.host)
+	}
+	return &authn.Basic{Username: "AWS", Password: k.password}, nil
+}
+
+func (r ecrRegistry) options(ctx context.Context, password string) []remote.Option {
+	return []remote.Option{remote.WithContext(ctx), remote.WithAuthFromKeychain(ecrKeychain{host: r.host, password: password})}
 }
 
 func (r ecrRegistry) digest(ctx context.Context, password, ref string) (string, error) {
@@ -1494,7 +1506,7 @@ func (r ecrRegistry) revision(ctx context.Context, password, ref string) (string
 }
 
 func (r ecrRegistry) publish(ctx context.Context, password string, in PublishImagesArgs, engine string) error {
-	refs, err := publishReleaseImages(ctx, in, engine, remote.WithAuth(&authn.Basic{Username: "AWS", Password: password}))
+	refs, err := publishReleaseImages(ctx, in, engine, remote.WithAuthFromKeychain(ecrKeychain{host: r.host, password: password}))
 	for _, ref := range refs {
 		sparkwing.Info(ctx, "published %s (linux/amd64, linux/arm64)", ref)
 	}
