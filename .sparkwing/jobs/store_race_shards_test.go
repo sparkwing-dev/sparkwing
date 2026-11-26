@@ -82,6 +82,8 @@ func TestStoreRaceExecIsolatesProductStateAndGoWorkspace(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", "operator-home")
 	t.Setenv("SPARKWING_AGENT_TOKEN", "operator-token")
 	t.Setenv("GOWORK", "operator-workspace")
+	t.Setenv("GIT_CONFIG_GLOBAL", "operator-gitconfig")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
 	result, err := raceExec(newTestContext(t), home, "env").Capture()
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +92,8 @@ func TestStoreRaceExecIsolatesProductStateAndGoWorkspace(t *testing.T) {
 	for _, want := range []string{
 		"SPARKWING_HOME=" + home,
 		"GOWORK=auto",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_NOSYSTEM=1",
 	} {
 		if !slices.Contains(lines, want) {
 			t.Errorf("suite environment lacks %q", want)
