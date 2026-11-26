@@ -147,36 +147,61 @@ func TestInspectionPolicyRefusalPreventsInstallationProperty(t *testing.T) {
 	}
 }
 
-func TestPlanPreviewReceivesTheCheckoutGitContext(t *testing.T) {
-	repo := initSnapshotRepo(t)
+func gitContextRepo(t *testing.T) (repo, dir, sha string) {
+	t.Helper()
+	repo = initSnapshotRepo(t)
 	runSnapshotGit(t, repo, "symbolic-ref", "HEAD", "refs/heads/main")
-	dir := filepath.Join(repo, ".sparkwing")
+	dir = filepath.Join(repo, ".sparkwing")
 	writeRepoFile(t, filepath.Join(dir, "go.mod"), "module fixture\n\ngo 1.26\n\nrequire github.com/sparkwing-dev/sparkwing/sparkwing v1.2.3\n")
 	writeRepoFile(t, filepath.Join(dir, "sparkwing.yaml"), "pipelines:\n  - name: demo\n    entrypoint: demo\n")
 	runSnapshotGit(t, repo, "add", ".")
 	runSnapshotGit(t, repo, "commit", "-qm", "pipeline")
-	sha := strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
-	home := t.TempDir()
+	runSnapshotGit(t, repo, "remote", "add", "origin", "https://example.invalid/acme/widgets.git")
+	runSnapshotGit(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+	runSnapshotGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	return repo, dir, strings.TrimSpace(runSnapshotGit(t, repo, "rev-parse", "HEAD"))
+}
+
+func gitContextSDK(t *testing.T, home string) (options source.Options, requests, processes string) {
+	t.Helper()
+	bin, requests := fakePlanSDK(t, fixtureDescribe, fixturePlan, fixtureEval)
+	writeRepoFile(t, filepath.Join(filepath.Dir(bin), "hello"), `"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v1.2.3"}}}`)
+	processes = filepath.Join(filepath.Dir(bin), "processes")
+	logged := filepath.Join(filepath.Dir(bin), "logged")
+	script := "#!/bin/sh\nprintf '%s|%s|%s|%s\\n' \"$SPARKWING_BRANCH\" \"$SPARKWING_COMMIT\" \"$SPARKWING_REPO\" \"$SPARKWING_TRIGGER_SOURCE\" >> " + processes + "\nexec " + bin + " \"$@\"\n"
+	if err := os.WriteFile(logged, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	target := releaseasset.Target{Binary: releaseasset.Sparkwing, GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
+	selected := engine.Resolved{Identity: engineid.Identity{Version: "v1.2.3", ManifestDigest: "fixture"}, Target: target, Executable: logged}
+	options = source.Options{
+		Target: target, Workspace: filepath.Join(home, "workspaces"),
+		Engines: inspectionEngines{
+			resolve: func(pin engineid.Pin, _ releaseasset.Target) (engine.Resolved, error) {
+				selected.Identity.Pin = pin
+				return selected, nil
+			},
+			ensure: func(engineid.Identity, releaseasset.Target) (engine.Resolved, error) { return selected, nil },
+		},
+		InstallSDK: func(_ context.Context, _ engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
+			pipelineDir, err := request.PipelineDirectory()
+			return engine.SDKCommand{Directory: pipelineDir, Command: []string{logged}}, err
+		},
+	}
+	return options, requests, processes
+}
+
+func processLines(t *testing.T, path string) []string {
+	t.Helper()
+	return strings.Split(strings.TrimSuffix(readRequests(t, path), "\n"), "\n")
+}
+
+func TestPlanPreviewReceivesTheCheckoutGitContext(t *testing.T) {
+	repo, dir, sha := gitContextRepo(t)
+	home := t.TempDir()
 	planRun := func(t *testing.T) nodewire.RunContext {
 		t.Helper()
-		bin, requests := fakePlanSDK(t, fixtureDescribe, fixturePlan, fixtureEval)
-		writeRepoFile(t, filepath.Join(filepath.Dir(bin), "hello"), `"ok":true,"result":{"protocol":2,"sdk":{"language":"go","version":"v1.2.3"}}}`)
-		selected := engine.Resolved{Identity: engineid.Identity{Version: "v1.2.3", ManifestDigest: "fixture"}, Target: target, Executable: bin}
-		options := source.Options{
-			Target: target, Workspace: filepath.Join(home, "workspaces"),
-			Engines: inspectionEngines{
-				resolve: func(pin engineid.Pin, _ releaseasset.Target) (engine.Resolved, error) {
-					selected.Identity.Pin = pin
-					return selected, nil
-				},
-				ensure: func(engineid.Identity, releaseasset.Target) (engine.Resolved, error) { return selected, nil },
-			},
-			InstallSDK: func(_ context.Context, _ engine.Resolved, request engine.SDKInstallRequest) (engine.SDKCommand, error) {
-				pipelineDir, err := request.PipelineDirectory()
-				return engine.SDKCommand{Directory: pipelineDir, Command: []string{bin}}, err
-			},
-		}
+		options, requests, _ := gitContextSDK(t, home)
 		err := withLocalPipelineEntry(t.Context(), home, dir, "demo", runFlags{}, os.Environ(), options, func(ctx context.Context, entry pipelineInspection, _ string) error {
 			_, err := planPipelineEntry(ctx, entry, "demo", []string{"--env=prod"})
 			return err
@@ -208,12 +233,43 @@ func TestPlanPreviewReceivesTheCheckoutGitContext(t *testing.T) {
 				runSnapshotGit(t, repo, "checkout", "-q", tc.checkout)
 			}
 			run := planRun(t)
-			if run.Git == nil || run.Git.Branch != tc.branch || run.Git.SHA != sha || run.Git.Repo == "" {
-				t.Fatalf("plan preview git context = %+v, want branch %q at %s", run.Git, tc.branch, sha)
+			want := nodewire.Git{SHA: sha, Branch: tc.branch, DefaultBranch: "main", Repo: repo}
+			if run.Git == nil || *run.Git != want {
+				t.Fatalf("plan preview git context = %+v, want %+v", run.Git, want)
 			}
 			if run.Trigger == nil || run.Trigger.Source != "local" {
 				t.Fatalf("plan preview trigger = %+v, want local", run.Trigger)
 			}
 		})
+	}
+}
+
+func TestDiscoveryRunsWithoutGitContext(t *testing.T) {
+	_, dir, sha := gitContextRepo(t)
+	home := t.TempDir()
+	options, _, processes := gitContextSDK(t, home)
+	var described int
+	err := withLocalPipelineEntry(t.Context(), home, dir, "demo", runFlags{}, os.Environ(), options, func(ctx context.Context, entry pipelineInspection, _ string) error {
+		if _, err := entry.presentation(ctx); err != nil {
+			return err
+		}
+		described = len(processLines(t, processes))
+		_, err := planPipelineEntry(ctx, entry, "demo", []string{"--env=prod"})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := processLines(t, processes)
+	if described == 0 || len(lines) <= described+1 {
+		t.Fatalf("SDK processes: show %d, total %v", described, lines)
+	}
+	for i, line := range lines[:described+1] {
+		if line != "|||" {
+			t.Fatalf("discovery process %d saw git variables %q", i, line)
+		}
+	}
+	if last := lines[len(lines)-1]; !strings.Contains(last, "|"+sha+"|") || !strings.HasSuffix(last, "|local") {
+		t.Fatalf("plan process git variables = %q, want commit %s from a local trigger", last, sha)
 	}
 }

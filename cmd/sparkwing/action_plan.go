@@ -102,6 +102,8 @@ type pipelineInspection struct {
 	projectFile string
 	planner     nodehost.SDKPlanner
 	input       nodehost.PlanningProcessInput
+	// safety: describe runs without git context, as in run, so only the Plan request gets planRun.
+	planRun nodewire.RunContext
 }
 
 func withPipelineEntry(pipeline string, fn func(context.Context, pipelineInspection, string) error) error {
@@ -218,8 +220,9 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 		}},
 		input: nodehost.PlanningProcessInput{
 			Entry: entry, Entrypoint: selection.identity.Entrypoint, Listed: listedPipelines(selection.project), Environment: environment,
-			Run: nodehost.LocalRunContext("inspection", pipeline, git, entry), Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+			Run: nodewire.RunContext{RunID: "inspection", Pipeline: pipeline}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 		},
+		planRun: nodehost.LocalRunContext("inspection", pipeline, git, entry),
 	}
 	return fn(ctx, inspection, filepath.Dir(selection.execution.Directory))
 }
@@ -265,6 +268,7 @@ func planPipelineEntry(ctx context.Context, entry pipelineInspection, pipeline s
 		return out, planError(pipeline, prepared.Declarations.Error(&apierr.Error{Code: apierr.InvalidArgs, Message: err.Error()}))
 	}
 	entry.input.Args = resolvedArgs
+	entry.input.Run.Git, entry.input.Run.Trigger = entry.planRun.Git, entry.planRun.Trigger
 	prepared, err = entry.planner.Prepare(ctx, entry.input, nodehost.PlanningInput{})
 	if err != nil {
 		return out, planError(pipeline, err)
