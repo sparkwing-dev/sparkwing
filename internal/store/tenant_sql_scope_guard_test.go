@@ -132,8 +132,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"belonged to the deployment and acted in each of its teams",
 	"(*Operator).grantCreatorTeamsTx": "lists every team holding grants a deleted account created, to lock each team's ledger " +
 		"before relabelling them",
-	"(*Operator).ClaimInvitationEmail": "counts the invitation emails one address received and one account sent from every team, " +
-		"because the daily caps protect the inbox and the deployment's sender, not the team",
+	"(*Operator).ClaimInvitationEmail": "reads and marks one invitation by its globally unique ID for the deployment's sender, " +
+		"whose daily caps count the inbox and the inviting account across every team",
 	"(*Operator).GitHubAppInstallationTeam": "a webhook delivery and a repository's installation name no team, " +
 		"so the installation's binding is how either finds the team it belongs to",
 	"(*Operator).disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +
@@ -171,6 +171,13 @@ var reviewedOperatorTableSQL = map[string]string{
 // safety: each entry joins a tenant relation pinned by a key other than team, with the reason that key is safe.
 var reviewedForeignKeyedJoins = map[string]string{
 	"(*Tenant).recordSessionMembershipTx": "a session is keyed by its hash across teams; m.team binds the tenant the row is written for",
+}
+
+// safety: a schema upgrade backfill reads one tenant table across every team once, inside the open transaction
+// that migrates the store. Each entry is keyed function|table and covers only a plain read of that one table.
+var reviewedUpgradeBackfillSQL = map[string]string{
+	"backfillTeamInvitationEventsTx|invitations": "the schema 44 upgrade reads every team's invitations of the last day " +
+		"to record each in limit_events under its own team's digest",
 }
 
 // safety: claim search reads every claimable team; this statement binds each row's team from the
@@ -235,6 +242,12 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 		if stmt.key == "actionsTeamForeignKeyUpgrade" && preservesSchema35ActionsRows(stmt.text) {
 			continue
 		}
+		if len(tables) == 1 && strings.HasPrefix(strings.ToUpper(strings.TrimSpace(stmt.text)), "SELECT ") && len(unscopedSubqueries(stmt.text)) == 0 {
+			if _, ok := reviewedUpgradeBackfillSQL[stmt.key+"|"+tables[0]]; ok {
+				seen["backfill "+stmt.key+"|"+tables[0]] = true
+				continue
+			}
+		}
 		unscoped := unscopedSubqueries(stmt.text)
 		if outerCarriesTeam(stmt.text) && len(unscoped) == 0 {
 			continue
@@ -291,6 +304,11 @@ func TestTenantSQLScope_EveryTenantTableStatementCarriesTheKey(t *testing.T) {
 	for key, why := range reviewedRuntimeRelations {
 		if strings.TrimSpace(why) == "" || !seen["runtime "+key] {
 			t.Errorf("reviewedRuntimeRelations entry %q is stale or has no reason; delete it", key)
+		}
+	}
+	for key, why := range reviewedUpgradeBackfillSQL {
+		if strings.TrimSpace(why) == "" || !seen["backfill "+key] {
+			t.Errorf("reviewedUpgradeBackfillSQL entry %q is stale or has no reason; delete it", key)
 		}
 	}
 	for key, why := range reviewedClaimSearchSQL {

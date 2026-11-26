@@ -88,8 +88,9 @@ controller:
   # runner identity: the authenticated holder, else the runner name the request
   # states, else its Here run or machine, else one unnamed bucket that such
   # requests share. A fleet sharing one team is budgeted runner by runner. The agent
-  # liveness heartbeat is never budgeted. Empty leaves both unlimited; 1200
-  # suits the cadence the shipped runners use.
+  # liveness heartbeat is never budgeted. Empty leaves both unlimited. A
+  # shipped runner renews each claim it holds once a minute, so a heartbeat
+  # budget of 1200 allows ten times that for about 120 concurrent claims.
   claimsPerRunnerMinute: ""
   heartbeatsPerRunnerMinute: ""
 
