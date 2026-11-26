@@ -186,7 +186,7 @@ var paymentModeAcrossModes = map[string]string{
 	"billingPriceTx|credit_charges":                                    "reads one award's reservation by its id",
 	"paidBillingTx|credit_charges":                                     "settles one award against everything charged to it; cutover refuses to start while any award is unsettled, so an award's charges share one mode",
 	"settledBillingResultTx|credit_charges":                            "reports one award's billed seconds, in whatever mode they were charged",
-	"overflowControlTx|credit_charges":                                 "sums one award's charged seconds; the reservation it filters on pins the mode, and an award's charges share one mode",
+	"overflowControlInModeTx|credit_charges":                           "sums one award's charged seconds; the reservation it filters on pins the mode, and an award's charges share one mode",
 	"(*Operator).refundableBillingSecondsTx|credit_charges":            "sums one award's charged seconds; the reservation it filters on pins the mode, and an award's charges share one mode",
 	"(*Operator).setPaymentModeTx|credit_checkouts":                    "looks for open test-mode refills before a switch; the literal 'test' names the mode",
 	"(*Operator).paidGrantForPaymentTx|credit_checkouts,credit_grants": "the checkout is pinned to the mode, and the grant joins by its own id, which belongs to that checkout's mode",
