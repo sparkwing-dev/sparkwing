@@ -65,8 +65,6 @@ func (binding CloudJobBinding) LeaseRef() capability.LeaseRef {
 // CloudJobAward carries only a single-use bootstrap, never the launcher's root credential.
 type CloudJobAward struct {
 	teardownDeadline   time.Time
-	renewAt            time.Time
-	predecessors       []CloudNodeReservation
 	claimReceivedAt    time.Time
 	claimApplied       bool
 	LeaseExpiresAt     time.Time          `json:"lease_expires_at"`
