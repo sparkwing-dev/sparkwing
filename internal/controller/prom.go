@@ -90,7 +90,7 @@ var (
 	inflightReserveAdmittedTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "sparkwing_inflight_reserve_admitted_total",
-			Help: "Lease renewals and running job results admitted from a team's in-flight reserve after its request budget refused them.",
+			Help: "Lease renewals, node transitions and step start and finish reports admitted from a team's in-flight reserve after its request budget refused them.",
 		},
 	)
 

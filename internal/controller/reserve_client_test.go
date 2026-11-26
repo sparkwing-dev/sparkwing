@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controller/client"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/nodehost"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -131,4 +133,20 @@ func TestEvalCredentialOpensApprovalThroughAnEmptyTeamBucket(t *testing.T) {
 	if row, err := tenant.ReadNode(t.Context(), ref); err != nil || row.Status != runstate.StatusApprovalPending {
 		t.Fatalf("approval did not commit: %+v, %v", row, err)
 	}
+}
+
+func TestClaimRenewalOfAFinishedRunIsRefused(t *testing.T) {
+	e, h, raw := engineClaimHTTPFixture(t, []capability.Grant{capability.NodesClaim})
+	w := engineClaimHTTP(t, h, raw, http.MethodPost, routeRunnerClaim, `{"runner_version":"v1","kinds":["node"]}`, http.StatusOK)
+	var response controllerwire.ClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response.Claim == nil {
+		t.Fatalf("no award: %s: %v", w.Body, err)
+	}
+	claim := response.Claim
+	engineAdmitBearer(t, e.Store, claim.Capability)
+	engineClaimHTTP(t, h, claim.Capability, http.MethodPost, "/api/v1/runs/run/jobs/job/transition", `{"to":"running","cause":"start","source_attempt":0}`, http.StatusOK)
+	heartbeat := "/api/v1/claims/" + url.PathEscape(claim.UnitID) + "/heartbeat"
+	engineClaimHTTP(t, h, claim.Capability, http.MethodPost, heartbeat, `{"executing":true}`, http.StatusOK)
+	engineSQL(t, e.Store, `UPDATE runs SET status='failed',finished_at=? WHERE team='a' AND id='run'`, time.Now().UnixNano())
+	engineClaimHTTP(t, h, claim.Capability, http.MethodPost, heartbeat, `{"executing":true}`, http.StatusUnauthorized)
 }
