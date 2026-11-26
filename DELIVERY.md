@@ -327,8 +327,25 @@ the formatters, changed-package Windows test compilation, em dashes, tracker IDs
 binaries, home resolution, the docs mirror, changelog lint and links, the
 required changelog entry, the docs sidebar, the OpenAPI and API-snapshot checks and the
 generated CLI reference (`bin/gen-cli-docs.sh --check`), Markdown lint, config-reference
-drift and wire-cut coverage. Each answers in
+drift, wire-cut coverage and the TypeScript SDK version. Each answers in
 seconds with a warm build cache.
+
+The `sdk-version` policy step runs only when the change touches the SDK's
+release inputs: `sdk/typescript/`, `.github/workflows/release.yaml`, which the
+release source digest covers, and `bin/typescript-release.mjs`, which computes
+it. It verifies the signed public version index and runs the release cut's SDK
+decision, so a change to SDK release input fails at land when package.json
+names an already published SDK version with a different source digest. The
+failure names the
+version to bump in `sdk/typescript/package.json`, its lockfile and
+`typeScriptSDKVersion`. Ordinary Land repeats the step on the merged tree. When
+the index cannot be downloaded or verified, the step passes with an
+`UNVERIFIED` warning, because an outage is not something the change can clear;
+the release cut's `typescript-release` check still refuses without a verified
+index. A change outside those paths does not fetch the index. When main already
+needs a bump, every change that touches SDK release inputs fails, including one
+that leaves the digest unchanged, until a change bumps the version or restores
+the published source.
 
 The `windows-compile` policy step uses the existing changed Go package and
 committed module selection. It compiles tests with `GOOS=windows GOARCH=amd64`
@@ -410,7 +427,8 @@ git identity and signing; never a rebase). Independent changelog and migration
 fragments merge as separate files. `CONTRIBUTING.md` table additions use union merge;
 changes to the same rule need review. The push step
 then builds the affected package closure and repeats the changelog, OpenAPI,
-API-snapshot, default and qatrust vet, and fast lint checks on the merged tree.
+API-snapshot, TypeScript SDK version, default and qatrust vet, and fast lint
+checks on the merged tree.
 Vet and lint cover both the branch range and the merge delta, including new
 packages from main. It runs affected tests once over the files that differ
 between the gated tree and the merged tree, then pushes the merge. The review
@@ -658,7 +676,8 @@ version once. Recoveries of pre-change SDK entries also refuse the new hash;
 the signed identities are not rewritten. An unchanged digest retains the existing SDK entry
 and skips native assembly and npm publication. Changed source requires a new
 SDK version. Bump both package manifests before cutting the engine release.
-The first independent SDK version is `0.72.0`.
+The land gate's `sdk-version` policy step reports a missing bump when the change
+lands. The first independent SDK version is `0.72.0`.
 
 The decision emits `sdk-entry-typescript.json` for the signed language-neutral policy.
 The immutable engine release retains that entry, including the existing version

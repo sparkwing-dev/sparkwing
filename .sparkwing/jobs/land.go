@@ -592,7 +592,7 @@ func recheckMergeDelta(ctx context.Context, files []string) error {
 		return err
 	}
 	scope := fmt.Sprintf("%d file(s) in the branch and merge delta", len(mergedFiles))
-	for _, check := range []func(context.Context) error{checkChangelogRequired, checkAPISpec, checkTrackedAPISnapshot} {
+	for _, check := range []func(context.Context) error{checkChangelogRequired, checkAPISpec, checkTrackedAPISnapshot, checkTypeScriptSDKVersion} {
 		if err := check(ctx); err != nil {
 			return err
 		}
