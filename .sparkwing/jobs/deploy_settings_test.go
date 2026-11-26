@@ -24,13 +24,13 @@ func seedDeployConfigRepo(t *testing.T, root string, settings []byte) string {
 	deployGitIn(t, seed, "init", "--quiet", "-b", "main")
 	deployGitIn(t, seed, "add", "-A")
 	deployGitIn(t, seed, "commit", "--quiet", "-m", "deploy settings")
-	bare := filepath.Join(root, "config.git")
+	bare := filepath.Join(root, "fixture-config.git")
 	deployGitIn(t, root, "clone", "--quiet", "--bare", seed, bare)
 	local := filepath.Join(root, "deploy.yaml")
 	if err := os.WriteFile(local, settings, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(pipelinesEnvConfigRepo, "file://"+bare)
+	t.Setenv(pipelinesEnvConfigRepo, "git@github.com:example/fixture-config.git")
 	t.Setenv(pipelinesEnvConfigParam, "/fixture/deploy/config-key")
 	t.Setenv(pipelinesEnvDeployRole, testDeployRole)
 	t.Setenv(pipelinesEnvDeployReg, "us-west-2")
@@ -59,7 +59,7 @@ func isolatePipelinesSettings(t *testing.T) string {
 }
 
 func TestDeploySettingsFillEveryAccountValue(t *testing.T) {
-	settings, err := parseDeploySettings("fixture", fixtureDeploySettings(t, "git@github.com:example/gitops.git", "git@github.com:example/reference.git"))
+	settings, err := parseDeploySettings("fixture", fixtureDeploySettings(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,8 +70,8 @@ func TestDeploySettingsFillEveryAccountValue(t *testing.T) {
 	want.Cluster = "fixture-cluster"
 	want.ControllerBase = testRegistry + "/sparkwing-controller@sha256:" + strings.Repeat("1", 64)
 	want.RunnerBase = testRegistry + "/sparkwing-runner@sha256:" + strings.Repeat("2", 64)
-	want.GitopsURL = "git@github.com:example/gitops.git"
-	want.ReferenceURL = "git@github.com:example/reference.git"
+	want.GitopsURL = "git@github.com:example/fixture-gitops.git"
+	want.ReferenceURL = "git@github.com:example/fixture-reference.git"
 	want.Params = deployParams{
 		GitopsKey:    "/fixture/deploy/gitops-deploy-key",
 		ReferenceKey: "/fixture/deploy/reference-deploy-key",
@@ -101,7 +101,7 @@ func TestDeploySettingsFillEveryAccountValue(t *testing.T) {
 }
 
 func TestDeploySettingsRefuseIncompleteOrUnknownKeys(t *testing.T) {
-	valid := string(fixtureDeploySettings(t, "git@github.com:example/gitops.git", "git@github.com:example/reference.git"))
+	valid := string(fixtureDeploySettings(t))
 	for name, tc := range map[string]struct {
 		edit func(string) string
 		want []string
@@ -130,6 +130,64 @@ func TestDeploySettingsRefuseIncompleteOrUnknownKeys(t *testing.T) {
 		"relative parameter": {
 			func(s string) string { return strings.Replace(s, "gitops_key: /fixture", "gitops_key: fixture", 1) },
 			[]string{"parameters.gitops_key", "not a parameter path"},
+		},
+		"stale document followed by a broken one": {
+			func(s string) string { return s + "---\nregistry: [broken\n" },
+			[]string{"exactly one YAML document"},
+		},
+		"second complete document": {
+			func(s string) string { return s + "---\n" + s },
+			[]string{"exactly one YAML document"},
+		},
+		"registry outside ECR": {
+			func(s string) string { return strings.ReplaceAll(s, testRegistry, "registry.example.com") },
+			[]string{"registry \"registry.example.com\" is not an ECR registry host"},
+		},
+		"gitops URL as an option": {
+			func(s string) string {
+				return strings.Replace(s, "gitops: git@github.com:example/fixture-gitops.git", "gitops: --upload-pack=touch /tmp/x", 1)
+			},
+			[]string{"repositories.gitops", "not a GitHub SSH URL"},
+		},
+		"reference URL over HTTPS": {
+			func(s string) string {
+				return strings.Replace(s, "git@github.com:example/fixture-reference.git", "https://github.com/example/fixture-reference.git", 1)
+			},
+			[]string{"repositories.reference", "not a GitHub SSH URL"},
+		},
+		"gitops dir escaping": {
+			func(s string) string {
+				return strings.Replace(s, "gitops_dir: sparkwing-staging", "gitops_dir: ../sparkwing-staging", 1)
+			},
+			[]string{"environments.staging.gitops_dir", "DNS-1123"},
+		},
+		"gitops dir with a slash": {
+			func(s string) string {
+				return strings.Replace(s, "gitops_dir: sparkwing\n", "gitops_dir: apps/sparkwing\n", 1)
+			},
+			[]string{"environments.production.gitops_dir", "DNS-1123"},
+		},
+		"argo app as an option": {
+			func(s string) string { return strings.Replace(s, "argo_app: sparkwing\n", "argo_app: --all\n", 1) },
+			[]string{"environments.production.argo_app", "DNS-1123"},
+		},
+		"uppercase deployment": {
+			func(s string) string {
+				return strings.Replace(s, "controller_deployment: sparkwing-sparkwing-full-controller", "controller_deployment: Sparkwing", 1)
+			},
+			[]string{"environments.production.controller_deployment", "DNS-1123"},
+		},
+		"cluster with a space": {
+			func(s string) string {
+				return strings.Replace(s, "cluster: fixture-cluster", "cluster: 'fixture cluster'", 1)
+			},
+			[]string{"cluster", "DNS-1123"},
+		},
+		"prepull tag too long": {
+			func(s string) string {
+				return strings.Replace(s, "prepull_tag: cloud-prepull\n", "prepull_tag: "+strings.Repeat("a", 64)+"\n", 1)
+			},
+			[]string{"environments.production.prepull_tag", "DNS-1123"},
 		},
 		"shared gitops dir": {
 			func(s string) string {
@@ -201,7 +259,7 @@ func TestDeploySignInReadsSettingsFromTheConfigurationRepository(t *testing.T) {
 	for _, want := range []string{
 		"aws sts assume-role-with-web-identity --role-arn " + testDeployRole,
 		"aws ssm get-parameter --name /fixture/deploy/config-key",
-		"git clone --quiet --depth 1 file://" + f.configRepo,
+		"git clone --quiet --depth 1 -- git@github.com:example/fixture-config.git",
 	} {
 		if !strings.Contains(calls, want) {
 			t.Fatalf("sign-in never ran %q; ran:\n%s", want, calls)
@@ -210,14 +268,14 @@ func TestDeploySignInReadsSettingsFromTheConfigurationRepository(t *testing.T) {
 	if err := d.signIn(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(strings.Join(f.calls, "\n"), "git clone --quiet --depth 1 file://"+f.configRepo); n != 1 {
+	if n := strings.Count(strings.Join(f.calls, "\n"), "git clone --quiet --depth 1 -- git@github.com:example/fixture-config.git"); n != 1 {
 		t.Fatalf("a job cloned the configuration repository %d times", n)
 	}
 }
 
 func TestDeploySignInRefusesInvalidRepositorySettings(t *testing.T) {
 	f := newFakeDeploy(t)
-	seedDeployConfigRepo(t, t.TempDir(), []byte("registry: "+testRegistry+"\n"))
+	replaceDeployConfig(t, f, "registry: "+testRegistry+"\n")
 	d := f.deployer(false)
 	if err := d.signIn(t.Context()); err == nil || !strings.Contains(err.Error(), "missing cluster") || !strings.Contains(err.Error(), deploySettingsPath) {
 		t.Fatalf("incomplete repository settings = %v", err)
@@ -284,5 +342,78 @@ func TestDeployFromRepositorySettingsReachesBothEnvironments(t *testing.T) {
 	}
 	if tag := testRegistry + "/sparkwing-runner:cloud-prepull"; !slices.ContainsFunc(f.said, func(s string) bool { return strings.Contains(s, tag) }) {
 		t.Fatalf("production never moved %s: %q", tag, f.said)
+	}
+}
+
+func replaceDeployConfig(t *testing.T, f *fakeDeploy, settings string) {
+	t.Helper()
+	work := filepath.Join(t.TempDir(), "config")
+	deployGitIn(t, filepath.Dir(work), "clone", "--quiet", f.configRepo, work)
+	if err := os.WriteFile(filepath.Join(work, deploySettingsPath), []byte(settings), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deployGitIn(t, work, "commit", "--quiet", "-am", "edit deploy settings")
+	deployGitIn(t, work, "push", "--quiet", "origin", "HEAD:main")
+}
+
+func TestDeployBootstrapRefusesANonGitHubConfigRepository(t *testing.T) {
+	isolatePipelinesSettings(t)
+	t.Setenv(pipelinesEnvConfigParam, "/fixture/deploy/config-key")
+	t.Setenv(pipelinesEnvDeployRole, testDeployRole)
+	t.Setenv(pipelinesEnvDeployReg, "us-west-2")
+	for _, repo := range []string{"--upload-pack=touch /tmp/x", "file:///srv/config.git", "git@example.com:example/config.git"} {
+		t.Setenv(pipelinesEnvConfigRepo, repo)
+		if _, err := readDeployBootstrap(); err == nil || !strings.Contains(err.Error(), "not a GitHub SSH URL") {
+			t.Fatalf("config repository %q accepted: %v", repo, err)
+		}
+	}
+}
+
+func TestDeploySignInRefusesARegistryOutsideTheRoleAccount(t *testing.T) {
+	for name, setting := range map[string][2]string{
+		"other account": {pipelinesEnvDeployRole, "arn:aws:iam::999999999999:role/fixture-deploy"},
+		"other region":  {pipelinesEnvDeployReg, "eu-west-1"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeDeploy(t)
+			t.Setenv(setting[0], setting[1])
+			d := f.deployer(false)
+			err := d.signIn(t.Context())
+			if err == nil || !strings.Contains(err.Error(), "is not the ECR registry of the deploy role's account") {
+				t.Fatalf("registry outside the role account = %v", err)
+			}
+			if d.settled || slices.ContainsFunc(f.calls, func(c string) bool { return strings.HasPrefix(c, "aws ecr") }) {
+				t.Fatalf("the deploy went on to ECR: settled=%v calls=%v", d.settled, f.calls)
+			}
+		})
+	}
+}
+
+func TestDeploySignInRemovesTheConfigCloneAndKey(t *testing.T) {
+	f := newFakeDeploy(t)
+	d := f.deployer(false)
+	if err := d.signIn(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(d.tmp, "deploy-config"), filepath.Join(d.tmp, "config-key")} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("%s remains after sign-in: %v", path, err)
+		}
+	}
+}
+
+func TestDeployRefusesAnUnknownArgoApplicationBeforePushing(t *testing.T) {
+	f := newFakeDeploy(t)
+	replaceDeployConfig(t, f, strings.Replace(string(fixtureDeploySettings(t)), "argo_app: sparkwing-staging", "argo_app: missing-app", 1))
+	before := f.subjects()
+	_, _, err := f.deployer(false).deployTo(t.Context(), f.config().Staging, f.candidate())
+	if err == nil || !strings.Contains(err.Error(), "argo_app missing-app") || !strings.Contains(err.Error(), "no GitOps change was pushed") {
+		t.Fatalf("unknown Argo application = %v", err)
+	}
+	if after := f.subjects(); !slices.Equal(before, after) {
+		t.Fatalf("GitOps changed before the Argo check: %q -> %q", before, after)
+	}
+	if slices.ContainsFunc(f.calls, func(c string) bool { return strings.HasPrefix(c, "git push") }) {
+		t.Fatalf("pushed despite an unknown Argo application: %v", f.calls)
 	}
 }

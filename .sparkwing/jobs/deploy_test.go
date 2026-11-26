@@ -459,6 +459,7 @@ type fakeDeploy struct {
 	t            *testing.T
 	bare         string
 	configRepo   string
+	root         string
 	repo         string
 	head         string
 	old          deployImages
@@ -569,7 +570,7 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	root := t.TempDir()
 	t.Setenv("TMPDIR", root)
 	f := &fakeDeploy{
-		t: t, bare: filepath.Join(root, "gitops.git"), repo: filepath.Join(root, "sparkwing"), claimsPerRun: 1,
+		t: t, root: root, bare: filepath.Join(root, "fixture-gitops.git"), repo: filepath.Join(root, "sparkwing"), claimsPerRun: 1,
 		failRuns: map[string]bool{}, clock: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC),
 	}
 	if err := os.MkdirAll(filepath.Join(f.repo, "internal", "store"), 0o755); err != nil {
@@ -622,7 +623,10 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	deployGitIn(t, work, "add", "-A")
 	deployGitIn(t, work, "commit", "--quiet", "-m", "seed")
 	deployGitIn(t, root, "clone", "--quiet", "--bare", work, f.bare)
-	f.configRepo = seedDeployConfigRepo(t, root, fixtureDeploySettings(t, f.bare, f.repo))
+	f.configRepo = seedDeployConfigRepo(t, root, fixtureDeploySettings(t))
+	if err := os.Symlink(f.repo, filepath.Join(root, "fixture-reference.git")); err != nil {
+		t.Fatal(err)
+	}
 	deployGitIn(t, f.repo, "commit", "--quiet", "--allow-empty", "-m", "candidate")
 	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
 	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
@@ -640,20 +644,19 @@ func (f *fakeDeploy) candidate() deployImages {
 
 const testDeployRole = "arn:aws:iam::123456789012:role/fixture-deploy"
 
-func fixtureDeploySettings(t testing.TB, gitops, reference string) []byte {
+func fixtureDeploySettings(t testing.TB) []byte {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join("testdata", "deploy-settings", "deploy.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := strings.Replace(string(body), "git@github.com:example/fixture-gitops.git", gitops, 1)
-	return []byte(strings.Replace(s, "git@github.com:example/fixture-reference.git", reference, 1))
+	return body
 }
 
 // hack: the config is preloaded so tests can call deploy steps directly; deployers still sign in and clone.
 func (f *fakeDeploy) config() deployConfig {
 	cfg := defaultDeployConfig()
-	settings, err := parseDeploySettings("fixture", fixtureDeploySettings(f.t, f.bare, f.repo))
+	settings, err := parseDeploySettings("fixture", fixtureDeploySettings(f.t))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -755,6 +758,8 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 		for k, v := range c.Env {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
+		// hack: the fixture's GitHub URLs resolve to the local fixture repositories.
+		cmd.Env = append(cmd.Env, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=url."+f.root+"/.insteadOf", "GIT_CONFIG_VALUE_0=git@github.com:example/")
 		out, err := cmd.Output()
 		if err != nil {
 			var stderr []byte
@@ -1458,8 +1463,8 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"resolve the candidate commit", "is still the tip of origin/main", "assume " + testDeployRole, "would clone file://", "build linux/amd64", "build linux/arm64", "publish both images",
-		"clone " + f.bare, "pin the staging controller", "render sparkwing-staging/rendered.yaml",
+		"resolve the candidate commit", "is still the tip of origin/main", "assume " + testDeployRole, "would clone git@github.com:example/fixture-config.git", "build linux/amd64", "build linux/arm64", "publish both images",
+		"clone git@github.com:example/fixture-gitops.git", "check that Argo application sparkwing-staging exists", "pin the staging controller", "render sparkwing-staging/rendered.yaml",
 		"commit \"deploy(staging): controller", "wait for Argo application sparkwing-staging", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-full-controller",
 		"pin the staging launcher", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-runner-bundle-launcher",
 		"build the candidate CLI", "add CLI profile staging", "trigger deploy-smoke", "trigger hello",
@@ -1487,7 +1492,7 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 }
 
 func TestDeployWritesOnlyTheConfiguredGitops(t *testing.T) {
-	settings, err := parseDeploySettings("fixture", fixtureDeploySettings(t, "git@github.com:example/fixture-gitops.git", "git@github.com:example/fixture-reference.git"))
+	settings, err := parseDeploySettings("fixture", fixtureDeploySettings(t))
 	if err != nil {
 		t.Fatal(err)
 	}

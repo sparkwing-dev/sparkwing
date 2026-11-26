@@ -1,5 +1,6 @@
 # Fixture deploy settings: the shape of the private sparkwing-deploy/deploy.yaml
-# with a made-up account. The fake deploy replaces the two repository URLs.
+# with a made-up account. The fake deploy's git resolves git@github.com:example/
+# to its local fixture repositories.
 registry: 123456789012.dkr.ecr.us-west-2.amazonaws.com
 cluster: fixture-cluster
 bases:

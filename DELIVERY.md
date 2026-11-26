@@ -918,8 +918,11 @@ ls -l /opt/sparkwing-deploy/bin && /opt/sparkwing-deploy/bin/go version
 
 The public pipeline holds the deploy's shape and validation, not its account.
 The account-specific values live in a private `sparkwing-deploy/deploy.yaml` in
-a configuration repository the deploy runner names. Every key is required, and
-an unknown key fails the load:
+a configuration repository the deploy runner names. Every key is required, an
+unknown key or a second YAML document fails the load, repositories are GitHub SSH
+URLs (`git@github.com:owner/repo.git`), `registry` must be the ECR registry of the
+deploy role's account in its region, and `cluster` and every environment name are
+DNS-1123 labels:
 
 ```yaml
 registry: <account>.dkr.ecr.<region>.amazonaws.com
@@ -957,8 +960,10 @@ the ambient environment wins over the file:
 | `SPARKWING_PIPELINES_DEPLOY_CONFIG_PARAMETER` | SSM parameter holding that repository's read-only deploy key |
 
 Each deploy job assumes the role, reads the key from SSM and shallow-clones the
-configuration repository once before it uses any account value; superseded
-commits still stop before that. A job missing a setting or a key names every
+configuration repository once before it uses any account value, then deletes the
+clone and the key; superseded commits still stop before that. Before its first
+GitOps push to an environment, the deploy checks that the environment's Argo CD
+application exists. A job missing a setting or a key names every
 missing one. `--controller-base` and `--runner-base` override the settings'
 bases. A `--dry-run` holds no credentials, so it reads a local copy of
 `deploy.yaml` from `--deploy-config` and still needs the role and region

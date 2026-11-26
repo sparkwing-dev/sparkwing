@@ -641,7 +641,7 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 	dir := filepath.Join(d.tmp, "gitops-"+env.Name)
 	values := filepath.Join(dir, env.GitopsDir, "helm-values.yaml")
 	if err := d.act(ctx, "clone "+d.cfg.GitopsURL+" ("+d.cfg.GitopsBranch+") into "+dir, func() error {
-		_, err := d.git(ctx, gitEnv, "", "clone", "--quiet", "--branch", d.cfg.GitopsBranch, "--single-branch", d.cfg.GitopsURL, dir)
+		_, err := d.git(ctx, gitEnv, "", "clone", "--quiet", "--branch", d.cfg.GitopsBranch, "--single-branch", "--", d.cfg.GitopsURL, dir)
 		return err
 	}); err != nil {
 		return rec, err
@@ -710,6 +710,14 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 		}); err != nil {
 			return rec, err
 		}
+	}
+	if err := d.act(ctx, "check that Argo application "+env.ArgoApp+" exists before changing GitOps", func() error {
+		if _, err := d.kubectl(ctx, "-n", "argocd", "get", "application", env.ArgoApp, "-o", "json"); err != nil {
+			return fmt.Errorf("argo_app %s for %s cannot be read, so no GitOps change was pushed: %w", env.ArgoApp, env.Name, err)
+		}
+		return nil
+	}); err != nil {
+		return rec, err
 	}
 	for _, phase := range deployPhases {
 		want := phase.want(images)
@@ -1251,7 +1259,7 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 		if err != nil {
 			return err
 		}
-		_, err = d.git(ctx, env, "", "clone", "--quiet", "--depth", "1", d.cfg.ReferenceURL, reference)
+		_, err = d.git(ctx, env, "", "clone", "--quiet", "--depth", "1", "--", d.cfg.ReferenceURL, reference)
 		return err
 	}); err != nil {
 		return rec, err

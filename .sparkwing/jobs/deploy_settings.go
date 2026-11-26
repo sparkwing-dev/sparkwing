@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -80,8 +81,13 @@ type deployBootstrap struct {
 }
 
 var (
-	roleARNRE = regexp.MustCompile(`^arn:aws[a-z-]*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$`)
+	roleARNRE = regexp.MustCompile(`^arn:aws[a-z-]*:iam::([0-9]{12}):role/[A-Za-z0-9+=,.@_/-]+$`)
 	regionRE  = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]$`)
+	// safety: git and ssh read a URL or name that starts with "-" as an option,
+	// so repositories are GitHub SSH URLs only and names are DNS-1123 labels.
+	githubSSHRE = regexp.MustCompile(`^git@github\.com:[A-Za-z0-9-]+/[A-Za-z0-9_.-]+\.git$`)
+	dnsLabelRE  = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+	ecrHostRE   = regexp.MustCompile(`^([0-9]{12})\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$`)
 )
 
 func readDeployBootstrap() (deployBootstrap, error) {
@@ -120,6 +126,9 @@ func readDeployBootstrap() (deployBootstrap, error) {
 	}
 	if !strings.HasPrefix(b.ConfigKey, "/") {
 		errs = append(errs, fmt.Errorf("%s %q is not a parameter path", pipelinesEnvConfigParam, b.ConfigKey))
+	}
+	if !githubSSHRE.MatchString(b.ConfigRepo) {
+		errs = append(errs, fmt.Errorf("%s %q is not a GitHub SSH URL (git@github.com:owner/repo.git)", pipelinesEnvConfigRepo, b.ConfigRepo))
 	}
 	return b, errors.Join(errs...)
 }
@@ -163,6 +172,12 @@ func parseDeploySettings(source string, body []byte) (deploySettings, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&s); err != nil {
 		return s, fmt.Errorf("deploy settings %s: %w", source, err)
+	}
+	// safety: a second document would otherwise be ignored, so an appended
+	// edit could leave a stale first document in force.
+	var extra yaml.Node
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return s, fmt.Errorf("deploy settings %s: must hold exactly one YAML document", source)
 	}
 	if err := s.validate(); err != nil {
 		return s, fmt.Errorf("deploy settings %s: %w", source, err)
@@ -218,10 +233,47 @@ func (s deploySettings) validate() error {
 			errs = append(errs, fmt.Errorf("%s %q is not a parameter path", key, param))
 		}
 	}
+	for key, url := range map[string]string{"repositories.gitops": s.Repositories.Gitops, "repositories.reference": s.Repositories.Reference} {
+		if !githubSSHRE.MatchString(url) {
+			errs = append(errs, fmt.Errorf("%s %q is not a GitHub SSH URL (git@github.com:owner/repo.git)", key, url))
+		}
+	}
+	if !ecrHostRE.MatchString(s.Registry) {
+		errs = append(errs, fmt.Errorf("registry %q is not an ECR registry host", s.Registry))
+	}
+	names := map[string]string{"cluster": s.Cluster}
+	for _, env := range []struct {
+		name string
+		s    deployEnvSettings
+	}{{"staging", s.Environments.Staging}, {"production", s.Environments.Production}} {
+		prefix := "environments." + env.name + "."
+		names[prefix+"gitops_dir"] = env.s.GitopsDir
+		names[prefix+"helm_release"] = env.s.HelmRelease
+		names[prefix+"argo_app"] = env.s.ArgoApp
+		names[prefix+"controller_deployment"] = env.s.ControllerDeployment
+		names[prefix+"launcher_deployment"] = env.s.LauncherDeployment
+		names[prefix+"prepull_tag"] = env.s.PrepullTag
+	}
+	for key, value := range names {
+		if !dnsLabelRE.MatchString(value) {
+			errs = append(errs, fmt.Errorf("%s %q is not a DNS-1123 label (lowercase letters, digits and inner hyphens, at most 63)", key, value))
+		}
+	}
 	if s.Environments.Staging.GitopsDir == s.Environments.Production.GitopsDir {
 		errs = append(errs, errors.New("staging and production share a gitops_dir"))
 	}
 	return errors.Join(errs...)
+}
+
+// safety: the ECR login token goes to the registry host, so the host must be
+// the signed-in role's own account in the signed-in region.
+func (s deploySettings) matchAccount(boot deployBootstrap) error {
+	role := roleARNRE.FindStringSubmatch(boot.RoleARN)
+	host := ecrHostRE.FindStringSubmatch(s.Registry)
+	if role == nil || host == nil || host[1] != role[1] || host[2] != boot.Region {
+		return fmt.Errorf("registry %q is not the ECR registry of the deploy role's account in %s", s.Registry, boot.Region)
+	}
+	return nil
 }
 
 func (c *deployConfig) applySettings(s deploySettings) {
@@ -289,6 +341,9 @@ func (d *deployer) signIn(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := settings.matchAccount(boot); err != nil {
+		return fmt.Errorf("deploy settings %s: %w", source, err)
+	}
 	d.cfg.applySettings(settings)
 	d.settled = true
 	return nil
@@ -296,13 +351,18 @@ func (d *deployer) signIn(ctx context.Context) error {
 
 func (d *deployer) cloneSettings(ctx context.Context, boot deployBootstrap) ([]byte, error) {
 	var body []byte
-	err := d.act(ctx, "read "+deploySettingsPath+" from "+boot.ConfigRepo, func() error {
+	err := d.act(ctx, "read "+deploySettingsPath+" from "+boot.ConfigRepo, func() (err error) {
 		env, err := d.gitEnv(ctx, boot.ConfigKey, "config-key")
 		if err != nil {
 			return err
 		}
 		dir := filepath.Join(d.tmp, "deploy-config")
-		if _, err := d.git(ctx, env, "", "clone", "--quiet", "--depth", "1", boot.ConfigRepo, dir); err != nil {
+		// safety: the key and the clone go as soon as deploy.yaml is read, so
+		// nothing later in the job can reach the configuration repository.
+		defer func() {
+			err = errors.Join(err, removeDeployDir(dir), os.Remove(filepath.Join(d.tmp, "config-key")))
+		}()
+		if _, err := d.git(ctx, env, "", "clone", "--quiet", "--depth", "1", "--", boot.ConfigRepo, dir); err != nil {
 			return err
 		}
 		body, err = os.ReadFile(filepath.Join(dir, deploySettingsPath))
