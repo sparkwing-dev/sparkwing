@@ -1,5 +1,5 @@
 # Independent rules may append to the orientation table concurrently.
-design/rewrite/ORIENTATION.md merge=union
+CONTRIBUTING.md merge=union
 
 # Tools compare generated files and formatted source byte for byte.
 *.sh text eol=lf

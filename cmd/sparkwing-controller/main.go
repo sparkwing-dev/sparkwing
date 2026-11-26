@@ -31,6 +31,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/deployment"
 	"github.com/sparkwing-dev/sparkwing/internal/egress"
 	"github.com/sparkwing-dev/sparkwing/internal/engine"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/localsecrets"
 	"github.com/sparkwing-dev/sparkwing/internal/logutil"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
@@ -161,9 +162,12 @@ func run(args []string) error {
 	heartbeatsPerMinute := fs.Int(flagHeartbeatsPerRunnerMinute, 0,
 		fmt.Sprintf("per-runner request budget on the heartbeat routes, per "+
 			"rolling minute, keyed like the claim budget above and charged "+
-			"whatever the answer. Zero is unlimited; %d suits the "+
-			"cadence the shipped runners heartbeat at.",
-			controller.RecommendedHeartbeatsPerMinute))
+			"whatever the answer. Zero is unlimited. A shipped runner renews "+
+			"each claim it holds once every %s, so %d allows ten times that "+
+			"for about %d concurrent claims.",
+			limits.Renew(limits.DefaultLease),
+			controller.RecommendedHeartbeatsPerMinute,
+			int(time.Duration(controller.RecommendedHeartbeatsPerMinute/10)*limits.Renew(limits.DefaultLease)/time.Minute)))
 	requestsPerTokenMinute := fs.Int(flagRequestsPerTokenMinute, 0,
 		"token bucket on every route a credential can reach, holding N requests "+
 			"and refilling N a minute. Every credential of one team shares the "+

@@ -501,3 +501,49 @@ func testSuccessorHandoff(t *testing.T, state string) {
 		}
 	})
 }
+
+func TestClaimRetiresPlanInHandoffInSamePass(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, _, control := fixture()
+		boundary, nodes := boundaryFixture()
+		node, err := nodes.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = kube.Tracker().Add(node); err != nil {
+			t.Fatal(err)
+		}
+		boundary.Kube, l.Boundary = kube, boundary
+		l.Config.MemoryCeiling = 16 << 30
+		plan := *control.award
+		plan.CPUCores, plan.Memory = 2, match.CloudSizeMemoryBytes(2)
+		plan.Binding.Kind, plan.Binding.NodeID, plan.Binding.Attempt = CloudPlan, "", 0
+		if _, err = l.launch(t.Context(), &plan); err != nil {
+			t.Fatal(err)
+		}
+		job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(plan.Binding), metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pod := &corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: *job.Spec.Template.Spec.DeepCopy()}
+		pod.Name, pod.Namespace, pod.UID = "planning", "cloud", "planning-pod"
+		pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: ptr(true)}}
+		pod.Status.Phase = corev1.PodRunning
+		if _, err = kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		first := plan
+		first.Binding.Kind, first.Binding.UnitID, first.Binding.NodeID, first.Binding.Attempt = CloudWork, "first", "first", 1
+		control.award, control.remove = &first, true
+		if _, err = l.launch(t.Context(), &first); !errors.Is(err, ErrNoDedicatedNode) || first.teardownDeadline.IsZero() {
+			t.Fatalf("first job did not wait for the planning node: %v", err)
+		}
+		job, err = kube.BatchV1().Jobs("cloud").Get(t.Context(), job.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if job.DeletionTimestamp == nil {
+			t.Fatal("claim pass left the handed-off plan for a later reconcile pass")
+		}
+	})
+}

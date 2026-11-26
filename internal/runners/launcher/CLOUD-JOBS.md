@@ -611,11 +611,16 @@ A work or eval award also waits for its planning Job before Kubernetes marks
 that Job for deletion: the controller can award work as planning exits.
 Only that predecessor's Pods and DaemonSets may occupy the node.
 Normal reconciliation retries teardown before placement. The controller can also
-end a work predecessor and award its dependent between reconciliation and claim.
-So before a fresh award's first capacity request, the launcher asks the controller
-about the run's other live Jobs, tears down those whose awards ended and places
-again, and the successor waits for that teardown instead of creating demand that
-cannot fit on the reserved node and would make Karpenter add one. Live work
+end a work predecessor, or hand off its plan, and award the dependent between
+reconciliation and claim. So on a fresh award's first failed placement, the launcher
+asks the controller about the run's other live Jobs in the same pass and tears down
+those whose awards ended. A successor that would otherwise request capacity places
+again. That attempt succeeds if the teardown already freed the node; otherwise the
+successor waits for the teardown rather than creating demand that cannot fit on the
+reserved node and would make Karpenter add one. An ordinary placement miss can still
+request fresh capacity. A successor already waiting on a
+predecessor's teardown keeps waiting, and the teardown starts without waiting for the
+next reconcile pass. Live work
 reservations still permit fanout. The 60-second idle-retire grace starts only
 after release; it cannot cover this occupied-node gap. Log sealing can defer the
 controller's retirement decision, so Pod exit evidence also earns the bounded
@@ -630,7 +635,9 @@ and `TestTeardownWaitRenewsThroughClaimBackoff` guard reuse, the fallback and re
 gap with a fake clock, including Pod exit before Job deletion, one NodeClaim
 through the handoff and fresh-capacity fallback at 30 seconds.
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
-normal runs and retries, including launcher restarts.
+normal runs and retries, including launcher restarts, and
+`TestClaimRetiresPlanInHandoffInSamePass` guards that the claim pass starts a handed-off
+plan's teardown.
 
 An unheld empty response, explicit poll advice or claim failure waits at least the configured poll
 interval or the controller's `PollAfter`, whichever is longer, after response
@@ -872,8 +879,6 @@ activation and uses only the sealed identity after bootstrap exchange.
 Shared NodePools need `disruption: {consolidationPolicy: WhenEmpty,
 consolidateAfter: 10m}` or longer, above the award lease, so a node emptied by
 a launcher restart survives until its unit is re-awarded.
-[W8-SCALE-FROM-ZERO.md](../../../design/rewrite/W8-SCALE-FROM-ZERO.md) records
-the rationale.
 
 ## Team identity and credential rotation
 

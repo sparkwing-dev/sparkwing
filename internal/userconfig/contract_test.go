@@ -72,11 +72,11 @@ func TestRunnerLabelsReserveCloudPrefix(t *testing.T) {
 }
 
 func TestRunnerLabelsIgnoreGrantedFactsWithLocatedWarning(t *testing.T) {
-	if _, err := Decode("machine.yaml", []byte("runner: {labels: [host=moonborn, '']}")); err == nil || !strings.Contains(err.Error(), "runner.labels") {
+	if _, err := Decode("machine.yaml", []byte("runner: {labels: [host=mybox, '']}")); err == nil || !strings.Contains(err.Error(), "runner.labels") {
 		t.Fatalf("blank label: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(path, []byte("runner:\n  labels:\n    - host=moonborn\n    - local\n    - location=local\n    - os=linux\n    - pool=prod\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("runner:\n  labels:\n    - host=mybox\n    - local\n    - location=local\n    - os=linux\n    - pool=prod\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ReadConfig(path); err != nil {

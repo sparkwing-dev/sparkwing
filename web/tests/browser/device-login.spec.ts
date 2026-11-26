@@ -18,7 +18,7 @@ type Seen = {
 const memberRequest = {
   user_code: "BCDFGHJK",
   kind: "member",
-  machine: "korey-laptop",
+  machine: "avery-laptop",
   team: "acme",
   grants: [
     "runs.read",
@@ -133,7 +133,7 @@ test("a typed code is approved and the terminal is told to finish", async ({
   await next.click();
 
   await expect(
-    page.getByRole("heading", { name: "Approve sign-in for korey-laptop?" }),
+    page.getByRole("heading", { name: "Approve sign-in for avery-laptop?" }),
   ).toBeVisible();
   await expect(page.getByText("A CLI token for acme with:")).toBeVisible();
   await expect(page.getByText("Cancel and retry runs")).toBeVisible();
@@ -311,7 +311,7 @@ test("an administration request warns in red and names team.admin", async ({
   await page.getByLabel("Device code").fill("BCDF-GHJK");
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(
-    page.getByRole("heading", { name: "Approve sign-in for korey-laptop?" }),
+    page.getByRole("heading", { name: "Approve sign-in for avery-laptop?" }),
   ).toBeVisible();
   await expect(page.getByText(/full control of acme/)).toBeVisible();
   await expect(page.getByText(/for 1 hour: read and change secrets/)).toBeVisible();

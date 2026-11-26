@@ -351,6 +351,12 @@ describe("subscription form rules", () => {
     assert.equal(lib.connectedAccount(""), null);
     assert.equal(lib.connectedAccount("?connected="), null);
   });
+
+  it("reads a request to connect an existing installation", () => {
+    assert.equal(lib.connectExistingRequested("?connect=existing"), true);
+    assert.equal(lib.connectExistingRequested("?connect=new"), false);
+    assert.equal(lib.connectExistingRequested(""), false);
+  });
 });
 
 describe("failed deliveries", () => {

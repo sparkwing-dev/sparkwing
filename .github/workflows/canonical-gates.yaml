@@ -27,7 +27,7 @@ jobs:
       matrix:
         # perf: each race-store lane races one part of internal/store on its
         # own four-core runner, so pre-release leaves that step to them.
-        # perf: pushes and pull requests verify only what changed (decision 96); the full suite,
+        # perf: pushes and pull requests verify only what changed; the full suite,
         # pre-release and the store race run nightly, on dispatch and for releases.
         gate: ${{ (inputs.source_ref != '' || inputs.release_tag != '') && fromJSON('["gate", "pre-release"]') || ((github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && fromJSON('["gate", "race-touched", "pre-release", "race-store-1-of-3", "race-store-2-of-3", "race-store-3-of-3"]') || fromJSON('["gate", "race-touched"]')) }}
     env:

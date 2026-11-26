@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// safety: CHANGELOG.md, docs/migrations/ and design/rewrite/contracts/ name these
-// surfaces as history, so the scan covers only text describing the shipped product.
+// safety: CHANGELOG.md and docs/migrations/ name these surfaces as history,
+// so the scan covers only text describing the shipped product.
 var retiredNames = []struct{ name, use string }{
 	{"--free-team-slots", "automatic free and paid storage tiers"},
 	{"ErrNoProject", "nothing; WorkDir() is the process working directory"},
@@ -66,9 +66,6 @@ var retiredNames = []struct{ name, use string }{
 var retiredExtraGlobs = []string{
 	"cmd/sparkwing/help_registry.go",
 	"internal/clisurface/registry.go",
-	"design/rewrite/ORIENTATION.md",
-	"design/rewrite/ADMISSION.md",
-	"design/rewrite/RUN-ANYWHERE.md",
 	"internal/*/[A-Z]*.md",
 	"internal/*/*/[A-Z]*.md",
 }

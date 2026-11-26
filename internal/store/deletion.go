@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -764,8 +762,12 @@ const MaxInvitationEmailsPerDay = 5
 // deleting and creating teams cannot multiply the deployment's outbound mail.
 const MaxInvitationEmailsPerAccountPerDay = 100
 
-// safety: a send counts toward the caps for this window, and the retention pass drops each log row after it.
 const invitationEmailWindow = 24 * time.Hour
+
+var (
+	invitationEmailsPerAccount   = windowLimit{kind: "invitation_email_account", limit: MaxInvitationEmailsPerAccountPerDay, window: invitationEmailWindow}
+	invitationEmailsPerRecipient = windowLimit{kind: "invitation_email_recipient", limit: MaxInvitationEmailsPerDay, window: invitationEmailWindow}
+)
 
 // InvitationEmailLimitError reports that the inviting account has sent
 // [MaxInvitationEmailsPerAccountPerDay] invitation emails in the last 24
@@ -818,37 +820,20 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 	if inviter == "" {
 		return InvitationEmailNoInviter, nil
 	}
-	// safety: concurrent sends from one account, or to one address, would each count the other's as not yet made;
-	// the locks order them, account before address in every claim. SQLite already serializes every writer.
-	account, address := invitationEmailKey(inviter), invitationEmailKey(normalizeEmail(email))
-	if tx.dialect == DialectPostgres {
-		for _, key := range []string{"sparkwing/invitation-email-account/" + account, "sparkwing/invitation-email/" + address} {
-			if _, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, key); err != nil {
-				return "", err
-			}
+	// safety: the account is counted first, so an account at its cap is told when it may send again.
+	now, refused, err := claimWindowLimitsTx(ctx, tx,
+		limitClaim{invitationEmailsPerAccount, inviter}, limitClaim{invitationEmailsPerRecipient, normalizeEmail(email)})
+	if err != nil {
+		return "", err
+	}
+	if refused != nil {
+		if refused.limit == invitationEmailsPerAccount {
+			return "", &InvitationEmailLimitError{RetryAt: refused.usage.oldest.Add(invitationEmailWindow).UTC()}
 		}
-	}
-	now := tx.now(ctx)
-	at, since := now.UTC().UnixNano(), now.Add(-invitationEmailWindow).UnixNano()
-	var fromAccount int
-	var oldest sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*), MIN(sent_at) FROM invitation_email_log WHERE inviter = ? AND sent_at > ?`, account, since).Scan(&fromAccount, &oldest); err != nil {
-		return "", err
-	}
-	if fromAccount >= MaxInvitationEmailsPerAccountPerDay {
-		return "", &InvitationEmailLimitError{RetryAt: time.Unix(0, oldest.Int64).Add(invitationEmailWindow).UTC()}
-	}
-	var toAddress int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM invitation_email_log WHERE address = ? AND sent_at > ?`, address, since).Scan(&toAddress); err != nil {
-		return "", err
-	}
-	if toAddress >= MaxInvitationEmailsPerDay {
 		return InvitationEmailRecipientLimit, nil
 	}
 	res, err := tx.execContext(ctx,
-		`UPDATE invitations SET emailed_at = ? WHERE id = ? AND emailed_at IS NULL AND accepted_at IS NULL AND withdrawn_at IS NULL`, at, invitationID)
+		`UPDATE invitations SET emailed_at = ? WHERE id = ? AND emailed_at IS NULL AND accepted_at IS NULL AND withdrawn_at IS NULL`, now.UTC().UnixNano(), invitationID)
 	if err != nil {
 		return "", err
 	}
@@ -859,18 +844,7 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 	if n != 1 {
 		return InvitationEmailClosed, nil
 	}
-	if _, err := tx.execContext(ctx,
-		`INSERT INTO invitation_email_log (address, inviter, sent_at) VALUES (?, ?, ?)`, address, account, at); err != nil {
-		return "", err
-	}
 	return "", tx.Commit() //nolint:contextcheck // Commit uses the context captured by beginTx.
-}
-
-// safety: the log outlives the invitation, the team that sent it and the inviting account, so it keeps digests of
-// the address and the account ID rather than either value.
-func invitationEmailKey(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])
 }
 
 func accountByEmailTx(ctx context.Context, tx *storeTx, email string) (_ Account, err error) {

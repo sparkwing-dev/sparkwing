@@ -16,7 +16,7 @@ type teamStanding struct {
 func TestStandingRequestFromBillingToOperatorDecision(t *testing.T) {
 	f, _ := billingFixture(t)
 	owner, editor, _ := teamOf(f)
-	operator := f.user("op", "korey@example.com")
+	operator := f.user("op", "avery@example.com")
 	f.srv.WithOperatorAccounts([]string{operator.id})
 	controller := "/api/v1/team/billing/standing-request"
 	queue := "/api/v1/operator/standing-requests"

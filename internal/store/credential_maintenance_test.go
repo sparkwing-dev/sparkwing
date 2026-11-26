@@ -20,7 +20,7 @@ import (
 const fixtureRepo = "gh:1"
 
 // proveFixtureRun reseals a fixture run as an App push to [fixtureRepo], the
-// proven repository identity pipeline secrets are released to (decision 68).
+// proven repository identity pipeline secrets are released to.
 func proveFixtureRun(t *testing.T, tenant *Tenant, run string) runspec.SealedRequest {
 	t.Helper()
 	var raw []byte

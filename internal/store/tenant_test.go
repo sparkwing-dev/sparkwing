@@ -58,7 +58,7 @@ func TestForTeamRefusesAnUnregisteredTeam(t *testing.T) {
 	}
 }
 
-// Decision 0004 routes on <team>.sparkwing.dev and DNS is
+// Teams route on <team>.sparkwing.dev and DNS is
 // case-insensitive, so spellings that address one host address one team.
 func TestTeamNamesNormalizeToOneTenant(t *testing.T) {
 	ctx := context.Background()

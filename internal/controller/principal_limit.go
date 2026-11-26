@@ -14,9 +14,11 @@ import (
 )
 
 // RecommendedHeartbeatsPerMinute is the per-runner heartbeat budget suggested
-// for the cadence the shipped runners keep: a node heartbeat runs every 3s and
-// a trigger heartbeat every 3s, and ten times that leaves room for retries and
-// bursts while still bounding a runner stuck in a tight loop.
+// for the cadence the shipped runners keep: one renewal per held claim every
+// limits.Renew(limits.DefaultLease), which is once a minute. Ten times that
+// covers about 120 concurrent claims per runner and leaves room for the faster
+// retries a renewal makes as its lease nears expiry, while still bounding a
+// runner stuck in a tight loop.
 //
 // It is a recommendation, not a default: a controller budgets nothing until an
 // operator names a number. For the claim routes, work the budget from

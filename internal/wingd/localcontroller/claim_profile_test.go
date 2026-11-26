@@ -74,7 +74,7 @@ func TestLocalClaimProfileAddsConfiguredLabelsWithoutAuthority(t *testing.T) {
 			Subject: capability.Subject{Kind: capability.SubjectLocal, ID: "local:verified"},
 		},
 	}
-	withLabels, err := NewClaimProfile([]string{"host=moonborn", "pool=prod", "name=other", "location=cloud", "local", "gpu"})
+	withLabels, err := NewClaimProfile([]string{"host=mybox", "pool=prod", "name=other", "location=cloud", "local", "gpu"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestLocalClaimProfileAddsConfiguredLabelsWithoutAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(profile.Labels, []string{"host=moonborn", "gpu"}) {
+	if !slices.Equal(profile.Labels, []string{"host=mybox", "gpu"}) {
 		t.Fatalf("labels = %v", profile.Labels)
 	}
 	profile.Labels = nil

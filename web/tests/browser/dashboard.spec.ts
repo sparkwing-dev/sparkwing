@@ -44,7 +44,7 @@ const runningRun = {
   finished_at: undefined,
 };
 
-test("keeps activity rows exactly two lines with long metadata and errors", async ({ page }) => {
+test("keeps wide activity rows to two lines and narrow rows readable in full", async ({ page }) => {
   const longRun = {
     ...finishedRun,
     id: "run-20260827-long",
@@ -76,14 +76,29 @@ test("keeps activity rows exactly two lines with long metadata and errors", asyn
       });
     });
     expect(metadataOverflow).toBe(false);
-    const identityWidth = await short.locator("div.grid").first().evaluate((grid) => ({
-      available: grid.getBoundingClientRect().width,
-      metadata: grid.firstElementChild!.getBoundingClientRect().width,
-    }));
-    expect(identityWidth.metadata).toBeGreaterThan(identityWidth.available * 0.75);
-
-    expect(sizes[0].height).toBe(sizes[1].height);
-    expect(sizes[0].height).toBe(56);
+    if (width >= 1024) {
+      const identityWidth = await short.locator("div.grid").first().evaluate((grid) => ({
+        available: grid.getBoundingClientRect().width,
+        metadata: grid.firstElementChild!.getBoundingClientRect().width,
+      }));
+      expect(identityWidth.metadata).toBeGreaterThan(identityWidth.available * 0.75);
+      expect(sizes[0].height).toBe(sizes[1].height);
+      expect(sizes[0].height).toBe(56);
+    } else {
+      // Narrow rows wrap so the repository, pipeline and branch read in full.
+      await expect(long).toContainText(longRun.repo.split("/").pop()!);
+      await expect(long).toContainText(longRun.pipeline);
+      await expect(long).toContainText(longRun.git_branch);
+      expect(sizes[0].height).toBeGreaterThan(sizes[1].height);
+      expect(await long.evaluate((row) => row.scrollWidth - row.clientWidth)).toBeLessThanOrEqual(0);
+      // Full text in the DOM is not enough: a truncated label keeps it, so check nothing is clipped.
+      const clipped = await long.evaluate((row) =>
+        Array.from(row.querySelectorAll<HTMLElement>("span.relative.inline-flex span.block")).filter(
+          (label) => label.scrollWidth > label.clientWidth + 1,
+        ).map((label) => label.textContent),
+      );
+      expect(clipped).toEqual([]);
+    }
     expect(sizes[0].overflow).toBeLessThanOrEqual(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
   }
@@ -149,7 +164,7 @@ test("keeps a long node name visible beside its location icon", async ({ page })
       execution_attempts: [{
         attempt: 1,
         executor_kind: "runner",
-        executor_name: "moonborn",
+        executor_name: "mybox",
         location: "local",
         started_at: "2026-08-27T18:00:00Z",
         finished_at: "2026-08-27T18:01:30Z",
@@ -179,18 +194,18 @@ test("keeps a long node name visible beside its location icon", async ({ page })
   expect(fit).toEqual({ clipped: true, ellipsis: true, inside: true });
   await expect(label).toHaveAttribute("title", longName);
   await expect(row.getByText("Local", { exact: true })).toHaveCount(0);
-  const rowSite = row.getByLabel("Ran on moonborn (your machine)");
+  const rowSite = row.getByLabel("Ran on mybox (your machine)");
   await expect(rowSite).toBeVisible();
   await rowSite.focus();
   await expect(rowSite.getByRole("tooltip")).toBeVisible();
   await page.getByRole("button", { name: /DAG/ }).click();
-  const dagSite = page.locator('svg [role="img"][aria-label="Ran on moonborn (your machine)"]');
+  const dagSite = page.locator('svg [role="img"][aria-label="Ran on mybox (your machine)"]');
   await expect(dagSite).toBeVisible();
   await dagSite.hover();
-  await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
+  await expect(page.locator("svg text", { hasText: "Ran on mybox (your machine)" })).toBeVisible();
   await page.mouse.move(0, 0);
   await dagSite.focus();
-  await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
+  await expect(page.locator("svg text", { hasText: "Ran on mybox (your machine)" })).toBeVisible();
 });
 
 test("shows the run's notices, job summaries and earlier attempts' steps", async ({ page }) => {

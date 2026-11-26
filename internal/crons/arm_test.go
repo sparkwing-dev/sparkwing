@@ -840,7 +840,7 @@ func TestPushedRepoAcceptsEveryCloneURLFormAndNoLocalPath(t *testing.T) {
 		}
 	}
 	for _, path := range []string{
-		"/home/korey/code/widgets", "./widgets", "widgets",
+		"/home/avery/code/widgets", "./widgets", "widgets",
 		"/tmp/a@b", "git@github.com", "-flag@host:path",
 	} {
 		if pushedRepo(path) {

@@ -27,7 +27,7 @@ const (
 )
 
 // Refill limits a refill can be stopped by. A team's own weekly and monthly limits come from its settings; the
-// standing limits are the decision 27 stolen-card caps its paid history earns.
+// standing limits are the stolen-card caps its paid history earns.
 const (
 	refillLimitPaymentSize    = "payment_size"
 	refillLimitStandingSize   = "standing_size"

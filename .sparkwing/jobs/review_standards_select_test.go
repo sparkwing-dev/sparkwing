@@ -13,7 +13,7 @@ func TestReviewerCardNamesLoadsReviewCardsByAlwaysScopeAndSurface(t *testing.T) 
 {"name":"standard-fixes","apply_type":["code","review"],"apply_always":true}
 {"name":"standard-architecture","apply_type":["api","code","review"]}
 {"name":"standard-gates","apply_type":["pipeline","review"]}
-{"name":"standard-sparkwing-product","apply_type":["review"]}
+{"name":"standard-product-rules","apply_type":["review"]}
 {"name":"standard-process","apply_type":["pipeline"],"apply_always":true}
 {"name":"standard-other-repo","apply_type":["review"],"scope_repo":["elsewhere"]}
 {"name":"standard-scoped","apply_type":["review"],"scope_repo":["SPARKWING"]}
@@ -22,17 +22,17 @@ func TestReviewerCardNamesLoadsReviewCardsByAlwaysScopeAndSurface(t *testing.T) 
 {"kind":"rule","card":"standard-fixes","globs":["**/*.go"]}
 {"kind":"rule","card":"standard-architecture","globs":["**/*.go","**/api/**"]}
 {"kind":"rule","card":"standard-gates","globs":["**/.sparkwing/**","**/.golangci*"]}
-{"kind":"rule","card":"standard-sparkwing-product","globs":[]}
+{"kind":"rule","card":"standard-product-rules","globs":[]}
 {"kind":"rule","card":"standard-process","globs":["**/.sparkwing/**"]}
 `
 	for _, tc := range []struct {
 		files []string
 		want  []string
 	}{
-		{[]string{"internal/controller/server.go"}, []string{"standard-fixes", "standard-architecture", "standard-sparkwing-product", "standard-scoped"}},
-		{[]string{".sparkwing/sparkwing.yaml"}, []string{"standard-fixes", "standard-gates", "standard-sparkwing-product", "standard-scoped"}},
-		{[]string{".golangci.yml"}, []string{"standard-fixes", "standard-gates", "standard-sparkwing-product", "standard-scoped"}},
-		{[]string{"README.txt"}, []string{"standard-fixes", "standard-sparkwing-product", "standard-scoped"}},
+		{[]string{"internal/controller/server.go"}, []string{"standard-fixes", "standard-architecture", "standard-product-rules", "standard-scoped"}},
+		{[]string{".sparkwing/sparkwing.yaml"}, []string{"standard-fixes", "standard-gates", "standard-product-rules", "standard-scoped"}},
+		{[]string{".golangci.yml"}, []string{"standard-fixes", "standard-gates", "standard-product-rules", "standard-scoped"}},
+		{[]string{"README.txt"}, []string{"standard-fixes", "standard-product-rules", "standard-scoped"}},
 	} {
 		if got := reviewerCardNames(listing, rules, "sparkwing-dev", "sparkwing", tc.files); !slices.Equal(got, tc.want) {
 			t.Errorf("reviewerCardNames(%q) = %q, want %q", tc.files, got, tc.want)
@@ -69,9 +69,9 @@ func TestReviewStandardsSeeACopyDestinationNotItsUnchangedSource(t *testing.T) {
 func TestRepoOwnerAndNameReadsOriginNotTheWorktreeName(t *testing.T) {
 	for _, tc := range []struct{ origin, owner, repo string }{
 		{"git@github.com:sparkwing-dev/sparkwing", "sparkwing-dev", "sparkwing"},
-		{"https://github.com/koreyGambill/kikd-infra.git", "koreyGambill", "kikd-infra"},
+		{"https://github.com/acme/infra.git", "acme", "infra"},
 		{"ssh://git@github.com:22/sparkwing-dev/sparkwing.git", "sparkwing-dev", "sparkwing"},
-		{"/srv/koreyGambill/sparkwing.git", "", "sparkwing"},
+		{"/srv/acme/sparkwing.git", "", "sparkwing"},
 		{"", "", "t3-worktree-7"},
 	} {
 		owner, repo := repoOwnerAndName(tc.origin, "/tmp/t3-worktree-7")

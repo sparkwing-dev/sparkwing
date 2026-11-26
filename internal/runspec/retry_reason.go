@@ -11,7 +11,7 @@ import (
 const MaxRetryReasonLength = 1024
 
 // ValidateRetryReason checks the reason a retry records. A retry that names an agent must give one
-// (decision 94 labels runs agents start); a retry without an agent label may leave it empty. The text
+// (runs an agent starts carry its label); a retry without an agent label may leave it empty. The text
 // is shown in run views, so control characters such as newlines and escape sequences are refused.
 func ValidateRetryReason(reason, agent string) error {
 	if err := ValidateAgent(agent); err != nil {

@@ -26,7 +26,7 @@ type billingPolicyRow struct {
 	refillCents, refillsPerDay, refillWeekCents int64
 }
 
-// safety: the ratified decision 27 caps; a team that outgrows them asks for the next tier.
+// safety: the standing refill caps; a team that outgrows them asks for the next tier.
 var billingPolicy = [...]billingPolicyRow{
 	{"New", 0, 8, 4 * time.Hour, 0, 0, true, 5000, 1, 10000},
 	{"Established", 2000, 32, 4 * time.Hour, 0, 0, true, 20000, 2, 50000},

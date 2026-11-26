@@ -47,7 +47,7 @@ func TestRegisteredRunnerRequiresEveryRequestedLabel(t *testing.T) {
 	engineSQL(t, e.Store, `INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json) VALUES ('a','run','job','pending',1,?,?)`, []byte(`{"id":"job"}`), []byte(`{}`))
 	fetchedRunFixture(t, e.Store, "a", "run", "acme/repo")
 	engineAcceptedFixturePlan(t, e, "a", "run")
-	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"requires":{"set":true,"value":["deploy-kikd-prod"]}}`))
+	engineSQL(t, e.Store, `UPDATE nodes SET execution_json=? WHERE run_id='run' AND node_id='job'`, []byte(`{"requires":{"set":true,"value":["deploy-prod"]}}`))
 	for _, labels := range [][]string{strings.Fields(strings.Repeat("gpu ", 33)), {strings.Repeat("a", 129)}, {"gpu\nprod"}} {
 		body, err := json.Marshal(controllerwire.ClaimRequest{RunnerVersion: "v1.2.3", Kinds: []capability.UnitKind{capability.UnitNode}, Labels: labels})
 		if err != nil {
@@ -59,8 +59,8 @@ func TestRegisteredRunnerRequiresEveryRequestedLabel(t *testing.T) {
 		}
 	}
 	for _, kinds := range []string{`["node"]`, `["trigger"]`, `["plan"]`} {
-		response := engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":`+kinds+`,"labels":["team-4cpu","deploy-kikd-prod"]}`, 403)
-		for _, hint := range []string{"deploy-kikd-prod", "allowed labels", "revoke this enrollment", "sparkwing runners add --runner capacity-machine --label LABEL --force", "Self-hosted operators", "admin runner-labels"} {
+		response := engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":`+kinds+`,"labels":["team-4cpu","deploy-prod"]}`, 403)
+		for _, hint := range []string{"deploy-prod", "allowed labels", "revoke this enrollment", "sparkwing runners add --runner capacity-machine --label LABEL --force", "Self-hosted operators", "admin runner-labels"} {
 			if !strings.Contains(response.Body.String(), hint) {
 				t.Fatalf("missing %q: %s", hint, response.Body)
 			}
@@ -100,7 +100,7 @@ func TestRegisteredRunnerRequiresEveryRequestedLabel(t *testing.T) {
 	if err != nil || !slices.Equal(got, allowed) {
 		t.Fatalf("migrated allowed labels: %v %v", got, err)
 	}
-	engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"labels":["deploy-kikd-prod"]}`, 403)
+	engineClaimHTTP(t, handler, bearer, "POST", "/api/v1/runners/claim", `{"runner_version":"v1.2.3","kinds":["node"],"labels":["deploy-prod"]}`, 403)
 	empty := []string{}
 	if _, err := st.AsOperator().ConfigureRunnerLabels(t.Context(), "a", "capacity-machine", "member", &empty); err != nil {
 		t.Fatal(err)

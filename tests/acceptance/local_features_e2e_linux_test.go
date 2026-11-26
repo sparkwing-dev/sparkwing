@@ -347,9 +347,11 @@ func TestLocalControllerFeatureE2E(t *testing.T) {
     trust_local_builds BIGINT NOT NULL DEFAULT 0 CHECK(trust_local_builds IN (0,1))
 )`,
 			"DROP TABLE github_actions_dispatches", "DROP TABLE github_actions_approvals",
+			"DROP TABLE limit_events",
+			"CREATE TABLE invitation_email_log (address TEXT NOT NULL, sent_at INT NOT NULL) STRICT",
+			"CREATE INDEX idx_invitation_email_log_address ON invitation_email_log(address, sent_at)",
 			"DROP INDEX idx_billing_awards_unsettled", "DROP INDEX idx_credit_charges_team_mode_amount",
 			"CREATE INDEX idx_credit_charges_team_amount ON credit_charges(team, amount_micro)",
-			"DROP INDEX idx_invitation_email_log_inviter", "ALTER TABLE invitation_email_log DROP COLUMN inviter",
 			"UPDATE sparkwing_schema_version SET version=34,baseline_digest='187573d27274e9bf1796a84d502b39ac9e8c0cb7730e41143a1e4f586d5a6012'",
 		} {
 			if _, err := db.Exec(query); err != nil {

@@ -61,7 +61,15 @@ Only a team owner connects, and only as a signed-in account with a linked GitHub
 
 The `installation_id` the controller binds is the one step 2 recorded in the cookie, never one from the callback URL. The callback keeps GitHub's code in the flow cookie and resumes on the controller's own origin before the session is used. A setup return with `setup_action=request` means an organization owner must approve the install; the controller's page says so and the owner connects again after the approval.
 
-A refused connection shows its reason without attributing every refusal to GitHub ownership. An already-used or expired connection asks the owner to start again from the team's GitHub settings.
+A refused connection shows its reason. The page says GitHub could not be reached only when a request to GitHub failed. A failure inside Sparkwing, such as a 503, a 429 or an App private key that cannot sign, says connecting failed on this server.
+
+Once GitHub reports an installation, a new **Connect GitHub** opens that installation's settings page on GitHub, which returns to Sparkwing only after a setting changes. So these failures offer **Connect an existing installation**, which opens **Team -> GitHub** with the existing-installation path expanded and focused (`/team/github?connect=existing`):
+
+- the callback arrives after this browser's signed flow, which recorded the installation, expired;
+- `/github/app/complete` fails because GitHub could not be reached, the server failed, or the connection was already used or expired;
+- a setup return names an installation but its flow could not be verified. Sparkwing cannot confirm that installation, so the page says to connect it if the App is already installed.
+
+Other refusals, including a demoted owner or a changed session while the connection finishes, show their own reason and lead back to the team's GitHub settings. A repository-access update return without `state` always shows the acknowledgement below, even in a browser with a connection in progress.
 
 When an administrator changes repository access on GitHub outside a connect flow,
 GitHub returns to the setup URL with `setup_action=update`, and the controller
