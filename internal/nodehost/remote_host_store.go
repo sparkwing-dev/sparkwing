@@ -110,12 +110,9 @@ func (s *RemoteHostStore) RenewNodeClaim(ctx context.Context, ref runspec.NodeRe
 	if nodes, ok := s.PrivateHostState.(interface {
 		RenewNode(context.Context, runspec.NodeRef, runstate.Actor, bool) (runstate.LeaseBeat, error)
 	}); ok {
-		// The owner can be computing while its node is still acquiring a source.
-		row, err := s.PrivateHostState.ReadNode(ctx, ref)
-		if err != nil {
-			return runstate.LeaseBeat{}, err
-		}
-		return nodes.RenewNode(ctx, ref, actor, row.Status == runstate.StatusRunning)
+		// safety: a node claim bills from the node row the controller reads under the renewal, so the host sends no
+		// executing claim it would first need a budgeted read to make true.
+		return nodes.RenewNode(ctx, ref, actor, false)
 	}
 	return s.renew(ctx, s.executing())
 }
