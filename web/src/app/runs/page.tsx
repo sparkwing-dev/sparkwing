@@ -2451,7 +2451,7 @@ const FullRunRow = memo(function FullRunRow({
             tooltip={`Branch: ${r.git_branch}`}
             className="min-w-0"
           >
-            <span className="block min-w-0 truncate text-amber-400/70">
+            <span className="block min-w-0 wrap-anywhere lg:truncate text-amber-400/70">
               ⎇ {r.git_branch}
             </span>
           </FilterableValue>

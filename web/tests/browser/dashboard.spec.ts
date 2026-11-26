@@ -91,6 +91,13 @@ test("keeps wide activity rows to two lines and narrow rows readable in full", a
       await expect(long).toContainText(longRun.git_branch);
       expect(sizes[0].height).toBeGreaterThan(sizes[1].height);
       expect(await long.evaluate((row) => row.scrollWidth - row.clientWidth)).toBeLessThanOrEqual(0);
+      // Full text in the DOM is not enough: a truncated label keeps it, so check nothing is clipped.
+      const clipped = await long.evaluate((row) =>
+        Array.from(row.querySelectorAll<HTMLElement>("span.relative.inline-flex span.block")).filter(
+          (label) => label.scrollWidth > label.clientWidth + 1,
+        ).map((label) => label.textContent),
+      );
+      expect(clipped).toEqual([]);
     }
     expect(sizes[0].overflow).toBeLessThanOrEqual(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
