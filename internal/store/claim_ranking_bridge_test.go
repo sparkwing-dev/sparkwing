@@ -21,6 +21,7 @@ type RankingFixture struct {
 	Owner, Admin, Member                              runstate.Actor
 	ReadyAt                                           time.Time
 	now                                               time.Time
+	idleRunners                                       []string
 }
 
 // TestOnlyRankingFixture seals a run-anywhere run whose plan unit and job become ready at ReadyAt.

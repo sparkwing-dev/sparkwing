@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 type claimOverflowFacts struct {
@@ -51,9 +53,9 @@ func (o *Operator) claimOverflowAccountsTx(ctx context.Context, tx *storeTx, tea
 	return out, nil
 }
 
-func claimOverflowUsageTx(ctx context.Context, tx *storeTx, out []claimOverflowFacts) ([]claimOverflowFacts, error) {
+func claimOverflowUsageTx(ctx context.Context, tx *storeTx, out []claimOverflowFacts, mode capability.PaymentMode) ([]claimOverflowFacts, error) {
 	for i := range out {
-		control, err := overflowControlTx(ctx, tx, Team(out[i].Team), out[i].Account)
+		control, err := overflowControlInModeTx(ctx, tx, Team(out[i].Team), out[i].Account, mode)
 		if err != nil {
 			return nil, err
 		}

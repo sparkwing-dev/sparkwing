@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 )
 
 // safety: every entry carries its reason and the guard refuses an empty
@@ -189,6 +191,8 @@ var reviewedClaimSearchSQL = map[string]string{
 // safety: each entry names a function that splices a relation into its SQL at run time, which the guard
 // cannot read, with the reason every relation it can splice is scoped.
 var reviewedRuntimeRelations = map[string]string{
+	"claimableUnitQueuedSQL":         "splices nodes, eval_units or triggers from queuedSources, each WHERE a.team = ?; TestEmptyPollExistenceCheckScopesEveryBranchToTheTeam renders every branch",
+	"(*claimSQL).queuedTeamsSQL":     "the Cloud launcher lists which live teams hold queued units in nodes, eval_units or triggers, reading only team names; each team's units are then read by the search under that team's own facts",
 	"(*Tenant).markForDeletionTx":    "deletes from a fixed list of tenant tables WHERE team = ?",
 	"deleteTenantRowsTx":             "deletes each tenant-owned schema table WHERE team = ?",
 	"(*Operator).relabelPrincipalTx": "relabels a deleted user's name in a fixed list of tables across every team",
@@ -976,5 +980,14 @@ func TestSchema35ActionsCopyRetainsTeamAndColumns(t *testing.T) {
 		if got := preservesSchema35ActionsRows(test.query); got != test.want {
 			t.Errorf("%s: got %v", test.query, got)
 		}
+	}
+}
+
+// The guard cannot read a team spliced into the shared predicate, so the rendered team-wide existence check must
+// bind the team-wide claimant's own team in every branch.
+func TestEmptyPollExistenceCheckScopesEveryBranchToTheTeam(t *testing.T) {
+	query, _ := claimableUnitQueuedSQL("x", []capability.UnitKind{capability.UnitNode, capability.UnitEval, capability.UnitTrigger, capability.UnitPlan})
+	if unscoped := unscopedSubqueries(query); len(unscoped) > 0 {
+		t.Fatalf("the existence check has unscoped branches %q:\n%s", unscoped, collapse(query))
 	}
 }

@@ -94,7 +94,6 @@ func TestClaimOwnerHasNoLauncherScanOrAwardBypass(t *testing.T) {
 // Fragments correlate team keys with the final authenticated work/claimant pair.
 // They cannot execute SQL or accept database handles.
 var reviewedClaimSQLFragments = map[string]string{
-	"(*claimSQL).queuedUnitSQL":          "each existence check equates its unit's team with the caller's team expression, a runner's bound team or each live team row the launcher's tenant-keyed teams query selects, and returns no unit data; this fragment cannot execute SQL",
 	"(*claimSQL).actionsReceiptScopeSQL": "the pure SQL builder correlates team, run, node and queue generation with the authenticated work row and checks same-team consent; TestGoSQLRuleAgreement/Actions_tenant_correlations exercises complete bound queries",
 	"(*claimSQL).repositoryTierMatch":    "the receipt lookup equates ad.team with the authenticated claimant facts team and matches the receipt, workflow and runner; TestGoSQLRuleAgreement/Actions_tenant_correlations exercises the complete bound queries",
 	"(*claimSQL).readyClaimContextSQL":   "readiness existence checks correlate both indexed sources with the enclosing tenant-keyed context; this fragment cannot execute SQL",

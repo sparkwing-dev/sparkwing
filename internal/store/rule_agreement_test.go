@@ -363,7 +363,11 @@ func overflowBudgetAgreement(t *testing.T, db *sql.DB, dialect Dialect) {
 				if control.UsedSeconds != used {
 					t.Fatalf("Go usage=%d, seeded reservation=%d", control.UsedSeconds, used)
 				}
-				facts, err := claimOverflowUsageTx(t.Context(), tx, []claimOverflowFacts{{Team: "a", Account: "owner"}})
+				mode, err := creditPaymentMode(t.Context(), tx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				facts, err := claimOverflowUsageTx(t.Context(), tx, []claimOverflowFacts{{Team: "a", Account: "owner"}}, mode)
 				if err != nil {
 					t.Fatal(err)
 				}

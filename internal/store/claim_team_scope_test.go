@@ -2,7 +2,9 @@ package store_test
 
 import (
 	"errors"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +16,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/store/internal/storetest"
 )
 
-var launcherKinds = []capability.UnitKind{capability.UnitPlan, capability.UnitNode}
+var launcherKinds = []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode}
 
 // hack: staging ran 48 live teams when the per-team cost was measured.
 const idleTeams = 45
@@ -35,6 +37,7 @@ func TestCloudLauncherSearchReadsOnlyTeamsWithQueuedWork(t *testing.T) {
 				f.AddIdleTeams(t, idle)
 				count := f.Store.TestOnlyCountStatements(t)
 				f.At(time.Minute)
+				f.PollIdleRunners(t)
 				f.Poll(t, f.Launcher, launcherKinds...)
 				count.Take()
 				award, err := f.Store.AsOperator().ClaimUnit(t.Context(), store.UnitDemand{CapabilityPrefix: f.Launcher, Kinds: launcherKinds, Labels: []string{"team-4cpu"}})
@@ -55,14 +58,24 @@ func TestCloudLauncherSearchReadsOnlyTeamsWithQueuedWork(t *testing.T) {
 	}
 }
 
-func TestClaimTeamFactsReadThePaymentModeOncePerSearch(t *testing.T) {
+func TestCloudLauncherSearchReadsThePaymentModeOnce(t *testing.T) {
 	f := rankingFixture(t, true)
+	overflow := int64(600)
+	f.Request(t, func(r *runspec.Request) {
+		r.Burst = &runspec.BurstPlacement{Preferences: []runspec.PlacementStep{{Target: "cloud"}}, OverflowMinutes: &overflow}
+	})
+	finishRankingTrigger(t, f)
 	f.AddIdleTeams(t, idleTeams)
 	count := f.Store.TestOnlyCountStatements(t)
-	teams := f.ClaimTeams(t)
-	got := count.Take()
-	if len(teams) < idleTeams || got.StandingReads != len(teams) || got.PaymentModeReads != 1 {
-		t.Fatalf("facts for %d teams read %d standings and the payment mode %d times", len(teams), got.StandingReads, got.PaymentModeReads)
+	f.At(time.Minute)
+	f.PollIdleRunners(t)
+	f.Poll(t, f.Launcher, launcherKinds...)
+	count.Take()
+	if err := f.SearchOnce(t, launcherKinds...); err != nil {
+		t.Fatal(err)
+	}
+	if got := count.Take(); got.PaymentModeReads != 1 || got.StandingReads != 1 {
+		t.Fatalf("one launcher search with overflow funding read %d standings and the payment mode %d times", got.StandingReads, got.PaymentModeReads)
 	}
 }
 
@@ -98,6 +111,10 @@ func TestCloudLauncherSearchKeepsEveryTeamWithClaimableWork(t *testing.T) {
 			}
 			f.ReadyJobAgain(t, "job")
 			return lapsed
+		}},
+		"eval unit alone": {kind: capability.UnitEval, job: "job", setup: func(t *testing.T, f *store.RankingFixture) time.Duration {
+			f.QueueEvalOnly(t)
+			return time.Minute
 		}},
 		"job held for a better-ranked runner": {kind: capability.UnitNode, job: "job", setup: func(t *testing.T, f *store.RankingFixture) time.Duration {
 			finishRankingTrigger(t, f)
@@ -140,12 +157,31 @@ func TestCloudLauncherSearchKeepsEveryTeamWithClaimableWork(t *testing.T) {
 	}
 }
 
-func TestLauncherExistenceCheckUsesThePartialClaimIndexesOnPostgres(t *testing.T) {
-	plan := store.LauncherClaimTeamsPlan(t, storetest.OpenPostgres(t))
+// The launcher's team list must cost the same whatever one team's backlog holds: a seek per team with work.
+func TestLauncherTeamListStaysBoundedOnASkewedBacklogOnPostgres(t *testing.T) {
+	s := storetest.OpenPostgres(t)
+	store.SeedSkewedBacklog(t, s, 100000)
+	plan, teams := store.LauncherClaimTeamsPlan(t, s)
 	t.Log(plan)
-	for _, index := range []string{"using idx_nodes_claim_", "using idx_eval_units_claimable ", "using idx_triggers_claim_"} {
-		if !strings.Contains(plan, index) {
-			t.Fatalf("the plan does not use a partial claim index (%s):\n%s", strings.TrimPrefix(index, "using "), plan)
+	if want := []string{"skew-00", "skew-01", "skew-02", "skew-03"}; !slices.Equal(teams, want) {
+		t.Fatalf("the launcher would search %v, want %v", teams, want)
+	}
+	for _, scan := range []string{"Seq Scan on nodes", "Seq Scan on triggers", "Seq Scan on eval_units", "Bitmap Heap Scan", "hashed SubPlan"} {
+		if strings.Contains(plan, scan) {
+			t.Fatalf("the team list reads a backlog (%s):\n%s", scan, plan)
 		}
+	}
+	match := regexp.MustCompile(`Buffers: shared hit=(\d+)(?: read=(\d+))?`).FindStringSubmatch(plan)
+	if match == nil {
+		t.Fatalf("no buffer count in the plan:\n%s", plan)
+	}
+	pages := 0
+	for _, count := range match[1:] {
+		if n, err := strconv.Atoi(count); err == nil {
+			pages += n
+		}
+	}
+	if pages > 500 {
+		t.Fatalf("the team list touched %d pages over a 100,000-unit backlog; a seek per team needs far fewer:\n%s", pages, plan)
 	}
 }

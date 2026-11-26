@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -130,13 +131,46 @@ func ClaimableUnitQueuedPlan(t *testing.T, s *Store, team string) string {
 	return explainWithoutSeqScan(t, s, query, args)
 }
 
-// LauncherClaimTeamsPlan is PostgreSQL's plan for the Cloud launcher's existence check across live teams over every
-// unit kind, planned with sequential scans disabled.
-func LauncherClaimTeamsPlan(t *testing.T, s *Store) string {
+// LauncherClaimTeamsPlan is PostgreSQL's executed plan, with buffer counts, for the Cloud launcher's team list over
+// every launcher unit kind, under the default planner settings.
+func LauncherClaimTeamsPlan(t *testing.T, s *Store) (plan string, teams []string) {
 	t.Helper()
-	q := claimSQL{}
-	queued := q.queuedUnitSQL(func() string { return "tm.name" }, []capability.UnitKind{capability.UnitNode, capability.UnitEval, capability.UnitPlan})
-	return explainWithoutSeqScan(t, s, `SELECT tm.name FROM teams tm WHERE `+queued, q.args)
+	if s.dialect != DialectPostgres {
+		t.Skip("the plan guard reads the PostgreSQL planner")
+	}
+	query, args := claimTeamsSQL("", []capability.UnitKind{capability.UnitPlan, capability.UnitEval, capability.UnitNode})
+	query = rewritePh(DialectPostgres, query)
+	rows, err := s.db.QueryContext(t.Context(), `EXPLAIN (ANALYZE, BUFFERS) `+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatal(err)
+		}
+		lines = append(lines, line)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := s.db.QueryContext(t.Context(), query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for listed.Next() {
+		var team string
+		var ordinal int64
+		if err := listed.Scan(&team, &ordinal); err != nil {
+			t.Fatal(err)
+		}
+		teams = append(teams, team)
+	}
+	if err := errors.Join(listed.Err(), listed.Close()); err != nil {
+		t.Fatal(err)
+	}
+	return strings.Join(lines, "\n"), teams
 }
 
 func explainWithoutSeqScan(t *testing.T, s *Store, query string, args []any) string {

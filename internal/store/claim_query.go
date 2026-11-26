@@ -256,6 +256,7 @@ type claimSQL struct {
 	args            []any
 	policy          ClaimPlacement
 	overflow        []claimOverflowFacts
+	mode            capability.PaymentMode
 }
 
 // hack: SQLite and PostgreSQL disagree on substr with a negative start, so match.IsCloudSizeLabel's suffix is read
@@ -480,19 +481,9 @@ type claimTeamFacts struct {
 }
 
 // perf: claimable kinds keep only teams holding a queued unit of one of them, so idle teams cost no facts.
-func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string, claimable []capability.UnitKind) ([]claimTeamFacts, error) {
-	query := `SELECT tm.name,tm.claim_award_ordinal FROM teams tm WHERE tm.name IN (` + liveTeamsSQL + `)`
-	var args []any
-	if scopeTeam != "" {
-		query += ` AND tm.name=?`
-		args = append(args, scopeTeam)
-	}
-	if len(claimable) > 0 {
-		q := claimSQL{}
-		query += ` AND (` + q.queuedUnitSQL(func() string { return "tm.name" }, claimable) + `)`
-		args = append(args, q.args...)
-	}
-	rows, err := tx.queryContext(ctx, query+` ORDER BY tm.claim_award_ordinal,tm.name`, args...)
+func claimTeamsTx(ctx context.Context, tx *storeTx, scopeTeam string, claimable []capability.UnitKind) ([]claimTeamFacts, error) {
+	query, args := claimTeamsSQL(scopeTeam, claimable)
+	rows, err := tx.queryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -504,35 +495,42 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string, claima
 		}
 		teams = append(teams, team)
 	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
+	return teams, errors.Join(rows.Err(), rows.Close())
+}
+
+func claimTeamsSQL(scopeTeam string, claimable []capability.UnitKind) (string, []any) {
+	q := claimSQL{}
+	query := `SELECT tm.name,tm.claim_award_ordinal FROM teams tm WHERE tm.name IN (` + liveTeamsSQL + `)`
+	if scopeTeam != "" {
+		query += ` AND tm.name=` + q.param(scopeTeam)
 	}
-	if len(teams) == 0 {
-		return nil, nil
+	if len(claimable) > 0 {
+		ctes, queued := q.queuedTeamsSQL(claimable)
+		query = `WITH RECURSIVE ` + ctes + ` ` + query + ` AND tm.name IN (` + queued + `)`
 	}
-	mode, err := creditPaymentMode(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
+	return query + ` ORDER BY tm.claim_award_ordinal,tm.name`, q.args
+}
+
+func claimTeamFactsTx(ctx context.Context, tx *storeTx, teams []claimTeamFacts, mode capability.PaymentMode) error {
 	for i := range teams {
 		team := Team(teams[i].Team)
 		standing, err := trustStandingInModeTx(ctx, tx, team, tx.now(ctx), mode)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		balance, err := creditBalanceInModeTx(ctx, tx, team, mode)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		var active int64
 		if err = tx.QueryRowContext(ctx, activeCloudCPUSQL, mode, team).Scan(&active); err != nil {
-			return nil, err
+			return err
 		}
 		teams[i].Available = standing.CloudVCPU - active
 		teams[i].Balance = balance
 		teams[i].Held = boolInt(standing.HoldCause != "" || standing.Tier == "Held")
 	}
-	return teams, nil
+	return nil
 }
 
 func (o *Operator) claimObserversTx(ctx context.Context, tx *storeTx, current claimFacts, teams []string) ([]claimFacts, error) {
@@ -850,12 +848,19 @@ func claimInputsForTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds
 	if scopeTeam == "" && !q.projected {
 		claimable = kinds
 	}
-	teams, err := claimTeamFactsTx(ctx, tx, scopeTeam, claimable)
+	teams, err := claimTeamsTx(ctx, tx, scopeTeam, claimable)
 	if err != nil {
 		return err
 	}
 	if claimable != nil && len(teams) == 0 {
 		return notFound("eligible work", "")
+	}
+	mode, err := creditPaymentMode(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err := claimTeamFactsTx(ctx, tx, teams, mode); err != nil {
+		return err
 	}
 	observed := []string{scopeTeam}
 	if scopeTeam == "" {
@@ -878,13 +883,13 @@ func claimInputsForTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds
 	if slices.ContainsFunc(facts, func(f claimFacts) bool { return f.Cloud != 0 }) {
 		q.overflow, err = tx.operator.claimOverflowAccountsTx(ctx, tx, scopeTeam, current, demand.Target)
 		if err == nil && (demand.Target != nil || current.BindRun != "" || len(current.Pushes) > 0) {
-			q.overflow, err = claimOverflowUsageTx(ctx, tx, q.overflow)
+			q.overflow, err = claimOverflowUsageTx(ctx, tx, q.overflow, mode)
 		}
 		if err != nil {
 			return err
 		}
 	}
-	q.dialect = tx.dialect
+	q.dialect, q.mode = tx.dialect, mode
 	q.facts, q.teams, q.rates, q.kinds, q.now = facts, teams, rates, kinds, tx.now(ctx).UnixNano()
 	return nil
 }
@@ -903,38 +908,53 @@ func claimableUnitQueuedTx(ctx context.Context, tx *storeTx, team string, kinds 
 
 func claimableUnitQueuedSQL(team string, kinds []capability.UnitKind) (string, []any) {
 	q := claimSQL{}
-	queued := q.queuedUnitSQL(func() string { return q.param(team) }, kinds)
-	if queued == "" {
+	var checks []string
+	for _, source := range queuedSources(kinds) {
+		checks = append(checks, `EXISTS (SELECT 1 FROM `+source.table+` a WHERE a.team=`+q.param(team)+` AND `+source.queued+`)`)
+	}
+	if len(checks) == 0 {
 		return "", nil
 	}
-	return `SELECT CASE WHEN ` + queued + ` THEN 1 ELSE 0 END`, q.args
+	return `SELECT CASE WHEN ` + strings.Join(checks, ` OR `) + ` THEN 1 ELSE 0 END`, q.args
 }
 
-// safety: each branch is its kind's claim source with only the team scope and index predicate kept, so any unit
-// a search can return makes this true in the same snapshot. team renders the team expression once per use.
-func (q *claimSQL) queuedUnitSQL(team func() string, kinds []capability.UnitKind) string {
-	var checks, triggerKinds []string
+// perf: each recursive step seeks the next team holding a queued unit in a team-leading partial claim index, so
+// listing the teams with work costs one seek per such team, never a read of any team's backlog.
+func (q *claimSQL) queuedTeamsSQL(kinds []capability.UnitKind) (string, string) {
+	var ctes, unions []string
+	for i, source := range queuedSources(kinds) {
+		name := fmt.Sprintf("queued_%d", i)
+		next := func(after string) string {
+			return `(SELECT a.team FROM ` + source.table + ` a WHERE ` + source.queued + after + ` ORDER BY a.team LIMIT 1)`
+		}
+		ctes = append(ctes, name+`(team) AS (SELECT `+next(``)+` UNION ALL SELECT `+next(` AND a.team>`+name+`.team`)+` FROM `+name+` WHERE `+name+`.team IS NOT NULL)`)
+		unions = append(unions, `SELECT team FROM `+name+` WHERE team IS NOT NULL`)
+	}
+	return strings.Join(ctes, `,`), strings.Join(unions, ` UNION `)
+}
+
+type queuedSource struct{ table, queued string }
+
+// safety: each source keeps a subset of its claim source's conditions, so any unit a search can return passes in
+// the same snapshot. Triggers drop the kind, which the partial index orders after claim_requirements, so a team's
+// backlog of other-kind triggers is never read; pending eval units are unclaimed by the table's checks.
+func queuedSources(kinds []capability.UnitKind) []queuedSource {
+	var sources []queuedSource
+	triggers := false
 	for _, kind := range kinds {
 		switch kind {
 		case capability.UnitNode:
-			checks = append(checks, `EXISTS (SELECT 1 FROM nodes n WHERE n.team=`+team()+` AND n.status='pending' AND n.ready_at IS NOT NULL AND n.claimed_by IS NULL AND n.capability_prefix='' AND n.cancel_requested_at IS NULL)`)
+			sources = append(sources, queuedSource{"nodes", `a.status='pending' AND a.ready_at IS NOT NULL AND a.claimed_by IS NULL AND a.capability_prefix='' AND a.cancel_requested_at IS NULL`})
 		case capability.UnitEval:
-			checks = append(checks, `EXISTS (SELECT 1 FROM eval_units e WHERE e.team=`+team()+` AND e.status='pending' AND e.claimed_by IS NULL AND e.capability_prefix='')`)
+			sources = append(sources, queuedSource{"eval_units", `a.status='pending'`})
 		default:
-			triggerKinds = append(triggerKinds, string(kind))
+			triggers = true
 		}
 	}
-	if len(triggerKinds) > 0 {
-		check := `EXISTS (SELECT 1 FROM triggers t WHERE t.team=` + team() + ` AND t.status='pending' AND t.claimed_by IS NULL AND t.capability_prefix='' AND t.cancel_requested_at IS NULL AND t.unit_kind IN (`
-		for i, kind := range triggerKinds {
-			if i > 0 {
-				check += `,`
-			}
-			check += q.param(kind)
-		}
-		checks = append(checks, check+`))`)
+	if triggers {
+		sources = append(sources, queuedSource{"triggers", `a.status='pending' AND a.claimed_by IS NULL AND a.capability_prefix='' AND a.cancel_requested_at IS NULL`})
 	}
-	return strings.Join(checks, ` OR `)
+	return sources
 }
 
 func claimQueryTx(ctx context.Context, tx *storeTx, demand UnitDemand, kinds []capability.UnitKind, q *claimSQL) (string, error) {

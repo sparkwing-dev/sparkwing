@@ -81,7 +81,7 @@ func BenchmarkClaimBoundRun4000(b *testing.B) {
 				exec(`INSERT INTO nodes(team,run_id,node_id,status,ready_at,spec_json,execution_json,claim_requirements) VALUES ('bench','bound',?,'pending',?, ?,?,?)`, node, i+1, []byte(`{}`), execution, keys[label])
 			}
 			facts := []claimFacts{{Prefix: "benchmark", Team: "bench", BindRun: "bound", FreeSlots: 1, Current: 1, Trust: "any", Kinds: []string{"node"}, Labels: []string{"eligible"}, Tier: tierSelfHosted}}
-			template := claimSQL{dialect: DialectSQLite, facts: facts, teams: []claimTeamFacts{{Team: "bench"}}, kinds: []capability.UnitKind{capability.UnitNode}, now: 1700000000000000000}
+			template := claimSQL{dialect: DialectSQLite, facts: facts, teams: []claimTeamFacts{{Team: "bench"}}, kinds: []capability.UnitKind{capability.UnitNode}, now: 1700000000000000000, mode: capability.PaymentTest}
 			demand := UnitDemand{CapabilityPrefix: "benchmark", Kinds: template.kinds}
 			poll := func() {
 				b.Helper()

@@ -267,7 +267,7 @@ func searchClaimTx(ctx context.Context, tx *storeTx, demand UnitDemand, template
 			}
 			teamTemplate := *template
 			teamTemplate.overflow = slices.DeleteFunc(slices.Clone(template.overflow), func(f claimOverflowFacts) bool { return f.Team != team.Team })
-			overflow, err := claimOverflowUsageTx(ctx, tx, teamTemplate.overflow)
+			overflow, err := claimOverflowUsageTx(ctx, tx, teamTemplate.overflow, template.mode)
 			teamTemplate.overflow = overflow
 			if err != nil {
 				return claimHead{}, err

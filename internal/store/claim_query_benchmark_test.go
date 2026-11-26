@@ -206,7 +206,7 @@ func benchmarkClaimQuery(b *testing.B, dialect Dialect, scenario string) {
 		}
 		facts = append(facts, claimFacts{Prefix: fmt.Sprintf("observer-%04d", i), FreeSlots: 1, Team: teams[i%len(teams)].Team, ObservedAt: 1700000000000000000, Trust: "any", Kinds: []string{"node"}, Labels: labels, Tier: tierSelfHosted})
 	}
-	template := claimSQL{dialect: dialect, facts: facts, teams: teams, rates: DefaultCreditRateTable(DefaultCreditRateMicro), kinds: []capability.UnitKind{capability.UnitNode}, now: 1700000000000000000}
+	template := claimSQL{dialect: dialect, facts: facts, teams: teams, rates: DefaultCreditRateTable(DefaultCreditRateMicro), kinds: []capability.UnitKind{capability.UnitNode}, now: 1700000000000000000, mode: capability.PaymentTest}
 	demand := UnitDemand{CapabilityPrefix: "benchmark", Kinds: template.kinds}
 	tx, err = db.BeginTx(ctx, nil)
 	if err != nil {
