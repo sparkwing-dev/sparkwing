@@ -127,18 +127,23 @@ func runPublishedDocsCheck(t *testing.T, repo string, site publishedDocsSite) er
 	if site.tamperIndex {
 		tamper = `printf ' ' >> "$output"`
 	}
+	// safety: a stalled site must fail the check rather than hold the cut, so every
+	// fetch needs a deadline and the docs title fetch reads only its head.
 	writeDeliveryTool(t, filepath.Join(bin, "curl"), fmt.Sprintf(`#!/bin/sh
 set -eu
-url= output=
+url= output= deadline= head=
 while [ "$#" -gt 0 ]; do
  case "$1" in
   https://*) url=$1; shift ;;
   -o) output=$2; shift 2 ;;
+  --max-time) deadline=$2; shift 2 ;;
+  --range) head=$2; shift 2 ;;
   *) shift ;;
  esac
 done
+[ -n "$deadline" ] || { echo "curl: unbounded fetch of $url" >&2; exit 43; }
 case "$url" in
- %[1]sllms.txt) %[2]s ;;
+ %[1]sllms.txt) [ "$head" = 0-4095 ] || { echo "curl: unbounded read of $url" >&2; exit 43; }; %[2]s ;;
  %[1]sversions.json) cp %[3]s "$output"; %[4]s ;;
  %[1]sversions.json.sig) cp %[5]s "$output" ;;
  *) exit 41 ;;

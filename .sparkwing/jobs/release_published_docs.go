@@ -36,7 +36,8 @@ func checkPublishedDocs(ctx context.Context, repo string) error {
 			sparkwing.Warn(ctx, "remove published docs scratch: %v", err)
 		}
 	}()
-	if err := downloadPublicSiteFile(ctx, repo, dir, "llms.txt"); err != nil {
+	// safety: the title is the first line of a ~35 KiB file, so fetch only its head.
+	if err := downloadPublicSiteFile(ctx, repo, dir, "llms.txt", "--range", "0-4095"); err != nil {
 		return fmt.Errorf("published docs: %w", err)
 	}
 	llms, err := os.ReadFile(filepath.Join(dir, "llms.txt"))
@@ -93,9 +94,14 @@ func releaseVersion(v string) bool {
 	return semver.IsValid(v) && semver.Canonical(v) == v && semver.Prerelease(v) == ""
 }
 
-func downloadPublicSiteFile(ctx context.Context, repo, dir, name string) error {
-	if _, err := sparkwing.Exec(ctx, "curl", "--fail", "--silent", "--show-error", "--location",
-		publicSiteURL+name, "-o", filepath.Join(dir, name)).Dir(repo).Run(); err != nil {
+// publicSiteFetchSeconds bounds each download so a stalled response fails the
+// check instead of holding the cut until its job timeout.
+const publicSiteFetchSeconds = "30"
+
+func downloadPublicSiteFile(ctx context.Context, repo, dir, name string, extra ...string) error {
+	args := append([]string{"--fail", "--silent", "--show-error", "--location", "--max-time", publicSiteFetchSeconds}, extra...)
+	args = append(args, publicSiteURL+name, "-o", filepath.Join(dir, name))
+	if _, err := sparkwing.Exec(ctx, "curl", args...).Dir(repo).Run(); err != nil {
 		return fmt.Errorf("download %s%s: %w", publicSiteURL, name, err)
 	}
 	return nil
