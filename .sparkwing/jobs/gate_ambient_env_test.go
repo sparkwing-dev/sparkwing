@@ -123,3 +123,56 @@ func TestNoLiveServiceIsWithinReach(t *testing.T) {
 	}
 }
 `
+
+func TestTheTestStepHidesTheMachinesGitConfigFromTheSuitesItRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
+	root := gateFixtureRepo(t)
+	ctx := newTestContext(t)
+
+	writeGoFile(t, filepath.Join(root, "internal", "git_identity_probe_test.go"), gitIdentityProbe)
+	gitAddAll(t, root)
+
+	config := t.TempDir()
+	var identities []string
+	for _, name := range []string{"global", "system"} {
+		path := filepath.Join(config, name)
+		email := name + "@operator.test"
+		writeGoFile(t, path, "[user]\n\tname = operator\n\temail = "+email+"\n")
+		t.Setenv("GIT_CONFIG_"+strings.ToUpper(name), path)
+		identities = append(identities, email)
+	}
+	// safety: a gate that already sets this would hide a missing system pin.
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "0")
+
+	err := forEachGoModule(ctx, "go test", "go test ./...", "")
+	if err == nil {
+		t.Fatal("the probe must fail while the machine's git identity reaches it, or the pass below proves nothing")
+	}
+	for _, email := range identities {
+		if !strings.Contains(err.Error(), email) {
+			t.Fatalf("the unpinned probe never saw %s, so the pass below proves nothing for it: %v", email, err)
+		}
+	}
+	if err := runTest(ctx); err != nil {
+		t.Fatalf("the test step handed its suites the machine's git config: %v", err)
+	}
+}
+
+const gitIdentityProbe = `package internal
+
+import (
+	"errors"
+	"os/exec"
+	"testing"
+)
+
+func TestNoGitIdentityIsConfigured(t *testing.T) {
+	out, err := exec.Command("git", "config", "--show-scope", "--get-all", "user.email").CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 || len(out) != 0 {
+		t.Fatalf("git config user.email = %q (%v), want the missing-key exit 1 hosted CI gives", out, err)
+	}
+}
+`

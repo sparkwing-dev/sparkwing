@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 
@@ -52,6 +54,17 @@ func OperatorHealth(t *testing.T, s *Server) controllerwire.OperatorHealth {
 // so a test serves a key without dialing a host.
 func SetHostKeyScan(s *Server, scan func(ctx context.Context, host string, port int) (ssh.PublicKey, error)) {
 	s.hostKeyScan = scan
+}
+
+// SetSourceLookup replaces the clone host resolver intake source selection
+// uses, so a test reaches fixture remotes without real DNS.
+func SetSourceLookup(s *Server, lookup sourceurl.Lookup) {
+	s.sourceLookup = lookup
+}
+
+// FixtureCloneHostLookup resolves every clone host to one public address.
+func FixtureCloneHostLookup(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return fixtureCloneHostLookup(ctx, host)
 }
 
 // BindTenantPortForTest binds one fake tenant rather than independent route ports.

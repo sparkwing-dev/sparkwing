@@ -262,10 +262,11 @@ type raceShardResult struct {
 }
 
 func raceExec(ctx context.Context, home, name string, args ...string) *sparkwing.Cmd {
-	envArgs := make([]string, 0, 2*len(productTestUnset)+len(args)+4)
+	envArgs := make([]string, 0, 2*len(productTestUnset)+len(productTestGitConfig)+len(args)+4)
 	for _, name := range productTestUnset {
 		envArgs = append(envArgs, "-u", name)
 	}
+	envArgs = append(envArgs, productTestGitConfig...)
 	envArgs = append(envArgs, productTestHomeVar+"="+home, "GOWORK=auto", name)
 	envArgs = append(envArgs, args...)
 	return sparkwing.Exec(ctx, "env", envArgs...)
