@@ -1215,7 +1215,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                     setFocusedColumn("runs");
                     selectRun(isActive ? null : r.id);
                   }}
-                  className={`relative h-14 overflow-hidden px-3 py-2 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
+                  className={`relative min-h-14 lg:h-14 overflow-hidden px-3 py-2 border-b border-[var(--border)] border-l-4 cursor-pointer hover:bg-[var(--surface-raised)] transition-colors flex items-start gap-2 ${
                     isChecked
                       ? "bg-violet-500/15 border-l-violet-400"
                       : "border-l-transparent"
@@ -2410,7 +2410,7 @@ const FullRunRow = memo(function FullRunRow({
 
   const meta = (
     <div className="min-w-0 flex flex-col gap-0.5 text-[11px]">
-      <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap">
+      <div className="flex flex-wrap lg:flex-nowrap items-center gap-x-2 gap-y-0.5 min-w-0 overflow-hidden lg:whitespace-nowrap">
         <FilterableValue
           facet="status"
           value={r.status}
@@ -2429,7 +2429,7 @@ const FullRunRow = memo(function FullRunRow({
           tooltip={`Repo: ${repo}`}
           className="min-w-0"
         >
-          <span className="block min-w-0 truncate text-cyan-400/70">{repo}</span>
+          <span className="block min-w-0 wrap-anywhere lg:truncate text-cyan-400/70">{repo}</span>
         </FilterableValue>
         <span className="text-[var(--muted)] shrink-0">/</span>
         <FilterableValue
@@ -2439,7 +2439,7 @@ const FullRunRow = memo(function FullRunRow({
           tooltip={`Pipeline: ${r.pipeline}`}
           className="min-w-0"
         >
-          <span className="block min-w-0 truncate font-medium text-violet-300">
+          <span className="block min-w-0 wrap-anywhere lg:truncate font-medium text-violet-300">
             {r.pipeline}
           </span>
         </FilterableValue>
@@ -2451,37 +2451,40 @@ const FullRunRow = memo(function FullRunRow({
             tooltip={`Branch: ${r.git_branch}`}
             className="min-w-0"
           >
-            <span className="block min-w-0 truncate text-amber-400/70">
+            <span className="block min-w-0 wrap-anywhere lg:truncate text-amber-400/70">
               ⎇ {r.git_branch}
             </span>
           </FilterableValue>
         )}
-        {sha7 && (
-          <FilterableValue
-            facet="commit"
-            value={sha7}
-            ctx={ctx}
-            tooltip={`Commit: ${sha7}`}
-          >
-            <span className="font-mono text-[var(--muted)] shrink-0">
-              {sha7}
-            </span>
-          </FilterableValue>
-        )}
-        {r.trigger_source && (
-          <FilterableValue
-            facet="trigger"
-            value={r.trigger_source}
-            ctx={ctx}
-            tooltip={`Trigger: ${r.trigger_source}`}
-            className="min-w-0"
-          >
-            <span className="block min-w-0 truncate font-mono text-[10px] text-[var(--muted)]">
-              {r.trigger_source}
-            </span>
-          </FilterableValue>
-        )}
-        <RunRequester requester={r.trigger_user} agent={r.agent} className="shrink" />
+        {/* Narrow rows give their width to repo, pipeline and branch; the run header and Setup tab still show these. */}
+        <span className="hidden lg:contents">
+          {sha7 && (
+            <FilterableValue
+              facet="commit"
+              value={sha7}
+              ctx={ctx}
+              tooltip={`Commit: ${sha7}`}
+            >
+              <span className="font-mono text-[var(--muted)] shrink-0">
+                {sha7}
+              </span>
+            </FilterableValue>
+          )}
+          {r.trigger_source && (
+            <FilterableValue
+              facet="trigger"
+              value={r.trigger_source}
+              ctx={ctx}
+              tooltip={`Trigger: ${r.trigger_source}`}
+              className="min-w-0"
+            >
+              <span className="block min-w-0 truncate font-mono text-[10px] text-[var(--muted)]">
+                {r.trigger_source}
+              </span>
+            </FilterableValue>
+          )}
+          <RunRequester requester={r.trigger_user} agent={r.agent} className="shrink" />
+        </span>
         {(r.retry_of || r.retried_as) && (
           <AttemptsDropdown currentRunID={r.id} dense />
         )}
@@ -2547,9 +2550,9 @@ const FullRunRow = memo(function FullRunRow({
   );
 
   return (
-    <div className={`grid ${hasSummary ? "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : "grid-cols-1"} gap-3 items-start min-w-0 overflow-hidden`}>
+    <div className={`grid grid-cols-1 ${hasSummary ? "lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" : ""} gap-x-3 gap-y-0.5 items-start min-w-0 overflow-hidden`}>
       {meta}
-      {hasSummary && <div className="min-w-0 text-[11px] font-mono">
+      {hasSummary && <div className={`min-w-0 text-[11px] font-mono ${r.error ? "" : "hidden lg:block"}`}>
         {r.error?.startsWith("run did not start: out of credits:") && (
           <RetryButton
             runId={r.id}

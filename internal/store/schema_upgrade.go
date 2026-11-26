@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ type schemaUpgrade struct {
 	digest             string
 	statements         []string
 	postgresStatements []string
+	backfill           func(context.Context, *storeTx) error
 }
 
 // safety: only a store at a listed version whose digest matches that release is changed; every step runs inside
@@ -78,6 +80,17 @@ var schemaUpgrades = []schemaUpgrade{
 		`CREATE INDEX idx_invitation_email_log_inviter ON invitation_email_log(inviter, sent_at)`,
 	}},
 	{from: 42, release: "schema 42", digest: "0674849f24548cae23bd6c39f3634113014b66559f193af9522ed30a3dcb523d", statements: schema43CreditIndexStatements},
+	{from: 43, release: "schema 43", digest: "7fe46a7554104b26ea25bac28ab7a719513991ad4f42af62a9cf7d9260bfc000", statements: []string{
+		`CREATE TABLE limit_events (
+    kind TEXT NOT NULL CHECK (kind <> ''),
+    digest TEXT NOT NULL CHECK (length(digest) = 64),
+    at BIGINT NOT NULL
+)`,
+		`CREATE INDEX idx_limit_events_key ON limit_events(kind, digest, at)`,
+		`INSERT INTO limit_events (kind, digest, at) SELECT 'invitation_email_recipient', address, sent_at FROM invitation_email_log`,
+		`INSERT INTO limit_events (kind, digest, at) SELECT 'invitation_email_account', inviter, sent_at FROM invitation_email_log WHERE inviter <> ''`,
+		`DROP TABLE invitation_email_log`,
+	}, backfill: backfillTeamInvitationEventsTx},
 }
 
 // safety: in the upgrade transaction PostgreSQL blocks ledger writes during each build (about 2 s per million
@@ -175,6 +188,42 @@ func actionsTeamForeignKeyUpgrade() []string {
 	}
 }
 
+// safety: before schema 44 the daily invitation count per team read the invitations themselves, so the upgrade
+// records the last day of them in limit_events; SQLite has no SHA-256 in SQL, so the digests are computed here.
+func backfillTeamInvitationEventsTx(ctx context.Context, tx *storeTx) error {
+	now := tx.now(ctx)
+	if tx.err != nil {
+		return tx.err
+	}
+	rows, err := tx.queryContext(ctx, `SELECT team, created_at FROM invitations WHERE created_at > ?`,
+		now.Add(-teamInvitationsPerDay.window).UnixNano())
+	if err != nil {
+		return err
+	}
+	type event struct {
+		team string
+		at   int64
+	}
+	var events []event
+	for rows.Next() {
+		var e event
+		if err := rows.Scan(&e.team, &e.at); err != nil {
+			return errors.Join(err, rows.Close())
+		}
+		events = append(events, e)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return err
+	}
+	for _, e := range events {
+		if _, err := tx.execContext(ctx, `INSERT INTO limit_events (kind, digest, at) VALUES (?, ?, ?)`,
+			teamInvitationsPerDay.kind, limitKeyDigest(e.team), e.at); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func schemaUpgradeFrom(version int) (schemaUpgrade, bool) {
 	i := slices.IndexFunc(schemaUpgrades, func(u schemaUpgrade) bool { return u.from == version })
 	if i < 0 {
@@ -212,6 +261,11 @@ func upgradeSchemaTx(ctx context.Context, tx *storeTx, version int, path string)
 				_, err = tx.execContext(ctx, translated)
 			}
 			if err != nil {
+				return fmt.Errorf("upgrade store schema %d to %d: %w; the store is unchanged", version, version+1, err)
+			}
+		}
+		if step.backfill != nil {
+			if err := step.backfill(ctx, tx); err != nil {
 				return fmt.Errorf("upgrade store schema %d to %d: %w; the store is unchanged", version, version+1, err)
 			}
 		}
