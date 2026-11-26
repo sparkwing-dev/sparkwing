@@ -378,3 +378,13 @@ func ExerciseOIDCScrubGuardForTest(t testing.TB, s *Store, check func(func(strin
 		return err
 	})
 }
+
+// ExpiredUnitsForTest returns the reaper's candidates as team/run/node/kind, in the order it reaps them.
+func (o *Operator) ExpiredUnitsForTest(ctx context.Context, limit int) ([]string, error) {
+	units, err := o.expiredUnits(ctx, limit)
+	out := make([]string, 0, len(units))
+	for _, unit := range units {
+		out = append(out, fmt.Sprintf("%s/%s/%s/%s", unit.team, unit.ref.RunID, unit.ref.NodeID, unit.kind))
+	}
+	return out, err
+}

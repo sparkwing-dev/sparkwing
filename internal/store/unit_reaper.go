@@ -122,6 +122,13 @@ type expiredUnit struct {
 	sourceGeneration int64
 }
 
+// perf: CROSS JOIN fixes the join order on SQLite, so the search reads unresolved approvals through
+// idx_approvals_pending and looks up each gate's node by key instead of scanning every node in history.
+const expiredApprovalsQuery = `SELECT n.team,n.run_id,n.node_id,'node',0,a.requested_at FROM approvals a
+	 CROSS JOIN nodes n
+	 WHERE n.team=a.team AND n.run_id=a.run_id AND n.node_id=a.node_id AND n.status='approval_pending'
+	 AND a.resolved_at IS NULL AND a.timeout_ms>0 AND a.requested_at<=?-a.timeout_ms*1000000`
+
 func (o *Operator) expiredUnits(ctx context.Context, limit int) ([]expiredUnit, error) {
 	current, err := o.s.databaseNow(ctx)
 	if err != nil {
@@ -137,10 +144,7 @@ func (o *Operator) expiredUnits(ctx context.Context, limit int) ([]expiredUnit, 
 	 WHERE n.status='pending' AND n.claimed_by IS NULL AND n.queue_started_at IS NOT NULL
 	 AND r.claim_wait_ns>0 AND n.queue_started_at<=?-r.claim_wait_ns
 	 UNION ALL
-	 SELECT n.team,n.run_id,n.node_id,'node',0,a.requested_at FROM nodes n
-	 JOIN approvals a ON a.team=n.team AND a.run_id=n.run_id AND a.node_id=n.node_id
-	 WHERE n.status='approval_pending' AND a.resolved_at IS NULL AND a.timeout_ms>0
-	 AND a.requested_at<=?-a.timeout_ms*1000000
+	 `+expiredApprovalsQuery+`
 	 UNION ALL
 	 SELECT t.team,t.id,'',t.unit_kind,0,COALESCE(t.lease_expires_at,t.expires_at,t.created_at) AS due FROM triggers t
  JOIN runs r ON r.team=t.team AND r.id=t.id
