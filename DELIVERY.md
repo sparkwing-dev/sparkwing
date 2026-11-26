@@ -482,8 +482,8 @@ release older than `latest` in the signed `https://sparkwing.dev/versions.json`
 index. The hosted release workflow writes that index only after a stable GitHub
 release publishes, so a prerelease, an unpushed tag, or a tag whose hosted build
 failed never demands docs; repair a failed hosted build with a later patch cut.
-Publish the indexed release's sparkwing-product docs (its `versions.json` entry
-as `latest`, pushed to product main) before cutting the next one.
+Publish the indexed release's product site docs (its `versions.json` entry
+as `latest`, pushed to the site's main) before cutting the next one.
 
 The check fails closed: a site outage, a docs title in any other format, or an
 index whose signature does not verify blocks every cut, and the pipeline has no
@@ -614,8 +614,9 @@ recovery date. The job shares `release-publication` with asset publication, so a
 late older release cannot replace a newer index with an old snapshot.
 
 The publisher writes only `versions.json` and `versions.json.sig` in the
-website bucket named in `bin/publish-release-index.sh`, then invalidates both
-paths on the website's CloudFront distribution. It reads back the exact bytes from S3 and the public hostname.
+website bucket the `SPARKWING_WEBSITE_BUCKET` repository variable names, then
+invalidates both paths on the CloudFront distribution `SPARKWING_WEBSITE_DISTRIBUTION`
+names; the script refuses to start without either. It reads back the exact bytes from S3 and the public hostname.
 Objects use a 60-second cache lifetime. Clients can encounter a mismatched pair
 during the two uploads and fail verification until the pair is complete.
 Existing clients retain their last verified index.
@@ -793,11 +794,15 @@ pre-push vets touched packages in both flavours.
 
 `bin/qa-release.sh <repo> <commit> <vX.Y.Z-qa.N>` clones the commit, builds the
 dashboard and the full release matrix with the tag, signs the assets with the QA
-seed from the SSM parameter named in the script, appends the version to
+seed from the SSM parameter `SPARKWING_QA_SIGNING_KEY_PARAMETER` names, appends the version to
 the signed QA `versions.json`, and uploads both. It also publishes the Go SDK at
 that version in GOPROXY layout under `/goproxy`. The index and the module `list`
 are written only if unchanged since they were read, so concurrent runs fail
 rather than drop a version. A published QA version is immutable; use the next `-qa.N`.
+The QA bucket is `SPARKWING_QA_BUCKET`. Keep both settings in
+`~/.config/sparkwing-pipelines/env` and export them, with `AWS_PROFILE` for the
+account that holds them, before running the script; it refuses to start without
+either.
 
 A qatrust engine compiling a pipeline pinned to a `-qa.N` SDK puts the QA proxy
 ahead of the effective GOPROXY (as `go env` reports it, so `go env -w` and
@@ -908,6 +913,60 @@ for t in git ssh bash; do sudo ln -sf "/usr/bin/$t" "/opt/sparkwing-deploy/bin/$
 sudo chown -R root:root /opt/sparkwing-deploy && sudo chmod -R go-w /opt/sparkwing-deploy
 ls -l /opt/sparkwing-deploy/bin && /opt/sparkwing-deploy/bin/go version
 ```
+
+### Deploy configuration
+
+The public pipeline holds the deploy's shape and validation, not its account.
+The account-specific values live in a private `sparkwing-deploy/deploy.yaml` in
+a configuration repository the deploy runner names. Every key is required, and
+an unknown key fails the load:
+
+```yaml
+registry: <account>.dkr.ecr.<region>.amazonaws.com
+cluster: <EKS cluster name>
+bases:                 # runtime bases, by digest, inside registry
+  controller: <registry>/sparkwing-controller@sha256:<digest>
+  runner: <registry>/sparkwing-runner@sha256:<digest>
+repositories:
+  gitops: <SSH URL of the GitOps repository the deploy pins>
+  reference: <SSH URL of the reference pipeline repository>
+parameters:            # SSM parameter paths, not values
+  gitops_key: /<path>
+  reference_key: /<path>
+  staging_gate_token: /<path>
+  smoke_submit_token: /<path>
+environments:
+  staging:             # and production, with the same keys
+    gitops_dir: <directory in the GitOps repository>
+    helm_release: <release>
+    argo_app: <Argo CD application>
+    controller_deployment: <Deployment name>
+    launcher_deployment: <Deployment name>
+    prepull_tag: <runner tag Cloud job nodes pull at boot>
+```
+
+The deploy runner's machine settings bootstrap that read. They live in
+`~/.config/sparkwing-pipelines/env` as `NAME=value` lines, and a variable in
+the ambient environment wins over the file:
+
+| Name | Purpose |
+| --- | --- |
+| `SPARKWING_PIPELINES_DEPLOY_ROLE` | IAM role ARN the run's OIDC token assumes |
+| `SPARKWING_PIPELINES_DEPLOY_REGION` | AWS region for that role and SSM |
+| `SPARKWING_PIPELINES_DEPLOY_CONFIG_REPO` | SSH URL of the configuration repository |
+| `SPARKWING_PIPELINES_DEPLOY_CONFIG_PARAMETER` | SSM parameter holding that repository's read-only deploy key |
+
+Each deploy job assumes the role, reads the key from SSM and shallow-clones the
+configuration repository once before it uses any account value; superseded
+commits still stop before that. A job missing a setting or a key names every
+missing one. `--controller-base` and `--runner-base` override the settings'
+bases. A `--dry-run` holds no credentials, so it reads a local copy of
+`deploy.yaml` from `--deploy-config` and still needs the role and region
+settings to print the actions.
+
+The same file's `SPARKWING_PIPELINES_OWNED_SDK_OWNERS`, a comma-separated list,
+adds GitHub owners whose repositories the `owned-sdk-main` pipeline updates beyond
+`sparkwing-dev`.
 
 ### Check tiers
 
@@ -1932,7 +1991,7 @@ images and the TypeScript package. Before cutting, the weekly pipeline starts
 or resumes the Bitwing `sparkwing-release` workflow using the version as its
 idempotency key. It records the cut's immutable tag and commit in a blocked
 `cut` handoff. The release owner resumes with `bitwing workflow next --run WR-N`
-to confirm hosted publication, publish matching sparkwing-product docs, verify
+to confirm hosted publication, publish the matching product site docs, verify
 production through the platform repository, and reconcile downstream pins. The checklist
 stays open until every required step has evidence. A failed cut retains the
 detached worktree at the path printed in its job log.

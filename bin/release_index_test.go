@@ -53,6 +53,9 @@ func TestReleaseIndexWorkflowPublishesAfterReleaseAndSupportsRepair(t *testing.T
 		if step.Allow || step.Run != "bash bin/publish-release-index.sh" || step.Env["SPARKWING_RELEASE_SIGNING_KEY"] != "${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}" {
 			t.Fatal("index must use existing update signing authority and propagate failure")
 		}
+		if step.Env["SPARKWING_WEBSITE_BUCKET"] != "${{ vars.SPARKWING_WEBSITE_BUCKET }}" || step.Env["SPARKWING_WEBSITE_DISTRIBUTION"] != "${{ vars.SPARKWING_WEBSITE_DISTRIBUTION }}" {
+			t.Fatal("the website bucket and distribution must come from repository variables")
+		}
 		return
 	}
 	t.Fatal("missing stable index publisher")
@@ -157,7 +160,7 @@ func TestReleaseIndexPublicationWritesOnlyVerifiedPairAndInvalidatesBoth(t *test
 				return "false"
 			}
 			cmd := exec.Command("bash", script)
-			cmd.Env = append(os.Environ(), "PATH="+filepath.Join(dir, "tools")+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "FIXTURE="+dir, "TAG=v0.68.2", "BOOTSTRAP_INDEX="+flag(tc.bootstrap), "FAIL_GENERATE="+flag(tc.fail), "FAIL_UPLOAD="+flag(tc.failUpload), "MISSING_CODE="+tc.code)
+			cmd.Env = append(os.Environ(), "PATH="+filepath.Join(dir, "tools")+string(os.PathListSeparator)+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "FIXTURE="+dir, "TAG=v0.68.2", "SPARKWING_WEBSITE_BUCKET=fixture-website", "SPARKWING_WEBSITE_DISTRIBUTION=EFIXTURE", "BOOTSTRAP_INDEX="+flag(tc.bootstrap), "FAIL_GENERATE="+flag(tc.fail), "FAIL_UPLOAD="+flag(tc.failUpload), "MISSING_CODE="+tc.code)
 			if tc.code == "" {
 				cmd.Env = append(cmd.Env, "MISSING_CODE=NoSuchKey")
 			}
@@ -202,14 +205,42 @@ func TestReleaseIndexPublicationWritesOnlyVerifiedPairAndInvalidatesBoth(t *test
 			if len(entries) != 2 || entries[0].Language != "go" || entries[0].Version != "v0.1.0" || entries[1].Language != "typescript" || entries[1].Version != "v0.2.0" {
 				t.Fatalf("lost independent SDK assets: %s", entriesBody)
 			}
-			if strings.Count(calls, "s3api put-object") != 2 || !strings.Contains(calls, "--paths /versions.json /versions.json.sig") || !strings.Contains(calls, "cloudfront wait invalidation-completed") {
+			if strings.Count(calls, "s3api put-object") != 2 || !strings.Contains(calls, "create-invalidation --distribution-id EFIXTURE") || !strings.Contains(calls, "--paths /versions.json /versions.json.sig") || !strings.Contains(calls, "cloudfront wait invalidation-completed") {
 				t.Fatalf("incomplete pair publication: %s", calls)
 			}
 			for _, line := range strings.Split(calls, "\n") {
-				if strings.Contains(line, "put-object") && (!strings.Contains(line, "--bucket kikd-prod-sparkwing-website --key versions.json") || !strings.Contains(line, "max-age=60")) {
+				if strings.Contains(line, "put-object") && (!strings.Contains(line, "--bucket fixture-website --key versions.json") || !strings.Contains(line, "max-age=60")) {
 					t.Fatalf("wrong publication destination: %s", line)
 				}
 			}
 		})
+	}
+}
+
+func TestReleaseIndexPublicationRefusesWithoutWebsiteSettings(t *testing.T) {
+	script, err := filepath.Abs("publish-release-index.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, missing := range []string{"SPARKWING_WEBSITE_BUCKET", "SPARKWING_WEBSITE_DISTRIBUTION"} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "aws"), []byte(releaseIndexToolStub), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		env := []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"), "FIXTURE=" + dir, "TAG=v0.68.2"}
+		for _, name := range []string{"SPARKWING_WEBSITE_BUCKET", "SPARKWING_WEBSITE_DISTRIBUTION"} {
+			if name != missing {
+				env = append(env, name+"=fixture")
+			}
+		}
+		cmd := exec.Command("bash", script)
+		cmd.Env = env
+		output, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(output), missing) {
+			t.Fatalf("without %s: err=%v output=%s", missing, err, output)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "log")); !os.IsNotExist(err) {
+			t.Fatalf("without %s the script reached aws: %v", missing, err)
+		}
 	}
 }
