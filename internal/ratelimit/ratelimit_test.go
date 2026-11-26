@@ -200,3 +200,22 @@ func TestAllowWithRetry_BoundsTheDebtOneKeyCanBuild(t *testing.T) {
 		t.Errorf("longest wait=%s; a capped debt cannot exceed a window plus its own refill", longest)
 	}
 }
+
+func TestAllowOrWaitRefusalChargesNothing(t *testing.T) {
+	l := New(2, time.Minute)
+	now := time.Unix(0, 0)
+	for range 2 {
+		if ok, _ := l.AllowOrWait("team", now); !ok {
+			t.Fatal("fresh bucket refused")
+		}
+	}
+	for range 10 {
+		ok, wait := l.AllowOrWait("team", now)
+		if ok || wait != 30*time.Second {
+			t.Fatalf("refusal = %v after %v, want a steady 30s wait", ok, wait)
+		}
+	}
+	if ok, _ := l.AllowOrWait("team", now.Add(30*time.Second)); !ok {
+		t.Fatal("refused requests delayed the next refill")
+	}
+}

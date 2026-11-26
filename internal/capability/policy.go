@@ -282,6 +282,25 @@ type Authorized struct {
 	LogTailAttempt int64
 }
 
+// LeaseBound reports whether a passed through a claim or eval access rule
+// whose liveness class required the credential's lease to be current when it
+// was authenticated. A result replay or log tail after the lease ended is not
+// lease-bound, and neither is any other credential, because a credential that
+// is not a claim passes every liveness class.
+func (a Authorized) LeaseBound() bool {
+	if a.ResultReplay || a.LogTailAttempt != 0 {
+		return false
+	}
+	if a.Access.Credential != CredentialClaim && a.Access.Credential != credentialEval {
+		return false
+	}
+	switch a.Access.Liveness {
+	case LiveReporting, LiveResult, LiveExpansion:
+		return true
+	}
+	return false
+}
+
 // Authorize returns forbidden for a live principal missing a grant, audience or binding.
 // Authentication failures are unauthenticated; later transaction races are lock_held or illegal_transition.
 func Authorize(ctx context.Context, bindings BindingChecker, route RoutePolicy, authenticated Authenticated, target Target) (Authorized, error) {

@@ -3,9 +3,12 @@ package nodehost
 import (
 	"context"
 	"errors"
+	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	controllerclient "github.com/sparkwing-dev/sparkwing/internal/controller/client"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
+	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -110,12 +113,9 @@ func (s *RemoteHostStore) RenewNodeClaim(ctx context.Context, ref runspec.NodeRe
 	if nodes, ok := s.PrivateHostState.(interface {
 		RenewNode(context.Context, runspec.NodeRef, runstate.Actor, bool) (runstate.LeaseBeat, error)
 	}); ok {
-		// The owner can be computing while its node is still acquiring a source.
-		row, err := s.PrivateHostState.ReadNode(ctx, ref)
-		if err != nil {
-			return runstate.LeaseBeat{}, err
-		}
-		return nodes.RenewNode(ctx, ref, actor, row.Status == runstate.StatusRunning)
+		// safety: a node claim bills from the node row the controller reads under the renewal, so the host sends no
+		// executing claim it would first need a budgeted read to make true.
+		return nodes.RenewNode(ctx, ref, actor, false)
 	}
 	return s.renew(ctx, s.executing())
 }
@@ -145,5 +145,42 @@ func (s *RemoteHostStore) TransitionNode(ctx context.Context, command store.Node
 	if err != nil {
 		return runstate.Applied{}, err
 	}
-	return s.PrivateHostState.TransitionNode(ctx, ref, actor, payload)
+	return transitionWithinLease(ctx, func(ctx context.Context) (runstate.Applied, error) {
+		return s.PrivateHostState.TransitionNode(ctx, ref, actor, payload)
+	})
+}
+
+// safety: the one layer that retries a rate-limited node transition; the client does not. It stops one lease
+// length after the first refusal and bounds each request by that deadline too, because a context the lease
+// keeper does not own never ends.
+func transitionWithinLease(ctx context.Context, send func(context.Context) (runstate.Applied, error)) (runstate.Applied, error) {
+	applied, err := send(ctx)
+	if _, limited := rateLimitedDelay(err, 0); !limited {
+		return applied, err
+	}
+	bounded, cancel := context.WithTimeout(ctx, limits.DefaultLease)
+	defer cancel()
+	for attempt := 0; ; attempt++ {
+		delay, limited := rateLimitedDelay(err, attempt)
+		if !limited {
+			return applied, err
+		}
+		if deadline, _ := bounded.Deadline(); time.Now().Add(delay).After(deadline) {
+			return applied, err
+		}
+		if err := executorWait(bounded, delay); err != nil {
+			return runstate.Applied{}, err
+		}
+		applied, err = send(bounded)
+	}
+}
+
+func rateLimitedDelay(err error, attempt int) (time.Duration, bool) {
+	var failure *apierr.Error
+	if !errors.As(err, &failure) || failure.Code != hosterr.RateLimited {
+		return 0, false
+	}
+	advised, _ := hosterr.RetryDelay(err)
+	// safety: jitter above the whole-second advice keeps nodes refused together from returning in the same instant.
+	return max(controllerclient.RetryBackoff(attempt, time.Second), advised+controllerclient.RetryJitter(attempt)), true
 }

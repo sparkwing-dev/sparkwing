@@ -241,8 +241,12 @@ export interface CreatedInvitation {
   id: string;
   accept_url: string;
   // False when the controller mailed nothing: no mail service, or the
-  // address reached its daily limit. The link still works either way.
+  // address or the inviting account reached its daily limit. The link still
+  // works either way.
   email_sent?: boolean;
+  // Why no email was sent and when to try again, when the inviting account
+  // reached its own daily limit.
+  email_note?: string;
 }
 
 export type TokenFamily = "member" | "machine";

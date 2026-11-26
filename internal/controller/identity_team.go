@@ -3,12 +3,15 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -69,19 +72,8 @@ func (s *Server) handleListInvitations(w http.ResponseWriter, r *http.Request, a
 	return writeListPage(w, r, a, "invitations", out, func(row invitationJSON) string { return row.ID }, nil)
 }
 
-type inviteReq struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
-}
-
-type inviteResp struct {
-	ID        string `json:"id"`
-	AcceptURL string `json:"accept_url"`
-	EmailSent bool   `json:"email_sent"`
-}
-
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var req inviteReq
+	var req controllerwire.InvitationCreate
 	if err := decodeEngineRequest(r, &req); err != nil {
 		return err
 	}
@@ -107,8 +99,8 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capabili
 	noteAuditTarget(r.Context(), "invitation_id", inv.ID)
 	noteAuditTarget(r.Context(), "role", string(inv.Role))
 	accept := s.acceptURL(inv.ID)
-	sent := s.mailInvitation(r.Context(), a, inv, accept)
-	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent})
+	sent, note := s.mailInvitation(r.Context(), a, inv, accept)
+	writeJSON(w, http.StatusCreated, controllerwire.InvitationCreated{ID: inv.ID, AcceptURL: accept, EmailSent: sent, EmailNote: note})
 	return nil
 }
 
@@ -120,23 +112,29 @@ func (s *Server) WithMailer(m mailer.Mailer) *Server {
 	return s
 }
 
-// safety: a failed or refused send leaves the invitation standing, because the
-// owner still holds its accept link; only the email is lost, and the response says so.
-func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, inv store.Invitation, accept string) bool {
+// safety: a failed or refused send leaves the invitation standing, because the owner still holds its accept link;
+// only the email is lost, and the response says so. The note explains only the inviter's own limit, never the
+// recipient's, which other teams' invitations fill.
+func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, inv store.Invitation, accept string) (bool, string) {
 	if s.mailer == nil {
 		if err := (mailer.Log{Logger: s.logger}).Send(ctx, mailer.Message{To: inv.Email, Subject: "team invitation"}); err != nil {
 			s.logger.Warn("invitation email: log", "err", err)
 		}
-		return false
+		return false, ""
 	}
-	ok, err := s.operator.ClaimInvitationEmail(ctx, inv.ID)
+	withheld, err := s.operator.ClaimInvitationEmail(ctx, inv.ID)
+	var limit *store.InvitationEmailLimitError
+	if errors.As(err, &limit) {
+		s.logger.Info("invitation email withheld", "invitation", inv.ID, "reason", "account_limit")
+		return false, accountInvitationEmailNote(limit.RetryAt)
+	}
 	if err != nil {
 		s.logger.Warn("invitation email: claim", "invitation", inv.ID, "err", err)
-		return false
+		return false, ""
 	}
-	if !ok {
-		s.logger.Info("invitation email withheld: the address reached its daily limit", "invitation", inv.ID)
-		return false
+	if withheld != "" {
+		s.logger.Info("invitation email withheld", "invitation", inv.ID, "reason", string(withheld))
+		return false, ""
 	}
 	inviter := a.Principal.Capability.Subject.ID
 	if acct, err := s.operator.Account(ctx, a.Principal.Capability.Subject.ID); err == nil && strings.TrimSpace(acct.Name) != "" {
@@ -153,13 +151,21 @@ func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, in
 	})
 	if err != nil {
 		s.logger.Warn("invitation email: render", "invitation", inv.ID, "err", err)
-		return false
+		return false, ""
 	}
 	if err := s.mailer.Send(ctx, msg); err != nil {
 		s.logger.Warn("invitation email: send", "invitation", inv.ID, "error_class", mailer.ErrorClass(err))
-		return false
+		return false, ""
 	}
-	return true
+	return true, ""
+}
+
+// safety: the time rounds up to the minute, so the named minute is never earlier than the account may send again.
+func accountInvitationEmailNote(retryAt time.Time) string {
+	at := retryAt.UTC().Add(time.Minute - time.Nanosecond).Truncate(time.Minute)
+	return fmt.Sprintf("Your account has reached its limit of %d invitation emails in 24 hours. "+
+		"It can send invitation emails again after %s.",
+		store.MaxInvitationEmailsPerAccountPerDay, at.Format("15:04 UTC on Jan 2, 2006"))
 }
 
 func (s *Server) acceptURL(id string) string {
