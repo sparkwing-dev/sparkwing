@@ -1506,9 +1506,11 @@ new team started a fresh 100-a-day invitation budget.
   Deleting a team, leaving it or creating a new one does not reset the count.
 - Past the cap the invitation is created without an email, as for the
   existing 5-a-day cap per recipient address. The response carries
-  `email_sent: false` and an `email_note` that names the limit and the UTC
-  minute after which the account can send again; the recipient cap stays
-  unexplained because other teams' invitations fill it.
+  `email_sent: false` and an `email_note` saying the account reached its
+  24-hour limit and naming the UTC minute after which it can send again. The
+  recipient cap stays unexplained because other teams' invitations fill it.
+- A send counts once claimed, even if the mail service then fails, so a
+  failed send cannot be retried without limit.
 - The invitation email log records a SHA-256 digest of the inviting account
   (schema 42), because the log outlives the account and its teams. The claim
   counts and inserts in one transaction under a PostgreSQL advisory lock per

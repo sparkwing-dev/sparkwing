@@ -283,7 +283,7 @@ func TestInvitationEmailPastTheAccountCapSaysWhenToRetry(t *testing.T) {
 		t.Fatalf("invite past the account cap = %+v, want no email and an accept_url", got)
 	}
 	retry := start.Add(24 * time.Hour).Truncate(time.Minute).Add(time.Minute)
-	for _, want := range []string{"100 invitation emails in the last 24 hours", "Share the invitation link yourself", "again after"} {
+	for _, want := range []string{"reached its limit of 100 invitation emails in 24 hours", "again after"} {
 		if !strings.Contains(got.EmailNote, want) {
 			t.Fatalf("email note %q lacks %q", got.EmailNote, want)
 		}

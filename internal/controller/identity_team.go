@@ -11,6 +11,7 @@ import (
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
+	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
 	"github.com/sparkwing-dev/sparkwing/internal/mailer"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -71,20 +72,8 @@ func (s *Server) handleListInvitations(w http.ResponseWriter, r *http.Request, a
 	return writeListPage(w, r, a, "invitations", out, func(row invitationJSON) string { return row.ID }, nil)
 }
 
-type inviteReq struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
-}
-
-type inviteResp struct {
-	ID        string `json:"id"`
-	AcceptURL string `json:"accept_url"`
-	EmailSent bool   `json:"email_sent"`
-	EmailNote string `json:"email_note,omitempty"`
-}
-
 func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capability.Authorized) error {
-	var req inviteReq
+	var req controllerwire.InvitationCreate
 	if err := decodeEngineRequest(r, &req); err != nil {
 		return err
 	}
@@ -111,7 +100,7 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request, a capabili
 	noteAuditTarget(r.Context(), "role", string(inv.Role))
 	accept := s.acceptURL(inv.ID)
 	sent, note := s.mailInvitation(r.Context(), a, inv, accept)
-	writeJSON(w, http.StatusCreated, inviteResp{ID: inv.ID, AcceptURL: accept, EmailSent: sent, EmailNote: note})
+	writeJSON(w, http.StatusCreated, controllerwire.InvitationCreated{ID: inv.ID, AcceptURL: accept, EmailSent: sent, EmailNote: note})
 	return nil
 }
 
@@ -174,8 +163,8 @@ func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, in
 // safety: the time rounds up to the minute, so the named minute is never earlier than the account may send again.
 func accountInvitationEmailNote(retryAt time.Time) string {
 	at := retryAt.UTC().Add(time.Minute - time.Nanosecond).Truncate(time.Minute)
-	return fmt.Sprintf("Your account has sent %d invitation emails in the last 24 hours, the most Sparkwing sends for one account. "+
-		"Share the invitation link yourself. Your account can send invitation emails again after %s.",
+	return fmt.Sprintf("Your account has reached its limit of %d invitation emails in 24 hours. "+
+		"It can send invitation emails again after %s.",
 		store.MaxInvitationEmailsPerAccountPerDay, at.Format("15:04 UTC on Jan 2, 2006"))
 }
 

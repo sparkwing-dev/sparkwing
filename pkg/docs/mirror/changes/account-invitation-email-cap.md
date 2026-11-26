@@ -5,8 +5,9 @@
   across every team it has invited from, including teams it has since deleted
   or left. Past the cap the invitation is still created and its link works,
   but no email is sent: the response carries `email_sent: false` and an
-  `email_note` naming the limit and when the account can send again, and the
-  console shows that note. The 5-a-day limit for one recipient address is
+  `email_note` saying the account reached its 24-hour invitation email limit
+  and when it can send again, and the console shows that note. The API
+  reference now documents the invitation response. The 5-a-day limit for one recipient address is
   unchanged. The schema baseline advances to version 42, which records a
   digest of the inviting account in the invitation email log. See
   [limits](docs/limits.md#invitation-limits) and the

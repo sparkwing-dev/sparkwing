@@ -1,7 +1,7 @@
 import { expect, test } from "./fixtures";
 
 const note =
-  "Your account has sent 100 invitation emails in the last 24 hours, the most Sparkwing sends for one account. Share the invitation link yourself. Your account can send invitation emails again after 14:05 UTC on Nov 26, 2026.";
+  "Your account has reached its limit of 100 invitation emails in 24 hours. It can send invitation emails again after 14:05 UTC on Nov 26, 2026.";
 
 test("an invitation past the account email limit shows when to try again", async ({
   page,

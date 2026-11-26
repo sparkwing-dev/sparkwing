@@ -163,6 +163,7 @@ func wireOperations() map[string]wireOperation {
 	result["POST /api/v1/auth/device/lookup"] = operation("Show what a pending device sign-in would grant", wire.UserCodeRequest{}, wire.DeviceLoginLookup{})
 	result["POST /api/v1/auth/device/approve"] = operation("Approve a device sign-in under this session", wire.UserCodeRequest{}, nil)
 	result["POST /api/v1/auth/device/deny"] = operation("Deny a device sign-in", wire.UserCodeRequest{}, nil)
+	result["POST /api/v1/team/invitations"] = operation("Invite an address to the team and email the invitation when the daily limits allow", wire.InvitationCreate{}, wire.InvitationCreated{})
 	result["GET /api/v1/team/settings"] = operation("Read team enrollment, claim ranking and child-run settings", nil, wire.TeamSettings{})
 	result["PUT /api/v1/team/settings"] = operation("Change and audit team enrollment, claim ranking and child-run settings", wire.TeamSettingsUpdate{}, wire.TeamSettings{})
 	result["GET /api/v1/data/records"] = operation("Look up an authorized record", nil, wire.DataRecordLookupResult{}, query("kind", "string"), query("name", "string"), query("ref", "string"), query("pipeline", "string"), query("job", "string"), query("key", "string"), query("deadline", "string"), query("verified_default_only", "boolean"))
