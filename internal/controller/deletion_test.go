@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -211,9 +212,11 @@ type inviteBody struct {
 
 func TestInvitationEmailNamesTheInviterAndTeamAndStopsAtTheDailyCap(t *testing.T) {
 	mail := &mailFake{}
-	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
-		s.WithMailer(mail)
-	}})
+	var logs controller.SyncBuffer
+	f := newIdentityFixtureWith(t, fixtureOpts{
+		logger:    slog.New(slog.NewTextHandler(&logs, nil)),
+		configure: func(s *controller.Server) { s.WithMailer(mail) },
+	})
 	owner := f.user("o", "olga@example.com")
 	f.createTeam(&owner, "acme")
 	var inv inviteBody
@@ -252,13 +255,18 @@ func TestInvitationEmailNamesTheInviterAndTeamAndStopsAtTheDailyCap(t *testing.T
 	if n := len(mail.messages()); n != store.MaxInvitationEmailsPerDay {
 		t.Fatalf("sent %d emails to one address in a day, want %d", n, store.MaxInvitationEmailsPerDay)
 	}
+	if out := logs.String(); !strings.Contains(out, "reason=recipient_limit") || strings.Contains(out, "target@example.com") {
+		t.Fatalf("logs should name the recipient limit without the address:\n%s", out)
+	}
 }
 
 func TestInvitationEmailPastTheAccountCapSaysWhenToRetry(t *testing.T) {
 	mail := &mailFake{}
-	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
-		s.WithMailer(mail)
-	}})
+	var logs controller.SyncBuffer
+	f := newIdentityFixtureWith(t, fixtureOpts{
+		logger:    slog.New(slog.NewTextHandler(&logs, nil)),
+		configure: func(s *controller.Server) { s.WithMailer(mail) },
+	})
 	owner := f.user("o", "olga@example.com")
 	invite := func(email string) inviteBody {
 		t.Helper()
@@ -298,6 +306,10 @@ func TestInvitationEmailPastTheAccountCapSaysWhenToRetry(t *testing.T) {
 	}
 	if n := len(mail.messages()); n != store.MaxInvitationEmailsPerAccountPerDay {
 		t.Fatalf("sent %d invitation emails from one account in a day, want %d", n, store.MaxInvitationEmailsPerAccountPerDay)
+	}
+	if out := logs.String(); !strings.Contains(out, "reason=account_limit") || strings.Contains(out, "one-too-many@example.com") ||
+		strings.Contains(out, "recipient_limit") {
+		t.Fatalf("logs should name only the account limit, without the address:\n%s", out)
 	}
 }
 

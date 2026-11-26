@@ -780,30 +780,43 @@ func (e *InvitationEmailLimitError) Error() string {
 		MaxInvitationEmailsPerAccountPerDay, e.RetryAt.UTC().Format(time.RFC3339))
 }
 
-// ClaimInvitationEmail records that an invitation is about to be mailed. It
-// returns an [*InvitationEmailLimitError] when the inviting account has
-// already sent [MaxInvitationEmailsPerAccountPerDay] invitation emails in the
-// last 24 hours, and reports false when the address has already been mailed
-// [MaxInvitationEmailsPerDay] times in that window. Both caps count every
-// team, including deleted ones. It also reports false for an invitation that
-// was accepted, withdrawn or already claimed, or whose inviting account was
-// deleted.
-func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string) (bool, error) {
+// InvitationEmailWithheld names why [Operator.ClaimInvitationEmail] claimed
+// no email. The empty value means the email was claimed.
+type InvitationEmailWithheld string
+
+// Reasons an invitation email is withheld without an error.
+const (
+	// InvitationEmailRecipientLimit: the address already received
+	// [MaxInvitationEmailsPerDay] invitation emails in the last 24 hours.
+	InvitationEmailRecipientLimit InvitationEmailWithheld = "recipient_limit"
+	// InvitationEmailClosed: the invitation was accepted, withdrawn or
+	// already emailed.
+	InvitationEmailClosed InvitationEmailWithheld = "invitation_closed"
+	// InvitationEmailNoInviter: the inviting account was deleted.
+	InvitationEmailNoInviter InvitationEmailWithheld = "no_inviter"
+)
+
+// ClaimInvitationEmail records that an invitation is about to be mailed and
+// returns the empty reason. It returns an [*InvitationEmailLimitError] when
+// the inviting account has already sent [MaxInvitationEmailsPerAccountPerDay]
+// invitation emails in the last 24 hours, and otherwise names why it claimed
+// nothing. Both caps count every team, including deleted ones.
+func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string) (InvitationEmailWithheld, error) {
 	tx, err := o.s.beginTx(ctx)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	defer rollbackOrLog(tx)
 	var email, inviter string
 	err = tx.QueryRowContext(ctx, `SELECT email, invited_by FROM invitations WHERE id = ?`, invitationID).Scan(&email, &inviter)
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, ErrNotFound
+		return "", ErrNotFound
 	}
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	if inviter == "" {
-		return false, nil
+		return InvitationEmailNoInviter, nil
 	}
 	// safety: concurrent sends from one account, or to one address, would each count the other's as not yet made;
 	// the locks order them, account before address in every claim. SQLite already serializes every writer.
@@ -811,7 +824,7 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 	if tx.dialect == DialectPostgres {
 		for _, key := range []string{"sparkwing/invitation-email-account/" + account, "sparkwing/invitation-email/" + address} {
 			if _, err := tx.execContext(ctx, `SELECT pg_advisory_xact_lock(hashtext(?))`, key); err != nil {
-				return false, err
+				return "", err
 			}
 		}
 	}
@@ -821,32 +834,36 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 	var oldest sql.NullInt64
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*), MIN(sent_at) FROM invitation_email_log WHERE inviter = ? AND sent_at > ?`, account, since).Scan(&fromAccount, &oldest); err != nil {
-		return false, err
+		return "", err
 	}
 	if fromAccount >= MaxInvitationEmailsPerAccountPerDay {
-		return false, &InvitationEmailLimitError{RetryAt: time.Unix(0, oldest.Int64).Add(invitationEmailWindow).UTC()}
+		return "", &InvitationEmailLimitError{RetryAt: time.Unix(0, oldest.Int64).Add(invitationEmailWindow).UTC()}
 	}
 	var toAddress int
 	if err := tx.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM invitation_email_log WHERE address = ? AND sent_at > ?`, address, since).Scan(&toAddress); err != nil {
-		return false, err
+		return "", err
 	}
 	if toAddress >= MaxInvitationEmailsPerDay {
-		return false, nil
+		return InvitationEmailRecipientLimit, nil
 	}
 	res, err := tx.execContext(ctx,
 		`UPDATE invitations SET emailed_at = ? WHERE id = ? AND emailed_at IS NULL AND accepted_at IS NULL AND withdrawn_at IS NULL`, at, invitationID)
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	if n, err := res.RowsAffected(); err != nil || n != 1 {
-		return false, err
+	n, err := res.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if n != 1 {
+		return InvitationEmailClosed, nil
 	}
 	if _, err := tx.execContext(ctx,
 		`INSERT INTO invitation_email_log (address, inviter, sent_at) VALUES (?, ?, ?)`, address, account, at); err != nil {
-		return false, err
+		return "", err
 	}
-	return true, tx.Commit()
+	return "", tx.Commit()
 }
 
 // safety: the log outlives the invitation, the team that sent it and the inviting account, so it keeps digests of

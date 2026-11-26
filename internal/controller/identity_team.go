@@ -122,18 +122,18 @@ func (s *Server) mailInvitation(ctx context.Context, a capability.Authorized, in
 		}
 		return false, ""
 	}
-	ok, err := s.operator.ClaimInvitationEmail(ctx, inv.ID)
+	withheld, err := s.operator.ClaimInvitationEmail(ctx, inv.ID)
 	var limit *store.InvitationEmailLimitError
 	if errors.As(err, &limit) {
-		s.logger.Info("invitation email withheld: the inviting account reached its daily limit", "invitation", inv.ID)
+		s.logger.Info("invitation email withheld", "invitation", inv.ID, "reason", "account_limit")
 		return false, accountInvitationEmailNote(limit.RetryAt)
 	}
 	if err != nil {
 		s.logger.Warn("invitation email: claim", "invitation", inv.ID, "err", err)
 		return false, ""
 	}
-	if !ok {
-		s.logger.Info("invitation email withheld: the address reached its daily limit", "invitation", inv.ID)
+	if withheld != "" {
+		s.logger.Info("invitation email withheld", "invitation", inv.ID, "reason", string(withheld))
 		return false, ""
 	}
 	inviter := a.Principal.Capability.Subject.ID

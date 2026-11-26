@@ -29,6 +29,11 @@ func inviteAt(t *testing.T, st *store.Store, accountID string, team store.Team, 
 }
 
 func claimAt(t *testing.T, st *store.Store, inv store.Invitation, at time.Time) (bool, error) {
+	withheld, err := claimReasonAt(t, st, inv, at)
+	return err == nil && withheld == "", err
+}
+
+func claimReasonAt(t *testing.T, st *store.Store, inv store.Invitation, at time.Time) (store.InvitationEmailWithheld, error) {
 	t.Helper()
 	st.SetTestClock(t, func() time.Time { return at })
 	return st.AsOperator().ClaimInvitationEmail(context.Background(), inv.ID)
@@ -153,8 +158,8 @@ func TestConcurrentInvitationEmailsShareTheAccountsLastSlot(t *testing.T) {
 				for _, inv := range invitations {
 					go func() {
 						<-start
-						ok, err := st.AsOperator().ClaimInvitationEmail(context.Background(), inv.ID)
-						results <- result{ok, err}
+						withheld, err := st.AsOperator().ClaimInvitationEmail(context.Background(), inv.ID)
+						results <- result{err == nil && withheld == "", err}
 					}()
 				}
 				close(start)
@@ -201,9 +206,16 @@ func TestInvitationEmailGoesOnlyToOpenInvitationsFromALiveAccount(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	for name, inv := range map[string]store.Invitation{"withdrawn": withdrawn, "accepted": accepted, "orphaned": orphaned} {
-		if ok, err := claimAt(t, st, inv, now); err != nil || ok {
-			t.Errorf("%s invitation email = %v, %v; want withheld", name, ok, err)
+	for name, want := range map[string]struct {
+		inv    store.Invitation
+		reason store.InvitationEmailWithheld
+	}{
+		"withdrawn": {withdrawn, store.InvitationEmailClosed},
+		"accepted":  {accepted, store.InvitationEmailClosed},
+		"orphaned":  {orphaned, store.InvitationEmailNoInviter},
+	} {
+		if got, err := claimReasonAt(t, st, want.inv, now); err != nil || got != want.reason {
+			t.Errorf("%s invitation email = %q, %v; want withheld as %q", name, got, err, want.reason)
 		}
 	}
 	if n := countWhere(t, st, "invitation_email_log", "1 = 1"); n != 0 {
