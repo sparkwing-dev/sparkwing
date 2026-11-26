@@ -113,6 +113,8 @@ func standingPolicyTx(ctx context.Context, q rowQuerier, team Team, now time.Tim
 	return p, nil
 }
 
+const activeCloudCPUSQL = `SELECT COALESCE(SUM(c.cpu_class),0) FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE c.payment_mode=? AND a.team=? AND a.executor_class='cloud' AND a.settled_at IS NULL`
+
 // safety: the claim rechecks under the team's ledger lock before it reserves capacity.
 func checkCloudCapacityTx(ctx context.Context, view ledgerView, cores int64) error {
 	tx, team := view.tx, view.team
@@ -131,7 +133,7 @@ func checkCloudCapacityTx(ctx context.Context, view ledgerView, cores int64) err
 		return err
 	}
 	var active int64
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(c.cpu_class),0) FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE c.payment_mode=? AND a.team=? AND a.executor_class='cloud' AND a.settled_at IS NULL`, mode, team).Scan(&active)
+	err = tx.QueryRowContext(ctx, activeCloudCPUSQL, mode, team).Scan(&active)
 	if err != nil {
 		return err
 	}

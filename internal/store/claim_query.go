@@ -516,7 +516,7 @@ func claimTeamFactsTx(ctx context.Context, tx *storeTx, scopeTeam string) ([]cla
 			return nil, err
 		}
 		var active int64
-		if err = tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(c.cpu_class),0) FROM billing_awards a JOIN credit_charges c ON c.team=a.team AND c.capability_prefix=a.capability_prefix AND c.kind='reservation' WHERE c.payment_mode=? AND a.team=? AND a.executor_class='cloud' AND a.settled_at IS NULL`, mode, team).Scan(&active); err != nil {
+		if err = tx.QueryRowContext(ctx, activeCloudCPUSQL, mode, team).Scan(&active); err != nil {
 			return nil, err
 		}
 		teams[i].Available = standing.CloudVCPU - active

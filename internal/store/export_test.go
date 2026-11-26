@@ -129,10 +129,21 @@ func InstallSchema35ActionsForTest(t testing.TB, s *Store) {
 	}
 }
 
+// safety: the digest proves the fixture is the shipped schema 42 DDL, whose balance index lacks the payment mode.
+func schema42NeutralForTest(t testing.TB) string {
+	t.Helper()
+	neutral := strings.Replace(schemaNeutral, "CREATE INDEX idx_credit_charges_team_mode_amount ON credit_charges(team, payment_mode, amount_micro);", "CREATE INDEX idx_credit_charges_team_amount ON credit_charges(team, amount_micro);", 1)
+	neutral = strings.Replace(neutral, "CREATE INDEX idx_billing_awards_unsettled ON billing_awards(team) WHERE settled_at IS NULL;\n", "", 1)
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(neutral))); got != "0674849f24548cae23bd6c39f3634113014b66559f193af9522ed30a3dcb523d" {
+		t.Fatalf("schema 42 fixture digest %s", got)
+	}
+	return neutral
+}
+
 // safety: the digest proves the fixture is the shipped schema 41 DDL, which lacks the invitation email inviter column.
 func schema41NeutralForTest(t testing.TB) string {
 	t.Helper()
-	neutral := strings.Replace(schemaNeutral, ",\n    inviter TEXT NOT NULL DEFAULT ''\n);", "\n);", 1)
+	neutral := strings.Replace(schema42NeutralForTest(t), ",\n    inviter TEXT NOT NULL DEFAULT ''\n);", "\n);", 1)
 	neutral = strings.Replace(neutral, "CREATE INDEX idx_invitation_email_log_inviter ON invitation_email_log(inviter, sent_at);\n\n", "", 1)
 	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(neutral))); got != "1bcc048252e13edb35021084dd24ad1d7f7adf9eb9cd9ee5fbc291a0ef7df189" {
 		t.Fatalf("schema 41 fixture digest %s", got)
@@ -178,9 +189,24 @@ func SeedInvitationEmailsForTest(t testing.TB, st *Store, accountID string, n in
 	}
 }
 
-// DropInvitationEmailInviterForTest returns the invitation email log to its schema 41 shape.
+// RevertCreditIndexesForTest returns the credit and billing award indexes to their schema 42 shape.
+func RevertCreditIndexesForTest(t testing.TB, st *Store) {
+	t.Helper()
+	for _, statement := range []string{
+		`DROP INDEX idx_billing_awards_unsettled`,
+		`DROP INDEX idx_credit_charges_team_mode_amount`,
+		`CREATE INDEX idx_credit_charges_team_amount ON credit_charges(team, amount_micro)`,
+	} {
+		if _, err := st.DB().ExecContext(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// DropInvitationEmailInviterForTest returns a store to its schema 41 shape, whose invitation email log has no inviter.
 func DropInvitationEmailInviterForTest(t testing.TB, st *Store) {
 	t.Helper()
+	RevertCreditIndexesForTest(t, st)
 	for _, statement := range []string{`DROP INDEX idx_invitation_email_log_inviter`, `ALTER TABLE invitation_email_log DROP COLUMN inviter`} {
 		if _, err := st.DB().ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)

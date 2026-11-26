@@ -77,6 +77,16 @@ var schemaUpgrades = []schemaUpgrade{
 		`ALTER TABLE invitation_email_log ADD COLUMN inviter TEXT NOT NULL DEFAULT ''`,
 		`CREATE INDEX idx_invitation_email_log_inviter ON invitation_email_log(inviter, sent_at)`,
 	}},
+	{from: 42, release: "schema 42", digest: "0674849f24548cae23bd6c39f3634113014b66559f193af9522ed30a3dcb523d", statements: schema43CreditIndexStatements},
+}
+
+// safety: these build inside the upgrade transaction, so PostgreSQL holds a SHARE lock that blocks ledger writes
+// for the build, about 2 s per million credit_charges rows. That is safe only because the controller opens the
+// store before it serves; past about a million rows, build such indexes CONCURRENTLY outside the transaction.
+var schema43CreditIndexStatements = []string{
+	`CREATE INDEX idx_credit_charges_team_mode_amount ON credit_charges(team, payment_mode, amount_micro)`,
+	`DROP INDEX idx_credit_charges_team_amount`,
+	`CREATE INDEX idx_billing_awards_unsettled ON billing_awards(team) WHERE settled_at IS NULL`,
 }
 
 var schema39RunEventStatements = []string{`CREATE TABLE run_event_subscriptions (
