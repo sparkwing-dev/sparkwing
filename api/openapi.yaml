@@ -2151,7 +2151,7 @@ components:
       type: object
       x-sparkwing-go-type: controllerwire.HealthView
     internal.controllerwire.InvitationCreate:
-      additionalProperties: true
+      additionalProperties: false
       properties:
         email:
           type: string

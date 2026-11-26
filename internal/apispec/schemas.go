@@ -23,6 +23,12 @@ type schemaBuilder struct {
 
 var componentCharacters = regexp.MustCompile(`[^a-zA-Z0-9._-]`)
 
+// safety: a closed schema promises that the handler refuses unknown fields, so a type joins this set only when its
+// decoder does.
+var closedObjects = map[reflect.Type]bool{
+	reflect.TypeFor[controllerwire.InvitationCreate](): true,
+}
+
 func (b *schemaBuilder) value(t reflect.Type) schema {
 	if t == reflect.TypeFor[json.RawMessage]() || t.Kind() == reflect.Interface {
 		return schema{}
@@ -102,7 +108,7 @@ func (b *schemaBuilder) value(t reflect.Type) schema {
 			properties := schema{}
 			required := []string{}
 			b.fields(t, properties, &required)
-			definition := schema{"type": "object", "properties": properties, "additionalProperties": true, "x-sparkwing-go-type": t.String()}
+			definition := schema{"type": "object", "properties": properties, "additionalProperties": !closedObjects[t], "x-sparkwing-go-type": t.String()}
 			if len(required) > 0 {
 				definition["required"] = required
 			}
