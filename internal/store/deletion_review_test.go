@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -379,21 +380,22 @@ func TestAccountDeletionRelabelsEveryRowThatNamedTheAccount(t *testing.T) {
 	}
 }
 
-// The invitation email log holds an unsalted digest of every invited address,
-// so the retention pass drops each row once it no longer counts toward the
-// daily cap, not only when the same address is invited again.
-func TestRetentionPrunesTheInvitationEmailLogAfterADay(t *testing.T) {
+// The limit log holds an unsalted digest of every invited address, so the
+// retention pass drops each invitation email row once it no longer counts
+// toward the daily cap, not only when the same address is invited again.
+func TestRetentionPrunesInvitationEmailEventsAfterADay(t *testing.T) {
 	st := storetest.Open(t)
 	ctx := context.Background()
 	now := time.Now()
-	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO invitation_email_log(address,sent_at) VALUES ('old',?),('recent',?)`), now.Add(-25*time.Hour).UnixNano(), now.Add(-time.Hour).UnixNano()); err != nil {
+	old, recent := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `INSERT INTO limit_events(kind,digest,at) VALUES ('invitation_email_recipient',?,?),('invitation_email_recipient',?,?)`), old, now.Add(-25*time.Hour).UnixNano(), recent, now.Add(-time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	st.SetTestClock(t, func() time.Time { return now })
 	if _, err := st.AsOperator().MaintainRetention(ctx, store.RetentionRequest{Limit: 100}); err != nil {
 		t.Fatal(err)
 	}
-	if old, recent := countWhere(t, st, "invitation_email_log", "address = 'old'"), countWhere(t, st, "invitation_email_log", "address = 'recent'"); old != 0 || recent != 1 {
-		t.Fatalf("after retention the log keeps %d day-old and %d recent rows, want 0 and 1", old, recent)
+	if o, r := countWhere(t, st, "limit_events", "digest = '"+old+"'"), countWhere(t, st, "limit_events", "digest = '"+recent+"'"); o != 0 || r != 1 {
+		t.Fatalf("after retention the log keeps %d day-old and %d recent rows, want 0 and 1", o, r)
 	}
 }

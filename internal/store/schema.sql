@@ -865,12 +865,6 @@ CREATE TABLE team_deletions (
     CHECK((state = 'done') = (finished_at IS NOT NULL))
 );
 
-CREATE TABLE invitation_email_log (
-    address TEXT NOT NULL,
-    sent_at BIGINT NOT NULL,
-    inviter TEXT NOT NULL DEFAULT ''
-);
-
 CREATE TABLE signup_gate (
     id BIGINT NOT NULL PRIMARY KEY CHECK (id = 1),
     mode TEXT NOT NULL CHECK (mode IN ('open', 'waitlist')),
@@ -889,6 +883,12 @@ CREATE TABLE signup_admissions (
     kind TEXT NOT NULL CHECK (kind IN ('signup', 'invitation')),
     at BIGINT NOT NULL,
     PRIMARY KEY (account_id, kind, at)
+);
+
+CREATE TABLE limit_events (
+    kind TEXT NOT NULL CHECK (kind <> ''),
+    digest TEXT NOT NULL CHECK (length(digest) = 64),
+    at BIGINT NOT NULL
 );
 
 CREATE TABLE credit_checkouts (
@@ -1700,13 +1700,11 @@ CREATE INDEX idx_github_app_triggers_installation ON github_app_triggers(team,in
 
 CREATE INDEX idx_team_deletions_state ON team_deletions(state);
 
-CREATE INDEX idx_invitation_email_log_address ON invitation_email_log(address, sent_at);
-
-CREATE INDEX idx_invitation_email_log_inviter ON invitation_email_log(inviter, sent_at);
-
 CREATE INDEX idx_triggers_team_created ON triggers(team, created_at);
 
 CREATE INDEX idx_signup_admissions_at ON signup_admissions(at);
+
+CREATE INDEX idx_limit_events_key ON limit_events(kind, digest, at);
 
 CREATE INDEX idx_accounts_created ON accounts(created_at);
 

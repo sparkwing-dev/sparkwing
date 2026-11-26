@@ -218,7 +218,7 @@ func TestInvitationEmailGoesOnlyToOpenInvitationsFromALiveAccount(t *testing.T) 
 			t.Errorf("%s invitation email = %q, %v; want withheld as %q", name, got, err, want.reason)
 		}
 	}
-	if n := countWhere(t, st, "invitation_email_log", "1 = 1"); n != 0 {
+	if n := countWhere(t, st, "limit_events", "kind IN ('invitation_email_account', 'invitation_email_recipient')"); n != 0 {
 		t.Fatalf("withheld invitation emails left %d log rows, want 0", n)
 	}
 }
