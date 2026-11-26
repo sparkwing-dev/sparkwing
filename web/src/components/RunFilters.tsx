@@ -1351,7 +1351,7 @@ export function FilterableValue({
               }
             }}
             style={{ left: popupPos.left, top: popupPos.top }}
-            className="fixed flex flex-col gap-0.5 z-[1000] bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]"
+            className="fixed flex flex-col gap-0.5 z-[1000] bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg text-[10px] min-w-[140px] max-w-[calc(100vw-16px)] [overflow-wrap:anywhere]"
             onClick={(e) => e.stopPropagation()}
           >
             <button

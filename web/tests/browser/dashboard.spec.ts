@@ -44,7 +44,7 @@ const runningRun = {
   finished_at: undefined,
 };
 
-test("keeps activity rows exactly two lines with long metadata and errors", async ({ page }) => {
+test("keeps wide activity rows to two lines and narrow rows readable in full", async ({ page }) => {
   const longRun = {
     ...finishedRun,
     id: "run-20260827-long",
@@ -76,14 +76,22 @@ test("keeps activity rows exactly two lines with long metadata and errors", asyn
       });
     });
     expect(metadataOverflow).toBe(false);
-    const identityWidth = await short.locator("div.grid").first().evaluate((grid) => ({
-      available: grid.getBoundingClientRect().width,
-      metadata: grid.firstElementChild!.getBoundingClientRect().width,
-    }));
-    expect(identityWidth.metadata).toBeGreaterThan(identityWidth.available * 0.75);
-
-    expect(sizes[0].height).toBe(sizes[1].height);
-    expect(sizes[0].height).toBe(56);
+    if (width >= 1024) {
+      const identityWidth = await short.locator("div.grid").first().evaluate((grid) => ({
+        available: grid.getBoundingClientRect().width,
+        metadata: grid.firstElementChild!.getBoundingClientRect().width,
+      }));
+      expect(identityWidth.metadata).toBeGreaterThan(identityWidth.available * 0.75);
+      expect(sizes[0].height).toBe(sizes[1].height);
+      expect(sizes[0].height).toBe(56);
+    } else {
+      // Narrow rows wrap so the repository, pipeline and branch read in full.
+      await expect(long).toContainText(longRun.repo.split("/").pop()!);
+      await expect(long).toContainText(longRun.pipeline);
+      await expect(long).toContainText(longRun.git_branch);
+      expect(sizes[0].height).toBeGreaterThan(sizes[1].height);
+      expect(await long.evaluate((row) => row.scrollWidth - row.clientWidth)).toBeLessThanOrEqual(0);
+    }
     expect(sizes[0].overflow).toBeLessThanOrEqual(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
   }
