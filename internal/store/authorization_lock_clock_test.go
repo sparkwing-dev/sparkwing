@@ -24,7 +24,7 @@ func TestInvitationExpiresWhileWaitingForSignUpGate(t *testing.T) {
 			*now = expires
 		}
 	}
-	_, err := s.AsOperator().AcceptAccountInvitation(t.Context(), authorized, "waiting")
+	_, err := s.AsOperator().AcceptAccountInvitation(t.Context(), authorized, "waiting", SignUpConditions{})
 	if !waited || !errors.Is(err, ErrInvitationClosed) {
 		t.Fatalf("waited=%v acceptance=%v", waited, err)
 	}

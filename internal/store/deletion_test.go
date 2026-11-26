@@ -61,7 +61,7 @@ func TestTeamDeletionClosesTheTeamAndKeepsFinancialRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	memberSession, _, _, err := st.AsOperator().CreateAccountSession(ctx, member.Account, "acme", time.Hour)
@@ -274,7 +274,7 @@ func TestAccountDeletionRefusesALastOwnerWithMembersAndNamesTheTeams(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	st.SetTestClock(t, func() time.Time { return now })
@@ -299,7 +299,7 @@ func TestAccountDeletionRemovesTheHumanAndKeepsTheTeamsRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	session, _, _, err := st.AsOperator().CreateAccountSession(ctx, leaver.Account, owner.PersonalTeam, time.Hour)
@@ -458,7 +458,7 @@ func TestAccountDeletionTouchesOnlyRowsNamingTheAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, leaver.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	other := signIn(t, st, "o2", "owner2@example.com")

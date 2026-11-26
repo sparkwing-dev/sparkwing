@@ -117,7 +117,7 @@ func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 	waiting := signIn(t, st, "s-w", "w@example.com")
 	requireWaitlisted(t, waiting, store.WaitlistReasonOperator)
 
-	joined, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), invite(t, st, owner, "m@example.com").ID)
+	joined, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), invite(t, st, owner, "m@example.com").ID, store.SignUpConditions{})
 	if err != nil || joined.Team != owner.Account.ActiveTeam || joined.Admitted || joined.GateClosed != nil {
 		t.Fatalf("an admitted account accepting while the gate is closed = %+v, %v", joined, err)
 	}
@@ -125,7 +125,7 @@ func TestAWaitlistedAccountMayAcceptAnInvitation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	acc, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, waiting.Account.ID), inv.ID)
+	acc, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, waiting.Account.ID), inv.ID, store.SignUpConditions{})
 	if err != nil || acc.Team != owner.Account.ActiveTeam || acc.Admitted || acc.GateClosed != nil {
 		t.Fatalf("AcceptInvitation while the gate is closed = %+v, %v; want a join that is no admission", acc, err)
 	}
@@ -424,7 +424,7 @@ func TestInvitationFixtureDoesNotConsumeSessionLifetime(t *testing.T) {
 		authority := storetest.AccountAuthority(t, st, member.Account.ID)
 		time.Sleep(2 * time.Hour)
 		invitation := invite(t, st, owner, member.Account.Email)
-		if _, err := st.AsOperator().AcceptAccountInvitation(t.Context(), authority, invitation.ID); err != nil {
+		if _, err := st.AsOperator().AcceptAccountInvitation(t.Context(), authority, invitation.ID, store.SignUpConditions{}); err != nil {
 			t.Fatalf("fixture setup consumed session lifetime: %v", err)
 		}
 	})
@@ -441,7 +441,7 @@ func TestWaitlistedInvitationAcceptsCountAsAdmissions(t *testing.T) {
 	owner := signUpAt(t, st, googleProfile("o", "o@example.com"), store.SignUpConditions{}, now)
 	// safety: an admitted account joining a team is no new admission, the negative control.
 	member := signUpAt(t, st, googleProfile("m", "m@example.com"), store.SignUpConditions{}, now)
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), invite(t, st, owner, "m@example.com").ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, member.Account.ID), invite(t, st, owner, "m@example.com").ID, store.SignUpConditions{}); err != nil {
 		t.Fatal(err)
 	}
 	bots := make([]store.SignInResult, 2)
@@ -450,11 +450,11 @@ func TestWaitlistedInvitationAcceptsCountAsAdmissions(t *testing.T) {
 			store.SignUpConditions{}, now)
 		requireWaitlisted(t, bots[i], store.WaitlistReasonGitHubAge)
 	}
-	first, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, bots[0].Account.ID), invite(t, st, owner, "bot0@example.com").ID)
+	first, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, bots[0].Account.ID), invite(t, st, owner, "bot0@example.com").ID, store.SignUpConditions{})
 	if err != nil || !first.Admitted || first.GateClosed != nil {
 		t.Fatalf("the third admission against a limit of 3 = %+v, %v; want it counted and the gate open", first, err)
 	}
-	second, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, bots[1].Account.ID), invite(t, st, owner, "bot1@example.com").ID)
+	second, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, bots[1].Account.ID), invite(t, st, owner, "bot1@example.com").ID, store.SignUpConditions{})
 	if err != nil || second.Admitted || second.GateClosed == nil || second.GateClosed.Source != store.WaitlistReasonHourly {
 		t.Fatalf("the accept past the limit = %+v, %v; want it held back and the gate closed", second, err)
 	}
@@ -474,7 +474,7 @@ func TestAnInvitationAtLaunchCapacityIsNoAdmission(t *testing.T) {
 		}
 	}
 	requireWaitlisted(t, last, store.WaitlistReasonLaunchCapacity)
-	acc, err := st.AsOperator().AcceptAccountInvitation(t.Context(), storetest.AccountAuthority(t, st, last.Account.ID), invite(t, st, owner, last.Account.Email).ID)
+	acc, err := st.AsOperator().AcceptAccountInvitation(t.Context(), storetest.AccountAuthority(t, st, last.Account.ID), invite(t, st, owner, last.Account.Email).ID, store.SignUpConditions{})
 	if err != nil || acc.Team != owner.Account.ActiveTeam || acc.Admitted || acc.GateClosed != nil {
 		t.Fatalf("AcceptInvitation at launch capacity = %+v, %v; want a join that is no admission", acc, err)
 	}
@@ -496,7 +496,7 @@ func TestTeamMembershipHasNoCap(t *testing.T) {
 				sub, email := fmt.Sprintf("j%d", i), fmt.Sprintf("j%d@example.com", i)
 				acct := signIn(t, st, sub, email)
 				inv := invite(t, st, owner, email)
-				if _, err := st.AsOperator().AcceptAccountInvitation(t.Context(), storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID); err != nil {
+				if _, err := st.AsOperator().AcceptAccountInvitation(t.Context(), storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 					t.Fatalf("accept member %d: %v", i+2, err)
 				}
 			}

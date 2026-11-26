@@ -158,7 +158,7 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 		t.Fatal(err)
 	}
 	route, _ := capability.LookupRoute("POST", "/api/v1/invitations/{invitation}/accept")
-	accepted, err := s.AsOperator().AcceptAccountInvitation(t.Context(), capability.Authorized{Principal: p, Access: route.Access[0]}, invitation.ID)
+	accepted, err := s.AsOperator().AcceptAccountInvitation(t.Context(), capability.Authorized{Principal: p, Access: route.Access[0]}, invitation.ID, SignUpConditions{})
 	if err != nil || accepted.Team != tenant.team {
 		t.Fatalf("invitation acceptance: %+v %v", accepted, err)
 	}

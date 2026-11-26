@@ -92,12 +92,8 @@ func (o *Operator) CreateAccountTeam(ctx context.Context, a capability.Authorize
 
 // AcceptAccountInvitation commits verified invitation membership and session selection together. A
 // waitlisted account's join counts as a sign-up admission only when the gate would admit a sign-up under
-// the deployment's conditions; a caller without a deployment waitlist may omit them.
-func (o *Operator) AcceptAccountInvitation(ctx context.Context, a capability.Authorized, id string, conditions ...SignUpConditions) (InvitationAcceptance, error) { //nolint:staticcheck // ST1016: Operator methods already mix the o and op receivers.
-	var c SignUpConditions
-	for _, given := range conditions {
-		c.ForceWaitlist = c.ForceWaitlist || given.ForceWaitlist
-	}
+// the deployment's conditions c.
+func (o *Operator) AcceptAccountInvitation(ctx context.Context, a capability.Authorized, id string, c SignUpConditions) (InvitationAcceptance, error) { //nolint:staticcheck // ST1016: Operator methods already mix the o and op receivers.
 	var out InvitationAcceptance
 	err := o.s.inTx(ctx, func(tx *storeTx) error {
 		var team Team

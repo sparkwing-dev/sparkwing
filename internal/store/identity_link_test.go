@@ -709,7 +709,7 @@ func TestUnlinkingTheProvingIdentityReleasesTheAddress(t *testing.T) {
 	if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, mallory.Account.ID); err != nil || len(listed) != 0 {
 		t.Fatalf("invitations listed after unlinking the proving identity = %+v, %v", listed, err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, mallory.Account.ID), before.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, mallory.Account.ID), before.ID, store.SignUpConditions{}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("accepting after unlinking the proving identity = %v, want ErrNotFound", err)
 	}
 
@@ -717,7 +717,7 @@ func TestUnlinkingTheProvingIdentityReleasesTheAddress(t *testing.T) {
 	if hire.Account.ID == mallory.Account.ID || !hire.NewAccount {
 		t.Fatalf("the address's next holder = %+v, want a new account", hire)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, hire.Account.ID), before.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, hire.Account.ID), before.ID, store.SignUpConditions{}); err != nil {
 		t.Fatalf("the new holder accepting = %v", err)
 	}
 }
@@ -739,7 +739,7 @@ func TestLinkedIdentityProvesItsAddressForInvitations(t *testing.T) {
 	if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, acct.Account.ID); err != nil || len(listed) != 1 {
 		t.Fatalf("invitations to the linked address = %+v, %v", listed, err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatalf("accepting through the linked address = %v", err)
 	}
 }
@@ -766,10 +766,10 @@ func TestNewAddressOwnerWithdrawsALinkedIdentitysClaim(t *testing.T) {
 	if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, former.Account.ID); err != nil || len(listed) != 0 {
 		t.Fatalf("former holder still lists the invitation: %+v %v", listed, err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, former.Account.ID), inv.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, former.Account.ID), inv.ID, store.SignUpConditions{}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("former holder accepting = %v, want ErrNotFound", err)
 	}
-	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, successor.Account.ID), inv.ID); err != nil {
+	if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, successor.Account.ID), inv.ID, store.SignUpConditions{}); err != nil {
 		t.Fatalf("new holder accepting = %v", err)
 	}
 }
@@ -850,7 +850,7 @@ func TestConcurrentLinksLeaveOneAddressOwnerPostgres(t *testing.T) {
 	}
 	accepted := 0
 	for _, account := range []store.SignInResult{first, second} {
-		if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, account.Account.ID), inv.ID); err == nil {
+		if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, account.Account.ID), inv.ID, store.SignUpConditions{}); err == nil {
 			accepted++
 		} else if !errors.Is(err, store.ErrNotFound) && !errors.Is(err, store.ErrInvitationClosed) {
 			t.Fatal(err)
@@ -892,7 +892,7 @@ func TestChangedSignInAddressReleasesTheFormerOne(t *testing.T) {
 			if listed, err := st.AsOperator().OpenInvitationsForAccount(ctx, acct.Account.ID); err != nil || len(listed) != 0 {
 				t.Fatalf("the former address's invitation is still listed: %+v %v", listed, err)
 			}
-			if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID); !errors.Is(err, store.ErrNotFound) {
+			if _, err := st.AsOperator().AcceptAccountInvitation(ctx, storetest.AccountAuthority(t, st, acct.Account.ID), inv.ID, store.SignUpConditions{}); !errors.Is(err, store.ErrNotFound) {
 				t.Fatalf("accepting through the former address = %v, want ErrNotFound", err)
 			}
 		})

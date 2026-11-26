@@ -18,7 +18,7 @@ type AccountWriter interface {
 	DeleteOwnAccount(context.Context, capability.Authorized, string, []string) (store.AccountDeletion, error)
 	SelectAccountTeam(context.Context, capability.Authorized, store.Team) error
 	CreateAccountTeam(context.Context, capability.Authorized, store.TeamInfo) (store.TeamInfo, error)
-	AcceptAccountInvitation(context.Context, capability.Authorized, string, ...store.SignUpConditions) (store.InvitationAcceptance, error)
+	AcceptAccountInvitation(context.Context, capability.Authorized, string, store.SignUpConditions) (store.InvitationAcceptance, error)
 	UnlinkAccountIdentity(context.Context, capability.Authorized, string) (store.IdentityUnlink, error)
 }
 

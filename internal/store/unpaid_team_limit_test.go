@@ -155,7 +155,7 @@ func inviteAs(t *testing.T, st *store.Store, host store.SignInResult, team store
 
 func acceptInvitation(t *testing.T, st *store.Store, accountID string, inv store.Invitation) error {
 	t.Helper()
-	_, err := st.AsOperator().AcceptAccountInvitation(context.Background(), storetest.AccountAuthority(t, st, accountID), inv.ID)
+	_, err := st.AsOperator().AcceptAccountInvitation(context.Background(), storetest.AccountAuthority(t, st, accountID), inv.ID, store.SignUpConditions{})
 	return err
 }
 
@@ -239,7 +239,7 @@ func TestOwnerInvitationAndTeamCreationShareTheLastUnpaidSlot(t *testing.T) {
 				results <- err
 			}()
 			go func() {
-				_, err := st.AsOperator().AcceptAccountInvitation(context.Background(), acceptor, inv.ID)
+				_, err := st.AsOperator().AcceptAccountInvitation(context.Background(), acceptor, inv.ID, store.SignUpConditions{})
 				results <- err
 			}()
 			var refused int
