@@ -20,7 +20,7 @@ func TestRunListFindsRetriesThroughRetryIndex(t *testing.T) {
 			retryLines = append(retryLines, line)
 		}
 	}
-	if len(retryLines) != 1 || !strings.Contains(retryLines[0], "idx_runs_retry_of (team=? AND retry_of=?)") {
+	if len(retryLines) != 1 || !strings.Contains(retryLines[0], "idx_runs_retry_of") || strings.Contains(retryLines[0], "idx_runs_created") {
 		t.Fatalf("RetriedAs subquery must search idx_runs_retry_of, not walk the team's runs; plan:\n%s", plan)
 	}
 }
