@@ -3,8 +3,8 @@ set -euo pipefail
 
 # The website and the API use different buckets. Only these two objects belong
 # to release publication.
-bucket=kikd-prod-sparkwing-website
-distribution=E3V178ZREDVPYN
+bucket="${SPARKWING_WEBSITE_BUCKET:?SPARKWING_WEBSITE_BUCKET must name the website bucket}"
+distribution="${SPARKWING_WEBSITE_DISTRIBUTION:?SPARKWING_WEBSITE_DISTRIBUTION must name the website CloudFront distribution}"
 root="$(realpath "$(dirname "${BASH_SOURCE[0]}")/..")"
 : "${TAG:?TAG must name an existing public stable release}"
 [[ "$TAG" =~ ^v0\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]

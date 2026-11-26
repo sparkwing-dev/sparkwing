@@ -130,18 +130,20 @@ func shellJoin(args []string) string {
 
 // safety: mutating deploy actions require act so dry runs can preview them without changing external state.
 type deployer struct {
-	tools     deployTools
-	cfg       deployConfig
-	dry       bool
-	runID     string
-	repoDir   string
-	tmp       string
-	aws       map[string]string
-	resolved  map[string]string
-	gate      stagingGateRecord
-	awsExpiry time.Time
-	cliBuilt  bool
-	ecrPass   string
+	tools        deployTools
+	cfg          deployConfig
+	dry          bool
+	runID        string
+	repoDir      string
+	tmp          string
+	aws          map[string]string
+	resolved     map[string]string
+	gate         stagingGateRecord
+	awsExpiry    time.Time
+	cliBuilt     bool
+	ecrPass      string
+	settingsFile string
+	settled      bool
 }
 
 func (d *deployer) act(ctx context.Context, desc string, fn func() error) error {
@@ -396,8 +398,8 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 	if out.Version == "" && d.dry {
 		out.Version = "<version>"
 	}
-	out.Controller = imagePin{Repository: d.cfg.Registry + "/sparkwing-controller", Tag: version, Digest: deployDryDigest}
-	out.Runner = imagePin{Repository: d.cfg.Registry + "/sparkwing-runner", Tag: version, Digest: deployDryDigest}
+	out.Controller = imagePin{Tag: version, Digest: deployDryDigest}
+	out.Runner = imagePin{Tag: version, Digest: deployDryDigest}
 	err := d.act(ctx, "resolve the candidate commit, version and store baseline in "+d.repoDir, func() error {
 		head, err := d.sourceGit(ctx, "rev-parse", "HEAD")
 		if err != nil {
@@ -426,9 +428,11 @@ func (d *deployer) buildCandidate(ctx context.Context, version string) (deployIm
 	if err := d.requireMainTip(ctx, out.Commit); err != nil {
 		return out, err
 	}
-	if err := d.assumeRole(ctx); err != nil {
+	if err := d.signIn(ctx); err != nil {
 		return out, err
 	}
+	out.Controller.Repository = d.cfg.Registry + "/sparkwing-controller"
+	out.Runner.Repository = d.cfg.Registry + "/sparkwing-runner"
 	if err := d.ecrLogin(ctx); err != nil {
 		return out, err
 	}
@@ -637,7 +641,7 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 	dir := filepath.Join(d.tmp, "gitops-"+env.Name)
 	values := filepath.Join(dir, env.GitopsDir, "helm-values.yaml")
 	if err := d.act(ctx, "clone "+d.cfg.GitopsURL+" ("+d.cfg.GitopsBranch+") into "+dir, func() error {
-		_, err := d.git(ctx, gitEnv, "", "clone", "--quiet", "--branch", d.cfg.GitopsBranch, "--single-branch", d.cfg.GitopsURL, dir)
+		_, err := d.git(ctx, gitEnv, "", "clone", "--quiet", "--branch", d.cfg.GitopsBranch, "--single-branch", "--", d.cfg.GitopsURL, dir)
 		return err
 	}); err != nil {
 		return rec, err
@@ -706,6 +710,14 @@ func (d *deployer) deployEnvironment(ctx context.Context, env deployEnv, images 
 		}); err != nil {
 			return rec, err
 		}
+	}
+	if err := d.act(ctx, "check that Argo application "+env.ArgoApp+" exists before changing GitOps", func() error {
+		if _, err := d.kubectl(ctx, "-n", "argocd", "get", "application", env.ArgoApp, "-o", "json"); err != nil {
+			return fmt.Errorf("argo_app %s for %s cannot be read, so no GitOps change was pushed: %w", env.ArgoApp, env.Name, err)
+		}
+		return nil
+	}); err != nil {
+		return rec, err
 	}
 	for _, phase := range deployPhases {
 		want := phase.want(images)
@@ -786,7 +798,7 @@ func (d *deployer) firstDeployError(env deployEnv, deployed imagePin, why string
 	return fmt.Errorf("%s runs %s, and %s. Deploy once by hand: confirm the live store with "+
 		"`SELECT version, baseline_digest FROM sparkwing_schema_version` matches this candidate's baseline, pin controller.image.tag and "+
 		"sparkwing-runner-bundle.launcher.image.tag, jobImage.tag and jobImage.digest in %s/helm-values.yaml to images built by this "+
-		"pipeline (they carry the revision label), render without the cluster-scoped documents kikd-infra applies with "+
+		"pipeline (they carry the revision label), render without the cluster-scoped documents the infrastructure repository applies with "+
 		"`helm template %s charts/sparkwing-full --namespace %s -f %s/helm-values.yaml | yq 'select(.metadata.namespace != null)' > %s/rendered.yaml`, "+
 		"and push; later deploys then run here", env.Name, deployed.ref(), why, env.GitopsDir, env.HelmRelease, env.Namespace, env.GitopsDir, env.GitopsDir)
 }
@@ -840,7 +852,7 @@ func (d *deployer) pinAndPush(ctx context.Context, env deployEnv, dir string, ph
 			return err
 		}
 		if len(dropped) > 0 {
-			d.tools.say(ctx, "left out of "+rendered+", applied through kikd-infra k8s/sparkwing-cluster/: "+strings.Join(dropped, ", "))
+			d.tools.say(ctx, "left out of "+rendered+", applied through the infrastructure repository: "+strings.Join(dropped, ", "))
 		}
 		if !strings.Contains(out, "@"+want.Digest) {
 			return fmt.Errorf("the render does not reference %s", want.Digest)
@@ -1228,7 +1240,7 @@ func (d *deployer) followRun(ctx context.Context, profile string, runID *string)
 
 func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagingGateRecord, error) {
 	rec := stagingGateRecord{Images: images, RunID: d.runID, GatedAt: d.tools.now().UTC().Format(time.RFC3339)}
-	if err := d.assumeRole(ctx); err != nil {
+	if err := d.signIn(ctx); err != nil {
 		return rec, err
 	}
 	if err := d.buildCLI(ctx); err != nil {
@@ -1247,7 +1259,7 @@ func (d *deployer) stagingGate(ctx context.Context, images deployImages) (stagin
 		if err != nil {
 			return err
 		}
-		_, err = d.git(ctx, env, "", "clone", "--quiet", "--depth", "1", d.cfg.ReferenceURL, reference)
+		_, err = d.git(ctx, env, "", "clone", "--quiet", "--depth", "1", "--", d.cfg.ReferenceURL, reference)
 		return err
 	}); err != nil {
 		return rec, err
@@ -1414,10 +1426,22 @@ func (d *deployer) observeClaims(ctx context.Context, runs []string, claims []ma
 	return nil
 }
 
-type ecrRegistry struct{}
+// safety: host is the registry the deploy settings validated against the
+// role's account; the ECR credential goes to no other host, whatever a
+// GitOps pin or a flag names. Until sign-in sets it, every call is refused.
+type ecrRegistry struct{ host string }
 
-func (ecrRegistry) options(ctx context.Context, password string) []remote.Option {
-	return []remote.Option{remote.WithContext(ctx), remote.WithAuth(&authn.Basic{Username: "AWS", Password: password})}
+type ecrKeychain struct{ host, password string }
+
+func (k ecrKeychain) Resolve(target authn.Resource) (authn.Authenticator, error) {
+	if k.host == "" || target.RegistryStr() != k.host {
+		return nil, fmt.Errorf("refusing to send the ECR credential to %s; the deploy registry is %q", target.RegistryStr(), k.host)
+	}
+	return &authn.Basic{Username: "AWS", Password: k.password}, nil
+}
+
+func (r ecrRegistry) options(ctx context.Context, password string) []remote.Option {
+	return []remote.Option{remote.WithContext(ctx), remote.WithAuthFromKeychain(ecrKeychain{host: r.host, password: password})}
 }
 
 func (r ecrRegistry) digest(ctx context.Context, password, ref string) (string, error) {
@@ -1482,7 +1506,7 @@ func (r ecrRegistry) revision(ctx context.Context, password, ref string) (string
 }
 
 func (r ecrRegistry) publish(ctx context.Context, password string, in PublishImagesArgs, engine string) error {
-	refs, err := publishReleaseImages(ctx, in, engine, remote.WithAuth(&authn.Basic{Username: "AWS", Password: password}))
+	refs, err := publishReleaseImages(ctx, in, engine, remote.WithAuthFromKeychain(ecrKeychain{host: r.host, password: password}))
 	for _, ref := range refs {
 		sparkwing.Info(ctx, "published %s (linux/amd64, linux/arm64)", ref)
 	}

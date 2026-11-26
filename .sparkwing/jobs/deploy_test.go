@@ -458,6 +458,8 @@ func (r *fakeDeployRegistry) publish(_ context.Context, _ string, in PublishImag
 type fakeDeploy struct {
 	t            *testing.T
 	bare         string
+	configRepo   string
+	root         string
 	repo         string
 	head         string
 	old          deployImages
@@ -568,7 +570,7 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	root := t.TempDir()
 	t.Setenv("TMPDIR", root)
 	f := &fakeDeploy{
-		t: t, bare: filepath.Join(root, "gitops.git"), repo: filepath.Join(root, "sparkwing"), claimsPerRun: 1,
+		t: t, root: root, bare: filepath.Join(root, "fixture-gitops.git"), repo: filepath.Join(root, "sparkwing"), claimsPerRun: 1,
 		failRuns: map[string]bool{}, clock: time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC),
 	}
 	if err := os.MkdirAll(filepath.Join(f.repo, "internal", "store"), 0o755); err != nil {
@@ -621,6 +623,10 @@ func newFakeDeploy(t *testing.T) *fakeDeploy {
 	deployGitIn(t, work, "add", "-A")
 	deployGitIn(t, work, "commit", "--quiet", "-m", "seed")
 	deployGitIn(t, root, "clone", "--quiet", "--bare", work, f.bare)
+	f.configRepo = seedDeployConfigRepo(t, root, fixtureDeploySettings(t))
+	if err := os.Symlink(f.repo, filepath.Join(root, "fixture-reference.git")); err != nil {
+		t.Fatal(err)
+	}
 	deployGitIn(t, f.repo, "commit", "--quiet", "--allow-empty", "-m", "candidate")
 	f.head = deployGitIn(t, f.repo, "rev-parse", "HEAD")
 	deployGitIn(t, f.repo, "push", "--quiet", "origin", "HEAD:main")
@@ -636,11 +642,26 @@ func (f *fakeDeploy) candidate() deployImages {
 	return c
 }
 
+const testDeployRole = "arn:aws:iam::123456789012:role/fixture-deploy"
+
+func fixtureDeploySettings(t testing.TB) []byte {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join("testdata", "deploy-settings", "deploy.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+// hack: the config is preloaded so tests can call deploy steps directly; deployers still sign in and clone.
 func (f *fakeDeploy) config() deployConfig {
 	cfg := defaultDeployConfig()
-	cfg.Registry = testRegistry
-	cfg.GitopsURL = f.bare
-	cfg.ReferenceURL = f.repo
+	settings, err := parseDeploySettings("fixture", fixtureDeploySettings(f.t))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	cfg.applySettings(settings)
+	cfg.RoleARN, cfg.Region = testDeployRole, "us-west-2"
 	cfg.ToolDir = ""
 	return cfg
 }
@@ -698,7 +719,11 @@ func (f *fakeDeploy) deployer(dry bool) *deployer {
 			return nil, errors.New("HTTP 404")
 		},
 	}
-	return &deployer{tools: tools, cfg: f.config(), dry: dry, runID: "run-deploy", repoDir: f.repo, tmp: f.t.TempDir()}
+	d := &deployer{tools: tools, cfg: f.config(), dry: dry, runID: "run-deploy", repoDir: f.repo, tmp: f.t.TempDir()}
+	if dry {
+		d.settingsFile = filepath.Join(filepath.Dir(f.configRepo), "deploy.yaml")
+	}
+	return d
 }
 
 func (f *fakeDeploy) pinsOnMain(dir string) valuesPins {
@@ -733,6 +758,8 @@ func (f *fakeDeploy) run(ctx context.Context, c deployCommand) (string, error) {
 		for k, v := range c.Env {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
+		// hack: the fixture's GitHub URLs resolve to the local fixture repositories.
+		cmd.Env = append(cmd.Env, "GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=url."+f.root+"/.insteadOf", "GIT_CONFIG_VALUE_0=git@github.com:example/")
 		out, err := cmd.Output()
 		if err != nil {
 			var stderr []byte
@@ -992,7 +1019,7 @@ func TestDeployStagingGateThenProduction(t *testing.T) {
 	} else if strings.Contains(final, "kind: ClusterRole") || strings.Contains(final, "kind: Namespace") || strings.Contains(final, "kind: ValidatingAdmissionPolicy") {
 		t.Fatalf("the render kept cluster-scoped objects:\n%s", final)
 	}
-	if !slices.Contains(f.said, "left out of sparkwing-staging/rendered.yaml, applied through kikd-infra k8s/sparkwing-cluster/: Namespace/sparkwing-cloud-jobs, ClusterRole/sparkwing-runner-boundary, ValidatingAdmissionPolicy/sparkwing-cloud-capacity, ValidatingAdmissionPolicyBinding/sparkwing-cloud-capacity") {
+	if !slices.Contains(f.said, "left out of sparkwing-staging/rendered.yaml, applied through the infrastructure repository: Namespace/sparkwing-cloud-jobs, ClusterRole/sparkwing-runner-boundary, ValidatingAdmissionPolicy/sparkwing-cloud-capacity, ValidatingAdmissionPolicyBinding/sparkwing-cloud-capacity") {
 		t.Fatalf("the deploy did not name the cluster-scoped objects it left out: %q", f.said)
 	}
 
@@ -1436,8 +1463,8 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"resolve the candidate commit", "is still the tip of origin/main", "assume arn:aws:iam::633280902600:role/sparkwing-deploy", "build linux/amd64", "build linux/arm64", "publish both images",
-		"clone " + f.bare, "pin the staging controller", "render sparkwing-staging/rendered.yaml",
+		"resolve the candidate commit", "is still the tip of origin/main", "assume " + testDeployRole, "would clone git@github.com:example/fixture-config.git", "build linux/amd64", "build linux/arm64", "publish both images",
+		"clone git@github.com:example/fixture-gitops.git", "check that Argo application sparkwing-staging exists", "pin the staging controller", "render sparkwing-staging/rendered.yaml",
 		"commit \"deploy(staging): controller", "wait for Argo application sparkwing-staging", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-full-controller",
 		"pin the staging launcher", "wait for deployment sparkwing-staging/sparkwing-staging-sparkwing-runner-bundle-launcher",
 		"build the candidate CLI", "add CLI profile staging", "trigger deploy-smoke", "trigger hello",
@@ -1464,9 +1491,14 @@ func TestDeployDryRunPrintsEveryActionAndTakesNone(t *testing.T) {
 	}
 }
 
-func TestDeployWritesOnlySparkwingGitops(t *testing.T) {
+func TestDeployWritesOnlyTheConfiguredGitops(t *testing.T) {
+	settings, err := parseDeploySettings("fixture", fixtureDeploySettings(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := defaultDeployConfig()
-	if cfg.GitopsURL != "git@github.com:sparkwing-dev/sparkwing-gitops.git" || cfg.Params.GitopsKey != "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key" {
+	cfg.applySettings(settings)
+	if cfg.GitopsURL != "git@github.com:example/fixture-gitops.git" || cfg.Params.GitopsKey != "/fixture/deploy/gitops-deploy-key" {
 		t.Fatalf("GitOps target = %q with key %q", cfg.GitopsURL, cfg.Params.GitopsKey)
 	}
 }
@@ -1614,11 +1646,11 @@ func TestDeploySchemaUpgradeKeepsCandidateAfterCancellation(t *testing.T) {
 }
 
 func TestProductionSmokeUsesSourceOwnerToken(t *testing.T) {
-	cfg := defaultDeployConfig()
-	if fmt.Sprint(cfg.SmokeProfiles) != "[production-smoke]" || cfg.Params.SmokeToken != "/kikd-prod/sparkwing/deploy/scan-submit-token" {
+	f := newFakeDeploy(t)
+	cfg := f.config()
+	if fmt.Sprint(cfg.SmokeProfiles) != "[production-smoke]" || cfg.Params.SmokeToken != "/fixture/deploy/scan-submit-token" {
 		t.Fatalf("production smoke config = %+v", cfg)
 	}
-	f := newFakeDeploy(t)
 	if _, err := f.deployer(false).promote(t.Context(), f.candidate()); err != nil {
 		t.Fatal(err)
 	}

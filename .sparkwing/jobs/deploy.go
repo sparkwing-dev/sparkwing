@@ -18,8 +18,9 @@ type DeployArgs struct {
 	Version         string `flag:"version" desc:"Version to build and tag the images as. Default: Go's canonical pseudo-version for main. A real deploy takes it only from sparkwing.yaml args."`
 	StopAfter       string `flag:"stop-after" desc:"Stop after this stage: staging deploys and gates staging only. Default: promote to production. A real deploy takes it only from sparkwing.yaml args."`
 	PromoteProven   bool   `flag:"promote-proven" desc:"Skip staging and promote to production on the staging-gate record of the last successful default-branch deploy run, which must name the same image digests. A real deploy takes it only from sparkwing.yaml args."`
-	ControllerBase  string `flag:"controller-base" desc:"Controller runtime base by digest (build-images --runtime-base). Default: the base pinned in deploy_env.go."`
-	RunnerBase      string `flag:"runner-base" desc:"Runner runtime base by digest (build-images --runtime-base). Default: the base pinned in deploy_env.go."`
+	ControllerBase  string `flag:"controller-base" desc:"Controller runtime base by digest (build-images --runtime-base). Default: bases.controller in the deploy settings."`
+	RunnerBase      string `flag:"runner-base" desc:"Runner runtime base by digest (build-images --runtime-base). Default: bases.runner in the deploy settings."`
+	DeployConfig    string `flag:"deploy-config" desc:"Local deploy settings file (deploy.yaml) a --dry-run reads instead of cloning the configuration repository. Only with --dry-run."`
 	ProvenRecordAge string `flag:"proven-max-age" desc:"Oldest staging-gate record --promote-proven accepts, as a Go duration. Default: 168h."`
 }
 
@@ -33,12 +34,12 @@ func (Deploy) ShortHelp() string {
 
 func (Deploy) Help() string {
 	return "Turns the Sparkwing Cloud deploy lanes into one DAG. build-images builds linux/amd64 and linux/arm64 binaries with bin/build-release-target.sh and appends them to the runtime bases with publish-images, " +
-		"reusing images an earlier run already published for the same commit. Before changing GitOps, deploy protects candidate and previous image indexes and platform manifests with immutable cloud-deploy-<digest> retention tags. A tagging failure stops deployment. staging-gate and production pin the digests in sparkwing-gitops, render with the candidate chart and push the controller, then the launcher, " +
+		"reusing images an earlier run already published for the same commit. Before changing GitOps, deploy protects candidate and previous image indexes and platform manifests with immutable cloud-deploy-<digest> retention tags. A tagging failure stops deployment. staging-gate and production pin the digests in the GitOps repository, render with the candidate chart and push the controller, then the launcher, " +
 		"each after Argo reports Synced/Healthy and the deployment has rolled out. The controller's commit changes only the controller Deployment; every other chart change lands with the launcher. Recovery relies on RDS point-in-time recovery, with no deploy-time snapshot or backup preflight. staging-gate compiles its candidate CLI alongside rollout, joining both before smoke submission. It runs deploy-smoke with a child run and the hello reference pipeline on staging Cloud. " +
 		"production reuses the staging-verified candidate CLI only for the same source SHA, native platform and binary digest, rebuilding on a missing or mismatched handoff. It requires a staging-gate record for the same digests, from this run or, with --promote-proven, from the last successful default-branch deploy run, then runs the two-job deploy-smoke pipeline in the " +
 		"production team that owns the source repository installation and checks one NodeClaim per run and WARN- and ERROR-free controller and launcher logs after both rollouts complete. Each environment's Cloud job nodes pull their own runner tag while they boot: after the staging rollout, deploy moves cloud-prepull-staging to the candidate, and after a passing production smoke it moves cloud-prepull; a failure to move either warns without failing the deploy. A failed production deploy or smoke reverts this run's GitOps commits only when the controller schema did not increase; a schema upgrade retains candidate images and records a Bitwing finding requiring roll forward. " +
-		"Take a manual snapshot before a risky migration. Staging summarizes its deployed and previous digests and emits the gate record. Production emits its deployment record. Credentials come from this run's OIDC token: the sparkwing-deploy role reads the GitOps deploy key and the fixture tokens " +
-		"from SSM; no key is stored with the pipeline. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
+		"Take a manual snapshot before a risky migration. Staging summarizes its deployed and previous digests and emits the gate record. Production emits its deployment record. Credentials come from this run's OIDC token: the deploy role reads the GitOps deploy key and the fixture tokens " +
+		"from SSM; no key is stored with the pipeline. The account-specific values (registry, cluster, runtime bases, repositories, parameter paths and per-environment object names) live in a private deploy.yaml: each deploy job signs in with the role and region from the runner's machine settings, then shallow-clones the configuration repository those settings name with the read-only key their parameter holds, and refuses a missing or invalid value. A --dry-run reads a local copy named by --deploy-config. Only a run the GitHub App started for a push to main can assume that role, so --stop-after, --promote-proven and --version reach a real deploy only through args " +
 		"in .sparkwing/sparkwing.yaml; on the command line they work with --dry-run, which prints every action without taking any. Separate capacity-one job queues serialize builds, staging rollout plus gate, and production promotion. The next candidate can build and stage during production. At build and staging admission, superseded commits stop before credentials or Cloud smoke. " +
 		"A candidate admitted to staging can finish while main advances: staging and production require its SHA to be an ancestor of origin/main or its tip. Production checks source ancestry again immediately before each GitOps push and requires both image revisions to advance without lowering their versions. Identical digests allow retries to finish partial deployments or leave an already deployed candidate unchanged. " +
 		"After production smoke, deploy starts a detached deploy-scan child at the same revision and with the same verified lineage and links it in the job summary without awaiting it. All scans share one concurrency slot and an hourly revision receipt, leaving the desktop runner's other slot for deploys. Full scans execute on our hardware. Scan failures publish Bitwing findings per failed example job; Bitwing policy controls ticket promotion. Later failures append run links to the promoted ticket. A clean scan resolves unpromoted findings. Before rollout, production flags its latest scan status, including failures before the scan job started, and files those execution failures. Repair deploys continue with the warning. An unavailable check reports could-not-run and preserves earlier findings. Argo refresh requires patch permission on the two named applications. Bitwing resolves from the runner user's PATH and uses their existing ledger configuration; deploy-scan uses scoped fixture secrets rather than the deploy AWS role."
@@ -46,9 +47,9 @@ func (Deploy) Help() string {
 
 func (Deploy) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Print every action a deploy of HEAD would take", Command: "sparkwing run deploy -- --dry-run"},
-		{Comment: "Print a staging-only deploy", Command: "sparkwing run deploy -- --dry-run --stop-after staging"},
-		{Comment: "Print a promotion of the last staging-proven images", Command: "sparkwing run deploy -- --dry-run --promote-proven"},
+		{Comment: "Print every action a deploy of HEAD would take", Command: "sparkwing run deploy -- --dry-run --deploy-config ./deploy.yaml"},
+		{Comment: "Print a staging-only deploy", Command: "sparkwing run deploy -- --dry-run --deploy-config ./deploy.yaml --stop-after staging"},
+		{Comment: "Print a promotion of the last staging-proven images", Command: "sparkwing run deploy -- --dry-run --deploy-config ./deploy.yaml --promote-proven"},
 	}
 }
 
@@ -75,6 +76,10 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 		}
 		maxAge = d
 	}
+	dry := in.DryRun || rc.DryRun
+	if in.DeployConfig != "" && !dry {
+		return errors.New("deploy: --deploy-config works only with --dry-run; a real deploy reads its settings from the configuration repository")
+	}
 	cfg := defaultDeployConfig()
 	if in.ControllerBase != "" {
 		cfg.ControllerBase = in.ControllerBase
@@ -82,7 +87,7 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 	if in.RunnerBase != "" {
 		cfg.RunnerBase = in.RunnerBase
 	}
-	base := deployJob{Cfg: cfg, Dry: in.DryRun || rc.DryRun, RunID: rc.RunID}
+	base := deployJob{Cfg: cfg, Dry: dry, RunID: rc.RunID, SettingsFile: in.DeployConfig}
 	var runnerLabels []string
 	if !base.Dry {
 		runnerLabels = []string{"deploy-kikd-prod"}
@@ -120,11 +125,12 @@ func (p *Deploy) Plan(_ context.Context, plan *sparkwing.Plan, in DeployArgs, rc
 }
 
 type deployJob struct {
-	Cfg   deployConfig
-	Dry   bool
-	RunID string
-	Name  string
-	tools *deployTools
+	Cfg          deployConfig
+	Dry          bool
+	RunID        string
+	Name         string
+	SettingsFile string
+	tools        *deployTools
 }
 
 func (j deployJob) named(name string) deployJob {
@@ -150,7 +156,7 @@ func (j *deployJob) deployer() (*deployer, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	d := &deployer{tools: tools, cfg: j.Cfg, dry: j.Dry, runID: j.RunID, repoDir: sparkwing.WorkDir(), tmp: tmp}
+	d := &deployer{tools: tools, cfg: j.Cfg, dry: j.Dry, runID: j.RunID, repoDir: sparkwing.WorkDir(), tmp: tmp, settingsFile: j.SettingsFile}
 	return d, func() {
 		if err := removeDeployDir(tmp); err != nil {
 			fmt.Fprintln(os.Stderr, "deploy: remove", tmp+":", err)
@@ -195,9 +201,10 @@ func (d *deployer) deployTo(ctx context.Context, env deployEnv, images deployIma
 	if err := d.requireMainAncestor(ctx, images.Commit); err != nil {
 		return envDeployment{}, nil, err
 	}
-	if err := d.assumeRole(ctx); err != nil {
+	if err := d.signIn(ctx); err != nil {
 		return envDeployment{}, nil, err
 	}
+	env = d.cfg.environment(env.Name)
 	if env.Name == d.cfg.Production.Name {
 		if err := d.productionCLI(ctx, images.Commit); err != nil {
 			return envDeployment{}, nil, err
@@ -373,8 +380,8 @@ func requireStagingPass(ctx context.Context, images deployImages, gate sparkwing
 }
 
 func (d *deployer) promote(ctx context.Context, images deployImages) (envDeployment, error) {
+	rec, gitEnv, err := d.deployTo(ctx, d.cfg.Production, images)
 	env := d.cfg.Production
-	rec, gitEnv, err := d.deployTo(ctx, env, images)
 	if err == nil {
 		// bug: startup probes can fail before readiness; the smoke judges the settled deployments.
 		rec.WindowStart = d.tools.now().UTC().Format(time.RFC3339Nano)

@@ -184,7 +184,7 @@ func (j *weeklyReleaseJob) run(ctx context.Context, dry bool) (err error) {
 
 func releaseWorkflowHandoff(ctx context.Context, run, cut string) error {
 	note := cut + " Release owner: resume with bitwing workflow next --run " + run +
-		". Confirm hosted publication and artifact identity, publish matching sparkwing-product docs, verify production through kikd-infra, and reconcile downstream pins before finishing this workflow."
+		". Confirm hosted publication and artifact identity, publish the matching product site docs, verify production through the platform repository, and reconcile downstream pins before finishing this workflow."
 	_, err := sparkwing.Exec(ctx, "bitwing", "workflow", "step", "--run", run, "--step", "cut", "--status", "blocked", "--note", note).Run()
 	return err
 }
