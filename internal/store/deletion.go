@@ -863,7 +863,7 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 		`INSERT INTO invitation_email_log (address, inviter, sent_at) VALUES (?, ?, ?)`, address, account, at); err != nil {
 		return "", err
 	}
-	return "", tx.Commit()
+	return "", tx.Commit() //nolint:contextcheck // Commit uses the context captured by beginTx.
 }
 
 // safety: the log outlives the invitation, the team that sent it and the inviting account, so it keeps digests of
