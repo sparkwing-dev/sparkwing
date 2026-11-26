@@ -785,7 +785,9 @@ func (e *InvitationEmailLimitError) Error() string {
 // already sent [MaxInvitationEmailsPerAccountPerDay] invitation emails in the
 // last 24 hours, and reports false when the address has already been mailed
 // [MaxInvitationEmailsPerDay] times in that window. Both caps count every
-// team, including deleted ones. A claimed invitation is never claimed twice.
+// team, including deleted ones. It also reports false for an invitation that
+// was accepted, withdrawn or already claimed, or whose inviting account was
+// deleted.
 func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string) (bool, error) {
 	tx, err := o.s.beginTx(ctx)
 	if err != nil {
@@ -799,6 +801,9 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 	}
 	if err != nil {
 		return false, err
+	}
+	if inviter == "" {
+		return false, nil
 	}
 	// safety: concurrent sends from one account, or to one address, would each count the other's as not yet made;
 	// the locks order them, account before address in every claim. SQLite already serializes every writer.
@@ -830,7 +835,7 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 		return false, nil
 	}
 	res, err := tx.execContext(ctx,
-		`UPDATE invitations SET emailed_at = ? WHERE id = ? AND emailed_at IS NULL`, at, invitationID)
+		`UPDATE invitations SET emailed_at = ? WHERE id = ? AND emailed_at IS NULL AND accepted_at IS NULL AND withdrawn_at IS NULL`, at, invitationID)
 	if err != nil {
 		return false, err
 	}

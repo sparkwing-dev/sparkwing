@@ -177,3 +177,36 @@ func TestConcurrentInvitationEmailsShareTheAccountsLastSlot(t *testing.T) {
 		})
 	}
 }
+
+func TestInvitationEmailGoesOnlyToOpenInvitationsFromALiveAccount(t *testing.T) {
+	st := storetest.Open(t)
+	ctx := context.Background()
+	now := time.Now()
+	owner := signIn(t, st, "o", "owner@example.com")
+	team := owner.PersonalTeam
+
+	withdrawn := inviteAt(t, st, owner.Account.ID, team, "withdrawn@example.com", now)
+	if err := tenant(t, st, team).WithdrawInvitationForTest(t, ctx, withdrawn.ID, now); err != nil {
+		t.Fatal(err)
+	}
+	guest := signIn(t, st, "g", "accepted@example.com")
+	accepted := inviteAt(t, st, owner.Account.ID, team, "accepted@example.com", now)
+	if err := acceptInvitation(t, st, guest.Account.ID, accepted); err != nil {
+		t.Fatal(err)
+	}
+	orphaned := inviteAt(t, st, owner.Account.ID, team, "orphaned@example.com", now)
+	// safety: account deletion blanks invited_by; such a send must not count under one digest every deleted
+	// inviter would share.
+	if _, err := st.DB().ExecContext(ctx, storetest.Rebind(st, `UPDATE invitations SET invited_by = '' WHERE id = ?`), orphaned.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, inv := range map[string]store.Invitation{"withdrawn": withdrawn, "accepted": accepted, "orphaned": orphaned} {
+		if ok, err := claimAt(t, st, inv, now); err != nil || ok {
+			t.Errorf("%s invitation email = %v, %v; want withheld", name, ok, err)
+		}
+	}
+	if n := countWhere(t, st, "invitation_email_log", "1 = 1"); n != 0 {
+		t.Fatalf("withheld invitation emails left %d log rows, want 0", n)
+	}
+}
