@@ -3,12 +3,18 @@ package apierrhttp
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
+
+// ErrStoppedRetryable marks a cause noted with NoteResponseError when the request's context ended but the handler
+// still answers a retryable error: the controller then delivers that status instead of recording a closed request.
+// Join it with the context error, as in errors.Join(apierrhttp.ErrStoppedRetryable, ctx.Err()).
+var ErrStoppedRetryable = errors.New("the request context ended before the answer; the client should retry")
 
 // Write writes the envelope and derives status from Code, including retry_after_ms as Retry-After.
 // Encode failures are returned to the caller for logging; this writer never emits plain text.

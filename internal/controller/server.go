@@ -18,6 +18,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/blob"
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/controllerwire"
@@ -713,7 +714,7 @@ func (r *statusRecorder) WriteHeader(code int) {
 	if r.committed {
 		return
 	}
-	if code >= http.StatusInternalServerError && r.clientCanceled() {
+	if code >= http.StatusInternalServerError && r.clientCanceled() && !errors.Is(r.cause, apierrhttp.ErrStoppedRetryable) {
 		code = statusClientClosedRequest
 	}
 	if code < 100 || code >= 200 || code == http.StatusSwitchingProtocols {
