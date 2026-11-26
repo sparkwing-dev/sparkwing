@@ -102,7 +102,7 @@ type pipelineInspection struct {
 	projectFile string
 	planner     nodehost.SDKPlanner
 	input       nodehost.PlanningProcessInput
-	// safety: describe runs without git context, as in run, so only the Plan request gets planRun.
+	// safety: initial inspection runs without git context, as in run; planRun applies from Prepare on.
 	planRun nodewire.RunContext
 }
 
