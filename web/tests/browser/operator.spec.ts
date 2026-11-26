@@ -11,7 +11,7 @@ const acme = {
     trust: "revoked",
     trusted: false,
     standing:"Held",cloud_vcpu:0,max_job_seconds:0,
-    trust_by: "korey@example.com",
+    trust_by: "avery@example.com",
     trust_at: 1_790_000_000,
     trust_reason: "chargeback",
   },
@@ -23,7 +23,7 @@ const acme = {
     {
       at: 1_790_000_000,
       kind: "billing.trust_changed",
-      actor: "korey@example.com",
+      actor: "avery@example.com",
       attrs: { reason: "chargeback" },
     },
   ],
@@ -71,7 +71,7 @@ test("the operator finds a team and reads its standing", async ({ page }) => {
   await expect(page).toHaveURL(/\/operator\?team=acme$/);
   await expect(page.getByText("$12.30", { exact: true })).toBeVisible();
   await expect(
-    page.getByText(/by korey@example\.com .*: chargeback/),
+    page.getByText(/by avery@example\.com .*: chargeback/),
   ).toBeVisible();
   await expect(page.getByText("billing.trust_changed")).toBeVisible();
 });

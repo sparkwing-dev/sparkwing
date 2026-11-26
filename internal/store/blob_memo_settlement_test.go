@@ -30,7 +30,7 @@ func TestMemoIsNotReusableWhileItsProducerRuns(t *testing.T) {
 	}
 }
 
-// Decision 42: a memo hit settles only through the executing holder's start
+// A memo hit settles only through the executing holder's start
 // permit, so the coordinator's reconciliation refuses a memo source.
 func TestCoordinatorReconciliationRefusesMemoSources(t *testing.T) {
 	s, records, change := blobResultFixture(t)

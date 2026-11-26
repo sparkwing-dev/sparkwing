@@ -37,7 +37,7 @@ type Tenant struct {
 // registered.
 var ErrUnknownTeam = errors.New("store: team is not registered")
 
-// NormalizeTeam is the one spelling of a team name. Decision 0004 routes
+// NormalizeTeam is the one spelling of a team name. Teams route
 // on `<team>.sparkwing.dev` and DNS is case-insensitive, so Acme and acme
 // address one tenant and must not become two.
 func NormalizeTeam(team Team) Team {

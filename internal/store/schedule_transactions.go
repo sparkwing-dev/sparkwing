@@ -450,7 +450,7 @@ func (t *Tenant) editSchedule(ctx context.Context, a capability.Authorized, sele
 		}
 		app := false
 		if !ownsSchedule(nil, row.RepoPath, row) {
-			// safety: decision 67 lets team admins pause and resume App schedules; their declaration stays the repository's.
+			// safety: team admins may pause and resume App schedules; their declaration stays the repository's.
 			if appAudit == "" || row.GitHubRepositoryID == 0 || !slices.Contains(p.Capability.Grants, capability.TeamAdmin) {
 				if appAudit == "" && row.GitHubRepositoryID > 0 {
 					return hosterr.Authorization(hosterr.ReasonBinding, "GitHub App manages this schedule; edit the declaration in the repository or update App automation")

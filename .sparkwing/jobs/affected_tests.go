@@ -55,7 +55,6 @@ var nonPackageReaders = []struct {
 	{"internal/apispec/", []string{".sparkwing/jobs"}},
 	{"install/", []string{"cmd/sparkwing", "internal/releaseauth"}},
 	{"examples/", []string{"internal/doccheck"}},
-	{"design/rewrite/contracts/", []string{"tests/acceptance"}},
 	{"AGENTS.md", []string{"cmd/sparkwing"}},
 	{"DELIVERY.md", []string{".sparkwing/jobs", "internal/doccheck"}},
 	{"README.md", []string{"internal/doccheck"}},

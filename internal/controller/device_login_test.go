@@ -61,7 +61,7 @@ func deviceRefusalReason(t *testing.T, w *httptest.ResponseRecorder) string {
 
 func TestDeviceLoginIssuesTheApproversCLITokenOnce(t *testing.T) {
 	s, raw, csrf := reviewAccount(t, "editor")
-	started := startDevice(t, s, `{"kind":"member","machine":"korey-laptop"}`)
+	started := startDevice(t, s, `{"kind":"member","machine":"avery-laptop"}`)
 	if poll := pollDevice(t, s, started.DeviceCode, 200); poll.Status != controllerwire.DevicePending || poll.Credential != nil {
 		t.Fatalf("first poll = %+v", poll)
 	}
@@ -79,7 +79,7 @@ func TestDeviceLoginIssuesTheApproversCLITokenOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"runs.read", "logs.read", "runs.write", "runs.control", "approvals.write"}
-	if lookup.Machine != "korey-laptop" || lookup.Team != "a" || lookup.Kind != "member" || !slices.Equal(lookup.Grants, want) || lookup.Runner != nil {
+	if lookup.Machine != "avery-laptop" || lookup.Team != "a" || lookup.Kind != "member" || !slices.Equal(lookup.Grants, want) || lookup.Runner != nil {
 		t.Fatalf("lookup = %+v", lookup)
 	}
 	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+started.UserCode+`"}`, 204)
@@ -173,17 +173,17 @@ func TestDeviceLoginRefusals(t *testing.T) {
 
 func TestDeviceLoginEnrollsARunnerUnderTheApprover(t *testing.T) {
 	s, raw, csrf := reviewAccount(t, "editor")
-	personal := startDevice(t, s, `{"kind":"runner","runner":{"name":"korey-laptop","personal":true}}`)
+	personal := startDevice(t, s, `{"kind":"runner","runner":{"name":"avery-laptop","personal":true}}`)
 	var lookup controllerwire.DeviceLoginLookup
 	if err := json.Unmarshal(reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/lookup", `{"user_code":"`+personal.UserCode+`"}`, 200).Body.Bytes(), &lookup); err != nil {
 		t.Fatal(err)
 	}
-	if lookup.Kind != "runner" || lookup.Machine != "korey-laptop" || lookup.Runner == nil || !lookup.Runner.Personal || !slices.Equal(lookup.Grants, []string{"nodes.claim", "triggers.claim"}) {
+	if lookup.Kind != "runner" || lookup.Machine != "avery-laptop" || lookup.Runner == nil || !lookup.Runner.Personal || !slices.Equal(lookup.Grants, []string{"nodes.claim", "triggers.claim"}) {
 		t.Fatalf("runner lookup = %+v", lookup)
 	}
 	reviewSessionRequest(t, s, raw, csrf, "POST", "/api/v1/auth/device/approve", `{"user_code":"`+personal.UserCode+`"}`, 204)
 	poll := pollDevice(t, s, personal.DeviceCode, 200)
-	if poll.Credential == nil || poll.Credential.Principal != "korey-laptop" || !slices.Equal(poll.Credential.Grants, []string{"nodes.claim", "triggers.claim"}) {
+	if poll.Credential == nil || poll.Credential.Principal != "avery-laptop" || !slices.Equal(poll.Credential.Grants, []string{"nodes.claim", "triggers.claim"}) {
 		t.Fatalf("runner poll = %+v", poll)
 	}
 	var kind string

@@ -1,7 +1,7 @@
 {
   "runners": [
     {
-      "name": "moonborn",
+      "name": "mybox",
       "class": "runner",
       "location": "local",
       "labels": [

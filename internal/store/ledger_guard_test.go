@@ -194,7 +194,7 @@ var paymentModeAcrossModes = map[string]string{
 	"(*Tenant).billingPageTx|billing_pages":                            "reads the page's stored mode and refuses it unless it is the configured mode (configuredPaymentModeTx)",
 }
 
-// Decision 63 keeps test-mode money out of every live decision by one column, so
+// One column keeps test-mode money out of every live decision, so
 // every statement on a table that carries payment_mode must filter or set it;
 // selecting the column alone does not count. The
 // money tables come from the schema, so a new one is judged the day it is added.

@@ -455,7 +455,7 @@ To offer your own workstation for your runs, approve the enrollment in a
 browser. The profile needs only the controller URL:
 
 ```bash
-sparkwing runners add --profile prod --runner korey-laptop --personal --team support-test
+sparkwing runners add --profile prod --runner my-laptop --personal --team support-test
 ```
 
 The command prints a code and the controller's `/device` page. Sign in to the

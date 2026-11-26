@@ -1,5 +1,5 @@
-# Review policy for this repository, in the tool-neutral format of the
-# ink-labs review spec (wing/review-spec.md). `sparkwing run review` reads it.
+# Review policy for this repository, in a tool-neutral format.
+# `sparkwing run review` reads it.
 version: 1
 
 objective:

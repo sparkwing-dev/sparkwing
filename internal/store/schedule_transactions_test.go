@@ -629,7 +629,7 @@ func TestScheduleOverrideReplacesPreviousEditAndResetsToDeclaration(t *testing.T
 	}
 }
 
-// Decision 67: a team admin pauses and resumes a schedule the GitHub App declared, audited, but cannot edit or delete it.
+// A team admin pauses and resumes a schedule the GitHub App declared, audited, but cannot edit or delete it.
 func TestAdminPausesAndResumesAppScheduleButCannotEditIt(t *testing.T) {
 	tenant, a, body, _ := consentedScheduleFixture(t)
 	ids, _, err := tenant.ReplaceAuthorizedSchedules(t.Context(), a, body)

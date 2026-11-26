@@ -1,6 +1,6 @@
 # Invocation routing and the local landing boundary
 
-An explicit `sparkwing run PIPELINE --sw-route cloud --profile NAME` captures
+An explicit `sparkwing run PIPELINE --route cloud --profile NAME` captures
 and inspects source locally, then uses the existing controller dispatch path
 with the `class=cloud` runner selector. It sends no burst preferences and
 requires no here owner or local execution controller. The machine-wide burst
@@ -13,11 +13,11 @@ secret sources or untracked files. A repository Cloud preference would need a
 new machine authorization contract, so this change uses invocation flags.
 There are no SDK, controller API, wire or store changes.
 
-## Customer-visible decisions for maintainer approval
+## Customer-visible behavior
 
-- Add `--sw-route local|cloud` and permit `--profile NAME` and
-  repository `allow_secret_files` with the explicit Cloud route. Cloud supports non-interactive foreground observation and
-  `--sw-detached`. Defaults remain local unless the machine opted into burst.
+- `--route local|cloud` selects the route for one invocation, and `--profile NAME`
+  and repository `allow_secret_files` apply with the explicit Cloud route. Cloud supports non-interactive foreground observation and
+  `--detach`. Defaults remain local unless the machine opted into burst.
 - Explicit Cloud selects Cloud immediately and fails when connection or
   upload fails. It never falls back to desktop work. Existing machine burst
   routing keeps here/machines preferences and pre-intake local fallback.
@@ -45,7 +45,7 @@ requester-secret relay and restart behavior remain its existing contract.
 
 `land -- --cloud-profile cloud` keeps preconditions, source policy, review,
 verification and push local. A quarter-core inline job invokes the product CLI
-to run `gate --sw-route cloud --profile cloud -- --full --base SHA` and waits for its
+to run `gate --route cloud --profile cloud -- --full --base SHA` and waits for its
 successful receipt. The parent records that Cloud run ID as `gate_run`.
 The remote graph includes policy, broad checks, race tests and the tree record.
 The wrapper names this repository's tracked secret-shaped fixtures with
@@ -66,10 +66,6 @@ local review record. If main moves afterward, the existing merge-delta build
 and tests still run locally. A complete remote merge-delta recheck would need
 its own tree handoff and is outside this change.
 
-Assumptions and mechanisms added: invocation flags choose an existing product
-execution path, a land input chooses an existing product CLI, and the repository
-gate input `--base SHA` fetches a public comparison commit in each job. Passing only
-`--full` was insufficient because source-policy and lint filters require a
-comparison tree. This repository-specific fetch avoids widening generic source
-uploads to include Git history. Removing the flags and the optional Cloud gate branch returns to machine-wide burst and
-local land. No new environment variable or background service is introduced.
+Passing only `--full` is not enough, because source-policy and lint filters need a
+comparison tree; fetching the public base commit in each job avoids widening
+generic source uploads to include Git history.

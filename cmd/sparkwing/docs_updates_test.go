@@ -34,7 +34,7 @@ func TestLaunchGuidesUseAvailableOnboardingAndModes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, stale := range []string{"pending Korey", "controller, dashboard, cache, and Kubernetes runner", "| Self-hosted controller |"} {
+		for _, stale := range []string{"controller, dashboard, cache, and Kubernetes runner", "| Self-hosted controller |"} {
 			if strings.Contains(body, stale) {
 				t.Errorf("%s advertises stale launch behavior: %s", topic, stale)
 			}

@@ -22,7 +22,7 @@ const oidcSchema39Digest = "bd376ce39b5fdee54f286dd73111f3644264b8cc4cb864a887cd
 
 func prepareOIDCSchema39(t *testing.T, st *store.Store) {
 	t.Helper()
-	store.DropInvitationEmailInviterForTest(t, st)
+	store.RewindToSchema41ForTest(t, st)
 	for _, q := range []string{`DROP TABLE IF EXISTS audit_privacy_migrations`, `UPDATE sparkwing_schema_version SET version=39,baseline_digest='` + oidcSchema39Digest + `'`} {
 		if _, err := st.DB().Exec(q); err != nil {
 			t.Fatal(err)

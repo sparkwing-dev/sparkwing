@@ -388,7 +388,7 @@ func TestSecrets_MarkerContainingValuesAreAccepted(t *testing.T) {
 	}
 }
 
-// Decisions 66 and 68: a manual run started with a member token, naming its
+// A manual run started with a member token, naming its
 // repository itself, reads no pipeline secret of that or any repository; only
 // team-wide shared secrets arrive. Pipeline rows name a GitHub repository.
 func TestSecrets_AssertedRunReadsOnlySharedSecrets(t *testing.T) {
