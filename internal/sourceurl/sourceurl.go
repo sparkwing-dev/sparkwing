@@ -303,6 +303,39 @@ func parseNumericLabel(label string) (uint64, bool) {
 // is the production one.
 type Lookup func(ctx context.Context, host string) ([]net.IPAddr, error)
 
+// HostLookupError reports that resolving a caller-supplied clone host failed.
+// Other DNS failures, such as for a service the controller calls, never carry it.
+type HostLookupError struct {
+	Host string
+	Err  error
+}
+
+func (e *HostLookupError) Error() string {
+	return fmt.Sprintf("resolve repo URL host %q: %v", e.Host, e.Err)
+}
+
+func (e *HostLookupError) Unwrap() error { return e.Err }
+
+// NotFound reports whether the resolver answered that the host does not exist.
+func (e *HostLookupError) NotFound() bool {
+	var dns *net.DNSError
+	return errors.As(e.Err, &dns) && dns.IsNotFound
+}
+
+// PublicReason describes err for a record tenants read. DNS failure text names
+// the resolver the service uses, so a lookup failure becomes a fixed reason.
+func PublicReason(err error) string {
+	var host *HostLookupError
+	if errors.As(err, &host) {
+		return fmt.Sprintf("could not resolve repository host %q", host.Host)
+	}
+	var dns *net.DNSError
+	if errors.As(err, &dns) {
+		return "source service unavailable"
+	}
+	return err.Error()
+}
+
 // Pin is a clone host and every address it resolved to. Git must connect to
 // one of Addrs, never to a fresh resolution of Host.
 type Pin struct {
@@ -330,7 +363,7 @@ func PinCloneHost(ctx context.Context, remote string, lookup Lookup) (Pin, error
 	}
 	addrs, err := lookup(ctx, pin.Host)
 	if err != nil {
-		return Pin{}, fmt.Errorf("resolve repo URL host %q: %w", pin.Host, err)
+		return Pin{}, &HostLookupError{Host: pin.Host, Err: err}
 	}
 	if len(addrs) == 0 {
 		return Pin{}, fmt.Errorf("repo URL host %q has no address", pin.Host)

@@ -1,8 +1,10 @@
 package controller_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"testing"
 	"time"
 
@@ -18,6 +20,38 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
+func TestScheduleRegistrationClassifiesHostResolutionFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		lookup *net.DNSError
+		status int
+		code   apierr.Code
+	}{
+		{name: "resolver unavailable", lookup: &net.DNSError{Err: "server misbehaving", Name: "gitlab.com", IsTemporary: true}, status: 503, code: hosterr.Unavailable},
+		{name: "resolver timeout", lookup: &net.DNSError{Err: "i/o timeout", Name: "gitlab.com", IsTimeout: true}, status: 503, code: hosterr.Unavailable},
+		{name: "host does not exist", lookup: &net.DNSError{Err: "no such host", Name: "gitlab.com", IsNotFound: true}, status: 422, code: apierr.PlanFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newBrowserFixture(t, nil)
+			controller.SetSourceLookup(f.srv, func(context.Context, string) ([]net.IPAddr, error) { return nil, tc.lookup })
+			sha := sourcetest.FixedRemote(t, "https://gitlab.com/acme/ci.git")
+			body := `{"repo_url":"https://gitlab.com/acme/ci.git","branch":"main","sha":"` + sha + `","schedules":[{"pipeline":"nightly","cron":"* * * * *"}]}`
+			response := f.serve(f.cookieRequest("PUT", "/api/v1/schedules/repos", body))
+			var envelope struct{ Error apierr.Error }
+			if response.Code != tc.status || json.Unmarshal(response.Body.Bytes(), &envelope) != nil || envelope.Error.Code != tc.code {
+				t.Fatalf("registration: %d %s, want %d %s", response.Code, response.Body, tc.status, tc.code)
+			}
+			if retry := response.Header().Get("Retry-After"); (tc.code == hosterr.Unavailable) != (retry != "") {
+				t.Fatalf("Retry-After=%q for %s", retry, tc.code)
+			}
+			rows, err := teststore.ForTeam(t, f.st, store.DefaultTeam).ListCronSchedules(t.Context())
+			if err != nil || len(rows) != 0 {
+				t.Fatalf("refused registration stored schedules: %+v %v", rows, err)
+			}
+		})
+	}
+}
+
 func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 	var now time.Time
 	f := newBrowserFixture(t, nil, teststore.WithClock(func() time.Time {
@@ -27,6 +61,7 @@ func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 		return now
 	}))
 	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	controller.SetSourceLookup(f.srv, controller.FixtureCloneHostLookup)
 	sha := sourcetest.FixedRemote(t, "https://gitlab.com/acme/ci.git")
 	now = time.Now().UTC().Add(time.Minute).Truncate(time.Minute)
 	body := `{"mode":"replace","repo_url":"https://gitlab.com/acme/ci.git","branch":"main","sha":"` + sha + `","follow":false,"schedules":[{"pipeline":"nightly","cron":"* * * * *","args":{"channel":"nightly"}}]}`
@@ -90,6 +125,7 @@ func TestControllerScheduleFiresThroughConcreteStore(t *testing.T) {
 func TestScheduleRunNowSharesAdmissionWithDueLaunches(t *testing.T) {
 	f := newBrowserFixture(t, nil)
 	f.srv.WithFloodPolicy(controller.FloodPolicy{RunsPerPrincipalHour: 1})
+	controller.SetSourceLookup(f.srv, controller.FixtureCloneHostLookup)
 	sha := sourcetest.FixedRemote(t, "https://gitlab.com/acme/ci.git")
 	body := `{"repo_url":"https://gitlab.com/acme/ci.git","branch":"main","sha":"` + sha + `","schedules":[{"pipeline":"nightly","cron":"* * * * *"}]}`
 	response := f.serve(f.cookieRequest("PUT", "/api/v1/schedules/repos", body))

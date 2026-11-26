@@ -170,6 +170,10 @@ func (s *Server) cronTickOnce(ctx context.Context) {
 		s.logger.Warn("cron schedule could not be evaluated", "detail", e)
 	}
 	for _, d := range report.Decisions {
+		if d.Cause != nil {
+			s.logger.Warn("cron schedule launch failed",
+				"schedule", crons.DisplayName(d.Schedule), "due", d.Due.UTC().Format(time.RFC3339), "err", d.Cause)
+		}
 		if d.RunID != "" {
 			s.logger.Info("cron schedule fired",
 				"schedule", crons.DisplayName(d.Schedule), "run_id", d.RunID,

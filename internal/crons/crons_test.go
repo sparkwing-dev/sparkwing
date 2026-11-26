@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 
 	"github.com/sparkwing-dev/sparkwing/internal/store/teststore"
 
@@ -1146,4 +1148,24 @@ func scheduleAuthorization(t *testing.T, st *store.Store) capability.Authorized 
 		t.Fatal(err)
 	}
 	return capability.Authorized{Principal: snapshot.Authorities[0].Principal, Target: capability.Target{Team: string(store.DefaultTeam)}}
+}
+
+func TestTickStoresALookupFailureWithoutTheResolverAddress(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t, at(t, "2026-01-01T00:00:30Z"))
+	sched := armOne(t, h, writeRepo(t, "unresolved", everyMinute))
+	cause := &sourceurl.HostLookupError{Host: "gitlab.com", Err: &net.DNSError{Err: "server misbehaving", Name: "gitlab.com", Server: "10.255.255.254:53", IsTemporary: true}}
+	h.launcher.mu.Lock()
+	h.launcher.launchErr = cause
+	h.launcher.mu.Unlock()
+
+	h.clock.set(at(t, "2026-01-01T00:01:05Z"))
+	report, err := h.svc.Tick(ctx, false)
+	if err != nil || report.Failed != 1 || len(report.Decisions) != 1 || !errors.Is(report.Decisions[0].Cause, cause) {
+		t.Fatalf("tick report %+v, err=%v; want the failure with its full cause", report, err)
+	}
+	fires, err := teststore.ForTeam(t, h.store, store.DefaultTeam).ListCronFires(ctx, sched.ID, 0)
+	if err != nil || len(fires) != 1 || fires[0].Detail != `could not resolve repository host "gitlab.com"` {
+		t.Fatalf("fires: %+v, err=%v", fires, err)
+	}
 }
