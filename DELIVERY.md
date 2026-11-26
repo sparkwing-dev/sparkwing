@@ -713,8 +713,12 @@ upgrade` on a pipeline pinned to the previous SDK and confirm it makes the
 change the guide describes. The
 pipeline refuses `v1.0.0` and above. The dry run resolves the version, runs the
 read-only cut checks (version freshness, Go directives, SDK pins, changelog
-links, docs sidebar) and previews the changelog and guide roll; build, lint and the short
-tests run only in the real cut.
+links, docs sidebar, published docs) and previews the changelog and guide roll; build, lint and the short
+tests run only in the real cut. The published-docs check reads
+`https://sparkwing.dev/llms.txt` and refuses the cut while its title names a
+version older than the newest release tag on origin. Publish that release's
+sparkwing-product docs (its `versions.json` entry as `latest`, pushed to product
+main) before cutting the next one.
 
 Manual releases reuse a successful exact-source CI receipt when available. Missing,
 pending, failed or unreadable receipts run the local build, lint and short suite

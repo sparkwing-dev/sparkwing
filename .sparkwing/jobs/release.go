@@ -164,6 +164,9 @@ func (j *releaseCutChecksJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, erro
 	}).Needs(freshness).SafeWithoutDryRun()
 	budget.step(w, "changelog-links", checkTrackedChangelogLinks).Needs(freshness).SafeWithoutDryRun()
 	budget.step(w, "docs-sidebar", checkDocsSidebar).Needs(freshness).SafeWithoutDryRun()
+	budget.step(w, "published-docs", func(ctx context.Context) error {
+		return checkPublishedDocs(ctx, sparkwing.WorkDir())
+	}).Needs(freshness).SafeWithoutDryRun()
 	budget.verdict(w)
 	return nil, nil
 }
