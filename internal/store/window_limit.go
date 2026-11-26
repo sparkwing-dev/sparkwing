@@ -48,18 +48,27 @@ type windowRefusal struct {
 }
 
 // safety: the events are written in the caller's transaction, so a request refused after the claim rolls them back
-// and keeps its slots. Keys are locked in the order given before the clock is read, so a wait for a lock never
-// leaves the window stale; the first full limit refuses the request and nothing is written.
+// and keeps its slots. Keys are locked in sorted order before the clock is read, so concurrent requests never
+// deadlock and a lock wait never leaves the window stale; limits are counted in the order given, and the first full
+// one refuses the request with nothing written.
 func claimWindowLimitsTx(ctx context.Context, tx *storeTx, claims ...limitClaim) (time.Time, *windowRefusal, error) {
 	digests := make([]string, len(claims))
+	locks := make([]string, len(claims))
 	for i, c := range claims {
 		if !slices.Contains(windowLimits, c.limit) {
 			return time.Time{}, nil, fmt.Errorf("store: window limit %q is not registered", c.limit.kind)
 		}
 		digests[i] = limitKeyDigest(c.key)
-		// safety: concurrent claims for one key would each count the other's event as not yet made; the lock orders
-		// them. SQLite already serializes every writer.
-		if err := advisoryLockTx(ctx, tx, "limit:"+c.limit.kind+":"+digests[i]); err != nil {
+		locks[i] = "limit:" + c.limit.kind + ":" + digests[i]
+		// safety: a key named twice would be counted once and recorded twice, overshooting its limit.
+		if slices.Contains(locks[:i], locks[i]) {
+			return time.Time{}, nil, fmt.Errorf("store: window limit %q names one key twice", c.limit.kind)
+		}
+	}
+	// safety: concurrent claims for one key would each count the other's event as not yet made; the lock orders
+	// them. SQLite already serializes every writer.
+	for _, lock := range slices.Sorted(slices.Values(locks)) {
+		if err := advisoryLockTx(ctx, tx, lock); err != nil {
 			return time.Time{}, nil, err
 		}
 	}

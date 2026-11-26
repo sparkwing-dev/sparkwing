@@ -1021,17 +1021,19 @@ boundaries. Purge's account timestamp uses the same unit.
 own: the daily invitation cap per team, and the invitation email caps per
 inviting account and per recipient address. `claimWindowLimitsTx` runs in the
 caller's transaction: it takes an advisory lock on each limit's kind and key
-digest on PostgreSQL, in the order given (SQLite already serializes writers),
-reads the clock once after the locks, counts each key's `limit_events` rows
-newer than its window, refuses at the first full limit without writing, and
-otherwise inserts one row per key at that time. Rolling the transaction back releases the slot, so a request
+digest on PostgreSQL, sorted by lock name so concurrent requests cannot
+deadlock (SQLite already serializes writers), and refuses a request that names
+one key twice. It reads the clock once after the locks, counts each key's
+`limit_events` rows newer than its window in the order the caller gave,
+refuses at the first full limit without writing, and otherwise inserts one row
+per key at that time. Rolling the transaction back releases the slot, so a request
 refused after the claim consumes nothing. A row keeps the limit kind, the
 SHA-256 digest of the key and the event time, so the log outlives the teams,
 accounts and addresses it counts without keeping their identifiers; callers
 normalize a key with several spellings before claiming. Each limit is declared
 in `windowLimits`, the claim refuses an undeclared one, and the retention pass
-deletes rows older than the longest declared window. An email claim takes the
-account before the address. Schema 44 backfills the team invitation events of
+deletes rows older than the longest declared window. An email claim counts the
+account before the address, so a refused account learns its retry time. Schema 44 backfills the team invitation events of
 the last day from `invitations`, so the upgrade keeps each team's count.
 
 Three windowed caps count their own records instead. Stripe Checkout Sessions

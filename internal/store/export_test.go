@@ -261,10 +261,19 @@ func RewindToSchema41ForTest(t testing.TB, st *Store) {
 	}
 }
 
-// ClaimTeamInvitationForTest claims one of key's daily team invitations in its own transaction at the store's
-// clock. A refusal reports the count that refused it.
-func (s *Store) ClaimTeamInvitationForTest(ctx context.Context, key string) (used int, ok bool, err error) {
-	return s.claimLimitForTest(ctx, limitClaim{teamInvitationsPerDay, key})
+// ClaimTeamInvitationForTest claims one daily team invitation for each key, in the order given, in one transaction
+// at the store's clock. A refusal reports the count that refused it.
+func (s *Store) ClaimTeamInvitationForTest(ctx context.Context, keys ...string) (used int, ok bool, err error) {
+	claims := make([]limitClaim, len(keys))
+	for i, key := range keys {
+		claims[i] = limitClaim{teamInvitationsPerDay, key}
+	}
+	return s.claimLimitForTest(ctx, claims...)
+}
+
+// TeamInvitationLockForTest names the advisory lock a team invitation claim takes for key on PostgreSQL.
+func TeamInvitationLockForTest(key string) string {
+	return "limit:" + teamInvitationsPerDay.kind + ":" + limitKeyDigest(key)
 }
 
 // ClaimUndeclaredLimitForTest claims an event under a limit missing from the declared list.

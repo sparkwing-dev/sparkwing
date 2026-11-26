@@ -820,7 +820,7 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 	if inviter == "" {
 		return InvitationEmailNoInviter, nil
 	}
-	// safety: every claim takes the account before the address, so concurrent claims lock in one order.
+	// safety: the account is counted first, so an account at its cap is told when it may send again.
 	now, refused, err := claimWindowLimitsTx(ctx, tx,
 		limitClaim{invitationEmailsPerAccount, inviter}, limitClaim{invitationEmailsPerRecipient, normalizeEmail(email)})
 	if err != nil {

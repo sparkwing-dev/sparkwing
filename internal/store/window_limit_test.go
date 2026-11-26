@@ -352,3 +352,71 @@ func TestPostgresInvitationEmailClaimReadsTheClockAfterItsLocks(t *testing.T) {
 		t.Fatalf("claim after the oldest send left the window = %q, %v; want sent", r.withheld, r.err)
 	}
 }
+
+func TestWindowLimitRefusesAKeyNamedTwice(t *testing.T) {
+	st := storetest.Open(t)
+	if _, ok, err := st.ClaimTeamInvitationForTest(t.Context(), "twice", "twice"); err == nil || ok {
+		t.Fatalf("claim naming one key twice = %t, %v; want an error", ok, err)
+	}
+	if n := countWhere(t, st, "limit_events", "1 = 1"); n != 0 {
+		t.Fatalf("a claim naming one key twice left %d events, want 0", n)
+	}
+}
+
+// The first lock in sorted order is held, and the request names the other key first; a claim that locked in the
+// order given would hold the other key while it waits.
+func TestPostgresWindowLimitLocksKeysInSortedOrder(t *testing.T) {
+	st := storetest.OpenPostgres(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	first, second := "alpha", "beta"
+	if store.TeamInvitationLockForTest(second) < store.TeamInvitationLockForTest(first) {
+		first, second = second, first
+	}
+	blocker, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback() }()
+	if _, err := blocker.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, store.TeamInvitationLockForTest(first)); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, ok, err := st.ClaimTeamInvitationForTest(ctx, second, first)
+		if err == nil && !ok {
+			err = errors.New("claim refused")
+		}
+		done <- err
+	}()
+	for waiting := 0; waiting == 0; {
+		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		runtime.Gosched()
+	}
+	probe, err := st.DB().Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer probe.Close()
+	var free bool
+	if err := probe.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtextextended($1,0))`, store.TeamInvitationLockForTest(second)).Scan(&free); err != nil {
+		t.Fatal(err)
+	}
+	if free {
+		if _, err := probe.ExecContext(ctx, `SELECT pg_advisory_unlock(hashtextextended($1,0))`, store.TeamInvitationLockForTest(second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := blocker.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("claim after the blocker released = %v", err)
+	}
+	if !free {
+		t.Fatal("the claim held the later key while it waited for the earlier one")
+	}
+}
