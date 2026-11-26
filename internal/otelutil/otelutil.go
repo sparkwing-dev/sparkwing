@@ -109,14 +109,7 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		serviceName = env
 	}
 
-	res, err := resource.New(
-		ctx,
-		resource.WithAttributes(
-			semconv.ServiceName(serviceName),
-			semconv.ServiceVersion(cfg.Version),
-		),
-		resource.WithHost(),
-	)
+	res, err := telemetryResource(ctx, serviceName, cfg.Version)
 	if err != nil {
 		res = resource.Default()
 	}
@@ -207,6 +200,20 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 // safety: the exporters replace an unparseable endpoint with localhost:4318
 // and still send OTEL_EXPORTER_OTLP_HEADERS there. The error names the
 // variable only, because the value can carry credentials.
+// safety: OTEL_RESOURCE_ATTRIBUTES lets a deployment label its telemetry, such as
+// its namespace for log retention, while the explicit service name still wins.
+func telemetryResource(ctx context.Context, serviceName, version string) (*resource.Resource, error) {
+	return resource.New(
+		ctx,
+		resource.WithFromEnv(),
+		resource.WithAttributes(
+			semconv.ServiceName(serviceName),
+			semconv.ServiceVersion(version),
+		),
+		resource.WithHost(),
+	)
+}
+
 func checkOTLPEndpoints(tracesOnly bool) error {
 	keys := []string{"OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"}
 	if !tracesOnly {
