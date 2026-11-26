@@ -1174,22 +1174,22 @@ func (t *Tenant) createInvitationTx(ctx context.Context, tx *storeTx, actorID, e
 		return Invitation{}, ErrRoleAboveOwn
 	}
 	at := now.UTC().UnixNano()
-	var open, today int
+	var open int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM invitations
 		WHERE team = ? AND accepted_at IS NULL AND withdrawn_at IS NULL AND expires_at > ?`,
 		string(t.team), at).Scan(&open); err != nil {
 		return Invitation{}, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM invitations WHERE team = ? AND created_at > ?`,
-		string(t.team), now.Add(-24*time.Hour).UnixNano()).Scan(&today); err != nil {
-		return Invitation{}, err
-	}
 	if open >= maxOpenInvitations {
 		return Invitation{}, fmt.Errorf("%w: open invitation limit is %d per team, current usage is %d invitations; withdraw unused invitations or contact support@sparkwing.dev to raise this limit", ErrInvitationLimit, maxOpenInvitations, open)
 	}
-	if today >= maxInvitationsPerDay {
-		return Invitation{}, fmt.Errorf("%w: daily invitation limit is %d per team, current usage is %d invitations in 24 hours; wait for the window to pass or contact support@sparkwing.dev to raise this limit", ErrInvitationLimit, maxInvitationsPerDay, today)
+	today, ok, err := claimWindowLimitTx(ctx, tx, teamInvitationsPerDay, string(t.team), now)
+	if err != nil {
+		return Invitation{}, err
+	}
+	if !ok {
+		return Invitation{}, fmt.Errorf("%w: daily invitation limit is %d per team, current usage is %d invitations in 24 hours; wait for the window to pass or contact support@sparkwing.dev to raise this limit", ErrInvitationLimit, maxInvitationsPerDay, today.count)
 	}
 	var already int
 	if err := tx.QueryRowContext(ctx, `
@@ -1201,7 +1201,7 @@ func (t *Tenant) createInvitationTx(ctx context.Context, tx *storeTx, actorID, e
 		return Invitation{}, ErrAlreadyMember
 	}
 	// safety: an expired invitation still holds the open-invitation index, so it is withdrawn before a
-	// fresh one to the same address is written; rows are kept, so the daily count stays honest.
+	// fresh one to the same address is written.
 	if _, err := tx.execContext(ctx, `
 		UPDATE invitations SET withdrawn_at = ?
 		WHERE team = ? AND email = ? AND accepted_at IS NULL AND withdrawn_at IS NULL AND expires_at <= ?`,

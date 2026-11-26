@@ -9,7 +9,7 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 43. Both dialects are translated from `schema.sql`.
+The baseline version is 44. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
@@ -46,7 +46,10 @@ its index. Schema 43 adds `idx_credit_charges_team_mode_amount` on
 `idx_billing_awards_unsettled` on `billing_awards(team)` for unsettled awards,
 and drops `idx_credit_charges_team_amount`, which the first replaces. On
 PostgreSQL the builds block writes to their tables and the drop blocks all
-access to `credit_charges` until the upgrade commits. The schema 35 digest remains a recognized upgrade
+access to `credit_charges` until the upgrade commits. Schema 44 adds
+`limit_events`, the log that windowed limits count (see "Windowed limits"),
+copies the invitation email log into it and drops that table. The schema 35
+digest remains a recognized upgrade
 source. A step adds a
 column at the end of its table so the upgraded schema matches a fresh one.
 Other versions and digests are refused unchanged. Any reset must preserve secrets,
@@ -948,7 +951,8 @@ that order with shuffled authority and unit inputs.
     reservation within each dimension.
 18. Credit ledgers, sorted by team.
 19. Billing awards, intervals, payment rows and storage counters.
-20. Records, manifests, logs, events, effects and invitations.
+20. Windowed limit key advisories, then records, manifests, logs, events,
+    effects and invitations.
 
 Hot transaction families:
 
@@ -1010,6 +1014,23 @@ retry resets all response metadata, and a failed transaction returns none.
 Team deletion stores and reads request, completion, recheck and lease times in
 Unix nanoseconds. Lease expiry and recheck predicates preserve subsecond
 boundaries. Purge's account timestamp uses the same unit.
+
+## Windowed limits
+
+`window_limit.go` owns every durable cap of the form "at most N events per key
+in a sliding window". `claimWindowLimitTx` runs in the caller's transaction:
+it takes an advisory lock on the limit's kind and key digest on PostgreSQL
+(SQLite already serializes writers), counts the key's `limit_events` rows
+newer than the window, refuses at the limit without writing, and otherwise
+inserts one row. Rolling the transaction back releases the slot, so a request
+refused after the claim consumes nothing. A row keeps the limit kind, the
+SHA-256 digest of the key and the event time, so the log outlives the teams,
+accounts and addresses it counts without keeping their identifiers; callers
+normalize a key with several spellings before claiming. Each limit is declared
+in `windowLimits`, the claim refuses an undeclared one, and the retention pass
+deletes rows older than the longest declared window. The daily invitation cap
+per team and the invitation email caps per inviting account and per recipient
+address use it; an email claim takes the account before the address.
 
 ## Durable admission
 

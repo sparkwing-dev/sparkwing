@@ -132,8 +132,8 @@ var reviewedUnscopedSQL = map[string]string{
 		"belonged to the deployment and acted in each of its teams",
 	"(*Operator).grantCreatorTeamsTx": "lists every team holding grants a deleted account created, to lock each team's ledger " +
 		"before relabelling them",
-	"(*Operator).ClaimInvitationEmail": "counts the invitation emails one address received and one account sent from every team, " +
-		"because the daily caps protect the inbox and the deployment's sender, not the team",
+	"(*Operator).ClaimInvitationEmail": "reads and marks one invitation by its globally unique ID for the deployment's sender, " +
+		"whose daily caps count the inbox and the inviting account across every team",
 	"(*Operator).GitHubAppInstallationTeam": "a webhook delivery and a repository's installation name no team, " +
 		"so the installation's binding is how either finds the team it belongs to",
 	"(*Operator).disputeHoldTx": "asks which payment and team a dispute's hold names, so a hold or reversal naming it for " +

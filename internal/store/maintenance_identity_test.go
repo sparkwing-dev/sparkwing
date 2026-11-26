@@ -140,7 +140,7 @@ func TestInvitationPersistenceUsesNanoseconds(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT created_at,expires_at,emailed_at FROM invitations WHERE id=?`, invitation.ID).Scan(&created, &expires, &emailed); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.db.QueryRow(`SELECT sent_at FROM invitation_email_log`).Scan(&sent); err != nil {
+	if err := s.db.QueryRow(`SELECT at FROM limit_events WHERE kind = 'invitation_email_recipient'`).Scan(&sent); err != nil {
 		t.Fatal(err)
 	}
 	if created != now.UnixNano() || expires != invitation.ExpiresAt.UnixNano() || emailed != created || sent != created {

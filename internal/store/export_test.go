@@ -129,10 +129,37 @@ func InstallSchema35ActionsForTest(t testing.TB, s *Store) {
 	}
 }
 
+const (
+	schema43InvitationEmailLog     = "CREATE TABLE invitation_email_log (\n    address TEXT NOT NULL,\n    sent_at BIGINT NOT NULL,\n    inviter TEXT NOT NULL DEFAULT ''\n);\n\n"
+	schema43InvitationEmailIndexes = "CREATE INDEX idx_invitation_email_log_address ON invitation_email_log(address, sent_at);\n\n" +
+		"CREATE INDEX idx_invitation_email_log_inviter ON invitation_email_log(inviter, sent_at);\n\n"
+	limitEventsTable = "CREATE TABLE limit_events (\n    kind TEXT NOT NULL CHECK (kind <> ''),\n    digest TEXT NOT NULL CHECK (length(digest) = 64),\n    at BIGINT NOT NULL\n);\n\n"
+	limitEventsIndex = "CREATE INDEX idx_limit_events_key ON limit_events(kind, digest, at);\n\n"
+)
+
+// safety: the digest proves the fixture is the shipped schema 43 DDL, which keeps the invitation email log in place
+// of limit_events.
+func schema43NeutralForTest(t testing.TB) string {
+	t.Helper()
+	neutral := schemaNeutral
+	for _, ddl := range []string{limitEventsTable, limitEventsIndex} {
+		if !strings.Contains(neutral, ddl) {
+			t.Fatalf("schema lacks %q", ddl)
+		}
+		neutral = strings.Replace(neutral, ddl, "", 1)
+	}
+	neutral = strings.Replace(neutral, "CREATE TABLE signup_gate (", schema43InvitationEmailLog+"CREATE TABLE signup_gate (", 1)
+	neutral = strings.Replace(neutral, "CREATE INDEX idx_triggers_team_created", schema43InvitationEmailIndexes+"CREATE INDEX idx_triggers_team_created", 1)
+	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(neutral))); got != "7fe46a7554104b26ea25bac28ab7a719513991ad4f42af62a9cf7d9260bfc000" {
+		t.Fatalf("schema 43 fixture digest %s", got)
+	}
+	return neutral
+}
+
 // safety: the digest proves the fixture is the shipped schema 42 DDL, whose balance index lacks the payment mode.
 func schema42NeutralForTest(t testing.TB) string {
 	t.Helper()
-	neutral := strings.Replace(schemaNeutral, "CREATE INDEX idx_credit_charges_team_mode_amount ON credit_charges(team, payment_mode, amount_micro);", "CREATE INDEX idx_credit_charges_team_amount ON credit_charges(team, amount_micro);", 1)
+	neutral := strings.Replace(schema43NeutralForTest(t), "CREATE INDEX idx_credit_charges_team_mode_amount ON credit_charges(team, payment_mode, amount_micro);", "CREATE INDEX idx_credit_charges_team_amount ON credit_charges(team, amount_micro);", 1)
 	neutral = strings.Replace(neutral, "CREATE INDEX idx_billing_awards_unsettled ON billing_awards(team) WHERE settled_at IS NULL;\n", "", 1)
 	if got := fmt.Sprintf("%x", sha256.Sum256([]byte(neutral))); got != "0674849f24548cae23bd6c39f3634113014b66559f193af9522ed30a3dcb523d" {
 		t.Fatalf("schema 42 fixture digest %s", got)
@@ -169,7 +196,7 @@ func Schema38NeutralForTest(t testing.TB) string {
 // DropRunEventSchemaForTest returns a store to the schema 38 tables.
 func DropRunEventSchemaForTest(t testing.TB, st *Store) {
 	t.Helper()
-	DropInvitationEmailInviterForTest(t, st)
+	RewindToSchema41ForTest(t, st)
 	for _, table := range []string{"audit_privacy_migrations", "run_event_deliveries", "run_event_subscriptions"} {
 		if _, err := st.DB().ExecContext(t.Context(), `DROP TABLE `+table); err != nil {
 			t.Fatal(err)
@@ -181,17 +208,37 @@ func DropRunEventSchemaForTest(t testing.TB, st *Store) {
 func SeedInvitationEmailsForTest(t testing.TB, st *Store, accountID string, n int, at time.Time) {
 	t.Helper()
 	for i := range n {
-		address := invitationEmailKey(fmt.Sprintf("seed-%s-%d@example.com", accountID, i))
-		if _, err := st.exec(t.Context(), `INSERT INTO invitation_email_log (address, inviter, sent_at) VALUES (?, ?, ?)`,
-			address, invitationEmailKey(accountID), at.UTC().UnixNano()); err != nil {
+		address := fmt.Sprintf("seed-%s-%d@example.com", accountID, i)
+		for kind, key := range map[string]string{invitationEmailsPerAccount.kind: accountID, invitationEmailsPerRecipient.kind: address} {
+			if _, err := st.exec(t.Context(), `INSERT INTO limit_events (kind, digest, at) VALUES (?, ?, ?)`,
+				kind, limitKeyDigest(key), at.UTC().UnixNano()); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// RewindToSchema43ForTest returns a store to the schema 43 tables: the invitation email log in place of limit_events.
+func RewindToSchema43ForTest(t testing.TB, st *Store) {
+	t.Helper()
+	statements := []string{`DROP TABLE limit_events`, strings.TrimSuffix(schema43InvitationEmailLog, ";\n\n")}
+	statements = append(statements, strings.Split(strings.TrimSuffix(schema43InvitationEmailIndexes, ";\n\n"), ";\n\n")...)
+	for _, statement := range statements {
+		translated, err := translateSchema(statement, st.dialect)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.DB().ExecContext(t.Context(), translated); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
-// RevertCreditIndexesForTest returns the credit and billing award indexes to their schema 42 shape.
-func RevertCreditIndexesForTest(t testing.TB, st *Store) {
+// RewindToSchema42ForTest returns a store to the schema 42 tables, whose credit and billing award indexes predate
+// schema 43.
+func RewindToSchema42ForTest(t testing.TB, st *Store) {
 	t.Helper()
+	RewindToSchema43ForTest(t, st)
 	for _, statement := range []string{
 		`DROP INDEX idx_billing_awards_unsettled`,
 		`DROP INDEX idx_credit_charges_team_mode_amount`,
@@ -203,15 +250,26 @@ func RevertCreditIndexesForTest(t testing.TB, st *Store) {
 	}
 }
 
-// DropInvitationEmailInviterForTest returns a store to its schema 41 shape, whose invitation email log has no inviter.
-func DropInvitationEmailInviterForTest(t testing.TB, st *Store) {
+// RewindToSchema41ForTest returns a store to the schema 41 tables.
+func RewindToSchema41ForTest(t testing.TB, st *Store) {
 	t.Helper()
-	RevertCreditIndexesForTest(t, st)
+	RewindToSchema42ForTest(t, st)
 	for _, statement := range []string{`DROP INDEX idx_invitation_email_log_inviter`, `ALTER TABLE invitation_email_log DROP COLUMN inviter`} {
 		if _, err := st.DB().ExecContext(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
 	}
+}
+
+// ClaimTeamInvitationForTest claims one of key's daily team invitations at now in its own transaction.
+func (s *Store) ClaimTeamInvitationForTest(ctx context.Context, key string, now time.Time) (used int, ok bool, err error) {
+	err = s.inTx(ctx, func(tx *storeTx) (err error) {
+		var usage windowUsage
+		usage, ok, err = claimWindowLimitTx(ctx, tx, teamInvitationsPerDay, key, now)
+		used = usage.count
+		return err
+	})
+	return used, ok, err
 }
 
 // PrepareSchema36ForTest preserves configured rows in the shipped pre-migration schema.

@@ -78,6 +78,17 @@ var schemaUpgrades = []schemaUpgrade{
 		`CREATE INDEX idx_invitation_email_log_inviter ON invitation_email_log(inviter, sent_at)`,
 	}},
 	{from: 42, release: "schema 42", digest: "0674849f24548cae23bd6c39f3634113014b66559f193af9522ed30a3dcb523d", statements: schema43CreditIndexStatements},
+	{from: 43, release: "schema 43", digest: "7fe46a7554104b26ea25bac28ab7a719513991ad4f42af62a9cf7d9260bfc000", statements: []string{
+		`CREATE TABLE limit_events (
+    kind TEXT NOT NULL CHECK (kind <> ''),
+    digest TEXT NOT NULL CHECK (length(digest) = 64),
+    at BIGINT NOT NULL
+)`,
+		`CREATE INDEX idx_limit_events_key ON limit_events(kind, digest, at)`,
+		`INSERT INTO limit_events (kind, digest, at) SELECT 'invitation_email_recipient', address, sent_at FROM invitation_email_log`,
+		`INSERT INTO limit_events (kind, digest, at) SELECT 'invitation_email_account', inviter, sent_at FROM invitation_email_log WHERE inviter <> ''`,
+		`DROP TABLE invitation_email_log`,
+	}},
 }
 
 // safety: in the upgrade transaction PostgreSQL blocks ledger writes during each build (about 2 s per million
