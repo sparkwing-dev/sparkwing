@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capability"
@@ -236,6 +237,7 @@ type leasedControl struct {
 	expires   map[capability.LeaseRef]time.Time
 	lapsed    bool
 	claimed   int
+	prepared  int
 	cancelled bool
 }
 
@@ -245,6 +247,7 @@ func (c *leasedControl) Prepare(ctx context.Context, fences []capability.LeaseRe
 	if c.cancelled {
 		return time.Time{}, &apierr.Error{Code: hosterr.LockHeld, Message: "award cancelled"}
 	}
+	c.prepared++
 	now := time.Now()
 	for _, fence := range fences {
 		if expires, ok := c.expires[fence]; ok && !now.Before(expires) {
@@ -498,6 +501,117 @@ func testSuccessorHandoff(t *testing.T, state string) {
 			if action.GetVerb() == "create" && action.GetResource().Resource == "pods" && action.(ktesting.CreateAction).GetObject().(*corev1.Pod).Labels[capacityLabel] == "true" {
 				t.Fatal("same-run reuse created a provisioning Pod")
 			}
+		}
+	})
+}
+
+func planHandoff(t *testing.T) (*Launcher, *fake.Clientset, *controlFake, *leasedControl, *CloudJobAward, *corev1.Pod, string) {
+	t.Helper()
+	l, kube, _, control := fixture()
+	boundary, nodes := boundaryFixture()
+	node, err := nodes.CoreV1().Nodes().Get(t.Context(), "node", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = kube.Tracker().Add(node); err != nil {
+		t.Fatal(err)
+	}
+	boundary.Kube, l.Boundary = kube, boundary
+	l.Config.MemoryCeiling = 16 << 30
+	leased := &leasedControl{controlFake: control, expires: map[capability.LeaseRef]time.Time{}}
+	l.Control = leased
+	plan := *control.award
+	plan.CPUCores, plan.Memory = 2, match.CloudSizeMemoryBytes(2)
+	plan.Binding.Kind, plan.Binding.NodeID, plan.Binding.Attempt = CloudPlan, "", 0
+	if _, err = l.launch(t.Context(), &plan); err != nil {
+		t.Fatal(err)
+	}
+	job, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(plan.Binding), metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pod := &corev1.Pod{ObjectMeta: *job.Spec.Template.ObjectMeta.DeepCopy(), Spec: *job.Spec.Template.Spec.DeepCopy()}
+	pod.Name, pod.Namespace, pod.UID = "planning", "cloud", "planning-pod"
+	pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: ptr(true)}}
+	pod.Status.Phase = corev1.PodRunning
+	if _, err = kube.CoreV1().Pods("cloud").Create(t.Context(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	first := plan
+	first.Binding.Kind, first.Binding.UnitID, first.Binding.NodeID, first.Binding.Attempt = CloudWork, "first", "first", 1
+	leased.prepared = 0
+	return l, kube, control, leased, &first, pod, job.Name
+}
+
+func TestClaimRetiresPlanInHandoffInSamePass(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, control, _, first, _, planJob := planHandoff(t)
+		control.award, control.remove = first, true
+		if _, err := l.launch(t.Context(), first); !errors.Is(err, ErrNoDedicatedNode) || first.teardownDeadline.IsZero() {
+			t.Fatalf("first job did not wait for the planning node: %v", err)
+		}
+		plan, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), planJob, metav1.GetOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plan.DeletionTimestamp == nil {
+			t.Fatal("claim pass left the handed-off plan for a later reconcile pass")
+		}
+	})
+}
+
+func TestTeardownWaitSkipsPreparationUntilNodeFreesOrRenewalIsDue(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		l, kube, control, leased, first, pod, _ := planHandoff(t)
+		claimed := time.Now()
+		control.award, control.remove = first, true
+		if _, err := l.launch(t.Context(), first); !errors.Is(err, ErrNoDedicatedNode) {
+			t.Fatalf("first job did not wait for the planning node: %v", err)
+		}
+		control.remove = false
+		prepared := func() int {
+			leased.mu.Lock()
+			defer leased.mu.Unlock()
+			return leased.prepared
+		}
+		pass := func(at time.Duration) {
+			t.Helper()
+			time.Sleep(time.Until(claimed.Add(at)))
+			if err := l.Sync(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if err := l.placeWaiting(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, at := range []time.Duration{time.Second, 5 * time.Second, 15 * time.Second, 20*time.Second - time.Nanosecond} {
+			pass(at)
+		}
+		if n := prepared(); n != 1 {
+			t.Fatalf("preparations while the planning Pod held the node = %d, want 1", n)
+		}
+		pass(20 * time.Second)
+		if n := prepared(); n != 2 {
+			t.Fatalf("preparations at the renewal deadline = %d, want 2", n)
+		}
+		pass(21 * time.Second)
+		if n := prepared(); n != 2 {
+			t.Fatalf("preparations after renewal while the node is held = %d, want 2", n)
+		}
+		if err := kube.CoreV1().Pods("cloud").Delete(t.Context(), pod.Name, metav1.DeleteOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		pass(21 * time.Second)
+		if n := prepared(); n != 3 {
+			t.Fatalf("preparations after the node emptied = %d, want 3", n)
+		}
+		if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(first.Binding), metav1.GetOptions{}); err != nil {
+			t.Fatalf("first job was not placed once the node emptied: %v", err)
+		}
+		leased.mu.Lock()
+		defer leased.mu.Unlock()
+		if leased.lapsed {
+			t.Fatal("waiting award's lease lapsed")
 		}
 	})
 }

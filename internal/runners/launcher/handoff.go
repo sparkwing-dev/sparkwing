@@ -92,3 +92,21 @@ func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJ
 	}
 	return retired, errors.Join(errs...)
 }
+
+// safety: any change or failed lookup reports false, so a skip can only defer a Reserve that would fail.
+func (l *Launcher) predecessorsHold(ctx context.Context, held []CloudNodeReservation) bool {
+	if len(held) == 0 {
+		return false
+	}
+	for _, reservation := range held {
+		node, err := l.Kube.CoreV1().Nodes().Get(ctx, reservation.NodeName, metav1.GetOptions{})
+		if err != nil || !nodeReady(*node) || quarantined(*node) {
+			return false
+		}
+		current, _, ok := nodeReservation(node)
+		if !ok || !sameReservationFence(current, reservation) {
+			return false
+		}
+	}
+	return true
+}

@@ -27,6 +27,12 @@ var ErrNoDedicatedNode = errors.New("no unoccupied team-dedicated Cloud node")
 
 var errPredecessorTeardown = fmt.Errorf("same-run predecessor is in teardown: %w", ErrNoDedicatedNode)
 
+// perf: naming the held reservations lets a waiting pass skip Prepare and Reserve until one changes.
+type predecessorTeardownError struct{ held []CloudNodeReservation }
+
+func (e *predecessorTeardownError) Error() string { return errPredecessorTeardown.Error() }
+func (e *predecessorTeardownError) Unwrap() error { return errPredecessorTeardown }
+
 const (
 	reservationNamespaceAnnotation = "sparkwing.dev/reservation-namespace"
 	reservationTaint               = "sparkwing.dev/cloud-reserved"
@@ -76,13 +82,13 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 		return 1
 	})
 	for index, class := range classes {
-		pending := false
+		var pending []CloudNodeReservation
 		for _, node := range nodes.Items {
 			if !nodeReady(node) || quarantined(node) || node.Labels[CloudClassLabel] != class {
 				continue
 			}
-			if pending && node.Labels[usedRunLabel] != run && !placement.teardownWaitExpired {
-				return CloudNodeReservation{}, errPredecessorTeardown
+			if len(pending) > 0 && node.Labels[usedRunLabel] != run && !placement.teardownWaitExpired {
+				return CloudNodeReservation{}, &predecessorTeardownError{held: pending}
 			}
 			if index > 0 && node.Labels[usedRunLabel] != runNodeValue(b.Namespace, binding.RunID) {
 				// safety: upsizing may avoid a cold start, but cannot reuse a node from another run.
@@ -103,7 +109,10 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 				if lookupErr != nil {
 					return CloudNodeReservation{}, lookupErr
 				}
-				pending = pending || waiting
+				if waiting {
+					held, _, _ := nodeReservation(&node)
+					pending = append(pending, held)
+				}
 			}
 			if apierrors.IsConflict(err) || errors.Is(err, ErrNoDedicatedNode) {
 				continue
@@ -117,8 +126,8 @@ func (b *KubernetesBoundary) Reserve(ctx context.Context, binding CloudJobBindin
 			}
 			return reservation, nil
 		}
-		if pending && !placement.teardownWaitExpired {
-			return CloudNodeReservation{}, errPredecessorTeardown
+		if len(pending) > 0 && !placement.teardownWaitExpired {
+			return CloudNodeReservation{}, &predecessorTeardownError{held: pending}
 		}
 	}
 
