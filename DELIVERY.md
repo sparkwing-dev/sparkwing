@@ -714,11 +714,23 @@ change the guide describes. The
 pipeline refuses `v1.0.0` and above. The dry run resolves the version, runs the
 read-only cut checks (version freshness, Go directives, SDK pins, changelog
 links, docs sidebar, published docs) and previews the changelog and guide roll; build, lint and the short
-tests run only in the real cut. The published-docs check reads
-`https://sparkwing.dev/llms.txt` and refuses the cut while its title names a
-version older than the newest release tag on origin. Publish that release's
-sparkwing-product docs (its `versions.json` entry as `latest`, pushed to product
-main) before cutting the next one.
+tests run only in the real cut.
+
+The published-docs check refuses the cut while the first line of
+`https://sparkwing.dev/llms.txt`, `# sparkwing -- vX.Y.Z (latest)`, names a
+release older than `latest` in the signed `https://sparkwing.dev/versions.json`
+index. The hosted release workflow writes that index only after a stable GitHub
+release publishes, so a prerelease, an unpushed tag, or a tag whose hosted build
+failed never demands docs; repair a failed hosted build with a later patch cut.
+Publish the indexed release's sparkwing-product docs (its `versions.json` entry
+as `latest`, pushed to product main) before cutting the next one.
+
+The check fails closed: a site outage, a docs title in any other format, or an
+index whose signature does not verify blocks every cut, and the pipeline has no
+override for it. To recover, restore the site or publish the missing docs, confirm
+`curl -fsS https://sparkwing.dev/llms.txt | head -n 1` names the release that
+`curl -fsS https://sparkwing.dev/versions.json | jq -r .latest` prints, then
+rerun the cut.
 
 Manual releases reuse a successful exact-source CI receipt when available. Missing,
 pending, failed or unreadable receipts run the local build, lint and short suite

@@ -1,71 +1,118 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
-	"time"
 
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// publishedDocsIndexURL is the public docs index; its title names the release
-// the site documents. Tests point it at a local server.
-var publishedDocsIndexURL = "https://sparkwing.dev/llms.txt"
+// publicSiteURL serves the signed release index and the published docs.
+const publicSiteURL = "https://sparkwing.dev/"
 
-var publishedDocsVersionRe = regexp.MustCompile(`(?m)^# sparkwing -- (v[0-9]+\.[0-9]+\.[0-9]+) \(latest\)`)
+// publishedDocsTitleRe matches the first line sparkwing-product's
+// bin/generate-llms.mjs writes for the release the site documents.
+var publishedDocsTitleRe = regexp.MustCompile(`^# sparkwing -- (v\S+) \(latest\)$`)
 
-// safety: publishing a release's docs is a separate sparkwing-product push that
-// nothing else checks, so refusing the next cut bounds a skipped one to one release.
-func checkPublishedDocs(ctx context.Context, repoDir string) error {
-	released, err := latestSemverTagIn(ctx, repoDir)
+// safety: a release's docs publish from sparkwing-product, which nothing else
+// checks. The baseline is the signed index's latest stable release, which the
+// hosted release workflow writes only after the GitHub release publishes, so a
+// tag whose hosted build failed, a prerelease or an unpushed tag never demands
+// docs that cannot publish yet, and the repairing patch cut stays possible.
+func checkPublishedDocs(ctx context.Context, repo string) error {
+	dir, err := os.MkdirTemp("", "sparkwing-published-docs-")
 	if err != nil {
-		return fmt.Errorf("published docs: list release tags: %w", err)
+		return err
 	}
-	if released == "" {
-		return nil
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			sparkwing.Warn(ctx, "remove published docs scratch: %v", err)
+		}
+	}()
+	if err := downloadPublicSiteFile(ctx, repo, dir, "llms.txt"); err != nil {
+		return fmt.Errorf("published docs: %w", err)
 	}
-	return checkPublishedDocsName(ctx, publishedDocsIndexURL, released)
-}
-
-func checkPublishedDocsName(ctx context.Context, indexURL, released string) error {
-	documented, err := publishedDocsVersion(ctx, indexURL)
+	llms, err := os.ReadFile(filepath.Join(dir, "llms.txt"))
 	if err != nil {
 		return fmt.Errorf("published docs: %w", err)
 	}
-	if semver.Compare(documented, released) < 0 {
+	documented, err := documentedRelease(llms)
+	if err != nil {
+		return fmt.Errorf("published docs: %w", err)
+	}
+	if err := downloadVerifiedReleaseIndex(ctx, repo, dir); err != nil {
+		return fmt.Errorf("published docs: %w", err)
+	}
+	published, err := latestPublishedRelease(filepath.Join(dir, "versions.json"))
+	if err != nil {
+		return fmt.Errorf("published docs: %w", err)
+	}
+	if semver.Compare(documented, published) < 0 {
 		return fmt.Errorf(
-			"published docs: %s documents %s but %s is released; publish %s's sparkwing-product docs (add it to versions.json as latest and push product main) before cutting another release",
-			indexURL, documented, released, released,
+			"published docs: %sllms.txt documents %s but %s is the latest published release; publish %s's sparkwing-product docs (add it to versions.json as latest and push product main) before cutting another release",
+			publicSiteURL, documented, published, published,
 		)
 	}
 	return nil
 }
 
-func publishedDocsVersion(ctx context.Context, indexURL string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, indexURL, nil)
+func documentedRelease(llms []byte) (string, error) {
+	first, _, _ := bytes.Cut(llms, []byte("\n"))
+	m := publishedDocsTitleRe.FindSubmatch(first)
+	if m == nil || !releaseVersion(string(m[1])) {
+		return "", fmt.Errorf("%sllms.txt must begin with %q, got %q", publicSiteURL, "# sparkwing -- vX.Y.Z (latest)", first)
+	}
+	return string(m[1]), nil
+}
+
+func latestPublishedRelease(indexPath string) (string, error) {
+	body, err := os.ReadFile(indexPath)
 	if err != nil {
 		return "", err
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", indexURL, err)
+	var index struct {
+		Latest string `json:"latest"`
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("read %s: status %d", indexURL, resp.StatusCode)
+	if err := json.Unmarshal(body, &index); err != nil {
+		return "", fmt.Errorf("read the release index: %w", err)
 	}
-	head, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", indexURL, err)
+	if !releaseVersion(index.Latest) {
+		return "", fmt.Errorf("the release index names %q as latest, not a stable vX.Y.Z release", index.Latest)
 	}
-	m := publishedDocsVersionRe.FindSubmatch(head)
-	if m == nil {
-		return "", fmt.Errorf("%s does not name its latest documented release in a %q title", indexURL, "# sparkwing -- vX.Y.Z (latest)")
+	return index.Latest, nil
+}
+
+func releaseVersion(v string) bool {
+	return semver.IsValid(v) && semver.Canonical(v) == v && semver.Prerelease(v) == ""
+}
+
+func downloadPublicSiteFile(ctx context.Context, repo, dir, name string) error {
+	if _, err := sparkwing.Exec(ctx, "curl", "--fail", "--silent", "--show-error", "--location",
+		publicSiteURL+name, "-o", filepath.Join(dir, name)).Dir(repo).Run(); err != nil {
+		return fmt.Errorf("download %s%s: %w", publicSiteURL, name, err)
 	}
-	return string(m[1]), nil
+	return nil
+}
+
+// downloadVerifiedReleaseIndex writes the public versions.json and its
+// signature into dir and verifies them with the keys shipped updaters trust.
+func downloadVerifiedReleaseIndex(ctx context.Context, repo, dir string) error {
+	for _, name := range []string{"versions.json", "versions.json.sig"} {
+		if err := downloadPublicSiteFile(ctx, repo, dir, name); err != nil {
+			return err
+		}
+	}
+	// safety: publication decisions must use the same authenticated policy as the hosted release.
+	if _, err := sparkwing.Exec(ctx, "go", "run", "./cmd/verify-release", "--index-out", dir, "--verify").
+		Dir(repo).Env("GOWORK", "off").Run(); err != nil {
+		return fmt.Errorf("verify the release index: %w", err)
+	}
+	return nil
 }
