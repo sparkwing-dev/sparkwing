@@ -9,7 +9,7 @@ counter domains, boolean flags, and nonempty concurrency keys. Installations
 are referenced with their tenant. Job receipts reference the exact attempt and
 generation. Sessions, memberships and identities reference an existing account.
 The schema counterexample suites exercise these rules against either dialect.
-The baseline version is 39. Both dialects are translated from `schema.sql`.
+The baseline version is 43. Both dialects are translated from `schema.sql`.
 A fresh store gets the baseline whole. `schemaUpgrades` in `schema_upgrade.go`
 lists the forward steps, each keyed by the version and baseline digest a release
 recorded, and an older supported store takes every later step in the same open
@@ -37,7 +37,16 @@ inside the upgrade transaction because it cannot add foreign keys. PostgreSQL
 adds the constraints in place. Schema 37 drops the unused team build-trust table. Schema 38 adds the private group-wait timestamp on jobs. Schema 39 adds
 `run_event_subscriptions` and `run_event_deliveries`; deleting a run or a
 subscription cascades to its deliveries, and operator key rotation re-seals
-subscription signing secrets. The schema 35 digest remains a recognized upgrade
+subscription signing secrets. Schema 40 adds `audit_privacy_migrations`, which
+tracks the one-time scrub of retained OIDC audit text. Schema 41 changes no
+tables; it fences older binaries from the sealed argument document format.
+Schema 42 adds the inviting account's digest to `invitation_email_log`, with
+its index. Schema 43 adds `idx_credit_charges_team_mode_amount` on
+`credit_charges(team, payment_mode, amount_micro)` and the partial
+`idx_billing_awards_unsettled` on `billing_awards(team)` for unsettled awards,
+and drops `idx_credit_charges_team_amount`, which the first replaces. On
+PostgreSQL the builds block writes to their tables and the drop blocks all
+access to `credit_charges` until the upgrade commits. The schema 35 digest remains a recognized upgrade
 source. A step adds a
 column at the end of its table so the upgraded schema matches a fresh one.
 Other versions and digests are refused unchanged. Any reset must preserve secrets,

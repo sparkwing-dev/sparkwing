@@ -54,7 +54,39 @@ func TestSchemaUpgradeIndexesCreditReadsFromVersion42(t *testing.T) {
 	if a, b := schemaShape(t, upgraded), schemaShape(t, fresh); a != b {
 		t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
 	}
+	if a, b := creditIndexDefinitions(t, upgraded), creditIndexDefinitions(t, fresh); a != b {
+		t.Fatalf("upgraded credit indexes differ from a fresh store's:\nupgraded: %s\nfresh:    %s", a, b)
+	}
 	if got := snapshotRows(t, upgraded, []string{`SELECT * FROM credit_charges ORDER BY id`, `SELECT * FROM billing_awards ORDER BY team, reservation_id`}); got != rows {
 		t.Fatal("the upgrade changed ledger rows")
 	}
+}
+
+// safety: schemaShape compares index names only, so the columns and predicate are compared here.
+func creditIndexDefinitions(t *testing.T, st *store.Store) string {
+	t.Helper()
+	query := `SELECT name || ': ' || sql FROM sqlite_master WHERE type='index' AND name IN ('idx_credit_charges_team_mode_amount','idx_billing_awards_unsettled') ORDER BY name`
+	if st.Dialect() == store.DialectPostgres {
+		query = `SELECT indexname || ': ' || replace(indexdef, current_schema() || '.', '') FROM pg_indexes WHERE schemaname=current_schema() AND indexname IN ('idx_credit_charges_team_mode_amount','idx_billing_awards_unsettled') ORDER BY indexname`
+	}
+	rows, err := st.DB().QueryContext(t.Context(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var definitions []string
+	for rows.Next() {
+		var definition string
+		if err := rows.Scan(&definition); err != nil {
+			t.Fatal(err)
+		}
+		definitions = append(definitions, definition)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(definitions) != 2 {
+		t.Fatalf("want both credit indexes, got %q", definitions)
+	}
+	return strings.Join(definitions, "; ")
 }
