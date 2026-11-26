@@ -1343,6 +1343,12 @@ export function FilterableValue({
           <span
             ref={(el) => {
               popupRef.current = el;
+              // A value near the right edge would open the menu off screen,
+              // so shift it left until its widest button fits.
+              if (el) {
+                const overflow = el.getBoundingClientRect().right - (window.innerWidth - 8);
+                if (overflow > 0) el.style.left = `${Math.max(8, popupPos.left - overflow)}px`;
+              }
             }}
             style={{ left: popupPos.left, top: popupPos.top }}
             className="fixed flex flex-col gap-0.5 z-[1000] bg-[var(--surface)] border border-[var(--border)] rounded p-1 shadow-lg whitespace-nowrap text-[10px] min-w-[140px]"
