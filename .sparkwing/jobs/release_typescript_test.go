@@ -5,7 +5,9 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,12 +33,7 @@ func TestReleaseTypeScriptDryRun(t *testing.T) {
 
 func runTypeScriptReleasePreview(t *testing.T, version string, tamper bool, want string) {
 	t.Helper()
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := filepath.Join(t.TempDir(), "repo")
-	gitRun(t, root, "clone", "--shared", root, repo)
+	repo := cloneCheckout(t)
 	editSDKSource(t, repo)
 	setSDKVersion(t, repo, version)
 	mode := ""
@@ -66,7 +63,7 @@ func runTypeScriptReleasePreview(t *testing.T, version string, tamper bool, want
 	if _, err := host.Plan(t.Context(), name, nil); err != nil {
 		t.Fatal(err)
 	}
-	_, err = host.RunStep(t.Context(), plan, "checks", "typescript-release")
+	_, err := host.RunStep(t.Context(), plan, "checks", "typescript-release")
 	if want == "" {
 		if err != nil {
 			t.Fatalf("dry-run refused new SDK version: %v", err)
@@ -136,6 +133,10 @@ func TestSDKVersionPolicyRefusesChangedSourceUnderPublishedVersion(t *testing.T)
 			name: "SDK source edit under published version", version: "0.72.1", change: editSDKSource, fetched: true,
 			want: "SDK version already names different source",
 		},
+		{
+			name: "digest code change under published version", version: "0.72.1", change: editDigestCode, fetched: true,
+			want: "SDK version already names different source",
+		},
 		{name: "change outside the SDK release inputs", version: "0.72.1", change: editReadme},
 		{name: "toolchain bump with a new unpublished version", version: "0.72.2", change: bumpNativeGoVersion, fetched: true},
 		{
@@ -191,12 +192,7 @@ func policyStepRun(t *testing.T, id string) func(context.Context) error {
 // safety: the base commit is origin/main, so the change in scope is only the candidate's.
 func sdkVersionFixture(t *testing.T, version string) string {
 	t.Helper()
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo := filepath.Join(t.TempDir(), "repo")
-	gitRun(t, root, "clone", "--quiet", "--shared", root, repo)
+	repo := cloneCheckout(t)
 	setSDKVersion(t, repo, version)
 	gitCommitAll(t, repo, "base")
 	gitRun(t, repo, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -259,4 +255,91 @@ func setSDKVersion(t *testing.T, repo, version string) {
 		t.Fatal(err)
 	}
 	writeFile(t, manifest, string(body))
+}
+
+// safety: hosted CI soft-resets HEAD to the event base and keeps the candidate
+// only in the index and worktree, so the clone takes the checkout's current files.
+func cloneCheckout(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(t.TempDir(), "repo")
+	gitRun(t, root, "clone", "--quiet", "--shared", root, repo)
+	changed := gitOutput(t, root, "diff", "-z", "--name-only", "--no-renames", "HEAD")
+	for _, name := range strings.Split(changed, "\x00") {
+		if name == "" {
+			continue
+		}
+		target := filepath.Join(repo, name)
+		info, err := os.Stat(filepath.Join(root, name))
+		if errors.Is(err, fs.ErrNotExist) {
+			if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				t.Fatal(err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, body, info.Mode().Perm()); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(target, info.Mode().Perm()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if changed != "" {
+		gitCommitAll(t, repo, "checkout files")
+	}
+	return repo
+}
+
+func editDigestCode(t *testing.T, repo string) {
+	t.Helper()
+	path := filepath.Join(repo, "bin/typescript-release.mjs")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := strings.Replace(string(body), `"native-build-inputs\0"`, `"native-build-inputs-v2\0"`, 1)
+	if changed == string(body) {
+		t.Fatal("bin/typescript-release.mjs names no native-build-inputs domain")
+	}
+	writeFile(t, path, changed)
+}
+
+func TestMergeRecheckJudgesTheTypeScriptSDKVersion(t *testing.T) {
+	stubPublicReleaseIndex(t, "")
+	root := publishedSDKFixture(t)
+	writeAPISnapshotFixture(t, root, "")
+	for _, check := range []string{"changelog", "api-spec"} {
+		writeGoFile(t, filepath.Join(root, "bin", "check-"+check+".sh"), "exit 0\n")
+	}
+	writeGoFile(t, filepath.Join(root, "cmd/verify-release/main.go"), "package main\n\nfunc main() {}\n")
+	writeGoFile(t, filepath.Join(root, "bin/typescript-release.mjs"), "console.error(\"merge contract sdk-version failed\");\nprocess.exit(1);\n")
+	gitCommitAll(t, root, "base")
+	runTestGit(t, root, "update-ref", "refs/remotes/origin/main", "HEAD")
+	writeGoFile(t, filepath.Join(root, "sdk/typescript/src/main.ts"), "export const merged = true;\n")
+	gitCommitAll(t, root, "SDK change")
+	if err := os.MkdirAll(filepath.Join(root, "web", "node_modules"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	host := newTestHost(t, sparkwingtest.Options{})
+	err := recheckMergeDelta(host.Context(t.Context()), []string{"internal/sound.go"})
+	if err == nil || !strings.Contains(err.Error(), "merge contract sdk-version failed") {
+		var log strings.Builder
+		for _, record := range host.Records() {
+			log.WriteString(record.Msg + "\n")
+		}
+		t.Fatalf("merged tree skipped the TypeScript SDK version: %v\n%s", err, log.String())
+	}
 }

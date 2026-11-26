@@ -40,12 +40,12 @@ func checkTypeScriptSDKVersion(ctx context.Context) error {
 	})
 }
 
-// safety: these are the paths sdkDigest in bin/typescript-release.mjs reads; a
-// digest input missing here would skip the check for a change that needs a bump.
+// safety: these are the paths sdkDigest reads plus the digest code itself; an
+// input missing here would skip the check for a change that needs a bump.
 func typeScriptReleaseInputs(files []string) []string {
 	var inputs []string
 	for _, f := range files {
-		if strings.HasPrefix(f, "sdk/typescript/") || f == ".github/workflows/release.yaml" {
+		if strings.HasPrefix(f, "sdk/typescript/") || f == ".github/workflows/release.yaml" || f == "bin/typescript-release.mjs" {
 			inputs = append(inputs, f)
 		}
 	}

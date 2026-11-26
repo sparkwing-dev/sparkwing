@@ -330,17 +330,21 @@ generated CLI reference (`bin/gen-cli-docs.sh --check`), Markdown lint, config-r
 drift, wire-cut coverage and the TypeScript SDK version. Each answers in
 seconds with a warm build cache.
 
-The `sdk-version` policy step runs only when the change touches
-`sdk/typescript/` or `.github/workflows/release.yaml`, the inputs of the SDK's
-release source digest. It verifies the signed public version index and runs the
-release cut's SDK decision, so a change to that source under an already
-published SDK version fails at land and names the version to bump in
-`sdk/typescript/package.json`, its lockfile and `typeScriptSDKVersion`. When the
-index cannot be downloaded or verified, the step passes with an `UNVERIFIED`
-warning, because an outage is not something the change can clear; the release
-cut's `typescript-release` check still refuses without a verified index. A
-change outside those paths does not fetch the index, so a main branch that
-already needs a bump fails only the next change that touches SDK release input.
+The `sdk-version` policy step runs only when the change touches the SDK's
+release inputs: `sdk/typescript/`, `.github/workflows/release.yaml`, which the
+release source digest covers, and `bin/typescript-release.mjs`, which computes
+it. It verifies the signed public version index and runs the release cut's SDK
+decision, so a change to SDK release input fails at land when package.json
+names an already published SDK version with a different source digest. The
+failure names the
+version to bump in `sdk/typescript/package.json`, its lockfile and
+`typeScriptSDKVersion`. Ordinary Land repeats the step on the merged tree. When
+the index cannot be downloaded or verified, the step passes with an
+`UNVERIFIED` warning, because an outage is not something the change can clear;
+the release cut's `typescript-release` check still refuses without a verified
+index. A change outside those paths does not fetch the index. When main already
+needs a bump, every change that touches SDK release inputs fails, including one
+that leaves the digest unchanged, until a change bumps the version.
 
 The `windows-compile` policy step uses the existing changed Go package and
 committed module selection. It compiles tests with `GOOS=windows GOARCH=amd64`
@@ -422,7 +426,8 @@ git identity and signing; never a rebase). Independent changelog and migration
 fragments merge as separate files. `CONTRIBUTING.md` table additions use union merge;
 changes to the same rule need review. The push step
 then builds the affected package closure and repeats the changelog, OpenAPI,
-API-snapshot, default and qatrust vet, and fast lint checks on the merged tree.
+API-snapshot, TypeScript SDK version, default and qatrust vet, and fast lint
+checks on the merged tree.
 Vet and lint cover both the branch range and the merge delta, including new
 packages from main. It runs affected tests once over the files that differ
 between the gated tree and the merged tree, then pushes the merge. The review
