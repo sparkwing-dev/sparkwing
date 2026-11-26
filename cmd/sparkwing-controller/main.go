@@ -167,7 +167,7 @@ func run(args []string) error {
 			"for about %d concurrent claims.",
 			limits.Renew(limits.DefaultLease),
 			controller.RecommendedHeartbeatsPerMinute,
-			controller.RecommendedHeartbeatsPerMinute/10/int(time.Minute/limits.Renew(limits.DefaultLease))))
+			int(time.Duration(controller.RecommendedHeartbeatsPerMinute/10)*limits.Renew(limits.DefaultLease)/time.Minute)))
 	requestsPerTokenMinute := fs.Int(flagRequestsPerTokenMinute, 0,
 		"token bucket on every route a credential can reach, holding N requests "+
 			"and refilling N a minute. Every credential of one team shares the "+
