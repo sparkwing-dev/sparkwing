@@ -522,7 +522,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	if errors.Is(err, ErrNoDedicatedNode) && !award.WaitedForFreshNode && award.teardownDeadline.IsZero() {
 		// safety: a failed retirement keeps this attempt's result, and the reconciliation loop reports it.
 		retired, retireErr := l.retireEndedPredecessors(ctx, award.Binding)
-		// perf: a predecessor in teardown holds its node until its Pods are gone, so placing again now would fail.
+		// perf: a predecessor in teardown usually still holds its node, so another attempt now would usually fail.
 		if retired && retireErr == nil && !errors.Is(err, errPredecessorTeardown) {
 			r, err = BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
 		}

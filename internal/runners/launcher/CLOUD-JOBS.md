@@ -615,8 +615,10 @@ end a work predecessor, or hand off its plan, and award the dependent between
 reconciliation and claim. So on a fresh award's first failed placement, the launcher
 asks the controller about the run's other live Jobs in the same pass and tears down
 those whose awards ended. A successor that would otherwise request capacity places
-again and then waits for that teardown instead of creating demand that cannot fit on
-the reserved node and would make Karpenter add one. A successor already waiting on a
+again. That attempt succeeds if the teardown already freed the node; otherwise the
+successor waits for the teardown rather than creating demand that cannot fit on the
+reserved node and would make Karpenter add one. An ordinary placement miss can still
+request fresh capacity. A successor already waiting on a
 predecessor's teardown keeps waiting, and the teardown starts without waiting for the
 next reconcile pass. Live work
 reservations still permit fanout. The 60-second idle-retire grace starts only
