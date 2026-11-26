@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -152,11 +153,18 @@ func TestOwnedSDKOnlySelectsOwnedGoReposWithAMainLandPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), "module fixture\n")
+	t.Setenv(pipelinesEnvOwnedOwners, " listed-owner , ")
+	owners, err := ownedSDKOwners()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		origin, policy string
 		want           bool
 	}{
 		{"git@github.com:sparkwing-dev/fixture.git", "landing: {branch: main, verify: verify}", true},
+		{"git@github.com:Listed-Owner/fixture.git", "landing: {branch: main, verify: verify}", true},
+		{"https://github.com/listed-owner-extra/fixture", "landing: {branch: main, verify: verify}", false},
 		{"https://github.com/sparkwing-dev/fixture", "landing: {branch: main, verify: verify}", true},
 		{"https://github.com/employer/fixture", "landing: {branch: main, verify: verify}", false},
 		{"https://github.com/sparkwing-dev/fixture", "landing: {branch: main, verify: verify, delivery: pull-request}", false},
@@ -166,9 +174,9 @@ func TestOwnedSDKOnlySelectsOwnedGoReposWithAMainLandPolicy(t *testing.T) {
 		writeFile(t, filepath.Join(repo, ".xwing-env.yaml"), tc.policy)
 		gitRun(t, repo, "remote", "set-url", "origin", tc.origin)
 		ctx := newTestHost(t, sparkwingtest.Options{}).Context(t.Context())
-		if got := ownedGoRepo(ctx, repo); got != tc.want {
+		if got := ownedGoRepo(ctx, repo, owners); got != tc.want {
 			origin, err := runGitIn(ctx, repo, "remote", "get-url", "origin")
-			t.Fatalf("selected %s with %s = %v, want %v (origin %q, error %v, match %v)", tc.origin, tc.policy, got, tc.want, origin, err, ownedOrigin.MatchString(strings.TrimSpace(origin)))
+			t.Fatalf("selected %s with %s = %v, want %v (origin %q, error %v, match %v)", tc.origin, tc.policy, got, tc.want, origin, err, ownedRemote(origin, owners))
 		}
 	}
 }
@@ -188,5 +196,36 @@ func TestOwnedSDKCurrentUsesTheEffectiveReplacement(t *testing.T) {
 		if err != nil || got != tc.want {
 			t.Fatalf("%s: %v, %v; want %v", tc.replace, got, err, tc.want)
 		}
+	}
+}
+
+func TestOwnedSDKOwnersComeFromMachineSettings(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	if err := os.Unsetenv(pipelinesEnvOwnedOwners); err != nil {
+		t.Fatal(err)
+	}
+	if owners, err := ownedSDKOwners(); err != nil || !slices.Equal(owners, []string{"sparkwing-dev"}) {
+		t.Fatalf("without machine settings owners = %v, %v; want only sparkwing-dev", owners, err)
+	}
+	file, err := pipelinesEnvFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, file, "# owners\nexport SPARKWING_PIPELINES_OWNED_SDK_OWNERS=\"first-owner,second\"\n")
+	if owners, err := ownedSDKOwners(); err != nil || !slices.Equal(owners, []string{"sparkwing-dev", "first-owner", "second"}) {
+		t.Fatalf("file owners = %v, %v", owners, err)
+	}
+	t.Setenv(pipelinesEnvOwnedOwners, "from-env")
+	if owners, err := ownedSDKOwners(); err != nil || !slices.Equal(owners, []string{"sparkwing-dev", "from-env"}) {
+		t.Fatalf("the environment must win over the file: %v, %v", owners, err)
+	}
+	t.Setenv(pipelinesEnvOwnedOwners, "owner/repo")
+	if _, err := ownedSDKOwners(); err == nil || !strings.Contains(err.Error(), "not a GitHub owner name") {
+		t.Fatalf("invalid owner accepted: %v", err)
 	}
 }

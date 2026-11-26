@@ -1,0 +1,31 @@
+# Fixture deploy settings: the shape of the private sparkwing-deploy/deploy.yaml
+# with a made-up account. The fake deploy's git resolves git@github.com:example/
+# to its local fixture repositories.
+registry: 123456789012.dkr.ecr.us-west-2.amazonaws.com
+cluster: fixture-cluster
+bases:
+  controller: 123456789012.dkr.ecr.us-west-2.amazonaws.com/sparkwing-controller@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  runner: 123456789012.dkr.ecr.us-west-2.amazonaws.com/sparkwing-runner@sha256:2222222222222222222222222222222222222222222222222222222222222222
+repositories:
+  gitops: git@github.com:example/fixture-gitops.git
+  reference: git@github.com:example/fixture-reference.git
+parameters:
+  gitops_key: /fixture/deploy/gitops-deploy-key
+  reference_key: /fixture/deploy/reference-deploy-key
+  staging_gate_token: /fixture/deploy/staging-gate-token
+  smoke_submit_token: /fixture/deploy/scan-submit-token
+environments:
+  staging:
+    gitops_dir: sparkwing-staging
+    helm_release: sparkwing-staging
+    argo_app: sparkwing-staging
+    controller_deployment: sparkwing-staging-sparkwing-full-controller
+    launcher_deployment: sparkwing-staging-sparkwing-runner-bundle-launcher
+    prepull_tag: cloud-prepull-staging
+  production:
+    gitops_dir: sparkwing
+    helm_release: sparkwing
+    argo_app: sparkwing
+    controller_deployment: sparkwing-sparkwing-full-controller
+    launcher_deployment: sparkwing-sparkwing-runner-bundle-launcher
+    prepull_tag: cloud-prepull

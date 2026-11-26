@@ -16,7 +16,7 @@ import (
 
 const publicSiteURL = "https://sparkwing.dev/"
 
-// safety: sparkwing-product's bin/generate-llms.mjs writes exactly this first line.
+// safety: the product site's llms.txt generator writes exactly this first line.
 var publishedDocsTitleRe = regexp.MustCompile(`^# sparkwing -- (v\S+) \(latest\)$`)
 
 // safety: the baseline is the signed index's latest stable release, written only after
@@ -53,7 +53,7 @@ func checkPublishedDocs(ctx context.Context, repo string) error {
 	}
 	if semver.Compare(documented, published) < 0 {
 		return fmt.Errorf(
-			"published docs: %sllms.txt documents %s but %s is the latest published release; publish %s's sparkwing-product docs (add it to versions.json as latest and push product main) before cutting another release",
+			"published docs: %sllms.txt documents %s but %s is the latest published release; publish %s's docs to the product site (add it to versions.json as latest and push the site's main) before cutting another release",
 			publicSiteURL, documented, published, published,
 		)
 	}

@@ -266,7 +266,7 @@ func cloneCheckout(t *testing.T) string {
 	repo := filepath.Join(t.TempDir(), "repo")
 	// safety: a commit starts detached auto maintenance on newer git, and its
 	// commit-graph write into a clone with long history can outlive a fast test.
-	gitRun(t, root, "clone", "--quiet", "--shared", "-c", "maintenance.auto=false", root, repo)
+	gitRun(t, root, "clone", "--quiet", "--shared", "-c", "maintenance.auto=false", "-c", "gc.auto=0", root, repo)
 	tree := strings.TrimSpace(gitOutput(t, root, "write-tree"))
 	if tree != strings.TrimSpace(gitOutput(t, repo, "rev-parse", "HEAD^{tree}")) {
 		gitRun(t, repo, "read-tree", "--reset", "-u", tree)
@@ -276,6 +276,15 @@ func cloneCheckout(t *testing.T) string {
 		t.Fatalf("fixture tree %s does not match the checkout index tree %s", got, tree)
 	}
 	return repo
+}
+
+func TestCloneCheckoutStartsNoAutoMaintenance(t *testing.T) {
+	repo := cloneCheckout(t)
+	for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0"} {
+		if got := strings.TrimSpace(gitOutput(t, repo, "config", "--local", "--get", key)); got != want {
+			t.Errorf("clone config %s = %q, want %q", key, got, want)
+		}
+	}
 }
 
 func editDigestCode(t *testing.T, repo string) {

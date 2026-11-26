@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -30,7 +31,7 @@ func (OwnedSDK) ShortHelp() string {
 }
 
 func (OwnedSDK) Help() string {
-	return "Inspect immediate children of --repos-root (default ~/code). Select Go pipeline repos owned by koreyGambill or sparkwing-dev whose committed Xwing policy lands main. Resolve green Sparkwing main to a Go module version, set the require and versioned replace to that exact source, tidy, commit in an Xwing environment, then run xwing env land with its configured verification. Skip unchanged repos and Sparkwing itself. Failed updates retain their environments and do not stop other repos. Dry runs list proposed pin edits without creating environments, committing or landing. TypeScript pipelines keep their published release pins."
+	return "Inspect immediate children of --repos-root (default ~/code). Select Go pipeline repos owned by sparkwing-dev, or by an owner the machine setting SPARKWING_PIPELINES_OWNED_SDK_OWNERS lists (comma-separated, in ~/.config/sparkwing-pipelines/env), whose committed Xwing policy lands main. Resolve green Sparkwing main to a Go module version, set the require and versioned replace to that exact source, tidy, commit in an Xwing environment, then run xwing env land with its configured verification. Skip unchanged repos and Sparkwing itself. Failed updates retain their environments and do not stop other repos. Dry runs list proposed pin edits without creating environments, committing or landing. TypeScript pipelines keep their published release pins."
 }
 
 func (*OwnedSDK) Plan(_ context.Context, plan *sparkwing.Plan, in OwnedSDKArgs, _ sparkwing.RunContext) error {
@@ -68,6 +69,10 @@ func (j *ownedSDKJob) run(ctx context.Context, dry bool) error {
 	if err != nil {
 		return err
 	}
+	owners, err := ownedSDKOwners()
+	if err != nil {
+		return err
+	}
 	remote, err := runGitIn(ctx, j.RepoDir, "ls-remote", "origin", "refs/heads/main")
 	if err != nil {
 		return err
@@ -98,7 +103,7 @@ func (j *ownedSDKJob) run(ctx context.Context, dry bool) error {
 			continue
 		}
 		repo := filepath.Join(root, entry.Name())
-		if !ownedGoRepo(ctx, repo) {
+		if !ownedGoRepo(ctx, repo, owners) {
 			continue
 		}
 		if err := updateOwnedSDK(ctx, repo, entry.Name(), target.Version, sha, dry); err != nil {
@@ -108,9 +113,39 @@ func (j *ownedSDKJob) run(ctx context.Context, dry bool) error {
 	return errors.Join(failures...)
 }
 
-var ownedOrigin = regexp.MustCompile(`(?i)^(?:git@github\.com:|https://github\.com/)(koreyGambill|sparkwing-dev)/[A-Za-z0-9_.-]+(?:\.git)?$`)
+var (
+	ownedOrigin = regexp.MustCompile(`^(?:git@github\.com:|https://github\.com/)([A-Za-z0-9-]+)/[A-Za-z0-9_.-]+(?:\.git)?$`)
+	githubOwner = regexp.MustCompile(`^[A-Za-z0-9-]+$`)
+)
 
-func ownedGoRepo(ctx context.Context, repo string) bool {
+func ownedSDKOwners() ([]string, error) {
+	owners := []string{"sparkwing-dev"}
+	listed, err := pipelinesSetting(pipelinesEnvOwnedOwners)
+	if err != nil {
+		return nil, err
+	}
+	for _, owner := range strings.Split(listed, ",") {
+		owner = strings.TrimSpace(owner)
+		if owner == "" {
+			continue
+		}
+		if !githubOwner.MatchString(owner) {
+			return nil, fmt.Errorf("%s lists %q, which is not a GitHub owner name", pipelinesEnvOwnedOwners, owner)
+		}
+		owners = append(owners, owner)
+	}
+	return owners, nil
+}
+
+func ownedRemote(origin string, owners []string) bool {
+	m := ownedOrigin.FindStringSubmatch(strings.TrimSpace(origin))
+	if m == nil {
+		return false
+	}
+	return slices.ContainsFunc(owners, func(owner string) bool { return strings.EqualFold(owner, m[1]) })
+}
+
+func ownedGoRepo(ctx context.Context, repo string, owners []string) bool {
 	if _, err := os.Stat(filepath.Join(repo, ".sparkwing", "go.mod")); err != nil {
 		return false
 	}
@@ -125,7 +160,7 @@ func ownedGoRepo(ctx context.Context, repo string) bool {
 		return false
 	}
 	origin, err := runGitIn(ctx, repo, "remote", "get-url", "origin")
-	return err == nil && ownedOrigin.MatchString(strings.TrimSpace(origin))
+	return err == nil && ownedRemote(origin, owners)
 }
 
 func ownedSDKCurrent(body []byte, version string) (bool, error) {

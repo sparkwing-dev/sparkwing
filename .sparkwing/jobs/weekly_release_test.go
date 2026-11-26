@@ -130,7 +130,7 @@ case "$*" in *--dry-run*) ;; *) git -C "$4" tag v0.1.0 ;; esac
 						t.Fatalf("preview wrote workflow: %s", workflow)
 					}
 				} else {
-					for _, want := range []string{"start --name sparkwing-release", "--idempotency-key sparkwing-release-v0.1.0", "--step cut --status blocked", "immutable tag v0.1.0 at " + head, "sparkwing-product", "kikd-infra", "downstream pins"} {
+					for _, want := range []string{"start --name sparkwing-release", "--idempotency-key sparkwing-release-v0.1.0", "--step cut --status blocked", "immutable tag v0.1.0 at " + head, "product site docs", "through the platform repository", "downstream pins"} {
 						if !strings.Contains(string(workflow), want) {
 							t.Fatalf("workflow handoff lacks %q: %s (%v)", want, workflow, workflowErr)
 						}

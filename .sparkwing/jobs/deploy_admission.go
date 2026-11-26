@@ -19,7 +19,7 @@ func (d *deployer) verifyClusterAdmission(ctx context.Context, rendered string) 
 		}
 		live, err := d.kubectl(ctx, "get", doc.kind, doc.name, "-o", "json")
 		if err != nil {
-			return fmt.Errorf("read cluster admission %s/%s; apply the chart's cluster objects through kikd-infra before deploying: %w", doc.kind, doc.name, err)
+			return fmt.Errorf("read cluster admission %s/%s; apply the chart's cluster objects through the infrastructure repository before deploying: %w", doc.kind, doc.name, err)
 		}
 		want, err := clusterAdmissionSpec(doc.text)
 		if err != nil {
@@ -30,7 +30,7 @@ func (d *deployer) verifyClusterAdmission(ctx context.Context, rendered string) 
 			return err
 		}
 		if got != want {
-			return fmt.Errorf("cluster admission %s/%s differs from the chart; apply the chart's cluster objects through kikd-infra before deploying", doc.kind, doc.name)
+			return fmt.Errorf("cluster admission %s/%s differs from the chart; apply the chart's cluster objects through the infrastructure repository before deploying", doc.kind, doc.name)
 		}
 	}
 	return nil

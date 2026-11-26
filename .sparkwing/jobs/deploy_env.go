@@ -92,60 +92,28 @@ type deployEnv struct {
 	ControllerDeployment string
 	LauncherDeployment   string
 	ControllerURL        string
-	// perf: kikd-infra's EC2NodeClass for this environment's Cloud job nodes
-	// pulls this runner tag while a node boots; terraform/ecr exempts it from
-	// tag immutability.
+	// perf: the infrastructure's node class for this environment's Cloud job
+	// nodes pulls this runner tag while a node boots; the registry exempts it
+	// from tag immutability.
 	PrepullTag string
 }
 
+// safety: account-specific values come only from the private deploy settings (deploy_settings.go).
 func defaultDeployConfig() deployConfig {
-	// #nosec G101 -- This is a parameter-store path, not its secret value.
-	const smokeSubmitTokenParameter = "/kikd-prod/sparkwing/deploy/scan-submit-token"
-	// #nosec G101 -- This is a parameter-store path, not its secret value.
-	const stagingGateTokenParameter = "/kikd-prod/sparkwing/deploy/staging-gate-token"
-	const ecr = "633280902600.dkr.ecr.us-west-2.amazonaws.com"
 	return deployConfig{
-		Region:   "us-west-2",
-		Cluster:  "kikd-prod",
-		Registry: ecr,
-		// safety: retain both runtime indexes with cloud-* and commit-* tags so
-		// the registry keeps them outside its rolling 100-image release window.
-		ControllerBase: ecr + "/sparkwing-controller@sha256:e3fba647556534dac6af3877ac5cb2b7f3de374eb2fbc4c0000085e5b43264ac",
-		RunnerBase:     ecr + "/sparkwing-runner@sha256:f3fb110a6d6aca18949cd74036943203cd7f9cba0956e87eeff4a2972d0f4ec5",
-		RoleARN:        "arn:aws:iam::633280902600:role/sparkwing-deploy",
-		GitopsURL:      "git@github.com:sparkwing-dev/sparkwing-gitops.git",
-		GitopsBranch:   "main",
-		ReferenceURL:   "git@github.com:sparkwing-dev/sparkwing-ci-smoke.git",
-		ReferenceName:  "hello",
-		CommitName:     "Sparkwing deploy",
-		CommitEmail:    "deploy@sparkwing.dev",
-		Params: deployParams{
-			GitopsKey:    "/kikd-prod/sparkwing/deploy/sparkwing-gitops-deploy-key",
-			ReferenceKey: "/kikd-prod/sparkwing/deploy/ci-smoke-deploy-key",
-			StagingToken: stagingGateTokenParameter,
-			SmokeToken:   smokeSubmitTokenParameter,
-		},
+		GitopsBranch:  "main",
+		ReferenceName: "hello",
+		CommitName:    "Sparkwing deploy",
+		CommitEmail:   "deploy@sparkwing.dev",
 		Staging: deployEnv{
-			Name:                 "staging",
-			GitopsDir:            "sparkwing-staging",
-			HelmRelease:          "sparkwing-staging",
-			Namespace:            "sparkwing-staging",
-			ArgoApp:              "sparkwing-staging",
-			ControllerDeployment: "sparkwing-staging-sparkwing-full-controller",
-			LauncherDeployment:   "sparkwing-staging-sparkwing-runner-bundle-launcher",
-			ControllerURL:        "https://staging.sparkwing.dev",
-			PrepullTag:           "cloud-prepull-staging",
+			Name:          "staging",
+			Namespace:     "sparkwing-staging",
+			ControllerURL: "https://staging.sparkwing.dev",
 		},
 		Production: deployEnv{
-			Name:                 "production",
-			GitopsDir:            "sparkwing",
-			HelmRelease:          "sparkwing",
-			Namespace:            "sparkwing",
-			ArgoApp:              "sparkwing",
-			ControllerDeployment: "sparkwing-sparkwing-full-controller",
-			LauncherDeployment:   "sparkwing-sparkwing-runner-bundle-launcher",
-			ControllerURL:        "https://api.sparkwing.dev",
-			PrepullTag:           "cloud-prepull",
+			Name:          "production",
+			Namespace:     "sparkwing",
+			ControllerURL: "https://api.sparkwing.dev",
 		},
 		SmokeProfiles:  []string{"production-smoke"},
 		ArgoTimeout:    10 * time.Minute,
@@ -491,7 +459,8 @@ func splitRendered(rendered string) ([]renderedDoc, error) {
 }
 
 // safety: the sparkwing Argo project admits no cluster-scoped kinds, so a
-// GitOps commit cannot grant cluster-wide access; kikd-infra applies these.
+// GitOps commit cannot grant cluster-wide access; the infrastructure
+// repository applies these.
 var clusterScopedKinds = map[string]bool{
 	"Namespace": true, "ClusterRole": true, "ClusterRoleBinding": true, "PriorityClass": true,
 	"ValidatingAdmissionPolicy": true, "ValidatingAdmissionPolicyBinding": true,

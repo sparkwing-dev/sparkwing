@@ -630,6 +630,8 @@ jobs:
           SPARKWING_RELEASE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
           TAG: ${{ inputs.tag || github.ref_name }}
           BOOTSTRAP_INDEX: ${{ inputs.bootstrap_index || false }}
+          SPARKWING_WEBSITE_BUCKET: ${{ vars.SPARKWING_WEBSITE_BUCKET }}
+          SPARKWING_WEBSITE_DISTRIBUTION: ${{ vars.SPARKWING_WEBSITE_DISTRIBUTION }}
         run: bash bin/publish-release-index.sh
       - name: Retain signed index for interrupted publication recovery
         if: ${{ always() }}

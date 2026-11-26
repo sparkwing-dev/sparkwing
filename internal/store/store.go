@@ -434,10 +434,12 @@ func (op *Operator) runOwnerTx(ctx context.Context, tx *storeTx, runID string) (
 	return Team(owner), true, nil
 }
 
+// perf: the unary plus on retry.created_at keeps the planner off idx_runs_created, which serves that
+// order but scans every run of the team for each listed row; idx_runs_retry_of finds the few retries.
 const runColumns = `runs.team,runs.id,runs.number,runs.pipeline,runs.status,runs.trigger_source,runs.git_branch,runs.git_sha,
  runs.request_json,runs.plan_json,runs.error,runs.created_at,runs.started_at,runs.finished_at,
  runs.parent_run_id,runs.repo_display,runs.retry_of,
- COALESCE((SELECT retry.id FROM runs retry WHERE retry.team=runs.team AND retry.retry_of=runs.id ORDER BY retry.created_at DESC,retry.id DESC LIMIT 1),''),
+ COALESCE((SELECT retry.id FROM runs retry WHERE retry.team=runs.team AND retry.retry_of=runs.id ORDER BY +retry.created_at DESC,retry.id DESC LIMIT 1),''),
  runs.lineage_json,runs.replay_of_run_id,runs.replay_of_node_id,runs.annotation_count,runs.top_annotation,runs.annotations_json,runs.admission,` + runAttentionColumn
 
 // RunFilter narrows ListRuns results; zero value matches everything.

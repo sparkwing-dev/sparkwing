@@ -7,17 +7,18 @@
 #
 # usage: bin/qa-release.sh <repo> <commit> <vX.Y.Z-qa.N>
 #
-# Reads the QA signing seed from SSM (AWS_PROFILE, default kikd-prod) straight
-# into the signer's environment; it is never written to disk. Images go to
+# Reads the QA signing seed from the SSM parameter SPARKWING_QA_SIGNING_KEY_PARAMETER
+# names, with the ambient AWS credentials, straight into the signer's environment;
+# it is never written to disk. Assets go to the bucket SPARKWING_QA_BUCKET names.
+# Both live in ~/.config/sparkwing-pipelines/env (see DELIVERY.md). Images go to
 # QA_IMAGE_REGISTRY, by default the profile account's ECR in us-west-2, built by
 # the publish-images pipeline onto the runtime bases SPARKWING_CONTROLLER_BASE
 # and SPARKWING_RUNNER_BASE name by digest (see build-images --runtime-base).
 set -euo pipefail
 
-bucket=kikd-prod-sparkwing-qa-releases
-ssm_key=/kikd-prod/sparkwing/qa-release-signing-key
+bucket=${SPARKWING_QA_BUCKET:?name the QA release bucket in SPARKWING_QA_BUCKET}
+ssm_key=${SPARKWING_QA_SIGNING_KEY_PARAMETER:?name the SSM parameter holding the QA signing seed in SPARKWING_QA_SIGNING_KEY_PARAMETER}
 region=us-west-2
-export AWS_PROFILE="${AWS_PROFILE:-kikd-prod}"
 
 if (( $# != 3 )); then
   echo "usage: bin/qa-release.sh <repo> <commit> <vX.Y.Z-qa.N>" >&2
