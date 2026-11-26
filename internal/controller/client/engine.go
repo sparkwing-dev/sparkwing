@@ -131,6 +131,11 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 		} else {
 			retry, err := c.readResponse(resp, output)
 			timing.Phase("http.response_body_complete")
+			// safety: the node host retries a rate-limited node transition within its lease, so retrying here too
+			// would let one request outlive that bound.
+			if _, nodeCommand := input.(runstate.NodeCommandPayload); nodeCommand && resp.StatusCode == http.StatusTooManyRequests {
+				retry = false
+			}
 			if !mayRetry || attempt >= retries || !retry || ctx.Err() != nil {
 				if err != nil {
 					return &RequestError{Method: req.Method, Path: req.URL.Path, Err: err}
@@ -140,6 +145,10 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 			advised, ok := parseRetryAfter(resp)
 			if !ok && !recoverIntake {
 				return err
+			}
+			if ok && resp.StatusCode == http.StatusTooManyRequests {
+				// safety: jitter above the whole-second advice keeps callers refused together from returning together.
+				advised += RetryJitter(attempt)
 			}
 			wait = max(wait, advised)
 			if waitErr := waitFor(ctx, wait); waitErr != nil {

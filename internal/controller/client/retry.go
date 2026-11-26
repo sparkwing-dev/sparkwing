@@ -33,6 +33,13 @@ func RetryBackoff(attempt int, floor time.Duration) time.Duration {
 	return floor + ceiling/2 + time.Duration(rand.Int64N(int64(ceiling/2)+1))
 }
 
+// RetryJitter returns a random spread to add above a server's advised wait,
+// so callers refused together do not return together. It starts at 400 to
+// 800 ms on the first retry and grows to at most 5 s.
+func RetryJitter(attempt int) time.Duration {
+	return RetryBackoff(max(attempt, 0)+3, 0)
+}
+
 // safety: held reads and fenced completions retry only within their caller's award context.
 func retryHeldRequest(ctx context.Context, request func() error) error {
 	for attempt := 0; ; attempt++ {
