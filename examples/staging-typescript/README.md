@@ -51,7 +51,7 @@ The input `--secret-name` selects the optional declared `EXAMPLE_GATE_SECRET`.
 The Docker job runs on Cloud or runners labeled `docker` or `docker=true`.
 
 After the assertions, `reference-pipeline-assert` can trigger a separate run in
-`sparkwing-ci-smoke`. Supply `--smoke-profile` and `--smoke-checkout` to enable it.
+a smoke repository. Supply `--smoke-profile` and `--smoke-checkout` to enable it.
 The target pipeline defaults to `reference`; `--smoke-pipeline` overrides it.
 Both `hello` and `docker-test` must succeed. Without a target profile the job
 skips with a reason. The host retains cancellation cleanup for detached probes

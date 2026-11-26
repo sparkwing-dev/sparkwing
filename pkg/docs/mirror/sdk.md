@@ -946,7 +946,7 @@ own job and step selections, so its `stamp` job still runs.
 ```bash
 sparkwing run example -- --fail-once
 sparkwing run example -- --secret-name EXAMPLE_GATE_SECRET
-sparkwing run example -- --smoke-profile staging --smoke-checkout /path/to/sparkwing-ci-smoke
+sparkwing run example -- --smoke-profile staging --smoke-checkout /path/to/smoke-repo
 ```
 
 `--fail-once` asks the probe to fail on its source run. The failed-only retry
@@ -962,7 +962,7 @@ daemon. `--child-branch` selects another same-repository branch tip when source
 provenance is available.
 
 The final `reference-pipeline` job submits `reference` from the supplied
-`sparkwing-ci-smoke` checkout through `pipeline trigger`, waits for the separate
+smoke repository checkout through `pipeline trigger`, waits for the separate
 run and requires successful `hello` and `docker-test` jobs. Set
 `--smoke-pipeline` if that repository uses another pipeline name. It skips when
 `--smoke-profile` is absent. Cross-repository child runs are refused, so this

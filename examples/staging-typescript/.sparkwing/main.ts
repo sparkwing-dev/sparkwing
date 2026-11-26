@@ -275,7 +275,7 @@ definePipeline({
     { name: "secret-name", type: "string", default: "EXAMPLE_GATE_SECRET", enum: ["EXAMPLE_GATE_SECRET"], description: "Optional declared secret to resolve in this run's scope" },
     { name: "fail-once", type: "bool", description: "Exercise a failed run and failed-only retry" },
     { name: "smoke-profile", type: "string", description: "Target environment profile for the separate reference run" },
-    { name: "smoke-checkout", type: "string", description: "Checkout of sparkwing-ci-smoke used by the trigger CLI" },
+    { name: "smoke-checkout", type: "string", description: "Checkout of the smoke repository used by the trigger CLI" },
     { name: "smoke-pipeline", type: "string", default: "reference", description: "Reference pipeline containing hello and docker-test" },
   ],
   secrets: [{ name: "EXAMPLE_GATE_SECRET", optional: true }],

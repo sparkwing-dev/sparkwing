@@ -17,14 +17,14 @@ func (Example) ShortHelp() string {
 }
 
 func (Example) Help() string {
-	return "Runs the SDK tour alongside named integration assertions for matrix, job and step outputs, generated jobs, dynamic child pipelines, scoped secrets, OIDC, dependency cache restore, memo reuse, artifacts, cancellation and API logs/history. The optional error canary remains a dashboard demonstration. Secrets, OIDC and the CLI lifecycle probes skip with a reason when unavailable; the probes use --cli when it is runnable on the job host, otherwise lifecycle-cli builds one from the checkout for --api-controller with the EXAMPLE_PROBE_TOKEN secret. Docker runs on capable runners. Pass --fail-once to exercise failed-only retry and predecessor outputs. Pass --smoke-profile plus --smoke-checkout to trigger and await sparkwing-ci-smoke as a separate run. Memoization belongs to jobs, so the memoized job contains one step. The default local run needs no Cloud or Docker."
+	return "Runs the SDK tour alongside named integration assertions for matrix, job and step outputs, generated jobs, dynamic child pipelines, scoped secrets, OIDC, dependency cache restore, memo reuse, artifacts, cancellation and API logs/history. The optional error canary remains a dashboard demonstration. Secrets, OIDC and the CLI lifecycle probes skip with a reason when unavailable; the probes use --cli when it is runnable on the job host, otherwise lifecycle-cli builds one from the checkout for --api-controller with the EXAMPLE_PROBE_TOKEN secret. Docker runs on capable runners. Pass --fail-once to exercise failed-only retry and predecessor outputs. Pass --smoke-profile plus --smoke-checkout to trigger and await a smoke repository as a separate run. Memoization belongs to jobs, so the memoized job contains one step. The default local run needs no Cloud or Docker."
 }
 
 func (Example) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Run the local integration gate and SDK tour", Command: "sparkwing run example"},
 		{Comment: "Assert failed-only retry and predecessor outputs", Command: "sparkwing run example -- --fail-once"},
-		{Comment: "Include the second repository on staging", Command: "sparkwing run example -- --smoke-profile staging --smoke-checkout /path/to/sparkwing-ci-smoke"},
+		{Comment: "Include the second repository on staging", Command: "sparkwing run example -- --smoke-profile staging --smoke-checkout /path/to/smoke-repo"},
 		{Comment: "Read the optional declared secret", Command: "sparkwing run example -- --secret-name EXAMPLE_GATE_SECRET"},
 		{Comment: "Render the DAG without running", Command: "sparkwing pipeline plan --pipeline example"},
 		{Comment: "Skip the rollout step via Work-layer SkipIf", Command: "DRY_RUN=1 sparkwing run example"},
@@ -114,7 +114,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, in ExampleInputs
 
 	reference := exampleJob(plan, in, "reference-pipeline", exampleReference(in)).Needs(features, notify).Inline()
 	if in.SmokeProfile == "" {
-		reference.SkipIf(exampleSkip("no --smoke-profile configured for the separate sparkwing-ci-smoke run"))
+		reference.SkipIf(exampleSkip("no --smoke-profile configured for the separate smoke repository run"))
 	}
 	exampleScanJobs(in, checks.Members()...)
 	exampleScanJobs(in, publishImages.Members()...)

@@ -28,7 +28,7 @@ type ExampleInputs struct {
 	APIProfile    string `flag:"api-profile" help:"Controller profile for lifecycle probes, empty for the local controller"`
 	APIController string `flag:"api-controller" help:"Controller URL for lifecycle probes on a host without --cli; builds the CLI from this checkout and signs in with EXAMPLE_PROBE_TOKEN"`
 	SmokeProfile  string `flag:"smoke-profile" help:"Target environment profile for the separate reference run"`
-	SmokeCheckout string `flag:"smoke-checkout" help:"Checkout of sparkwing-ci-smoke used by the trigger CLI"`
+	SmokeCheckout string `flag:"smoke-checkout" help:"Checkout of the smoke repository used by the trigger CLI"`
 	SmokePipeline string `flag:"smoke-pipeline" default:"reference" help:"Reference pipeline containing hello and docker-test"`
 	ChildBranch   string `flag:"child-branch" help:"Optional same-repository branch tip for the dynamic child"`
 }
@@ -645,7 +645,7 @@ func exampleLogsHistory(in ExampleInputs, rc sparkwing.RunContext) func(context.
 func exampleReference(in ExampleInputs) func(context.Context) error {
 	return func(ctx context.Context) error {
 		if in.SmokeProfile == "" {
-			sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "SKIP: no --smoke-profile configured for the separate sparkwing-ci-smoke run"})
+			sparkwing.Annotate(ctx, sparkwing.Annotation{Message: "SKIP: no --smoke-profile configured for the separate smoke repository run"})
 			return nil
 		}
 		if in.SmokeCheckout == "" {
