@@ -264,7 +264,9 @@ func cloneCheckout(t *testing.T) string {
 		t.Fatal(err)
 	}
 	repo := filepath.Join(t.TempDir(), "repo")
-	gitRun(t, root, "clone", "--quiet", "--shared", root, repo)
+	// safety: a commit starts detached auto maintenance on newer git, and its
+	// commit-graph write into a clone with long history can outlive a fast test.
+	gitRun(t, root, "clone", "--quiet", "--shared", "-c", "maintenance.auto=false", root, repo)
 	tree := strings.TrimSpace(gitOutput(t, root, "write-tree"))
 	if tree != strings.TrimSpace(gitOutput(t, repo, "rev-parse", "HEAD^{tree}")) {
 		gitRun(t, repo, "read-tree", "--reset", "-u", tree)

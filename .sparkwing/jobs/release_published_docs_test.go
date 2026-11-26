@@ -101,7 +101,8 @@ func runPublishedDocsCheck(t *testing.T, repo string, site publishedDocsSite) er
 	t.Helper()
 	origin := t.TempDir()
 	gitRun(t, origin, "init", "--quiet", "-b", "main")
-	gitRun(t, origin, "commit", "--quiet", "--allow-empty", "-m", "origin fixture")
+	gitRun(t, origin, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false",
+		"commit", "--quiet", "--allow-empty", "-m", "origin fixture")
 	for _, tag := range site.originTags {
 		gitRun(t, origin, "tag", tag)
 	}
