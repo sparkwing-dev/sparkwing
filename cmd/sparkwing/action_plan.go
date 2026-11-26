@@ -202,6 +202,10 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 	if err != nil {
 		return err
 	}
+	git := selection.git
+	if git.SHA == "" {
+		git.SHA = entry.SHA
+	}
 	processes := nodehost.ProtocolSessionConfig{Environments: nodehost.SDKEnvironment{Base: options.Base}}
 	inspection := pipelineInspection{
 		project: project, projectFile: projectFile,
@@ -214,7 +218,7 @@ func withLocalPipelineEntry(ctx context.Context, home, directory, pipeline strin
 		}},
 		input: nodehost.PlanningProcessInput{
 			Entry: entry, Entrypoint: selection.identity.Entrypoint, Listed: listedPipelines(selection.project), Environment: environment,
-			Run: nodewire.RunContext{RunID: "inspection", Pipeline: pipeline}, Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
+			Run: nodehost.LocalRunContext("inspection", pipeline, git, entry), Runner: nodewire.RunnerIdentity{Name: "local", Type: "local", Labels: []string{}},
 		},
 	}
 	return fn(ctx, inspection, filepath.Dir(selection.execution.Directory))
