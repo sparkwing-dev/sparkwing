@@ -545,21 +545,22 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	// reconciliation. Retiring the plan while Prepare runs starts the teardown that reuse waits on
 	// before the first reservation; one award per run finds a live plan, so the rest pay one list.
 	var retiring chan []string
-	// safety: a stalled controller or API server can delay retirement by at most this bound, and a
-	// refused preparation cancels it without waiting, so the loop never waits on an ended award.
-	retireCtx, cancelRetire := context.WithTimeout(ctx, handoffWait)
-	defer cancelRetire()
 	if !award.WaitedForFreshNode && award.teardownDeadline.IsZero() {
 		retiring = make(chan []string, 1)
-		go func() {
+		// safety: the retirement runs under the loop's context, detached from this launch, so a deadline
+		// or refused preparation never interrupts a teardown between Job deletion and finalizer removal.
+		go func(ctx context.Context, successor CloudJobBinding) {
 			// safety: a failed retirement keeps this attempt's result, and the reconciliation loop reports it.
-			ending, err := l.retireEndedPredecessors(retireCtx, award.Binding, true)
+			ending, err := l.retireEndedPredecessors(ctx, successor, true)
 			if err != nil {
 				l.logger().DebugContext(ctx, "claim-time plan retirement deferred to reconciliation", "error", err)
 			}
 			retiring <- ending
-		}()
+		}(ctx, award.Binding)
 	}
+	// safety: a stalled controller or API server delays placement by at most this bound.
+	retireWait := time.NewTimer(handoffWait)
+	defer retireWait.Stop()
 	started := time.Now()
 	prepared, stop, expires, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
 	if !errors.Is(err, ErrNoDedicatedNode) && !errors.Is(err, errCapacityUnconfigured) {
@@ -572,7 +573,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	if retiring != nil {
 		select {
 		case predecessors = <-retiring:
-		case <-retireCtx.Done():
+		case <-retireWait.C:
 		}
 	}
 	ctx = prepared

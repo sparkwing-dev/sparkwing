@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,6 +31,7 @@ type handoffControl struct {
 	deliveries chan *CloudJobAward
 	prepare    func(context.Context, capability.LeaseRef)
 	stallSync  atomic.Bool
+	slowSync   atomic.Pointer[func(context.Context) error]
 
 	mu        sync.Mutex
 	planEnded bool
@@ -63,6 +65,11 @@ func (c *handoffControl) Sync(ctx context.Context, observations []CloudJobObserv
 	if c.stallSync.CompareAndSwap(true, false) {
 		<-ctx.Done()
 		return nil, context.Cause(ctx)
+	}
+	if slow := c.slowSync.Swap(nil); slow != nil {
+		if err := (*slow)(ctx); err != nil {
+			return nil, err
+		}
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -564,4 +571,85 @@ func TestPreparationStageExcludesClaimTimeRetirement(t *testing.T) {
 			t.Fatalf("preparation stage=%v, want Prepare's own instant duration", stages)
 		}
 	})
+}
+
+func TestRefusedPreparationLetsAStartedRetirementFinish(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newHandoffFixture(t)
+		f.deletePlanPod(t)
+		f.control.endPlan()
+		f.control.refuse(f.first)
+		slow := func(ctx context.Context) error {
+			select {
+			case <-time.After(1500 * time.Millisecond):
+				return nil
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			}
+		}
+		f.control.slowSync.Store(&slow)
+		started := time.Now()
+		if _, err := f.l.launch(t.Context(), f.first); err == nil {
+			t.Fatal("refused award launched")
+		}
+		if waited := time.Since(started); waited != 0 {
+			t.Fatalf("refused award waited %s for its retirement", waited)
+		}
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		if _, err := f.kube.BatchV1().Jobs("cloud").Get(t.Context(), f.plan.Labels[JobLabel], metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Fatalf("retired plan Job left behind its cleanup finalizer: %v", err)
+		}
+	})
+}
+
+func TestClaimTimeRetirementWaitEndsAtItsBound(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newHandoffFixture(t)
+		probe := &contextProbe{Handler: slog.DiscardHandler}
+		f.l.Logger = slog.New(probe)
+		f.control.endPlan()
+		slow := func(context.Context) error {
+			time.Sleep(handoffWait + 500*time.Millisecond)
+			return errors.New("controller unavailable")
+		}
+		f.control.slowSync.Store(&slow)
+		started := time.Now()
+		if _, err := f.l.launch(t.Context(), f.first); !errors.Is(err, ErrNoDedicatedNode) {
+			t.Fatalf("first job did not wait for the live planning Pod: %v", err)
+		}
+		if waited := time.Since(started); waited != handoffWait {
+			t.Fatalf("launch waited %s for a stalled retirement, want %s", waited, handoffWait)
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if errs := probe.errs(); len(errs) != 1 || errs[0] != nil {
+			t.Fatalf("late retirement ran under contexts with errors %v, want the launcher's live context", errs)
+		}
+	})
+}
+
+// hack: the race detector cannot see a reassigned context across synctest's clock, so the retirement's
+// log records which context it was given.
+type contextProbe struct {
+	slog.Handler
+	mu   sync.Mutex
+	seen []error
+}
+
+func (p *contextProbe) Enabled(context.Context, slog.Level) bool { return true }
+
+func (p *contextProbe) Handle(ctx context.Context, record slog.Record) error {
+	if record.Message == "claim-time plan retirement deferred to reconciliation" {
+		p.mu.Lock()
+		p.seen = append(p.seen, ctx.Err())
+		p.mu.Unlock()
+	}
+	return nil
+}
+
+func (p *contextProbe) errs() []error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.seen)
 }
