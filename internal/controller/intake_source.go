@@ -148,7 +148,7 @@ func (s *Server) selectFetchedSource(ctx context.Context, request *runspec.Reque
 	probe.Git.SHA, probe.Source.Ref, probe.Source.RequestedRef = "", "", ""
 	git, selected, err := selectSource(ctx, &probe)
 	fetched := store.FetchedRepository{ID: id, Name: git.RepositoryName.Value}
-	// Decision 72: the head the App resolved is claimed when the code ran there.
+	// safety: the head the App resolved is claimed when the code ran there.
 	if strings.EqualFold(selected.Ref, git.SHA) && (strings.HasPrefix(git.Ref, "refs/heads/") || strings.HasPrefix(git.Ref, "refs/tags/")) {
 		fetched.Ref, fetched.SHA = git.Ref, git.SHA
 	}

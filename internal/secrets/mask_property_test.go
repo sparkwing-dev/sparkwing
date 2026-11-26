@@ -139,7 +139,7 @@ func TestRegisterOfAKnownValueDoesNoWork(t *testing.T) {
 
 // Concatenated emissions, including a final EOF flush, must never expose any
 // registered spelling even when matching or replacement crosses a chunk edge.
-// Decision 49 accepts marker-containing secrets and values containing '*' that
+// Masking accepts marker-containing secrets and values containing '*' that
 // replacement may form beside a marker across emissions that cannot be recalled.
 func TestStreamReplacementClosureProperty(t *testing.T) {
 	random := rand.New(rand.NewSource(43109))
@@ -180,7 +180,7 @@ func TestStreamReplacementClosureProperty(t *testing.T) {
 		decoded := jsonDecodedView(rendered)
 		for _, spelling := range m.Values() {
 			if strings.Contains(spelling, "*") {
-				continue // Decision 49 accepts values formed with '*' adjacent to a replacement marker.
+				continue // safety: masking accepts values formed with '*' adjacent to a replacement marker.
 			}
 			if strings.Contains(rendered, spelling) || strings.Contains(decoded, spelling) {
 				t.Fatalf("iteration %d: spelling %q survived in %q", iteration, spelling, rendered)
@@ -198,7 +198,7 @@ func FuzzStreamReplacementClosure(f *testing.F) {
 			t.Skip()
 		}
 		value := "private-" + strings.ToValidUTF8(string(data), "?")
-		// Decision 49 also accepts values formed with '*' adjacent to a replacement marker.
+		// safety: masking also accepts values formed with '*' adjacent to a replacement marker.
 		if strings.Contains(value, "*") {
 			t.Skip()
 		}
@@ -222,7 +222,7 @@ func FuzzStreamReplacementClosure(f *testing.F) {
 		for range 3 {
 			for _, pattern := range m.Values() {
 				if strings.Contains(pattern, "*") {
-					continue // Decision 49 accepts this marker-edge residual.
+					continue // safety: masking accepts this marker-edge residual.
 				}
 				if strings.Contains(view, pattern) {
 					t.Fatalf("registered spelling %q survived in %q", pattern, output.String())

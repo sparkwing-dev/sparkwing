@@ -1,4 +1,4 @@
-# EKS kikd-prod / ArgoCD input. Replace public IDs and image coordinates with
+# EKS / ArgoCD input. Replace public IDs and image coordinates with
 # one built release. Digests below are syntactic examples, not published images.
 controller:
   image:

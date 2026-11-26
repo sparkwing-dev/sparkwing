@@ -16,7 +16,7 @@ import (
 func operatorFixture(t *testing.T) (f *identityFixture, operator, owner signedIn) {
 	t.Helper()
 	f, _ = billingFixture(t)
-	operator = f.user("op", "korey@example.com")
+	operator = f.user("op", "avery@example.com")
 	owner = f.user("o", "olga@example.com")
 	f.srv.WithOperatorAccounts([]string{" " + operator.id + " "})
 	return f, operator, owner

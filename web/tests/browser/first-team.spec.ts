@@ -37,8 +37,8 @@ test("an approved session can select an existing team without creating another",
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Choose a team" })).toBeVisible();
   await page.getByRole("button", { name: "Choose a team", exact: true }).click();
-  await page.getByRole("menuitemradio", { name: /Korey's space/ }).click();
-  await expect(page.getByRole("button", { name: "Korey's space owner" })).toBeVisible();
+  await page.getByRole("menuitemradio", { name: /Avery's space/ }).click();
+  await expect(page.getByRole("button", { name: "Avery's space owner" })).toBeVisible();
   expect(fixture.mutations).toEqual(["POST /api/v1/me/active-team"]);
   expect(fixture.requestsWithoutTeam).toEqual([]);
 });

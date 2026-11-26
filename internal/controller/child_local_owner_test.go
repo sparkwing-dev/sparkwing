@@ -44,7 +44,7 @@ func TestNativeChildOwnerBudgetFollowsAuthenticatedLocalPlacement(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"deploy-kikd-prod"}}}
+			request.Options.Requires = runspec.Setting[[]string]{Optional: runspec.Optional[[]string]{Set: true, Value: []string{"deploy-prod"}}}
 			request.Dispatch, request.Origin, request.ExecutionLocation = runspec.DispatchHost, runspec.OriginTrigger, "local"
 			if tc.local {
 				request.Origin = runspec.OriginLocal
@@ -98,7 +98,7 @@ func TestNativeChildOwnerBudgetFollowsAuthenticatedLocalPlacement(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !slices.Equal(child.Request.Request.Options.Requires.Value, []string{"deploy-kikd-prod"}) {
+			if !slices.Equal(child.Request.Request.Options.Requires.Value, []string{"deploy-prod"}) {
 				t.Fatalf("child planning lost its owned-runner requirement: %+v", child.Request.Request.Options.Requires)
 			}
 			want := limits.RunDeadline

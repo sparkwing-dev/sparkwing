@@ -823,7 +823,7 @@ operator's direct browser session with its CSRF proof. It creates the team,
 owner account, membership and first credential in one audited transaction.
 The credential is returned once. Members sign the CLI in with `sparkwing login --controller https://HOST`, and
 enroll their own workstation with
-`sparkwing runners add --profile work --runner korey-laptop --personal`;
+`sparkwing runners add --profile work --runner my-laptop --personal`;
 both are approved in the browser (see [device sign-in](#device-sign-in)).
 Shared runners take an existing team administrator's session instead:
 `sparkwing runners add --session-stdin --profile work --runner build-box --repos 'github.com/acme/*'`,

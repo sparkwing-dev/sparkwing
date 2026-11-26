@@ -133,7 +133,7 @@ for (const waitlisted of [true, false]) {
     test(`${waitlisted ? "waitlisted" : "teamless"} account reaches deletion from Home at ${width}px`, async ({ page }, testInfo) => {
       await onboardingFixture(page, { noTeam: true });
       await page.route("**/api/v1/me", route => route.fulfill({ json: {
-        user: { id: "u1", email: "korey@example.test", name: "Korey" },
+        user: { id: "u1", email: "avery@example.test", name: "Avery" },
         active_team: null, waitlisted, memberships: [], invitations: [],
       } }));
       await page.route("**/api/v1/me/team-deletions", route => route.fulfill({ json: { deletions: [], truncated: false, next_cursor: "" } }));

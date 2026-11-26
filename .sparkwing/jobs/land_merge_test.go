@@ -239,7 +239,7 @@ func TestLandMergesIndependentReleaseFragments(t *testing.T) {
 		"CHANGELOG.md": changelogWith(), "pkg/docs/changelog.md": changelogWith(),
 		"docs/migrations/_unreleased.md":            "# Unreleased migrations\n\nNo breaking changes so far.\n",
 		"pkg/docs/mirror/migrations/_unreleased.md": "# Unreleased migrations\n\nNo breaking changes so far.\n",
-		"design/rewrite/ORIENTATION.md":             "| Rule | Owner | Test |\n|---|---|---|\n",
+		"CONTRIBUTING.md":                           "| Rule | Owner | Test |\n|---|---|---|\n",
 	}
 	for _, name := range []string{".gitattributes", "bin/sync-docs.sh"} {
 		body, err := os.ReadFile(filepath.Join("..", "..", name))
@@ -257,7 +257,7 @@ func TestLandMergesIndependentReleaseFragments(t *testing.T) {
 		return map[string]string{
 			"docs/changes/" + name + ".md": fragment, "pkg/docs/mirror/changes/" + name + ".md": fragment,
 			"docs/migrations/unreleased/" + name + ".md": migration, "pkg/docs/mirror/migrations/unreleased/" + name + ".md": migration,
-			"design/rewrite/ORIENTATION.md": files["design/rewrite/ORIENTATION.md"] + "| " + name + " | owner | guard |\n",
+			"CONTRIBUTING.md": files["CONTRIBUTING.md"] + "| " + name + " | owner | guard |\n",
 		}
 	}
 	r.commit(r.dev, entries("branch"), "branch entry")
@@ -279,7 +279,7 @@ func TestLandMergesIndependentReleaseFragments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orientation := r.git(r.dev, "show", "HEAD:design/rewrite/ORIENTATION.md")
+	orientation := r.git(r.dev, "show", "HEAD:CONTRIBUTING.md")
 	for _, name := range []string{"branch", "main"} {
 		if strings.Count(string(body), "**"+name+":**") != 1 || strings.Count(guide, "## "+name+"\n") != 1 || strings.Count(orientation, "| "+name+" |") != 1 {
 			t.Fatalf("lost or duplicated %s", name)

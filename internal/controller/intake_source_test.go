@@ -358,7 +358,7 @@ func TestTriggerIntakeReservesGitHubProvenanceForTheWebhook(t *testing.T) {
 	}
 }
 
-// Decision 68: only code the controller fetches through the team's GitHub App,
+// Only code the controller fetches through the team's GitHub App,
 // as source selection resolves it, proves the repository for its pipeline
 // secrets. Requests take the CLI's shape: an unqualified current branch with
 // the locally resolved commits, and a configured source: pin.
@@ -383,7 +383,7 @@ func TestFetchedGitHubRepositoryFollowsSourceSelection(t *testing.T) {
 	}
 	cli := runspec.Request{Pipeline: "ci", Git: runspec.Git{Repository: runspec.Repository{Key: "gh:701"}, Ref: "main", SHA: head}, Source: runspec.Source{Ref: head, Location: runspec.SourceLocation{RemoteURL: "https://github.com/acme/app"}}}
 	app := &Server{githubApp: &githubAppState{}}
-	// Decision 72: the claimed head is the branch or tag the App resolved, and
+	// safety: the claimed head is the branch or tag the App resolved, and
 	// none when the code ran at a pinned branch's commit.
 	for name, tc := range map[string]struct {
 		change func(*runspec.Request)
@@ -436,9 +436,9 @@ func TestFetchedGitHubRepositoryFollowsSourceSelection(t *testing.T) {
 
 // The console names only a repository and branch. Intake resolves that intent
 // once through the App, admits the selected commit, and seals the repository
-// that selection proved for pipeline secrets and OIDC repository claims
-// (decision 70), with the owner/name GitHub reported, never the request's text,
-// and the branch head it ran for the OIDC ref and sha claims (decision 72).
+// that selection proved for pipeline secrets and OIDC repository claims,
+// with the owner/name GitHub reported, never the request's text,
+// and the branch head it ran for the OIDC ref and sha claims.
 func TestConsoleTriggerAdmitsSelectedSourceAndProvesRepository(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

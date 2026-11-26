@@ -10,7 +10,7 @@ async function selectRepository(page: Page, name = "acme/app") {
 }
 
 async function confirmGitHub(page: Page) {
-  await page.getByLabel("My enabled workflow starts a Sparkwing runner on pushes for team korey-gam", { exact: true }).check();
+  await page.getByLabel("My enabled workflow starts a Sparkwing runner on pushes for team avery-dev", { exact: true }).check();
 }
 
 async function accessible(page: Page) {
@@ -27,10 +27,10 @@ for (const width of [1440, 390]) {
     const activeTab = await page.getByRole("link", { name: "GitHub", exact: true }).boundingBox();
     expect(activeTab?.x).toBeGreaterThanOrEqual(0);
     expect((activeTab?.x ?? 0) + (activeTab?.width ?? 0)).toBeLessThanOrEqual(width);
-    await expect(page.getByLabel("Team slug", { exact: true })).toHaveText("korey-gam");
+    await expect(page.getByLabel("Team slug", { exact: true })).toHaveText("avery-dev");
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.getByRole("button", { name: "Copy Team slug", exact: true }).click();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("korey-gam");
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("avery-dev");
     expect(fixture.mutations).toEqual([]);
     await expect(page.getByText("Run location: not selected", { exact: true })).toBeVisible();
     const enable = page.getByRole("button", { name: "Enable runs on GitHub Actions", exact: true });
@@ -52,7 +52,7 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("button", { name: "Copy Starter workflow", exact: true })).toBeHidden();
     await accessible(page);
     await page.getByText("Need a workflow? Copy this starter", { exact: true }).click();
-    await expect(page.getByLabel("Starter workflow", { exact: true })).toContainText("--team korey-gam");
+    await expect(page.getByLabel("Starter workflow", { exact: true })).toContainText("--team avery-dev");
     await expect(page.getByRole("link", { name: "Download workflow" })).toHaveAttribute("download", "sparkwing.yaml");
     await page.getByText("Other run locations and separate permissions", { exact: true }).click();
     await expect(page.getByRole("button", { name: "Revoke GitHub Actions permission" })).toBeVisible();
@@ -73,8 +73,8 @@ test("new team goes directly from local provider sign-in to guided repository se
     await expect(page).toHaveURL(`${dashboard.origin}/team/new`);
     const fixture = await onboardingFixture(page, { connected: false });
     await page.reload();
-    await page.getByRole("textbox", { name: "Name", exact: true }).fill("Korey's space");
-    await page.getByRole("textbox", { name: /Slug/ }).fill("korey-gam");
+    await page.getByRole("textbox", { name: "Name", exact: true }).fill("Avery's space");
+    await page.getByRole("textbox", { name: /Slug/ }).fill("avery-dev");
     await page.getByRole("button", { name: "Create team", exact: true }).click();
     await expect(page).toHaveURL(`${dashboard.origin}/team/github`);
     await expect(page.getByRole("heading", { name: "1. Connect GitHub" })).toBeVisible();
@@ -113,7 +113,7 @@ test("saved permissions need only workflow confirmation and never grant again on
   await expect(page.getByRole("heading", { name: "Ready for your next push" })).toBeVisible();
   await page.reload();
   await selectRepository(page);
-  await expect(page.getByLabel("My enabled workflow starts a Sparkwing runner on pushes for team korey-gam", { exact: true })).not.toBeChecked();
+  await expect(page.getByLabel("My enabled workflow starts a Sparkwing runner on pushes for team avery-dev", { exact: true })).not.toBeChecked();
   await expect(page.getByText("GitHub Actions access: allowed", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Ready for your next push" })).toHaveCount(0);
   expect(fixture.mutations).toEqual([]);
@@ -165,7 +165,7 @@ test("retry finishes a partial save without granting Actions access twice", asyn
   await expect(page.getByRole("heading", { name: "Ready for your next push" })).toBeVisible();
   await selectRepository(page, "acme/other");
   await selectRepository(page);
-  await expect(page.getByLabel("My enabled workflow starts a Sparkwing runner on pushes for team korey-gam", { exact: true })).not.toBeChecked();
+  await expect(page.getByLabel("My enabled workflow starts a Sparkwing runner on pushes for team avery-dev", { exact: true })).not.toBeChecked();
   await expect(page.getByRole("heading", { name: "Ready for your next push" })).toHaveCount(0);
 });
 
@@ -182,14 +182,14 @@ test("CLI access leads with browser sign-in and the exact team slug", async ({ p
   const fixture = await onboardingFixture(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/team/machines");
-  await expect(page.getByLabel("CLI sign-in command", { exact: true })).toContainText("--team korey-gam --profile korey-gam");
-  await expect(page.getByText("sparkwing runs list --profile korey-gam", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("CLI sign-in command", { exact: true })).toContainText("--team avery-dev --profile avery-dev");
+  await expect(page.getByText("sparkwing runs list --profile avery-dev", { exact: true })).toBeVisible();
   await expect(page.getByText("To renew a different profile", { exact: false })).toBeVisible();
   await expect(page.getByText("This also replaces an expired CLI token.", { exact: false })).toBeVisible();
   await page.getByRole("link", { name: "Enter a code from your terminal" }).click();
   await page.getByRole("textbox", { name: "Device code" }).fill("BCDF-GHJK");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Approve sign-in for Korey's desktop?", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Approve sign-in for Avery's desktop?", exact: true })).toBeVisible();
   expect(fixture.mutations).toEqual(["POST /api/v1/auth/device/lookup"]);
   await accessible(page);
 });

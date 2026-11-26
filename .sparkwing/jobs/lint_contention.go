@@ -12,7 +12,7 @@ import (
 )
 
 // perf: linting both modules measures about four to five minutes on a loaded box; the gate allows ten,
-// including any wait for a neighbor's lint (decision 96).
+// including any wait for a neighbor's lint.
 const gateLintDeadline = 10 * time.Minute
 
 const golangciContention = "parallel golangci-lint is running"

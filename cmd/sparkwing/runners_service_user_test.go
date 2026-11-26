@@ -60,7 +60,7 @@ func installedReply(account string) func([]string, []byte) ([]byte, error) {
 			Account: runnerservice.Account{Name: account, UID: 990, GID: 990, Home: home}, Created: true,
 			Config:      home + "/.config/sparkwing/config.yaml",
 			Service:     runnerServiceResult{Status: "started", Detail: "the runner service runs as " + account, Path: "/etc/systemd/system/sparkwing-runner-" + account + ".service"},
-			DroppedPath: []string{"/home/korey/.asdf/shims"},
+			DroppedPath: []string{"/home/avery/.asdf/shims"},
 		})
 	}
 }
@@ -102,7 +102,7 @@ func TestRunnersAddServiceUserHandsTheCredentialToThePrivilegedStep(t *testing.T
 	if slices.ContainsFunc(*f.calls, func(call string) bool { return strings.Contains(call, "--user") }) {
 		t.Fatalf("a user service was installed: %q", *f.calls)
 	}
-	for _, want := range []string{"runs as sw-ci", "/var/lib/sparkwing/sw-ci/.config/sparkwing/config.yaml", "--max-concurrent is the only cap", "/home/korey/.asdf/shims", "runners delete --profile prod --service-user sw-ci"} {
+	for _, want := range []string{"runs as sw-ci", "/var/lib/sparkwing/sw-ci/.config/sparkwing/config.yaml", "--max-concurrent is the only cap", "/home/avery/.asdf/shims", "runners delete --profile prod --service-user sw-ci"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output lacks %q:\n%s", want, out)
 		}
@@ -268,7 +268,7 @@ func newInstallFixture(t *testing.T) *installFixture {
 
 func TestRunnersInstallServiceWritesFilesAsTheAccountAndInstallsItsUnit(t *testing.T) {
 	fx := newInstallFixture(t)
-	payload := serviceUserEnrollment{Credential: "swk_000000001_secret", RunnerBinary: "/usr/local/bin/sparkwing-runner", Path: "/home/korey/.asdf/shims:/usr/bin:/bin"}
+	payload := serviceUserEnrollment{Credential: "swk_000000001_secret", RunnerBinary: "/usr/local/bin/sparkwing-runner", Path: "/home/avery/.asdf/shims:/usr/bin:/bin"}
 	installed, err := installServiceUser(t.Context(), "linux", "sw-ci", payload)
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +285,7 @@ func TestRunnersInstallServiceWritesFilesAsTheAccountAndInstallsItsUnit(t *testi
 			t.Fatalf("unit lacks %q:\n%s", line, body)
 		}
 	}
-	if !slices.Equal(installed.DroppedPath, []string{"/home/korey/.asdf/shims"}) || installed.Account.Name != "sw-ci" || installed.Service.Status != "started" {
+	if !slices.Equal(installed.DroppedPath, []string{"/home/avery/.asdf/shims"}) || installed.Account.Name != "sw-ci" || installed.Service.Status != "started" {
 		t.Fatalf("installed = %+v", installed)
 	}
 }

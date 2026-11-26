@@ -1,6 +1,6 @@
 # Delivery
 
-Use the smallest evidence that covers the change. A lead agent owns the decision;
+Use the smallest evidence that covers the change. The author of a change owns the decision;
 this file is a menu and checklist, not a command that every change must run.
 
 ## Xwing workflows
@@ -253,13 +253,6 @@ Git fixture is exercised by
 `TestAffectedTestsRejectUnsafeGitInUnrelatedTestPackages`. These tags share the
 existing critical phase and deadline. Documentation-only selection is unchanged.
 
-Measured on 2026-11-12, 13 guard bodies excluding the SDK documentation guards
-summed to 5.54 seconds in one shared-host run. The eight-package command for the 11 root guards took
-81.09 seconds wall and 137.45 seconds CPU, including compilation and waited
-children, at load1 13.2-17.5. The two SDK guards ran with `-race` in 5.75 seconds
-wall and 4.40 seconds CPU. These mixed-cache command timings do not measure
-incremental Land latency. The critical-size guard counts all committed modules.
-
 The shared affected-test runner sets nonempty `GOFLAGS=-mod=readonly` for
 selection and execution. This overrides process and saved flags while keeping
 other saved Go settings, including `GOPROXY`, `GOPRIVATE` and `GONOSUMDB`.
@@ -298,62 +291,6 @@ lanes and leave critical ordering unchanged. Store shards remain one admitted
 package with their existing command order and slots. Hook and Gate callers
 keep their collect-all ordering. The list uses no runtime-learned durations.
 
-Measured on 2026-11-11, one broad queued diagnostic on `3da0442b9` selected
-66 root and two pipeline short packages on a shared 16-logical-CPU host.
-Its allowance seven assigned one pipeline worker, three ordinary root
-workers and one per store shard. Top-level bodies were forced with
-`-count=1`; package commands used `-p 1` and their assigned runtime width.
-
-| Start-first package, in hint order | Observed command span, s |
-| --- | ---: |
-| `cmd/sparkwing` | 444.109 |
-| `internal/controller` | 426.233 |
-| `internal/store` (three overlapping shards) | 357.109 |
-| `sparkwing-pipelines/jobs` | 316.731 |
-| `internal/bincache` | 308.097 |
-| `tests/acceptance` | 202.705 |
-
-The runner took 835.553 s. Acceptance started 605.522 s after the first test
-command and was the only remaining selected short command for the final
-189.956 s. These are baseline costs, not measured savings from the hints.
-Package spans include Go driver/build and test-binary work; store's shard
-durations are not added. Shared load1 median/max was 13.763/22.586. This
-single forced-body sample does not measure default Go result-cache overhead
-or an end-to-end Land. Narrow selections that already fit their lanes have
-little admission-order benefit. Changing order can change contention,
-cache sharing and which failure is observed first; performance needs paired
-measurements without changing coverage or fail-fast behavior.
-
-Three interleaved FIFO/hint pairs on 2026-11-11 used the identical
-`a59a9a28f` tree, the same 13-file cohort and allowance seven. FIFO removed
-only the coordinator's hint call through a Go overlay; nested tests used the
-candidate source in both arms. Each sample used one ordinary Go slot, with
-`-count=1`, shared build caches and no load-based exclusions.
-
-| Pair | FIFO runner, s | Hint runner, s | Runner change | Short-span change, s |
-| --- | ---: | ---: | ---: | ---: |
-| 1 | 727.676 | 695.567 | -4.41% | -50.971 |
-| 2 | 704.137 | 575.042 | -18.33% | -125.424 |
-| 3 | 652.664 | 652.071 | -0.09% | +2.938 |
-
-Runner medians were 704.137 / 652.071 s (FIFO / hints), a 7.39% reduction
-in the ratio of medians. Ranges were 652.664-727.676 / 575.042-695.567 s;
-inclusive IQRs were 37.506 / 60.263 s. The paired median runner saving was
-32.109 s. All six had exact top-level run/pass/skip parity: 7,908 root and
-774 pipeline short test runs, plus 31 Linux critical passes and seven
-Windows-only critical declarations absent. Selection, all 81 commands,
-lane widths, atomic store admission and the critical join were unchanged.
-
-The third pair was effectively tied: its short span increased 2.938 s,
-while its critical span fell 3.609 s. These samples do not establish a
-stable, meaningful saving. FIFO/hint load1 medians were 7.333/15.734,
-13.382/14.344 and 10.401/16.342. Other owners, load, host iowait and steal
-were recorded at 1 Hz without replacing samples. One shared host, one
-time window, fixed FIFO-before-hints order and changing cache/compile
-context limit attribution. This measures forced-body affected tests, not
-default result-cache processing or end-to-end Land. Existing deadlines
-remain unchanged.
-
 Compiler identity discovery stats a PATH candidate before resolving its symlinks.
 A missing tool costs one stat per nonempty PATH directory. Existing tools retain
 the resolved path, size and modification-time identity. There is no process memo,
@@ -362,188 +299,11 @@ Pipeline and real-Go SDK installation fixtures restrict PATH to the directories
 supplying their required tools when they do not test PATH discovery. Product
 and job PATH remain unchanged.
 
-A before/after pair on 2026-11-11 used base `2b52cfec5` and candidate
-`abc8e9759`, Go 1.26.11, `GOFLAGS=-mod=readonly`, `GOMAXPROCS=7` and `-p 1`.
-Both outer commands retained the real WSL PATH, including 32 mounted Windows
-entries. Each package command started with its own empty private GOCACHE and
-private home. Default test-result caching remained enabled, with no `-count`;
-all four commands ran bodies and saved results. Compilation is outside the
-test-executable and post-`ok` intervals below.
-
-| Package | Executable before / after, s | `ok` to first cache-save observation before / after, s |
-| --- | ---: | ---: |
-| `internal/bincache` | 212.745 / 39.720 | 391.489 / 4.997 |
-| `cmd/sparkwing` | 340.905 / 239.942 | 132.079 / 17.215 |
-
-Bincache testlog operations fell from 930,770 to 312,840, with mounted Windows
-file operations falling from 144,130 to zero. CLI operations fell from 805,200
-to 643,662, with mounted Windows operations falling from 35,728 to 1,024.
-Existing test run/pass/skip inventories matched exactly, and the three added
-identity/call-count guards passed. Whole command walls, including cold build
-work and excluding slot wait, were 667.806 / 73.837 s for bincache and
-673.888 / 469.536 s for CLI.
-
-This is one pair per package on a shared host, combining the product scan
-change with fixture PATH isolation. It does not isolate their separate gains
-or establish stable end-to-end Land savings. Bincache load1 medians were
-13.438 / 10.359; CLI medians were 11.038 / 11.749. Save markers were observed
-with nominal 100 ms polling. Both CLI CPU observers missed their final exit
-sample after the save markers; raw Go timestamps and the input intervals were
-retained. These measurements change no test selection, gate tier or deadline.
-
-Three interleaved SDK installation package pairs on 2026-11-12 used base
-`76afada1a` and code `11610638c`, Go 1.26.11, `GOMAXPROCS=3`, `-p 1`,
-`-short` and default result caching. All fifteen original top-level cases were
-selected; the two short-mode skips stayed unchanged. The new ambient-compiler
-fixture guard was checked separately. Each command copied the same private
-compiled-only cache seed and used fresh product/user state. The outer PATH
-kept its 32 mounted entries; only the candidate's real-Go fixtures narrowed
-their tool directories. No result-cache replay replaced test bodies.
-
-| Measure, seconds | Before median (range) | After median (range) |
-| --- | ---: | ---: |
-| Whole Go command wall | 102.746 (100.929–103.684) | 45.569 (45.468–45.753) |
-| Whole Go command CPU | 71.797 (70.833–72.121) | 62.622 (62.343–62.810) |
-| Native test wall | 65.867 (64.577–66.060) | 43.335 (43.149–43.430) |
-| Native test CPU | 64.877 (63.468–65.503) | 60.042 (59.663–60.141) |
-| Native `ok` to terminal package event | 36.251 (34.236–38.543) | 1.694 (1.666–1.767) |
-
-CPU is wait4 user+sys including waited descendants in each stated scope;
-the native and whole-command columns overlap. Whole-command wall fell
-54.85%, 55.75% and 55.87% per pair; CPU fell 13.17%, 13.17% and 11.33%.
-Mounted testlog stats fell from 5,376 / 5,632 / 5,888 to zero. Outcome
-inventories matched after normalizing two local-SDK cases' temporary path
-names. Native quick-check payloads retain their per-invocation random inputs.
-The full candidate package also passed all 30 parent/leaf cases with race
-detection, including both real-compiler cases skipped by short mode.
-
-Cache copying, compile-only priming, npm preparation and manifest hashing are
-outside the observations. Native CPU supervision restores Go's usual local
-testlog argument, which `-exec` otherwise omits; retained logs and cache-save
-events prove input replay stayed active. Load1 medians were 4.55 / 3.31,
-2.82 / 2.88 and 2.92 / 2.98. Two other Go-slot holders were present, and all
-samples were retained. This is one shared WSL host and one time window,
-with exact native timestamps and 1 Hz host/process samples. It measures the
-SDK package, not end-to-end Land, and changes no tier, selection or deadline.
-
-A nine-sample study on 2026-11-11 compared unsplit source U at `b61a1fe4e`,
-store shards S at `340ebed3f`, and module overlap with store shards M at
-`406208403`. All share root b61 and the same 13-file selection: two pipeline
-packages, 66 root packages and 37 critical declarations. All 30 runnable Linux
-critical bodies passed; seven declarations are Windows-only. The SDK module
-was unselected, so this timing does not measure three-module execution.
-
-The study used Go 1.26.11, `GOFLAGS=-mod=readonly` and top-level `-count=1`.
-Compile-only warmup covered two pipeline packages and the union of 69 root
-short/critical packages, including the three critical-only packages. All nine
-samples ran in one 92.37-minute shared-desktop window, ordered U/S/M, S/M/U,
-M/U/S. Each variant had three observations with forced test bodies. The common
-command allowance was seven: U ran pipeline then root at seven; S ran pipeline
-at seven, then root at four plus three width-one store shards; M overlapped
-pipeline at one with root at three plus three width-one store shards.
-
-Shared runner wall times in seconds, excluding Go-slot wait:
-
-| Variant / source | Round 1 | Round 2 | Round 3 | Median | Min / max | Inclusive IQR |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| U, Unsplit (`b61a1fe4e`) | 684.559 | 589.469 | 612.010 | 612.010 | 589.469 / 684.559 | 47.545 |
-| S, Store shards (`340ebed3f`) | 683.201 | 574.933 | 629.455 | 629.455 | 574.933 / 683.201 | 54.134 |
-| M, Modules together (`406208403`) | 603.686 | 555.893 | 578.596 | 578.596 | 555.893 / 603.686 | 23.897 |
-
-Statistics use the unrounded observations; IQR uses inclusive quartiles.
-Min/max and IQR describe these observations, not confidence intervals. S's
-median was 2.8506% longer than U's. Its same-round changes were -0.1983%,
--2.4659% and +2.8506%, so store sharding did not establish a consistent whole-run
-improvement. The median of each run's slowest store package JSON elapsed time
-fell from 452.270 s to 185.226 s. That compares U's single store package result
-with S's slowest shard result, not summed command wall time.
-
-M's median runner time was 5.4597% below U and 8.0799% below S. M finished
-sooner than S in all three rounds, by 11.6385%, 3.3116% and 8.0799%.
-Pipeline command median increased from S's 96.549 s to M's 153.177 s, while
-root short span increased from 511.392 s to 569.457 s. The overlapped runs had
-lower runner wall in this cohort; overlapping component times cannot be added.
-M includes store sharding, so this study does not isolate module overlap without
-store sharding or establish that sharding is necessary inside M.
-
-All root short and critical test inventories and outcomes matched. S adds
-three passing pipeline guards, and M adds two more. One unchanged pipeline
-capacity guard passes in U/S and skips in M because its test binary starts at
-width one. Source comparisons disclose these guards and candidate documentation
-changes. Every run joined all short commands before full critical tests, stayed
-within overlapping command width seven and completed with no owned survivors.
-
-These three interleaved shared-host observations do not establish causality,
-a flake rate or a general latency guarantee. Host load varied.
-These observations supersede the earlier provisional single-pair claim.
-Raw sources, plans, command/test JSON, resource traces, receipts and the final
-independent recount are retained under
-`~/evidence/sparkwing/land-test-speedups-2026-11-11/repeated-speed-study/`.
-
-Keep the 45-minute job execution ceiling. The slowest runner observation here
-was 684.559 s, leaving about 33m35s below that ceiling for runner work alone.
-This study does not time cold dependency installation, all wider selections or
-other host CPU counts; job preparation and shared-host contention can consume
-more time. The 25-minute Go timeout applies to each package test binary, not
-the whole command. Neither deadline nor the existing tier allocation changes.
-
 The affected runner installs missing locked SDK dependencies with
 `npm --prefix sdk/typescript ci --ignore-scripts --no-audit --no-fund` when
 acceptance or the native TypeScript host package is selected. It also prepares
 dashboard Node dependencies when acceptance needs them. `xwing app install`
 includes both dependency roots.
-
-Warm-build-cache observations on Go 1.26.10, with `GOMAXPROCS=2`, `-p 2`,
-`-short -count=1` and an explicit compile-only warm-up on 2026-11-10:
-
-| Change shape | Selected short packages | Selection wall time | Short command wall time | Result |
-| --- | ---: | ---: | ---: | --- |
-| Changelog only | 0 | 1.03 s | No command | Passed |
-| `internal/doccheck` | 1 root | 0.92 s | 7.37 s | Passed |
-| Broad 36-file change | 2 pipeline + 65 root | 0.98 s | 1432.94 s | Passed |
-
-The separate 37-critical-test invocation took 14.99 s and passed. These are
-individual observations on shared hardware, with SDK and dashboard dependencies
-installed. The broad short commands took 65.67 s in the pipeline module and
-1367.27 s in the root module. That observation originally justified the
-45-minute job ceiling. It is an execution ceiling, not a latency target or a
-guarantee for every change shape.
-
-A matching-width replay on 2026-11-11 pinned source `15834b6d4`, Go 1.26.10,
-the same 13-file selection, warm compilation and `-count=1`. It selected two
-pipeline packages, 66 root packages and 37 critical declarations in ten
-packages. Modules and short/critical commands ran sequentially:
-
-| Command allowance (`GOMAXPROCS` / `-p`) | Pipeline short | Root short | Critical | Replay wall | Result |
-| --- | ---: | ---: | ---: | ---: | --- |
-| 1 / 1 | 164.48 s | 1941.21 s | 24.33 s | 2130.45 s | Passed |
-| 7 / 7 | 91.90 s | 662.59 s | 8.98 s | 763.88 s | Passed |
-
-The seven-worker observation was 64.1% shorter and left 32m16s below the
-45-minute ceiling. Retain that ceiling for wider changes, cold dependency or
-build preparation, shared-host load and timeout diagnostics. Two completed
-local queued lands also recorded 664 s and 729 s at `-p 8`; those used different
-revisions and selections and are operational context, not the matched replay.
-The earlier inherited-limit land exceeded 45 minutes before completing its
-66 root packages and critical set.
-
-Both replay widths used empty process `GOFLAGS`, private homes and no saved
-Go environment file, isolating command width. They do not time the later
-explicit readonly-flag correction, which has separate unit and native
-execution proof. Both entered the same 8,592 top-level tests; root and critical
-outcomes matched. One pipeline capacity guard skipped at width one and passed
-at seven. All 30 Linux critical bodies passed; seven other selected declarations
-are Windows-only. Root test-package lifetimes peaked at one and seven concurrent
-packages. These are single shared-host observations: mean one-minute load,
-including the replay, was 12.47 and 22.47 respectively. Replay wall includes
-less than half a second of driver bookkeeping.
-
-An installed-candidate controller test-file change selected 2 pipeline and 36
-root packages plus the full critical set. With native `GOMAXPROCS=8`, `-p 8`,
-and `GOFLAGS=-trimpath`, PrePush passed in 757.03 s including preparation; the
-affected phase took 746.80 s. Uncached package durations included store 462.93 s,
-CLI 287.20 s, controller 277.58 s and acceptance 191.44 s; package durations
-overlap. Its changelog-only affected phase took 1.08 s and selected no tests.
 
 Race tests remain a separate local or hosted lane, available with
 `sparkwing run gate --only race-touched`. The broad shape selects five
@@ -568,14 +328,7 @@ binaries, home resolution, the docs mirror, changelog lint and links, the
 required changelog entry, the docs sidebar, the OpenAPI and API-snapshot checks and the
 generated CLI reference (`bin/gen-cli-docs.sh --check`), Markdown lint, config-reference
 drift and wire-cut coverage. Each answers in
-seconds with a warm build cache. Warm-tree wall times measured on 2026-11-09
-with `GOWORK=off GOFLAGS=-trimpath GOMAXPROCS=2` after one warm-up run:
-
-| Policy check | Command | Wall time |
-| --- | --- | --- |
-| Markdown lint | `npx --yes markdownlint-cli2@0.23.2` | 2.90 s |
-| Config reference | `bash bin/gen-config-docs.sh --check` | 0.27 s |
-| Wire-cut coverage | `go -C .sparkwing test -p 2 ./jobs -run ^TestRepositoryUnreleasedSectionDeclaresEveryWireCut$ -count=1` | 1.49 s |
+seconds with a warm build cache.
 
 The `windows-compile` policy step uses the existing changed Go package and
 committed module selection. It compiles tests with `GOOS=windows GOARCH=amd64`
@@ -586,17 +339,6 @@ with no eligible amd64 files compiles only for arm64.
 Negative-only `!windows` constraints do not select a package. Outputs use disposable
 scratch, and compilation shares the normal Go build cache. These are cross-compiles;
 native Windows execution remains separate coverage.
-
-For the Windows host-execution package, the first observed amd64 compile took
-11.01 s and an arm64 compile with cold architecture dependencies took 124.51 s.
-Independent warm-cache repeats took 2.98 s and 2.57 s respectively, on the desktop
-with `GOFLAGS='-trimpath -p=1'`. The arm64 cost is charged only when its source
-requires that target. Raw commands and timings are retained in the
-Windows test-compilation evidence under `~/evidence/sparkwing/`.
-The guard itself compiling both `internal/nodehost` and `cmd/sparkwing` took
-169.76 s on its first pass with uncached CLI dependencies; subsequent passes
-were 11.30 s and 13.79 s (median 12.54 s), sharing that cache. These timings
-include target selection and scratch cleanup.
 
 Gate and land request full source history and tags. Wire-cut coverage refuses
 a checkout without a reachable release tag before invoking the existing test.
@@ -626,7 +368,7 @@ Model time includes the reviewer's repository reads and any nested reviewers.
 Prompts and findings never appear in these timing logs. Standards prompts keep
 the complete rule bodies and omit card routing metadata and terminal vault
 backlink lists.
-The gate selects its checks from the change scope (decision 96): vet, build, lint,
+The gate selects its checks from the change scope: vet, build, lint,
 the critical tests and the TypeScript SDK suite run only when the change
 reaches Go source, a non-Markdown file inside a Go package, module files,
 `.golangci.yml`, the store schema or, for the SDK suite, `sdk/typescript/`. A
@@ -665,7 +407,7 @@ merges, gate run, review record path and result). The gate's `test` step reports
 When `origin/main` is not an ancestor of HEAD at push time, the `push` step
 merges it into the branch in the checkout (`git merge --no-ff`, the default
 git identity and signing; never a rebase). Independent changelog and migration
-fragments merge as separate files. Orientation table additions use union merge;
+fragments merge as separate files. `CONTRIBUTING.md` table additions use union merge;
 changes to the same rule need review. The push step
 then builds the affected package closure and repeats the changelog, OpenAPI,
 API-snapshot, default and qatrust vet, and fast lint checks on the merged tree.
@@ -758,11 +500,10 @@ pipeline binary's source key walks and removed with the worktree. A cache
 shared between trees replays findings under the other tree's paths, so it is
 never shared.
 
-The full gate's `lint` step allows ten minutes (decision 96; both modules measure
-four to five minutes under load). It runs golangci-lint with
+The full gate's `lint` step allows ten minutes. It runs golangci-lint with
 `--allow-serial-runners`, so a neighbor's lint queues it on golangci-lint's own
 lock, `$TMPDIR/golangci-lint.lock`, and that wait counts against the ten
-minutes (Korey, 2026-11-04, replacing the gate's own lock manager).
+minutes.
 Affected landing lint keeps all configured linters, uses bounded workers and
 its private worktree cache, and passes `--allow-parallel-runners` to avoid
 queueing behind a full scan.
@@ -854,9 +595,9 @@ are added. Twelve-month support windows use GitHub's `published_at`, not the
 recovery date. The job shares `release-publication` with asset publication, so a
 late older release cannot replace a newer index with an old snapshot.
 
-The publisher writes only `versions.json` and `versions.json.sig` in
-`kikd-prod-sparkwing-website`, then invalidates both paths on CloudFront
-`E3V178ZREDVPYN`. It reads back the exact bytes from S3 and the public hostname.
+The publisher writes only `versions.json` and `versions.json.sig` in the
+website bucket named in `bin/publish-release-index.sh`, then invalidates both
+paths on the website's CloudFront distribution. It reads back the exact bytes from S3 and the public hostname.
 Objects use a 60-second cache lifetime. Clients can encounter a mismatched pair
 during the two uploads and fail verification until the pair is complete.
 Existing clients retain their last verified index.
@@ -886,9 +627,10 @@ runs and prereleases never publish this stable index.
 
 A run retains the generated pair as `signed-release-index` for seven days,
 including when an upload fails. An interrupted upload may leave mismatched
-objects and block another dispatch. Restore that artifact's matched pair using
-the procedure in [the recovery runbook](design/release-index-recovery.md), then
-rerun the index-only dispatch. Never bootstrap over a damaged signed policy.
+objects and block another dispatch. Pause other index dispatches, download
+that artifact, verify it with `go run ./cmd/verify-release --verify
+--index-out <dir>`, upload both objects with the publisher's content types and
+cache lifetime, invalidate both paths, then rerun the index-only dispatch. Never bootstrap over a damaged signed policy.
 
 Focused evidence for index changes is `go test ./cmd/verify-release`,
 `go test ./bin -run 'TestReleaseIndex|TestTypeScriptReleaseRequiresBothNativeBridges'`,
@@ -1021,8 +763,7 @@ Go test output is printed when bridge verification fails.
 ### QA pre-releases
 
 Cloud QA installs unreleased engines through the real signed-release path from
-`https://qa-releases.sparkwing.dev`, a private S3 bucket behind CloudFront in
-kikd-infra. Only binaries built with the `qatrust` Go tag trust it: the tag adds
+`https://qa-releases.sparkwing.dev`, a private S3 bucket behind CloudFront. Only binaries built with the `qatrust` Go tag trust it: the tag adds
 the QA public key to `internal/releaseauth` and replaces the version index and
 release download origin in `internal/engine`. A QA pre-release version such as
 `v0.68.0-qa.1` enforces the QA index instead of passing as a development build.
@@ -1033,7 +774,7 @@ pre-push vets touched packages in both flavours.
 
 `bin/qa-release.sh <repo> <commit> <vX.Y.Z-qa.N>` clones the commit, builds the
 dashboard and the full release matrix with the tag, signs the assets with the QA
-seed from SSM `/kikd-prod/sparkwing/qa-release-signing-key`, appends the version to
+seed from the SSM parameter named in the script, appends the version to
 the signed QA `versions.json`, and uploads both. It also publishes the Go SDK at
 that version in GOPROXY layout under `/goproxy`. The index and the module `list`
 are written only if unchanged since they were read, so concurrent runs fail
@@ -1083,320 +824,10 @@ Dockerfile's `runtime` stage, rebuilt only when that stage or its pinned images 
 that runs linux/arm64 natively or under emulation. The hosted release still builds its ghcr.io
 images with buildx under QEMU and joins both architectures under one index per tag.
 
-### Deploying Sparkwing Cloud
+### Deploy toolchain
 
-The default runtime bases in `.sparkwing/jobs/deploy_env.go` must keep both
-`cloud-*` and `commit-*` tags on their multi-architecture indexes. The ECR
-retention rule matches both patterns and keeps those images outside the rolling
-100-image release window. Digest pins alone do not protect an index from
-expiration. Keep the platform manifests referenced by each retained index.
-When replacing a base, publish its retention tags before updating the pin and
-verify that both Linux architectures resolve through that digest.
-
-Production deploys follow main. Releases are separate and occasional: the release tag, 38 CLI
-assets, npm packages, signed version index and site publication stay in the release workflow.
-The `deploy` pipeline builds its own service images and needs no tag at HEAD or GitHub release run.
-It fetches release tags for the base, then computes Go's canonical pseudo-version. After a
-stable release, this is `vX.Y.(Z+1)-0.YYYYMMDDhhmmss-SHA12` from the highest reachable tag, the commit's UTC
-committer time and its first 12 SHA characters. For example, a commit after `v0.69.2` builds as
-`v0.69.3-0.20261106041046-718a7591f23a`. This version matches Go's module stamp without creating
-a temporary tag. The same version names image tags, labels, version checks and summaries.
-Production compares it with semantic version ordering, after the base release and before the
-next release, and refuses older images. A prerelease base uses Go's corresponding prerelease
-pseudo-version form. Release-tag builds keep their exact release version.
-
-`deploy` and `deploy-scan` declare `requires: [deploy-kikd-prod]` in the
-repository configuration so planning and jobs stay on owned hardware. Controller
-intake seals those requirements before a planner selects the replacement-pin
-engine. A detached scan inherits them. Cloud remains for the small smokes that
-exercise Cloud itself.
-
-`build-images` builds linux/amd64 and linux/arm64 binaries with `bin/build-release-target.sh` and
-publishes them through `publish-images`, reusing the image pair when its immutable version tags
-already exist and both revision labels match the candidate commit. A new build checks that both
-pinned runtime-base manifests exist before compiling the dashboard or binaries. A missing base
-fails with its reference and a repair hint. Reusing published candidate images needs no base lookup.
-The runner image also ships the candidate's stable release base, such as `v0.79.0` for
-`v0.79.1-0.<time>-<sha>`: that release's SHA256SUMS, its signature, and each platform's `sparkwing`
-executable and signature, read-only under `/usr/local/share/sparkwing/releases/<version>/`. The
-deploy first checks them with `go run ./cmd/verify-release --engine-bundle`, the runner's own release
-verification under the production keys. Cloud Pods verify those files again exactly like a download
-and skip the engine download when the signed policy selects that release. When the bundle cannot be
-downloaded or fails verification, the deploy says so and publishes without it, so Pods download the
-engine as before.
-`staging-gate` pins the
-digests in `sparkwing-dev/sparkwing-gitops` and renders with the candidate chart. It pushes the
-controller Deployment alone and waits for Argo Synced/Healthy and the rollout, then does the
-same for the launcher with every other chart change. Each GitOps push requests a hard
-Argo refresh before waiting, requiring patch permission on the named Application.
-The candidate CLI compiles alongside staging rollout. Both finish successfully before
-either Cloud smoke is submitted. A failure cancels and joins the other operation.
-The same job holds staging's concurrency slot through the Cloud gate. Production
-can run alongside it. GitOps pushes merge concurrent changes from the other
-environment after a rejected push, preserving phase commits for rollback. Argo
-may report a descendant of the phase commit only when that environment's entire
-GitOps directory is unchanged. Deployment readiness still checks the exact image digest.
-
-The successful staging gate records the candidate CLI's SHA-256 and native platform.
-It retains only those executable bytes in a content-addressed temporary directory,
-using the deploy scratch expiry. Production copies them into its own private job
-directory after checking the gate's source SHA, platform and binary digest.
-Missing or mismatched bytes rebuild from the production job's candidate checkout.
-A runner without the staging runner's temporary filesystem rebuilds too.
-CLI profiles, credentials and stores stay private to each job.
-
-`staging-gate` starts `deploy-smoke` and the `sparkwing-ci-smoke` reference pipeline
-before waiting for both on staging Cloud. `production`
-requires a staging-gate record for the same digests and deploys the same images. It runs
-`deploy-smoke` once in the production team that owns the source repository installation, using
-the existing `/kikd-prod/sparkwing/deploy/scan-submit-token` (one NodeClaim, no controller or launcher
-WARN or ERROR after both controller and launcher rollouts complete).
-Smoke status follows poll every second. NodeClaim sampling interrupts its wait
-when all followers finish, then takes a final sample before checking the claims
-and logs.
-After a passing smoke, production moves the runner's `cloud-prepull` tag to the candidate.
-Cloud job nodes pull their environment's tag while they boot (kikd-infra
-`k8s/karpenter/ec2nodeclass.yaml`), so the first Job Pod of each run finds the runner already
-present. Staging has its own node class and tag, `cloud-prepull-staging`, which `staging-gate`
-moves once the staging rollout completes, before its smoke: staging keeps the candidate even when
-the gate fails. ECR exempts only these two tags from the repository's immutability. A failure to
-move either warns in the job summary and leaves the environment deployed; its nodes keep
-pre-pulling the previous runner until the next deploy moves the tag.
-Recovered startup probe failures before readiness remain visible in pod logs but do not
-fail the smoke; any warning or error during the smoke still fails it. The QA teams need no installation and are not used for this repository-backed smoke. Staging summarizes its deployed and previous digests before emitting the gate record. Production emits its deployment record. Credentials come
-from the run's OIDC token through the `sparkwing-deploy` role in
-[deploy-pipeline-iam.md](design/rewrite/proposals/deploy-pipeline-iam.md).
-
-The deploy takes no deploy-time snapshot. Recovery is RDS point-in-time recovery. Production
-(`kikd-prod-sparkwing-postgres`, RDS) keeps 7 days; staging (`kikd-prod-sparkwing-staging-postgres`,
-a separate Aurora Serverless cluster) keeps 1 day. Take a manual snapshot before a risky
-migration. Checking that automated backups are on belongs to external verification through
-stormwing, not the deploy. The deploy role has no RDS permission.
-
-After a successful production smoke, the deploy starts a detached child
-`deploy-scan` at the deployed commit and digests using `sparkwing.StartChild`.
-The child inherits verified-default provenance from the deploy, so the existing
-runner trust policy and repository-scoped scan secrets apply; it is exempt from
-the parent-completion child sweep. The scan starts the full `example` through the same native
-child route and awaits its run ID with `sparkwing.AwaitChild`, retaining the deploy proof and
-releasing runner capacity during the wait. The inline scan wrapper runs on the deploy owner.
-Example jobs, generated work and lifecycle probes require `deploy-kikd-prod`. Example jobs
-share the capacity-one `sparkwing-post-deploy-work` job group. A waiting example job retains
-that group while its weather child or serialized probe runs, so other scan jobs cannot fill
-the desktop's other slot. Probe children use a separate capacity-one job group to avoid
-waiting on their parent's group. The small staging and production smokes retain Cloud placement.
-The example's simulated `deploy` job has a two-minute execution deadline, including
-startup, render, apply and rollout. It runs no `kubectl`: after printing its tour
-output, apply waits for the controller to acknowledge its annotation; rollout
-also waits for an annotation and summary acknowledgement. The budget allows
-these reporting requests and host scheduling delays rather than treating the
-printed output as completion. A missing acknowledgement or stalled job still
-fails within the deadline; the fixture adds no sleep or retry of its own.
-Promotion does not wait for the full scan. All `deploy-scan` runs share the capacity-one
-`sparkwing-post-deploy` run group. Queued scans whose source is no longer main's tip stop
-before building or running fixtures, so the newest waiting revision wins. The target team's
-existing example history is the hourly receipt: an in-flight run suppresses another scan
-without waiting or changing findings. A result finished within the last hour is read once
-and reported again without starting another example, including failed results.
-Staging leaves the full scan for production. Failed example jobs use a fingerprint
-containing the environment and job ID. Bitwing promotes each eligible finding to a
-ticket after three consecutive breaches or ten total breaches. Later failures append deploy, scan and example run links to that
-ticket, preserving the first report. A clean scan resolves unpromoted findings.
-Automatic promotion uses Bitwing's eligibility decision and normal `finding promote`;
-checks never force promotion.
-Finding list supplies IDs; finding show supplies fingerprints and linked tickets.
-If per-job status enrichment fails, the known scan failure still publishes a finding
-with its run links and the unavailable-details warning. Bitwing policy controls
-ticket promotion. Publication receives its full 30-second budget after optional enrichment finishes, including on timeout.
-Promoted tickets stay with their repair owner rather than closing automatically.
-Bitwing must be installed on that user's PATH. The scan also
-requires the runner label and trust conditions documented below.
-
-Before changing production images, deploy reads the latest production scan through
-the controller and puts its status and run link in the log and job summary. A failed,
-cancelled or unfinished scan warns. Failed jobs that never started are recorded and
-ticketed under a separate execution source because their scan feedback could not run.
-Pre-planning observations use requested arguments when resolved arguments are
-absent. When those arguments are redacted, repository-inherited children of the
-`production` job identify production scans; their parent deployment link remains
-available. Planning failures with no jobs produce a run-level execution finding. Conclusive
-observations without startup failures clear execution findings and reset their
-streak; unfinished observations preserve them.
-An unavailable observation or ledger warns too. These warnings allow repair deploys
-to continue. The check reuses the scan-submit token and starts no runs.
-
-The `deploy-scan` child inherits the parent `deploy` identity for secret selection.
-Store `DEPLOY_SCAN_STAGING_TOKEN` and `DEPLOY_SCAN_PRODUCTION_TOKEN` as masked
-repository secrets scoped to the `deploy` pipeline, not the child pipeline name. Each value
-needs `runs.write`, `runs.read` and `logs.read` in the target deployment's team that owns
-the GitHub App installation covering `sparkwing-dev/sparkwing`. Production uses the existing
-source-owning team's `/kikd-prod/sparkwing/deploy/scan-submit-token`, also used by its smoke.
-A QA fixture token with no installation cannot submit this repository-backed scan. Keep the
-source installation bound to its existing team. The optional `--smoke-profile` and
-`--smoke-checkout` example probe also needs access to `sparkwing-dev/sparkwing-ci-smoke`;
-the detached scan does not enable that probe. Missing prerequisites report that the scan
-could not run, rather than clearing prior Bitwing findings.
-
-Each target team must own a GitHub App installation covering
-`sparkwing-dev/sparkwing`, because the scan submits a repository-backed example.
-A token that can authenticate but belongs to an unrelated QA team cannot submit
-that source. An installation belongs to one team. Keep the source-owning team's
-installation bound there when repairing a fixture's access.
-
-Replace an ended scan credential in its existing target team, retaining
-`runs.read,logs.read,runs.write`, and save it under the same repository and
-`deploy` pipeline scope above. Create it from a signed-in account session. A token
-delegated from another token cannot outlive its parent. Record the replacement's
-expiry and verify authentication and repository access before the next scan.
-
-Before changing production, deploy compares the candidate source's controller schema version with
-the previous image's source revision. Missing evidence stops before changing image pins. A failed
-production deploy or smoke reverts this run's GitOps commits, launcher first, only if the schema
-version did not increase. When it increased, even a startup failure before migration is proven
-leaves the candidate pins in place and fails loudly with a roll-forward remedy and a Bitwing
-finding. This conservative rule also applies after cancellation and timeout; deploy does not query
-the live database to decide whether an older image might still work. No automatic database
-downgrade or restore runs. Staging and production have separate database servers.
-
-Bitwing rollback feedback is best-effort until the trusted toolchain copy is provisioned: a missing `/opt/sparkwing-deploy/bin/bitwing` skips ledger publication, retains candidate pins and includes the missing-helper reason in the failed deploy log. It never falls back to the runner's PATH.
-
-Only a run the GitHub App started for a push to main can assume the deploy role. The `deploy`
-entry in `.sparkwing/sparkwing.yaml` declares `on: push` for `main`. Separate capacity-one
-global job queues serialize image builds, staging rollout plus gate, and production
-promotion plus smoke and recovery. A later candidate can build and stage while an earlier
-candidate promotes. At build admission and again at staging admission, `git ls-remote`
-checks main's tip. Superseded waiters stop before credentials or Cloud smoke at that stage.
-Several stale rows can wait, but only the newest waiting commit can pass admission.
-Once staging admits a candidate, its rollout and gate finish even when more pushes land.
-Before landing this queue-layout change, drain deploy runs and pending intake that
-still use the whole-run queue. Their plans do not hold the new stage slots, so
-the landing owner must keep the old and new layouts from executing together.
-Staging and production fetch main's tip at depth one in shallow checkouts and require the
-exact candidate SHA to be an ancestor of `origin/main` or its tip. Ancestry checks first use
-available history. A missing proof deepens the descendant's exact SHA by 64 commits, then
-fetches full history if the proof still fails. The same check proves that both deployed
-image revisions precede the production candidate. Build-time version resolution retains
-the release history needed for its stamp.
-These fetches preserve `FETCH_HEAD`, which the Cloud smoke uses as repository proof.
-
-Production checks ancestry again immediately before each controller or launcher GitOps push.
-A candidate removed by a main history rewrite during deployment preparation is refused at
-that write. Source validation and the GitOps push use separate repositories, so this check
-does not make them atomic.
-
-Production requires a staging-gate pass for the same image digests and checks both production
-image revision labels. Each changed digest must advance from its pinned revision to a newer
-source commit, with no version downgrade. Missing revision evidence, unrelated history or a
-new digest for the same SHA stops before GitOps pins change. A retry can finish a partial
-deployment when a matching digest already runs. An already deployed image pair leaves the
-pins unchanged.
-
-A terminal can preview with `--dry-run`. `--stop-after`, `--promote-proven` and `--version`
-reach a real deploy through the entry's `args`.
-
-The deployment module's local SDK replacement selects the planning host's
-installed executable. Deploy and scan use the owned runner described above;
-every job host in a run must retain those exact executable bytes.
-
-A local `pipeline plan` can pass while an older Cloud planning runner rejects the
-same source before any job starts. Deploy a wire-contract change to staging and
-production before later pipelines depend on it. If that ordering breaks,
-bootstrap with an exact image already proven by the staging smokes, compare its
-schema with production before changing the controller pin, and wait for its
-rollout before updating the launcher and planning runner. Then observe a new
-push-triggered deploy through both environments.
-
-#### Delivery timing budgets
-
-The targets are five minutes to land on main, five minutes from main to staging
-proof, and five minutes from staging proof to production acceptance. Report
-staging rollout separately from staging proof. Proof includes the blocking
-smokes. Production acceptance includes its smoke, NodeClaim/log checks and scan
-submission, while the detached scan finishes separately.
-
-Every delivery comparison retains the full elapsed leg and a named **cold Cloud
-provisioning** segment. Measure that segment from NodeClaim creation to its
-successful Initialized transition, with the claim name and both timestamps.
-Record each claim once, including capacity used by child and successor jobs.
-Land on our own hardware records this segment as `not applicable`. A Cloud leg
-without those boundaries records `unknown`, with any observed capacity wait
-alongside it. Use zero only when evidence proves the leg required no new capacity.
-
-Include cold provisioning in the full elapsed leg when comparing it with the
-five-minute target. Keep image pull, source preparation, execution and observation
-tail separate because they have different causes. Component intervals can overlap, so only sum non-overlapping critical-path
-intervals. Run acceptance follows preparation and can follow provisioning, so a
-controller run-duration headline cannot substitute for the full delivery leg.
-Compare cold samples with cold samples and report any provisioning change before
-attributing a change to preparation or execution.
-
-Retain measured samples with their raw timing boundaries in the delivery evidence
-record. A sample is a baseline, not a timeout or guaranteed provisioning ceiling.
-Warm capacity is forbidden for our delivery work.
-
-#### Deploy cost estimate
-
-These are estimates from the code path, not observed deploy timings. The ranges assume a warm
-builder, working registry and available Cloud capacity. Queueing and cold compiler caches can
-exceed them. The watched staging deploy should record phase durations before setting a speed target.
-
-| Phase | Estimated elapsed time | Bound or main cost in code |
-| --- | --- | --- |
-| Resolve version, role and existing images | 2-15 seconds | Git fetch and commit metadata, STS, ECR lookups. A matching published pair skips all builds. |
-| Dashboard | 30 seconds-3 minutes when rebuilt, seconds on validated reuse | `bin/build-web.sh --reuse` validates its existing input/output receipt before reusing the bundle. |
-| Two Linux binary builds | 1-6 minutes warm, 5-20 minutes cold | amd64 then arm64, each compiling the CLI, controller and runner. Whole build job budget: 45 minutes. |
-| Publish and verify both multi-arch images | 30 seconds-3 minutes | Controller and runner publish concurrently after all binary hashes pass. One binary layer per platform over pinned runtime bases, plus the runner's shipped engine layer. Verification reads the published binaries and shipped engines back. |
-| GitOps and two rollouts, per environment | 1-8 minutes | Two serial GitOps pushes, each waiting for Argo (10-minute cap, one-second observation interval) and rollout (5-minute cap). |
-| Cold Cloud provisioning, per new claim | Measure per leg, no fixed estimate | Creation to Initialized. Included in smoke elapsed time when on its critical path. Report separately from image pull and preparation. |
-| Staging gate | 1-10 minutes with available capacity | Candidate CLI build plus two overlapping pipeline runs. Each run has a 45-minute limit. |
-| Production smoke | 1-5 minutes with available capacity | CLI build plus two concurrent fixture runs, NodeClaim sampling and log scan. Each run has a 20-minute limit. |
-| Production rollback, on failure | Similar to the two rollouts | Two reverse GitOps commits. Budget: 35 minutes. |
-
-The slowest expected work is cold Go compilation, Argo polling and the staging probe runs.
-Dashboard receipt reuse and overlapping staging probes are enabled. Reuse by published tag and
-revision, skipping unchanged rollout digests, and shared runtime base layers already avoid work.
-Different commits still stamp different binaries and revision labels, so a source-unrelated change
-does not automatically produce the same image digest.
-
-Parallel architecture builds are a follow-up. Untagged main builds no longer create a shared
-Git tag, so measure CPU and memory contention before running them concurrently. Release builds
-that create a temporary tag still need coordinated tag ownership. Controller/runner publication
-overlaps independent registry I/O and joins both tasks before returning. Persistent Go caches reduce cold builds, while ECR's
-existing content-addressed base layers already avoid uploading unchanged runtime layers. An Argo
-GitHub webhook can replace polling with prompt sync without widening the deploy role's access.
-
-Job budgets are failure ceilings, not expected duration: build 45 minutes, staging deploy 45,
-staging gate 105, and production 100 including rollback. They allow 3h15 for a staging-only path
-or 4h55 for all four jobs if every ceiling is reached.
-
-The deploy writes no cluster-scoped object to GitOps: the AppProject `sparkwing` permits no
-cluster-scoped kinds, so a GitOps commit cannot grant cluster-wide access. The render drops the
-chart's namespaces, ClusterRole, ClusterRoleBinding, admission policies and similar, logs each one
-it left out, and fails on any other object without a namespace. Before either deployment phase
-pushes GitOps, it reads every rendered ValidatingAdmissionPolicy and binding from the cluster
-and fails if any is missing or its spec differs, including the launcher capacity policy. kikd-infra keeps them in
-`k8s/sparkwing-cluster/staging.yaml` and `production.yaml`, applied by the Argo application
-`sparkwing-cluster` in project `kikd`. An image-only release leaves them alone: the Cloud job
-admission policies read the runner and Docker images from the ConfigMap `sparkwing-cloud-admission`
-in the job namespace, which the render keeps, so the policies are the same across releases and
-rollbacks. A release whose chart changes a rule, the RBAC or the namespaces updates kikd-infra
-before its deploy, staging first, then production:
-
-1. Render the chart at the new tag with `helm template <release> charts/sparkwing-full --namespace <ns> -f <env dir>/helm-values.yaml`.
-2. Copy its cluster-scoped documents into the environment's file in kikd-infra `k8s/sparkwing-cluster/`. Verify the kustomize output preserves the rendered policy specs, including CEL string values.
-3. Land that on kikd-infra main and wait for `sparkwing-cluster` to report Synced.
-
-Add permissions before the deploy and remove them after the old version is gone. That application
-prunes, so deleting an object from the file deletes it from the cluster; a Namespace leaves the
-file only on purpose, because deleting it deletes everything in it.
-
-```bash
-sparkwing run deploy -- --dry-run                         # print every action, take none
-sparkwing run deploy -- --dry-run --stop-after staging    # preview a staging-only deploy
-sparkwing run deploy -- --dry-run --promote-proven        # preview promoting the last staging-proven digests
-```
-
-#### Deploy toolchain
+The `deploy` pipeline ships Sparkwing Cloud from runners its operators own.
+This section is the toolchain those runners need.
 
 Deploy CLI homes share only the runner's existing content-addressed pipeline
 binary cache. Each invocation keeps its profiles, credentials and store in its
@@ -1406,10 +837,10 @@ installation verifies the cached bytes before executing a private copy.
 If linking the cache fails, submission uses its private cache. Job cleanup
 removes the link, while existing cache limits and pruning own retained entries.
 
-Deploys run only on runners labelled `deploy-kikd-prod`. After installing the root-owned toolchain
-below, enroll one with `sparkwing runners add --profile prod --runner korey-desktop --session-stdin
---repos github.com/sparkwing-dev/sparkwing --trust verified-default --label deploy-kikd-prod`, using
-the account session described in the [runners add docs](docs/cli-runners.md#sparkwing-runners-add).
+Deploys run only on runners carrying the deploy runner label declared in
+`.sparkwing/sparkwing.yaml`. After installing the root-owned toolchain below,
+enroll a runner with that label using `sparkwing runners add --label` and the
+account session described in the [runners add docs](docs/cli-runners.md#sparkwing-runners-add).
 Local `--dry-run` previews need no runner label.
 
 A real deploy runs `aws`, `kubectl`, `helm`, `git`, `ssh`, `go`, `bash`, `node`, `pnpm` and `bitwing` only from
@@ -1459,151 +890,6 @@ sudo chown -R root:root /opt/sparkwing-deploy && sudo chmod -R go-w /opt/sparkwi
 ls -l /opt/sparkwing-deploy/bin && /opt/sparkwing-deploy/bin/go version
 ```
 
-### Cloud isolation conformance
-
-Run `cloud-isolation` against staging before each release that changes the
-launcher, the Job pod, the DinD sidecar, node classes or the network policy, and
-before a new paying team starts on Cloud. It attacks the execution plane from two
-dedicated conformance teams and fails on any breach:
-
-```bash
-sparkwing run cloud-isolation -- --database <staging database host>:5432 \
-  --vpc-resolver <staging VPC resolver address> \
-  --evidence ~/evidence/cloud-isolation/$(date +%F)
-```
-
-The pipeline attacks staging only. It refuses a controller URL or namespace
-that is not staging's, and before the first upload it checks that both team
-profiles point at the staging controller and authenticate as their own teams.
-Target discovery fails when the controller pods or services, cluster DNS,
-ingress pods or controller nodes yield nothing to probe. It also fails when any
-of their running pods uses its node's network or has no address, and when the
-database endpoint or the VPC resolver is missing. Both addresses are passed at
-run time, so neither is stored in this repository.
-
-The run uploads the `isolation-probe` fixture as each team, in three phases on
-three fresh nodes. Each phase transition, the last one included, passes only
-when all of these hold:
-
-- the run reported every result its plan owed, and none failed;
-- every peer it probed is still running;
-- placement is correct in every observation so far;
-- no evidence has gone missing.
-
-The first failure stops the sequence and cancels the runs it started, and the
-report is still written. The fixture's sources live in
-`.sparkwing/isolationprobe`. Each probe job does the following:
-
-- reaches for instance metadata over IPv4 and IPv6;
-- reaches for the controller's pods and services, cluster DNS and the database;
-- reaches for the kube API's private and public endpoints, and wherever one
-  answers, tries to create and rewrite pods with every credential it can find;
-- reaches for the other runs' nodes, kubelets, listeners and Docker ports, and
-  for its own node's ports and its own pod's Docker ports;
-- checks its mounts, devices, sockets, its user namespace and the peers' canary
-  files, searching the scratch volume except this pod's own paths;
-- reads a job output it depends on, and is refused two it does not;
-- repeats from a DinD container on Docker's bridge and from one holding every
-  privilege the sidecar grants, which also tries host kernel files, mounts,
-  device nodes, `NET_ADMIN` and the syscalls the DinD seccomp profile refuses.
-
-The probes stay non-destructive:
-
-- they connect and close;
-- they open kernel files without writing to them;
-- they answer an unexpected connection with reads and dry runs only, presenting
-  no credential beyond what the job itself can find;
-- each job is bounded at 20 minutes on Cloud's default two-core class, unless
-  the run raises the anchors' limit.
-
-The anchors must outlive every later run's probes. An anchor that ends first
-fails the run and names the peer. To give the anchors more time for one run,
-pass `--anchor-timeout`, which takes a Go duration from `20m` to `1h`. The
-report records the limit used.
-
-While the runs are live, the driver records each run's pods, the nodes they used,
-every pod seen on those nodes, their NodeClaims and each raw run status. It
-appends every observation to `cluster/observations.ndjson` and never replaces
-one. Each observation is judged on its own, so a wrong fence or an unsafe pod
-seen once stays a failure even if a later observation looks healthy. The
-launcher deletes a run's Jobs when the run ends, so placement comes only from
-these records.
-
-A tested node may hold the run's own Job pods, cluster-listed DaemonSet pods,
-and the launcher's inert capacity placeholder for that same run and team.
-Job and DaemonSet owners are matched by UID. A capacity pod must match its
-binding-derived name, team label, runner image and unprivileged sleep-only
-spec. The driver retains its complete raw spec and accepts only the expected
-capacity fields. Lifecycle hooks, probes, init/ephemeral containers,
-environment injection, security overrides and unknown execution fields all
-fail placement. Another team's or run's capacity pod still fails placement. If a Job
-starts between capture calls, the driver reads Jobs again to resolve the newly
-observed owner's UID and retains that capture.
-
-User namespaces bind the six standard character devices from devtmpfs.
-The mount audit accepts only their expected roots, destinations, character
-types and device numbers. The privileged DinD probe sees those same sidecar
-devices under `/host/dev`, because Docker resolves its read-only `/:/host`
-bind inside the sidecar. Standard masked proc files pass only when a bounded
-read reaches EOF without returning a byte and the file is the null character
-device (1:3), with mount root `/null`. Empty regular files do not qualify.
-A devtmpfs directory, an unexpected device or an actual host filesystem still
-fails the audit. The sidecar path exception requires the exact `/host/` prefix.
-
-Placement rests on one assumption, which the report header states. Pod metadata
-cannot be authenticated from inside the cluster. Anyone able to create or
-rewrite pods through the kube API could copy a real Job's or DaemonSet's UID
-into one, so the placement checks trust the owner references that cluster
-controllers write. The kube API grade tests that assumption from inside each
-hostile job.
-
-At every kube API endpoint the job can reach, the grade presents each of these
-identities in turn:
-
-- anonymous access;
-- a mounted token, or a token file the environment names;
-- a credential-named environment value;
-- a node role from instance metadata.
-
-With each identity it tries a dry-run pod create in the job namespace and in
-the controller namespace. It also tries a dry-run patch and update of the owner
-references and annotations of its own pod, each peer's pod and a controller
-pod. Both teams' jobs share the one job namespace, so trying it covers the other
-team's namespace as well. In the controller namespace it also lists secrets,
-reviews its own rules and submits a dry-run Job. Any authenticated caller may
-review its own rules, so any credential the API accepts fails the grade. A job
-must hold no cluster identity at all. Every attempt must be refused, and an
-endpoint the job cannot reach passes because the job cannot use it either.
-These fail the grade:
-
-- an allowed attempt;
-- an answer that does not prove a refusal;
-- a credential the probe cannot present, such as AWS keys or a node role,
-  which need signing it does not do.
-
-Placement is trusted only when every run reported every kube API probe its plan
-owed and all of them passed. Otherwise the report marks placement untrusted and
-the run fails C2.
-
-Every result the plan owed must be present, from one manifest shared by the
-probe and the driver. `REPORT.md` counts the verdicts by checklist item, lists
-each failure, and lists every check that was not probed. `results.ndjson` holds
-every result.
-
-It needs the following:
-
-- `sparkwing`, `kubectl`, `git` and Go on `PATH`;
-- read access through the kubeconfig contexts the repository configuration
-  names;
-- CLI profiles named `stg-iso-a` and `stg-iso-b`, holding run tokens for those
-  staging teams. The teams need Cloud credits, which only an operator console
-  grants, and no CLI command shows a team's balance.
-
-An operator-created team credential expires 30 days after the team is created,
-and every token minted from it expires with it. While that credential is still
-live, invite an owner who signs in to the staging console, so replacement run
-tokens can be minted after it lapses.
-
 ### Check tiers
 
 Current SDK verification runs the Go and TypeScript unit suites and the host
@@ -1645,10 +931,11 @@ piping a dedicated administrator session to stdin, then keep its runner service
 running. The service reports `os=darwin` or `os=windows` itself:
 
 ```bash
-sparkwing runners add --runner build-mac --profile prod --repos github.com/sparkwing-dev/sparkwing --max-concurrent 1 --session-stdin
-sparkwing runners add --runner build-windows --profile prod --repos github.com/sparkwing-dev/sparkwing --max-concurrent 1 --session-stdin
-``` The canonical timing
-artifact retains those step outcomes and durations but excludes their error text.
+sparkwing runners add --runner mac-runner-1 --profile prod --repos github.com/sparkwing-dev/sparkwing --max-concurrent 1 --session-stdin
+sparkwing runners add --runner windows-runner-1 --profile prod --repos github.com/sparkwing-dev/sparkwing --max-concurrent 1 --session-stdin
+```
+
+The canonical timing artifact retains those step outcomes and durations but excludes their error text.
 
 Pinned actionlint v1.7.12 does not recognize GitHub's `concurrency.queue`.
 Its config ignores only that exact diagnostic in `release.yaml`. The workflow
@@ -1677,7 +964,7 @@ file. Other syntax and workflow checks remain active.
   trees. Run `gate` when that evidence is required. Everything
   else is `gate` (the broad check) and `pre-release` (the release boundary),
   which `sparkwing run <name>` runs on demand; no git hook fires either. Hosted
-  CI verifies, it does not gate (decision 96): every pull request and push to
+  CI verifies, it does not gate: every pull request and push to
   main runs `gate` and `race-touched` over the change since the push's previous
   commit (or the pull request base), and the full suite, `pre-release`, the
   store race lanes and Postgres conformance run nightly and on dispatch.
@@ -1751,9 +1038,8 @@ file. Other syntax and workflow checks remain active.
   work is outside what `pre-push` reads. The
   budget judges the slowest step's own run time, not the admission wait, the
   time a step waits for a core or a step slot, or the 2.5 s the pipeline
-  binary takes to recompile after a Go change. On a host at load 28, a
-  pre-commit whose slowest check took 473 ms spanned 3.8 s and failed the
-  old span budget. The verdict line reports both numbers. Pre-push's
+  binary takes to recompile after a Go change. The verdict line reports both
+  the slowest step's run time and the span. Pre-push's
   affected Go tests have their own 45-minute job deadline and are outside
   the fast phase's warning budget. The
   formatters are the per-file cost in the commit tier, and `goimports` inside
@@ -1803,13 +1089,7 @@ file. Other syntax and workflow checks remain active.
   combined branch and merge delta. Publish a standalone Go SDK API change first,
   wait for its module version to resolve, then bump the root `go.mod` requirement
   before the root uses that API. Workspace conformance remains a separate check.
-  The full-tier matrix measured 18m21s while filling missing cross-target caches
-  and 54-58 seconds with the same source and warm caches on one compiler core.
-  The host/deploy check, measured three times on the same `aee29e9e1` source,
-  took a median 17.37s wall and 17.28s CPU with one compiler core. Splitting
-  three cores across the two targets took 10.51s wall and 20.21s CPU at the
-  median. Shared load1 ranged from 4.0 to 5.3. These are warm-cache compiler
-  timings, excluding admission, not end-to-end land measurements. The fast
+  The fast
   phase retains its one-minute warning. The build follows the workspace build
   rather than increasing its compiler reservation.
   Without `--full`, vet and build cover the affected dependency closure. Its test step
@@ -1911,16 +1191,12 @@ file. Other syntax and workflow checks remain active.
   derived as three quarters of that budget. This raises the ordinary package
   timeout from 45 minutes and replaces nodehost's ten-minute shard timeout.
   The race node deadline bounds its builds, listing and every selected package.
-  Broad checks have their own deadline. Controller exceeded the former unsharded
-  45-minute timeout on hosted CI without a hung test. The unsharded one-thread
-  local nodehost baseline took 687 seconds. Parallel tests within a runtime
+  Broad checks have their own deadline. Parallel tests within a runtime
   share the same CPU bound. Hosts with capacity for one package retain the
   ordinary race command. On a four-core single-tenant host, the ordinary
   command uses one-thread, two-package bounds on its separate runner, and the
   PostgreSQL suite runs four one-thread shard processes. Fitting each hosted deadline and improving cold-start
-  latency still require measured evidence. The full Go suite uses a 25-minute per-package timeout;
-  hosted runs 36678720566 and 36689529462 hit Go's default 10-minute timeout
-  in `internal/controller` or `internal/store` while the active tests had run for 0s.
+  latency still require measured evidence. The full Go suite uses a 25-minute per-package timeout.
   Lint and the PostgreSQL suite, conditional outside `--full`, wait for the full Go suite.
   Touched-package race tests run as an independent job on every host. Existing
   per-command Go parallelism stays unchanged.
@@ -1950,48 +1226,10 @@ file. Other syntax and workflow checks remain active.
   processes on a failure and retains each shard's output in the run log. It
   gives the suite a fresh `SPARKWING_HOME`, clears inherited runner credentials
   and service bindings, and passes `GOWORK=off` into Go commands in worktrees.
-  A complete local run on 16 logical CPUs covered 1,075 top-level names in
-  27m20s; its four shards took 21m45s, 23m15s, 23m40s and 27m20s. A prior
-  pre-release run without this step took 13m03s, so 40m23s is a local estimate
-  for the whole release check, not a hosted measurement. On hosted four-core
-  runners, pre-release reached `race-store` after about 8 minutes in one run
-  and 18 minutes in another. All four shards reached the former 55-minute
-  timeout with different active tests running for 1s to 6s. The new 80-minute
-  shard timeout is a hypothesis to verify on hosted runners, not a measured
-  passing budget. Hosted run 40856721261 still ran all four shards past it,
-  with TestRefillModel alone at over a minute under race, so the shards run
+  The shards run
   the short class (`-test.short`); the tests that guard themselves as slow keep
   running without race in `gate` and on PostgreSQL in `store-postgres`. Later checks remain under the 120-minute node deadline and a
   130-minute hosted job deadline.
-  **Store race costs, 2026-11-03:** hosted runs 41578268161 and 41590717553
-  each spent about 82 s on `storetest`, 71 s compiling
-  and listing 1,860 names, then four round-robin shards of 54m51s to 64m51s.
-  A local run at c6dff62df (four shards, `CI=1`, `GOMAXPROCS=1`, pinned with
-  `taskset` to four cores of a loaded 16-core host) took 28m11s to 31m49s per
-  shard over 1,862 names, 7,096 s of test time in all, the longest test 189 s.
-  Hosted shards ran 1.93 to 2.13 times their local cost, about 2.03 on
-  average, so the suite is about 240 hosted core-minutes. Round-robin's
-  slowest shard held 7% more than the mean; cost-balanced shards land within
-  a second of each other on the measured table, so balancing alone saves
-  about four hosted minutes of 65. On the same four pinned cores, the
-  balanced four-shard assignment ran 29m52s to 30m38s against round-robin's
-  28m11s to 31m49s, and the pipeline's own part 2 of 3 took 11m21s
-  including pipeline and race compilation. Three parts of four shards hold about
-  591 local seconds, about 20 hosted minutes, per shard. Projected per lane:
-  about 2 minutes of setup, 2.5 minutes of pipeline and race compilation and
-  `storetest` in part 1, and 20 minutes of shards, about 25 minutes, under
-  the broad gate's 32-minute hosted job. Pre-release without the store race
-  takes about 20 minutes: setup, the other checks (10 minutes in run
-  41590717553), and `store-postgres`, which took 7m25s locally on four pinned
-  cores of the same loaded host. With the store race inside it, the same job
-  measured 6,000 s before the PostgreSQL rewrite and projects to about 85
-  minutes after it. The CI workflow's critical path
-  moves from pre-release (100m09s from creation to completion in run
-  41590717553) to the broad gate, about 33 minutes. Runner time rises by
-  about 10 minutes per run, from about 85 to about 95 four-core minutes
-  across pre-release and the race-store lanes, for setup and compilation on
-  three more runners. These are projections from the timings
-  above until a hosted run measures them.
   The hosted broad and touched-package race
   jobs each keep an 80-minute deadline.
   A Go step's own parallelism depends on who else holds the
@@ -2003,30 +1241,10 @@ file. Other syntax and workflow checks remain active.
   collapses: at four CPUs a shared host runs one thread and a single-tenant
   host runs two. The race suite keeps `GOMAXPROCS=1`
   on four CPUs either way.
-  A local four-CPU `CI=1` run using the hosted schedule (202014, source
-  f314ad61) finished full Go in 23m18s before PostgreSQL began. Three measured
-  PostgreSQL store runs took 16m24s, 16m45s and 20m15s. Those two serial
-  checks alone project to 39m42s–43m33s, excluding build, lint and cleanup.
-  Hosted source `0f118be32` took 35m32s before PostgreSQL started: 31m20s in
-  the full Go step after build and setup. The 50-minute node deadline then
-  cancelled PostgreSQL after 14m31s, before its 25-minute Go timeout. The
-  server was still writing WAL near cancellation. The 70-minute node deadline
-  allows that measured prefix, the full 30-minute PostgreSQL limit, and
-  cleanup. A passing hosted total at this deadline remains unmeasured.
-  That boundary remains a liveness limit rather than a completion
-  guarantee. That publication path
+  That publication path
   stops at the parent runner rather than
   entering node processes, so nested Sparkwing commands choose their own
-  output. Measured on this 16-core Linux
-  host with a warm cache at source `2eefff146`, the release cut's three
-  members cost 17.001 s (build), 73.455 s (full lint), and 439.746 s
-  (`go test -short`). Every check passed; the span exceeded the former
-  five-minute budget. `internal/store` took 361.767 s inside that run. A focused
-  `internal/store -short` run without concurrent build or lint took 347.558 s,
-  with 1,214 top-level passes and a 240 ms median test duration; 1,130
-  exceeded 200 ms. Repeated current-schema SQLite setup remains in this
-  coverage. The ten-minute check allowance keeps the entire short suite and its
-  checks, with room above the measured 7m19.746s class span. `sparkwing runs stats
+  output. `sparkwing runs stats
   --pipeline pre-commit --since 7d` reports what a class has cost over the
   week, and `sparkwing runs status --run <id> --view timeline --steps` breaks one run into
   its steps; the runs store is shared across repositories, so filter the runs
@@ -2035,164 +1253,16 @@ file. Other syntax and workflow checks remain active.
   200 ms as guidance for expensive test-body work beyond current-schema
   fixture setup. Such work should guard itself with
   `if testing.Short() { t.Skip("slow: ...") }` naming what costs the time.
-  Real-store fixture setup remains in the short suite; the measured package
-  and test durations above include that setup. The short class retains a
+  Real-store fixture setup remains in the short suite. The short class retains a
   real-store risk-admission test that requires
   an unapproved submission to leave the queue empty. First-run compilation,
   ref selection and pinned-binary risk fixtures remain in the full class.
   `gate -- --full` runs the suite without `-short`, which is where every
-  guarded test is still judged. Affected landing gates use the short class. On 2026-10-29, with the cut's `GOMAXPROCS=7 -p 7` on a shared
-  16-core host at load 9 to 15, `cmd/sparkwing`, `internal/controller` and
-  `internal/store` took 241 s, 832 s and 617 s under `-short`, two of them past
-  Go's ten-minute package limit. The tests that measured 1 s or more there
-  now split by what they guard. A `testing/quick` property keeps running under
+  guarded test is still judged. Affected landing gates use the short class.
+  Tests that cost 1 s or more split by what they guard. A `testing/quick` property keeps running under
   `-short`, checking three fixed-seed cases through `internal/quicktest`; a
   test whose name or file names an authorization, fence, expiry, masking,
-  tenant or secret boundary keeps running whole; the rest skip as slow. That
-  brought the three packages to 123 s, 265 s and 353 s at load 6 to 7.
-- **TypeScript native fixture build, measured 2026-11-12:** the nativehost
-  test process compiles its unchanged SDK once, retaining the resolved Node
-  path, SDK directory and original build error. Protocol, Conformance and
-  JobIDVectors retain their cases and separate protocol processes. The Node
-  local-pack test keeps its independent production build. The native
-  `TestSDKFixtureBuildsOnce` guard counts actual compiler invocations on both
-  success and failure. Its counting executable uses a Unix shell; Windows
-  retains the real native tests.
-
-  Three interleaved A1B1A2B2A3B3 pairs used the same `0d7b18969` source,
-  with A disabling only the new cache through a Go overlay and B using it.
-  Both used identical Go JSON/tool tracing instrumentation. Go 1.26.11 ran
-  the whole `TestTypeScriptBoundary` with `GOMAXPROCS=3`, `-p 1` and `-short`.
-  Each sample copied the same compiled-only private seed containing both
-  helper variants and the outer/nested Go flag variants. Priming, copying,
-  hashing and slot wait are excluded. Acceptance test-binary CPU is wait4 user
-  plus system time, including descendants reaped by `acceptance.test`.
-  These binary measurements cover both the Node SDK cell and the nested
-  nativehost Go cell.
-
-  | Pair | Acceptance binary wall A / B, s | Acceptance binary CPU A / B, s | Whole Go wall change | Load1 median A / B |
-  | --- | ---: | ---: | ---: | ---: |
-  | 1 | 20.797 / 17.547 | 34.108 / 27.452 | -11.02% | 8.478 / 11.243 |
-  | 2 | 25.868 / 24.794 | 37.937 / 37.126 | +2.58% | 9.755 / 13.206 |
-  | 3 | 20.343 / 18.345 | 33.664 / 28.383 | -7.22% | 10.388 / 8.759 |
-
-  Acceptance test-binary wall medians, covering both cells, were 20.797/18.345 s
-  (-11.79%), with ranges
-  20.343-25.868/17.547-24.794 s. Acceptance test-binary CPU medians were
-  34.108/28.383 s (-16.78%), with ranges
-  33.664-37.937/27.452-37.126 s. Whole Go wall medians were
-  24.419/22.014 s, but pair 2 regressed 2.58%; a stable
-  whole-command wall saving is inconclusive. The unmodified Node cell was
-  slower in B in all three pairs, so its drift is not attributed to this cache.
-  The nested Go cell's separate CPU medians were 15.959/8.972 s, including
-  that Go command's build and link work.
-  Every sample retained 145 Node assertions, 15 native Go parent/leaf cases
-  and both acceptance cells with exact outcome parity. Native compiler
-  invocations fell from two to one. Load, owners, iowait and steal were recorded
-  at 1 Hz without filtering. This is one shared WSL host and one window,
-  with no whole-Land saving claim or change to selection, lanes or deadlines.
-  The earlier cold private-cache probe included an 80.296 s nested-Go prefix
-  before its first compiler and is kept separate from these warm pairs.
-  Evidence: `~/evidence/sparkwing/typescript-boundary-cost-2026-11-12/` and
-  the native SDK fixture packet beside it.
-
-- **Storage acceptance fixture creation, measured 2026-11-12:** the depcache
-  properties create their isolated current-schema SQLite databases through
-  `teststore.Open` and reopen persisted data through `OpenExisting`. The common
-  controller fixture takes that opener explicitly. Other callers retain their
-  previous opener. All archive, output, scope-forgery, corruption and revocation
-  checks remain, with 128 fixed-seed cases per backend (the existing 16-case
-  prefix under race). Cells and cases keep their serial order.
-
-  A fresh private-cache probe on `afd8a186f` took 198.48 s in `TestStorage`:
-  filesystem/S3 depcache took 84.96/89.61 s. The Go post-`ok` interval was
-  2.123 s. CPU/block profiles of those two leaves used in-process HTTP recorders
-  and map-backed S3, not an external service. Repeated schema setup accounted
-  for 13.26 s of 81.28 sampled CPU seconds. With candidate `0d8b8f961`, it fell
-  to 2.08 s of 58.33 sampled CPU seconds; nested DDL execution fell from
-  11.12 to 0.04 s. Authority-chain work remained substantial at 28.37/24.50 s.
-  Profiled runs are diagnostic observations, not performance pairs; summed idle
-  SQL-pool blocking time is not elapsed test time.
-
-  Three interleaved A/B pairs used source-bound, precompiled test binaries,
-  fresh per-sample homes/state and GOCACHE directories, runtime width seven,
-  the full `TestStorage` cohort and no profiler flags. Build/link and Go result
-  caching are outside these samples. The parent test's reported duration
-  includes its bodies and cleanup:
-
-  | Pair | Before / after body, s | Body change | Load1 median before / after |
-  | --- | ---: | ---: | ---: |
-  | 1 | 57.87 / 89.99 | +55.50% | 3.901 / 16.952 |
-  | 2 | 69.62 / 55.10 | -20.86% | 13.653 / 8.500 |
-  | 3 | 65.89 / 48.06 | -27.06% | 7.182 / 5.461 |
-
-  Body medians were 65.89/55.10 s, a -16.38% ratio of medians. Ranges were
-  57.87-69.62/48.06-89.99 s; inclusive IQRs were 5.875/20.965 s. Separate
-  admitted command walls, including tool startup and excluding slot wait,
-  were A [61.562, 74.187, 69.745] and B [93.592, 59.403, 52.088] s.
-  Their medians were 69.745/59.403 s, a -14.83% ratio of medians.
-
-  All six had exact test outcome and cell/leaf-result parity: 16 test runs
-  and passes, 15 cells and 15 assertion leaves each. Property seeds/counts
-  and cell declarations have identical source. Load, other slot owners,
-  iowait and steal were captured at 1 Hz without excluding samples.
-  The paired signs differ and load shifted sharply. Wall-time improvement
-  is inconclusive; these numbers establish no stable Land saving and change
-  no gate tier, deadline or test budget.
-
-- **Reporting fixture setup, measured 2026-11-11:** typed `teststore.SeedRun`
-  inserts its known routing identity and sealed provenance with the new row.
-  Provenance projections come from decoding that new row’s JSON once, so
-  JSON normalization stays consistent without changing the caller’s arguments.
-  It does not rewrite earlier reporting rows. Generic fixture `Exec` retains
-  its projection behavior for arbitrary SQL changes. A real SQLite update
-  trigger guards the write boundary, and a separate test guards generic SQL
-  projection.
-
-  The two web history regressions retain all 202 and 250 seeded runs, the
-  older-than-200 match, exclusion before the limit, 125 unique results over
-  four cursor pages, and every existing assertion. In a separate baseline
-  profile, seeding consumed 99.68–99.72% of their body wall time; the repeated
-  identity projector appeared on 93.01% of sampled CPU stacks. CPU share is
-  not wall-time share.
-
-  Three interleaved A/B pairs used the same clean `f23203f69` source on this
-  shared 16-logical-CPU host. A restored only the two original helper files
-  from `0c7738eda`; B used typed seeding. Both ran the same instrumented test
-  bodies with Go 1.26.11, `GOMAXPROCS=3`, `-p 1 -count=1 -short`, readonly
-  modules and `GOWORK=off` with the local SDK replacement. No CPU profiling,
-  noise exclusions, replacements or extra warmups entered these six samples.
-
-  | Pair | Combined body wall A / B, s | B minus A / A | Load1 median A / B | Load1 maximum A / B |
-  | --- | ---: | ---: | ---: | ---: |
-  | 1 | 369.970 / 4.222 | -98.859% | 16.99 / 14.43 | 24.57 / 14.91 |
-  | 2 | 417.706 / 3.952 | -99.054% | 16.23 / 13.21 | 31.47 / 13.40 |
-  | 3 | 407.950 / 4.687 | -98.851% | 13.35 / 16.82 | 15.85 / 16.82 |
-
-  | Body | A median, s (min–max) | B median, s (min–max) |
-  | --- | ---: | ---: |
-  | Older filtered match | 159.861 (154.094–170.716) | 1.878 (1.806–1.989) |
-  | Cursor pages | 246.989 (210.110–253.856) | 2.416 (2.075–2.698) |
-  | Combined | 407.950 (369.970–417.706) | 4.222 (3.952–4.687) |
-
-  The combined linear empirical IQR was 23.868 s for A and 0.367 s for B.
-  The ratio of combined medians fell 98.965%; median paired percentage change
-  was -98.859%. These are targeted passing-body measurements on one shared
-  host in one fixed A-before-B window. They exclude cleanup, compilation and
-  slot waiting; those intervals and the per-sample owner/iowait/steal traces
-  are retained separately. Prior validation warmed the two variants in
-  different contexts, so compile/link cache parity is unproven. This does
-  not measure whole-Gate or Land latency, or a future flake rate. Raw profiles,
-  scripts, six samples and complete source archives are retained with the
-  `web-paging-test-cost-2026-11-11` measurement.
-
-  A later correctness follow-up (`6427439d9`) restored persisted-JSON
-  normalization and guarded caller argument ownership. Three separate,
-  unpaired confirmations of the same two instrumented bodies took 6.684,
-  5.754 and 5.666 s combined (median 5.754 s; range 5.666–6.684 s; linear IQR
-  0.509 s). They retain the same Go settings and full datasets. These are
-  confirmations on the corrected code, not replacements for the six paired
-  samples or a measurement of the follow-up’s incremental cost.
+  tenant or secret boundary keeps running whole; the rest skip as slow.
 - **Native recovery simulation:** `TestStartGateSeededRecovery` runs seed 1
   with and without compute under `-short`; the full class runs all eight seeds
   in both modes. Each case still covers lost plan capacity, an already released
@@ -2200,35 +1270,8 @@ file. Other syntax and workflow checks remain active.
   events from scheduling snapshots, forces admission retry completions to cancel
   waits while the competitor holds capacity, and fails after 64 scheduling passes.
   A wait callback cannot drive external events because retry completions may keep
-  the owner from entering it. The full 16-case family measured 10.0 seconds without
-  race on this loaded 16-core host (load 22); keep its permutation coverage in the
+  the owner from entering it. Keep its permutation coverage in the
   full class while retaining both compute paths in affected landing gates.
-- **What the fast hook phases cost:** measured on this 16-core Linux host. The fast
-  phase of `pre-push` retains a ten-second target when the compiler cache is warm. Run records
-  expose total and per-step durations, but they carry no compiler-cache
-  temperature signal, so the target is measured rather than enforced. A warm
-  integrated run over 13 changed Go files took 10.678 s and missed the target;
-  fast lint took 10.678 s and build took 9.782 s. A controlled cold run of the
-  same functional checks took 24.432 s, and broader cold parallel samples took
-  51.182 s and 56.923 s. These observations fit the one-minute budget but
-  do not establish a ceiling for every cold input. A change to a Go file also
-  invalidates the cached `.sparkwing/` pipeline binary, so the first hook run
-  after one pays about 2.5 s to recompile it outside the timed job span.
-- **Gate and land speed fixes, measured 2026-11-04** on this 16-core host at
-  load 13 to 35 (raw data in the sweep's `speed-data/ci/fixes/`).
-  Hosted CI: a per-commit Go cache key saved from main pushes took the CLI
-  build from 112 s cold (99 s median on the stale cache) to 6 s plus a 15 s
-  restore on gate-core, 74 s to 15 s plus 26 s on race-touched, and vet from
-  297 s cold (161 s median) to 6 s; each save is about 930 MiB. Locally, with
-  the lint cache in the tree `sparkwing pipeline list` took 61 to 75 s and
-  with it in the git directory 2.5 s. A cold whole-module lint of the root
-  measured 551 s; a change outside the root module now skips it, while a deep
-  package (`internal/bincache`) still took 465 s cold because golangci-lint
-  loads every dependency. A stable test home made `internal/paths` and
-  `internal/bincache` replay from the cache on a rerun; `cmd/sparkwing`
-  (400 to 630 s) still reruns. Land's push skipped a pre-push run that had cost
-  37 to 632 s. The old `gofmt -l .` failed 2 of 150 runs beside a looping
-  `npm ci`; the pruned walk failed none.
 - **Which tier decides a merge:** the hooks judge what they can in seconds and
   nothing more, so main may go red. Follow the [release failure policy](#release-failure-policy).
   Main is where the broad checks run:
@@ -2258,10 +1301,7 @@ file. Other syntax and workflow checks remain active.
   pipeline module.
 - **Why the whole-tree vet, test and lint are in neither hook:** the house
   standard puts them in the pre-commit chain, and this repo runs them in `gate`
-  on purpose. Earlier broad-tier runs took 12 to 24 minutes through the shared
-  admission daemon. At that time, the Postgres suite took 401 s, race tests
-  401 s, the full unit suite 315 s, and lint 117 s. The Postgres lane now takes
-  693 s end to end. No new broad-tier total has been measured. A hook that
+  on purpose: the broad tier takes many minutes. A hook that
   long is a hook everyone passes `--no-verify`, and it loses the fast-forward
   race whenever a co-maintainer lands first. Hosted CI runs `gate` and
   `pre-release` on every pull request and push to main, so a landing pays for
@@ -2273,9 +1313,8 @@ file. Other syntax and workflow checks remain active.
   runs in a hook tier:
   the fast test class belongs to the release cut, and the hooks run formatters,
   sweeps, contract gates and linters. The suites are the wrong shape for a
-  ten-second tier -- the short suite of `internal/store` alone measured 53 s,
-  because several hundred of its tests each cost between 50 and 200 ms in
-  fixture setup.
+  ten-second tier: several hundred `internal/store` tests each spend tens of
+  milliseconds in fixture setup.
 - **Cheap:** format touched Go files and run the affected package tests, for
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
@@ -2344,278 +1383,14 @@ file. Other syntax and workflow checks remain active.
   caller's temporary-directory settings so Go can reuse passing results.
   Test fixtures own cleanup through `t.TempDir`, `t.Cleanup`, or deferred
   removal. Forced race and Postgres runs retain their per-run scratch roots.
-- **Single-core race shard costs:** measured on a 16-logical-CPU Linux host
-  with Go 1.26.10 during concurrent builds and tests. The load average exceeded
-  24, so these are contended local samples. Controller used four shards and
-  two workers, with commands of the form
-  `GOMAXPROCS=1 go test -race -count=1 -run "$pattern" ./internal/controller/`,
-  with each pattern selecting one sorted round-robin shard. The CLI used
-  compiled race binaries with `GOMAXPROCS=1` and `-test.count=1`.
-  Localcontroller used `GOMAXPROCS=1 go test -race -count=1` on the whole
-  package. Every measurement ran the full test class.
-
-  | Package | Listed names | Shard seconds, in order | Result |
-  | --- | ---: | --- | --- |
-  | `internal/controller` | 1,026 | 1040.73 / 1884.44 / 953.24 / 949.81 | All four passed |
-  | `cmd/sparkwing` | 1,129 | 950.51 / 975.64 | Both passed |
-  | `internal/wingd/localcontroller` | 21 | 156.63 | Whole package passed |
-
-  Two preliminary controller shards each hit a 35-minute measurement guard,
-  after 508 and 263 of their 513 names, respectively.
-  A four-shard trial with a 30-minute guard completed shards 1, 3 and 4, and
-  stopped shard 2 after 245 of its 257 names. The table uses shard 2's complete
-  rerun with the configured 52m30s timeout. Together the final four samples
-  cover 257, 257, 256 and 256 names, with no skips. Controller's sorted listing
-  SHA-256 was `dc830a363f175b8cf17c1eb91083e7d1061f23936921989100ee5fd917b17770`.
-  CLI compilation took 126.75s separately from its shard timings.
-  An exploratory two-process localcontroller run compiled in 37.62s,
-  took 23.58s and 159.86s in its two processes, and reported
-  `unstarted local renewal changed claim` in
-  `TestLocalControllerTwoJobProcessesUseIndependentAwards`. The final
-  one-process sample passed all 21 names, so the queue keeps this package
-  together. Full hosted batch completion remains unmeasured.
-
-- **Touched-package race costs, 2026-11-01:** hosted run 41330942938 raced
-  six packages in one `go test -p 2` call and the gate job hit its 70-minute
-  deadline: `tests/acceptance` alone took 3150.5 s there, so the controller
-  shards could not start until minute 61. Local samples below ran on the
-  16-logical-CPU Linux host with Go 1.26.10, each package as
-  `GOMAXPROCS=1 go test -race -count=1 ./<pkg>` with a private home, six
-  packages at once beside other lanes (load average 4 to 12).
-
-  | Package | Local wall | Local CPU (user+sys) | Hosted wall (41330942938) |
-  | --- | ---: | ---: | ---: |
-  | `internal/controller` | 5112.8 s | 4724.8 s | not reached |
-  | `internal/controller/client` | 5.0 s | 4.0 s | 3.0 s |
-  | `internal/controllerwire` | 2.1 s | 1.0 s | 1.0 s |
-  | `internal/runners/launcher` | 102.6 s | 100.3 s | 205.5 s |
-  | `internal/source` | 37.2 s | 35.1 s | 70.0 s |
-  | `tests/acceptance` | 2408.2 s | 2345.6 s | 3150.5 s |
-
-  Both long packages are CPU-bound under race, so splitting them only helps
-  when a core is free. `TestStorage` took 1696.6 s of acceptance's total; a
-  four-way round-robin split of acceptance ran 1990.3, 257.8, 173.1 and
-  202.1 s, the long shard being the one holding `TestStorage`. Controller's
-  two property tests above took 663.9 and 604.2 s; split ten ways, its
-  groups ran 291 to 1145 s, the two longest holding those tests. The hosted-to-local ratio was 1.31 for
-  acceptance and about 2.0 for launcher and source.
-
-  Later the same day the three long poles got cheaper under race, measured
-  the same way on a quieter host (load average 4 to 6). Fixture inserts in
-  the controller tests became one statement each, because every
-  `teststore.Exec` reparses the schema and reprojects every run. Under race,
-  retry history reads its 270-link chain through one selector per shape
-  instead of three, and `TestStorage` checks the first 16 of its 128 depcache
-  cases per backend. The full suite without race still checks every selector
-  and all 128 cases. Test rows ran each test alone with `-run`.
-
-  | Test or package | Race before | Race after | No race before | No race after |
-  | --- | ---: | ---: | ---: | ---: |
-  | `TestStorage` | 1681.7 s | 271.0 s | 177.9 s | 148.5 s |
-  | `TestLogTreeTraversesEveryTenantDescendantProperty` | 585.9 s | 65.3 s | 99.8 s | 7.7 s |
-  | `TestRetryHistoryTraversesLongChainsAndCycles` | 564.7 s | 95.1 s | 95.6 s | 12.9 s |
-  | `tests/acceptance` | 2408.2 s | 890.5 s | | |
-  | `internal/controller` | 5112.8 s | 3836.4 s | | |
-
-  The package CPU (user+sys) after the change was 873.7 s for acceptance and
-  3680.9 s for controller. Retry history still costs about 6 s per page under
-  race because every page request rewalks the whole retry tree.
-
-  Projected plan on the former shared hosted runner, from the measurements
-  before those reductions, for a batch touching all six packages, at the 1.31 ratio, with `store-postgres` idle: the ordinary packages take about 4
-  minutes, the three lead shards (about 37, 14 and 13 minutes) start first,
-  two more workers join when the full Go suite ends near minute 32, and the
-  queue drains at about minute 60 of a step that starts near minute 5 of the
-  70-minute job and still owes lint about 3 minutes. That leaves no headroom.
-  At a ratio of 1.6 or more, or when the batch also touches `internal/store`
-  and `store-postgres` holds two cores for its 23 minutes, the race work
-  (about 164 core-minutes for controller and acceptance at 1.31) exceeds what
-  four cores can supply inside the job deadline under any schedule.
-
-  Hosted CI therefore gives touched-package race tests a separate four-core
-  runner and a full 70-minute execution window. All four shard workers are
-  available from the start of that job. The full Go suite, conditional
-  PostgreSQL suite and lint consume another runner's budget. The package
-  selection, lead shards, ordinary packages, package timeouts and release-only
-  store race coverage stay unchanged. At 1.31, the measured 164 core-minutes
-  for controller and acceptance have up to 280 core-minutes available in the
-  dedicated window, before ordinary packages, compilation and listing. This
-  removes the shared-runner capacity shortfall. A complete hosted batch under
-  the split is still unmeasured.
-
-- **Fixture SQL synchronization, measured 2026-11-12:** the separate SQLite
-  connections used by `teststore.SQL` and `Exec` set `synchronous(NORMAL)`,
-  matching the production store. SQLite applies this pragma per connection;
-  the fixture previously defaulted to FULL. The native
-  `TestSQLiteFixtureConnectionUsesNormalSynchronization` guard reads the
-  connection's actual mode (2 before, 1 after). Each trust case retains its
-  own store, signing key and claims.
-
-  Three interleaved A/B pairs ran every one of the 19
-  `TestAppParentChildrenPreserveOnlyExactRevisionTrust` leaves on source
-  `76afada1a`. B applied only the fixture DSN line through a Go overlay.
-  Relevant fixture/controller sources are unchanged on implementation base
-  `18ee4831b`. Go 1.26.11 used `GOMAXPROCS=3`, `-p 1` and `-short` on the
-  shared 16-CPU WSL host. Every sample copied the same private, compiled-only
-  cache seed; result caching remained enabled. Cache copying, hashing and
-  slot wait are outside the observations. Native CPU is wait4 user plus
-  system time, including descendants reaped by the test binary.
-
-  | Pair | Native wall before / after, s | Native CPU before / after, s | Load1 median before / after |
-  | --- | ---: | ---: | ---: |
-  | 1 | 18.477 / 13.355 | 13.046 / 12.274 | 6.192 / 8.295 |
-  | 2 | 20.499 / 12.838 | 13.178 / 11.855 | 8.717 / 8.579 |
-  | 3 | 19.609 / 12.421 | 14.303 / 11.901 | 8.224 / 9.252 |
-
-  Native wall medians were 19.609/12.838 s (-34.53%), with ranges
-  18.477-20.499/12.421-13.355 s. CPU medians were 13.178/11.901 s (-9.69%),
-  with ranges 13.046-14.303/11.855-12.274 s. Whole Go command wall medians
-  were 24.413/17.853 s (-26.87%), including warm driver/build work and cache
-  bookkeeping. All six samples had identical 20 run/pass results, including
-  the parent, without skips or failures. Load, other Go-slot owners, iowait
-  and steal were recorded at 1 Hz; no samples were discarded. The earlier
-  n=1 diagnostic had no wall-time win (16.294/16.461 s) and remains in the
-  evidence. One host, one window and one test cohort establish no whole-Land
-  saving and change no gate tier, lane width, deadline or test budget.
-  Evidence: `~/evidence/sparkwing/controller-app-parent-cost-2026-11-12/`
-  and the fixture SQLite synchronization packet beside it.
-
-- **Fixture SQL connection reuse, 2026-11-01:** `teststore.Exec` retains one
-  connection per registered store, closed by the opening test's cleanup. Its
-  SQLite DSN keeps foreign keys, the busy timeout and immediate transactions.
-  `SQL(t, st)` keeps its separate pool for corruption tests. The retained
-  connection avoids reparsing the schema for every fixture statement.
-
-  Normal samples compared `6065a30b9` with `f06454e8f` on the
-  16-logical-CPU Linux host using Go 1.26.10, `GOMAXPROCS=4`, `GOWORK=off`,
-  `GOFLAGS=-buildvcs=false`, `GOCACHE=/tmp/sw-gocache`, private homes and a
-  private temporary directory. The command was `go test -p 12 -json -count=1
-  -timeout 120m ./internal/controller/... ./internal/store/...
-  ./tests/acceptance/...`. An `-exec` wrapper recorded each test binary's
-  start before executing it. The initial baseline binaries were compiled
-  before changing the helper. The updated helper suite adds two regressions.
-  Every other package ran the same top-level names.
-
-  | Normal sample | Initial baseline | Clean baseline repeat | After |
-  | --- | ---: | ---: | ---: |
-  | Full command wall | 1342.270 s | 935.440 s | 944.970 s |
-  | Full command CPU, user + system | 2257.300 s | 1941.110 s | 1878.300 s |
-  | `internal/controller` wall | 1235.251 s | 871.644 s | 863.498 s |
-  | `internal/store` wall | 1210.223 s | 927.453 s | 938.127 s |
-  | `tests/acceptance` wall | 513.305 s | 336.539 s | 381.005 s |
-  | `internal/store/teststore` wall | 2.660 s | 1.664 s | 1.496 s |
-
-  The updated command passed. The normal baseline lacked web `tsx` and the
-  TypeScript SDK's locked dependencies, so
-  `TestDashboardRequestsReachControllerHandlers` and `TestTypeScriptBoundary`
-  failed. Installing the locked dependencies made both focused reruns pass.
-  The dashboard rerun used its original binary. The clean baseline repeat
-  compiled the original Go sources through `-overlay` after dependency setup
-  and passed the full command. Its wall time is within 1.1% of the updated
-  sample, so these samples do not establish a gain in normal wall time. No
-  existing assertions changed. Command wall includes compilation. Runs
-  overlapped other samples and other lanes, with different cache warmth and
-  variable host load, so these are
-  observed shared-host costs.
-
-  Race samples used the same command with `-race`. All packages except the
-  unsharded `internal/store` completed successfully in both revisions.
-
-  | Race sample | Before | After |
-  | --- | ---: | ---: |
-  | Full command wall, store timeout | 7388.810 s | 7235.910 s |
-  | `internal/controller` wall | 6599.623 s | 4181.674 s |
-  | `tests/acceptance` wall | 3518.984 s | 3072.251 s |
-  | `internal/store/teststore` wall | 32.942 s | 11.366 s |
-  | Unsharded `internal/store` wall, timeout | 7200.338 s | 7200.288 s |
-
-  Both unsharded commands failed at the store's 120-minute timeout. The
-  baseline had passed 753 top-level tests and the updated run 787, with no
-  correctness failures reported before either timeout. These store samples
-  establish lower bounds rather than completed suite costs.
-
-  The full store race comparison therefore used four exhaustive sorted
-  round-robin shards, each running a retained race-enabled test binary once
-  with `GOMAXPROCS=1` and `-test.timeout=180m`. Both binaries list the same
-  1,856 top-level Test, Example and Fuzz names. Their sorted LF-terminated
-  list has SHA-256
-  `b0c3f77c2c408c9e0c033c9894d7c56c3ada90df51a32e60fbd18f832678e65d`.
-  Both runs include the slow class. Each name belongs to exactly one shard,
-  and completion checks reject missing names or test failures. The four
-  workers run concurrently within each revision, with the two revisions run
-  sequentially. Compiling and listing the package binaries are outside the
-  shard timing.
-
-  | Four-shard store race sample | Before | After |
-  | --- | ---: | ---: |
-  | Suite wall | 3943.941 s | 3255.259 s |
-  | Suite CPU, user + system | 13310.561 s | 11125.046 s |
-  | Shard 0 wall | 3425.553 s | 2822.166 s |
-  | Shard 1 wall | 3098.942 s | 2522.560 s |
-  | Shard 2 wall | 3158.799 s | 2591.540 s |
-  | Shard 3 wall | 3943.917 s | 3255.238 s |
-
-  Both full-class store runs passed 1,797 top-level names and retained the
-  same 59 conditional skips. All eight shards exited successfully, with no
-  missing or failed names. Wall time fell about 17% and CPU about 16% in
-  these shared-host samples.
-
-- **RSA fixture leases, measured 2026-11-12:** GitHub App and JWKS fixtures,
-  including Google and GitHub OIDC, share `internal/rsatest.New`. The process
-  generates a 2048-bit key only when no free material exists. Each live fixture
-  has an exclusive lease and its own parsed key object. Its own `t.Cleanup`
-  returns the material after issuer cleanup; parent-owned fixtures retain their
-  keys until parent cleanup. The pool retains the live-lease high-water mark,
-  rather than generating for every construction. No key material is checked in,
-  and scanner and snapshot policy are unchanged.
-
-  Three interleaved A/B pairs ran the whole `internal/controller` short class
-  on the same `f75692d80` source tree. A restored only the original two
-  generating helper files through a Go overlay; B used the pooled helpers.
-  Go 1.26.11, `GOWORK=auto`, `GOFLAGS=-mod=readonly`, `GOMAXPROCS=3` and
-  `go test -json -p 1 -short -timeout 25m` were fixed. Every sample used private
-  homes and a private clone of the same compile-only cache seed, warmed for
-  both variants. A native process wrapper recorded user plus system CPU,
-  including waited children, and restored Go's test input log. Compilation and
-  cache cloning are outside these native timings.
-
-  | Pair | CPU before / after | CPU delta | Wall before / after | Wall delta |
-  | --- | ---: | ---: | ---: | ---: |
-  | 1 | 221.540 / 164.652 s | -25.68% | 249.622 / 166.779 s | -33.19% |
-  | 2 | 198.739 / 184.972 s | -6.93% | 184.614 / 175.476 s | -4.95% |
-  | 3 | 225.507 / 164.958 s | -26.85% | 230.723 / 180.211 s | -21.89% |
-
-  Native medians were 221.540 to 164.958 CPU seconds (-25.54%) and
-  230.723 to 175.476 wall seconds (-23.94%), comparing the medians.
-  CPU ranges were 198.739-225.507 before and 164.652-184.972 after;
-  wall ranges were 184.614-249.622 and 166.779-180.211 seconds.
-  All six inventories match exactly: 2,266 passes and 69 conditional skips.
-  This was one shared host and one time window, with no quiet reservation or
-  sample exclusions. Median load1 before/after was 9.68/4.09, 4.46/7.46 and
-  9.93/5.07 by pair. Raw load and Go-slot owners were recorded at 1 Hz, along
-  with CPU iowait and steal. These are package observations, not a forecast
-  for an entire queued land. Evidence, overlays, cache manifests and native
-  rusage are in the runtime RSA lease pool packet under `~/evidence/sparkwing/`.
-
 - **Heavy packages:** run these by name rather than reaching for `./...`, and
-  give the command a timeout the package actually fits in. Measured on a
-  16-core Linux box, `GOWORK=off go test -count=1 <pkg>`. The CLI sample
-  used Go 1.26.10 alongside other gates; the other samples ran alone:
+  give the command a timeout the package actually fits in:
 
-  | Package | Measured | Suggested `-timeout` |
-  | --- | --- | --- |
-  | `./cmd/sparkwing` | 399s package / 409s command wall | 10m |
-  | `./internal/orchestrator` | 121s | 10m |
-  | `./internal/cluster` | 4s | 2m |
-
-  The full CLI package passed all 1,130 top-level tests and fuzz targets in
-  398.535s. Command wall time was 408.661s. The measurement used
-  `go test -json -count=1 -timeout 90m ./cmd/sparkwing`, `GOWORK=off`,
-  `GOFLAGS=-buildvcs=false`, `GOCACHE=/tmp/sw-gocache`, private homes, and
-  `TMPDIR=/var/tmp/sw-lead-tmp`. Before fixture reuse, the same class took
-  775.644s (780.969s command wall). Pipeline build calls fell from 112 to 53;
-  both runs built the CLI three times and passed the same test names without
-  skips. These are ordinary runs, separate from the race-shard samples above.
+  | Package | Suggested `-timeout` |
+  | --- | --- |
+  | `./cmd/sparkwing` | 10m |
+  | `./internal/orchestrator` | 10m |
+  | `./internal/cluster` | 2m |
 
   SDK fixtures share a package-owned source snapshot and binary cache because
   installer re-execs otherwise enter fresh test homes. Source changes,
@@ -2623,51 +1398,6 @@ file. Other syntax and workflow checks remain active.
   retain real compiler coverage. Independent subprocess tests run in parallel.
   Contention can still extend these samples; the suggested timeouts leave
   room above the measurements.
-
-- **Offline uploaded fixture builds, measured 2026-11-12:** the nested
-  `go test` in `TestKubernetesE2EUploadedFixtureBuildsWithoutCallerCheckout`
-  uses `-trimpath -count=1`. Trimmed source paths let fresh uploaded checkouts
-  reuse build objects; `-count=1` keeps the run-ID/log proof executing. The
-  self-contained bundle/clone, readonly modules, `GOWORK=off`, `GOPROXY=off`
-  and `GOSUMDB=off` checks remain. The native cache guard checks equal test
-  executable bytes at two source paths and four actual proof-body executions.
-
-  Three alternating before/after pairs compared main `136fdd93c` with code
-  `7e0da3f79`, Go1.26.11, `GOMAXPROCS=7`, one shared 16-CPU Linux host and one
-  time window. This is the standalone module allowance; a broad queued Land
-  can give the pipeline module one worker. Each sample copied the same private
-  cache snapshot, already primed for both modes. Test binaries were compiled
-  once per arm. Their compilation, cache copies, priming and queue wait are
-  outside native timings. Nested fixture compilation is included.
-
-  | Pair | Before / after wall, s | Wall delta | Before / after CPU, s | CPU delta | Median load1, before / after |
-  | --- | --- | --- | --- | --- | --- |
-  | 1 | 10.308 / 3.656 | -64.53% | 40.391 / 5.015 | -87.58% | 6.178 / 6.352 |
-  | 2 | 10.335 / 3.764 | -63.58% | 38.410 / 5.181 | -86.51% | 7.568 / 7.187 |
-  | 3 | 10.394 / 3.742 | -64.00% | 39.105 / 5.115 | -86.92% | 6.592 / 6.178 |
-
-  Median native wall was 10.335 -> 3.742 s (-63.80%); median user+system CPU
-  was 39.105 -> 5.115 s (-86.92%). Wall ranges were 10.308-10.394 and
-  3.656-3.764 s; CPU ranges were 38.410-40.391 and 5.015-5.181 s.
-  Linux `wait4` CPU includes the test process and children it waited for;
-  direct-process and waited-child ticks are also retained separately.
-  Every sample passed the complete guard, with no selected skip or failure.
-  Load1 ranged 6.083-7.759; another job held a second Go slot throughout. All samples are included. This narrow warm cache result
-  does not measure the whole affected-tests job or a whole Land.
-
-  The initial seed made the first trimmed build more expensive. A probe at `6bc12d4f1`, starting
-  each variant from the same private cache with warm platform dependencies,
-  took 35.853 CPU s / 7.903 wall s for the normal command versus 141.231 CPU s /
-  22.106 wall s for its first trimmed command. A second fresh checkout used
-  34.972 CPU s / 7.392 wall s normally, versus 1.442 CPU s / 0.834 wall s
-  trimmed: 80 local compiler actions versus none, with the proof body run in
-  both variants. The common-cache refresh for `136fdd93c` cost another
-  24.303 CPU s / 6.082 wall s outside the paired samples. Retained cache
-  contents govern that startup cost; an empty-cache bootstrap was not measured.
-  No test selection, lane width, deadline or production engine verification
-  policy changed. Raw commands, source/bundle/cache snapshots, profiles,
-  CPU-scope self-check, outcomes and 1 Hz load/owner data are in
-  `/home/bombuntu/evidence/sparkwing/cli-fixture-staging-cost-2026-11-12/`.
 
 - **Normal broad check:** `sparkwing run gate` covers every committed Go
   module, the dashboard TypeScript unit, full ESLint, production build,
@@ -2884,17 +1614,7 @@ file. Other syntax and workflow checks remain active.
   never tracked the name. Both are rare and fail the run; drop the leftovers
   by hand with `DROP DATABASE <name> WITH (FORCE)` once no run is using them. A failing shard
   stops the others. `internal/store/internal/storetest` and
-  `internal/store/teststore` run whole. Measured on 2026-11-02 on a loaded
-  16-core host pinned to four cores with `CI=1` against a shared PostgreSQL 18
-  server: the former single `go test ./internal/store/...` took 28m12s for
-  1,876 top-level tests; selection alone took 14m26s; selection with four shards
-  took 7m10s, and a verbose repeat 6m07s whose shards took 3m10s to 6m04s with
-  each of the 508 selected names passing exactly once. After the selection
-  moved to a reviewed file list, 514 names run: the five other tests in
-  `claim_requirements_test.go` and `TestStoreSQLTrustLiterals` share a file
-  with a PostgreSQL test. A verbose four-shard run on the same pinned cores,
-  with the host otherwise idle, took 5m37s, shards 3m15s to 5m34s, each of the
-  514 passing exactly once. Round-robin leaves
+  `internal/store/teststore` run whole. Round-robin leaves
   `TestAdmissionDeterministicSimulation` (about two minutes) in the longest
   shard. It reuses `SPARKWING_TEST_PG_URL` when
   that is set and otherwise starts an embedded Postgres on a free port (data
@@ -3190,7 +1910,7 @@ or resumes the Bitwing `sparkwing-release` workflow using the version as its
 idempotency key. It records the cut's immutable tag and commit in a blocked
 `cut` handoff. The release owner resumes with `bitwing workflow next --run WR-N`
 to confirm hosted publication, publish matching sparkwing-product docs, verify
-production through kikd-infra, and reconcile downstream pins. The checklist
+production through the platform repository, and reconcile downstream pins. The checklist
 stays open until every required step has evidence. A failed cut retains the
 detached worktree at the path printed in its job log.
 
@@ -3211,7 +1931,8 @@ tidies the pipeline module, commits only its go.mod and go.sum, and invokes
 host without requesting an unpublished signed engine release.
 
 Eligible repos are immediate children of `~/code` with a Go pipeline module,
-a GitHub origin owned by `koreyGambill` or `sparkwing-dev`, and an Xwing policy
+a GitHub origin whose owner `ownedOrigin` in `.sparkwing/jobs/owned_sdk.go`
+allows, and an Xwing policy
 with `landing.branch: main` and a verification command. Pull-request policies
 and Sparkwing itself are excluded. Xwing applies the repo's committed landing
 policy and verification. An unchanged main pin is skipped. A retained candidate

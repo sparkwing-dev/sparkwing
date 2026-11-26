@@ -62,7 +62,7 @@ func (f *identityFixture) setSignUp(body map[string]any) signUpStatus {
 // before the controller lists it.
 func (f *identityFixture) operatorAuth() string {
 	f.t.Helper()
-	op := person("g-operator", "korey@example.com", "Korey")
+	op := person("g-operator", "avery@example.com", "Avery")
 	out := f.signIn(op)
 	if out.Waitlisted {
 		f.srv.WithOperatorAccounts([]string{"operator"})

@@ -247,7 +247,7 @@ func TestSecretManagementRejectsInvalidInputBeforeConnection(t *testing.T) {
 	}
 }
 
-// Decision 66: a pipeline secret belongs to one repository, so naming a
+// A pipeline secret belongs to one repository, so naming a
 // pipeline without its repository is refused before any connection.
 func TestSecretManagementRefusesPipelineWithoutRepository(t *testing.T) {
 	for _, args := range [][]string{

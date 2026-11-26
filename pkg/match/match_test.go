@@ -61,16 +61,16 @@ func TestEvaluateMatchesTheLegacyFilterForEqualitySelectors(t *testing.T) {
 
 func TestSelfAssertedLabelsCannotClaimAGrantedField(t *testing.T) {
 	asserted := match.Profile{Class: match.ClassAgent, Labels: match.SelfAsserted([]string{
-		"name=moonborn", "class=coordinator", "team=acme", "pool=prod", "local", "location=cloud", "sparkwing-16cpu", " sparkwing-future ", "gpu",
+		"name=mybox", "class=coordinator", "team=acme", "pool=prod", "local", "location=cloud", "sparkwing-16cpu", " sparkwing-future ", "gpu",
 	})}
-	for _, term := range []string{"name=moonborn", "class=coordinator", "team=acme", "pool=prod", "local", "location=cloud", "sparkwing-16cpu", "sparkwing-future"} {
+	for _, term := range []string{"name=mybox", "class=coordinator", "team=acme", "pool=prod", "local", "location=cloud", "sparkwing-16cpu", "sparkwing-future"} {
 		if v := match.Evaluate(asserted, match.Demand{Selector: []string{term}}); v.OK() {
 			t.Errorf("a self-asserted label satisfied %q", term)
 		}
 	}
-	granted := match.Profile{Name: "moonborn", Class: match.ClassAgent}
-	if v := match.Evaluate(granted, match.Demand{Selector: []string{"name=moonborn"}}); !v.OK() {
-		t.Errorf("the granted name did not satisfy name=moonborn: %v", v)
+	granted := match.Profile{Name: "mybox", Class: match.ClassAgent}
+	if v := match.Evaluate(granted, match.Demand{Selector: []string{"name=mybox"}}); !v.OK() {
+		t.Errorf("the granted name did not satisfy name=mybox: %v", v)
 	}
 }
 

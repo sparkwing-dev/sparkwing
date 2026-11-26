@@ -1,2 +1,0 @@
-bench go P2 bulk 1 wall_ms 1973
-PASS

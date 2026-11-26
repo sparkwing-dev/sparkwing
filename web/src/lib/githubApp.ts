@@ -340,6 +340,11 @@ export function connectedAccount(search: string): string | null {
   return value ? value : null;
 }
 
+// A failed connect sends the browser here when GitHub already holds the installation.
+export function connectExistingRequested(search: string): boolean {
+  return new URLSearchParams(search).get("connect") === "existing";
+}
+
 export interface FailedGitHubDelivery {
   id: string;
   event: string;
