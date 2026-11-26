@@ -4,6 +4,7 @@ package wingd
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -16,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/localhostwire"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 type cleanupRunRegistry struct {
@@ -29,14 +31,22 @@ func cleanupWireInstance(i store.LocalRunnerInstance) localhostwire.LocalRunnerI
 	return localhostwire.LocalRunnerInstance{ID: i.ID, CapabilityPrefix: i.CapabilityPrefix, Machine: i.Machine, PID: i.PID, ProcessBirth: i.ProcessBirth, Version: i.Version, BuildIdentity: i.BuildIdentity, State: i.State}
 }
 
+// safety: like the controller adapter, report a missing runner as apierr.NotFound, which retirement reads as stopped.
+func cleanupRegistryError(err error) error {
+	if errors.Is(err, store.ErrNotFound) {
+		return &apierr.Error{Code: apierr.NotFound, Message: err.Error()}
+	}
+	return err
+}
+
 func (r cleanupRegistryAdapter) ActiveLocalRunner(ctx context.Context, subject string) (localhostwire.LocalRunnerInstance, error) {
 	i, err := r.Operator.ActiveLocalRunner(ctx, subject)
-	return cleanupWireInstance(i), err
+	return cleanupWireInstance(i), cleanupRegistryError(err)
 }
 
 func (r cleanupRegistryAdapter) ReadLocalRunner(ctx context.Context, subject, id string) (localhostwire.LocalRunnerInstance, error) {
 	i, err := r.Operator.ReadLocalRunner(ctx, subject, id)
-	return cleanupWireInstance(i), err
+	return cleanupWireInstance(i), cleanupRegistryError(err)
 }
 
 func (r cleanupRegistryAdapter) RegisterLocalRunner(ctx context.Context, subject string, i localhostwire.LocalRunnerInstance) (localhostwire.LocalRunnerInstance, error) {
@@ -45,8 +55,8 @@ func (r cleanupRegistryAdapter) RegisterLocalRunner(ctx context.Context, subject
 }
 
 func TestControllerStopRetryAfterRunnerCredentialCleanup(t *testing.T) {
-	for _, name := range []string{"credential-live", "credential-revoked", "no-retry"} {
-		revoke, retry := name == "credential-revoked", name != "no-retry"
+	for _, name := range []string{"credential-live", "credential-revoked", "retry-after-self-stop"} {
+		revoke, selfStop := name == "credential-revoked", name == "retry-after-self-stop"
 		t.Run(name, func(t *testing.T) {
 			s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 			if err != nil {
@@ -155,7 +165,7 @@ func TestControllerStopRetryAfterRunnerCredentialCleanup(t *testing.T) {
 				t.Fatalf("fixture process remains: alive=%v err=%v", alive, err)
 			}
 			t.Logf("first stop persisted draining, runner cleanup complete, PID %d absent, revoke=%v", instance.PID, revoke)
-			if !retry {
+			if selfStop {
 				wait, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 				defer cancel()
 				select {
@@ -163,7 +173,6 @@ func TestControllerStopRetryAfterRunnerCredentialCleanup(t *testing.T) {
 				case <-wait.Done():
 					t.Fatal("controller stayed open after its held runner exited without another stop")
 				}
-				return
 			}
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, controllerHTTPRequest(t, http.MethodPost, "drain?runner=retire", "", true))
