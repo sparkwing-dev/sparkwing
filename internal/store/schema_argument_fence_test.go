@@ -11,7 +11,7 @@ import (
 )
 
 func TestSchema41UpgradesLegacyArgumentRowsInEachDialect(t *testing.T) {
-	if store.ExpectedSchemaVersion() != 41 {
+	if store.ExpectedSchemaVersion() < 41 {
 		t.Fatal("argument document format requires schema 41")
 	}
 	for _, dialect := range []struct {
@@ -21,13 +21,6 @@ func TestSchema41UpgradesLegacyArgumentRowsInEachDialect(t *testing.T) {
 		t.Run(dialect.name, func(t *testing.T) {
 			target := dialect.target(t)
 			s := target.Open(t)
-			var digest string
-			if err := s.DB().QueryRowContext(t.Context(), `SELECT baseline_digest FROM sparkwing_schema_version`).Scan(&digest); err != nil {
-				t.Fatal(err)
-			}
-			if digest != "1bcc048252e13edb35021084dd24ad1d7f7adf9eb9cd9ee5fbc291a0ef7df189" {
-				t.Fatal("fixture must use the schema-40 SQL layout")
-			}
 			tenant, err := s.ForTeam(t.Context(), store.DefaultTeam)
 			if err != nil {
 				t.Fatal(err)
@@ -47,6 +40,7 @@ func TestSchema41UpgradesLegacyArgumentRowsInEachDialect(t *testing.T) {
 			if err := s.DB().QueryRowContext(t.Context(), `SELECT completed FROM audit_privacy_migrations WHERE version=1`).Scan(&completed); err != nil {
 				t.Fatal(err)
 			}
+			store.DropInvitationEmailInviterForTest(t, s)
 			if _, err := s.DB().ExecContext(t.Context(), `UPDATE sparkwing_schema_version SET version=40,baseline_digest='1bcc048252e13edb35021084dd24ad1d7f7adf9eb9cd9ee5fbc291a0ef7df189'`); err != nil {
 				t.Fatal(err)
 			}
@@ -77,7 +71,7 @@ func TestSchema41UpgradesLegacyArgumentRowsInEachDialect(t *testing.T) {
 				t.Fatalf("reseal broke schedule listing: %v", err)
 			}
 			var version int
-			if err := upgraded.DB().QueryRowContext(t.Context(), `SELECT version FROM sparkwing_schema_version`).Scan(&version); err != nil || version != 41 {
+			if err := upgraded.DB().QueryRowContext(t.Context(), `SELECT version FROM sparkwing_schema_version`).Scan(&version); err != nil || version != store.ExpectedSchemaVersion() {
 				t.Fatalf("schema fence = %d, %v", version, err)
 			}
 		})
@@ -96,6 +90,7 @@ func TestSchema41ScrubsPendingSchema40OIDCAuditInEachDialect(t *testing.T) {
 			if _, err := s.DB().ExecContext(t.Context(), `UPDATE audit_privacy_migrations SET completed=0 WHERE version=1`); err != nil {
 				t.Fatal(err)
 			}
+			store.DropInvitationEmailInviterForTest(t, s)
 			if _, err := s.DB().ExecContext(t.Context(), `UPDATE sparkwing_schema_version SET version=40,baseline_digest='1bcc048252e13edb35021084dd24ad1d7f7adf9eb9cd9ee5fbc291a0ef7df189'`); err != nil {
 				t.Fatal(err)
 			}

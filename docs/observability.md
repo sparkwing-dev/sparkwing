@@ -681,7 +681,8 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing_object_store_bucket_ceiling_freezes_total` | Counter | (none) | Times the bucket crossed its ceiling and began refusing object writes |
 | `sparkwing_object_store_bucket_ceiling_refused_total` | Counter | (none) | Object writes the ceiling refused |
 | `sparkwing_object_store_bucket_ceiling_measurement_incomplete` | Gauge | (none) | 1 while the last measurement stopped early and was discarded |
-| `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a request budget refused with `429` (`claim`, `heartbeat`, `idle_poll`, `token`) |
+| `sparkwing_principal_throttled_total` | Counter | `route_class` | Requests a request budget refused with `429` (`claim`, `heartbeat`, `idle_poll`, `token`, and `inflight_reserve` when a team's in-flight reserve for lease renewals and running job results is also spent) |
+| `sparkwing_inflight_reserve_admitted_total` | Counter | (none) | Lease renewals, node transitions and step start and finish reports a team's in-flight reserve admitted after its request budget refused them; a rising count means a team is living on its reserve |
 | `sparkwing_request_rate_alarm_total` | Counter | (none) | Minutes in which the controller served more requests than `--requests-per-minute-alarm`; it refuses nothing |
 | `sparkwing_egress_day_bytes` | Gauge | (none) | Bytes the process has sent to clients in the current UTC day |
 | `sparkwing_egress_daily_alarm` | Gauge | (none) | 1 while the process is past `--egress-daily-alarm-bytes`; it refuses nothing |

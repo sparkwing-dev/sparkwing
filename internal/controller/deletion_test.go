@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -206,13 +207,16 @@ type inviteBody struct {
 	ID        string `json:"id"`
 	AcceptURL string `json:"accept_url"`
 	EmailSent bool   `json:"email_sent"`
+	EmailNote string `json:"email_note"`
 }
 
 func TestInvitationEmailNamesTheInviterAndTeamAndStopsAtTheDailyCap(t *testing.T) {
 	mail := &mailFake{}
-	f := newIdentityFixtureWith(t, fixtureOpts{configure: func(s *controller.Server) {
-		s.WithMailer(mail)
-	}})
+	var logs controller.SyncBuffer
+	f := newIdentityFixtureWith(t, fixtureOpts{
+		logger:    slog.New(slog.NewTextHandler(&logs, nil)),
+		configure: func(s *controller.Server) { s.WithMailer(mail) },
+	})
 	owner := f.user("o", "olga@example.com")
 	f.createTeam(&owner, "acme")
 	var inv inviteBody
@@ -250,6 +254,62 @@ func TestInvitationEmailNamesTheInviterAndTeamAndStopsAtTheDailyCap(t *testing.T
 	}
 	if n := len(mail.messages()); n != store.MaxInvitationEmailsPerDay {
 		t.Fatalf("sent %d emails to one address in a day, want %d", n, store.MaxInvitationEmailsPerDay)
+	}
+	if out := logs.String(); !strings.Contains(out, "reason=recipient_limit") || strings.Contains(out, "target@example.com") {
+		t.Fatalf("logs should name the recipient limit without the address:\n%s", out)
+	}
+}
+
+func TestInvitationEmailPastTheAccountCapSaysWhenToRetry(t *testing.T) {
+	mail := &mailFake{}
+	var logs controller.SyncBuffer
+	f := newIdentityFixtureWith(t, fixtureOpts{
+		logger:    slog.New(slog.NewTextHandler(&logs, nil)),
+		configure: func(s *controller.Server) { s.WithMailer(mail) },
+	})
+	owner := f.user("o", "olga@example.com")
+	invite := func(email string) inviteBody {
+		t.Helper()
+		var got inviteBody
+		if code := f.call("POST", "/api/v1/team/invitations", owner.auth,
+			map[string]string{"email": email, "role": "reader"}, &got); code != http.StatusCreated {
+			t.Fatalf("invite %s = %d", email, code)
+		}
+		return got
+	}
+	start := time.Now().UTC()
+	for i := range store.MaxInvitationEmailsPerAccountPerDay {
+		if i == 34 || i == 67 {
+			f.createTeam(&owner, fmt.Sprintf("team-%d", i))
+		}
+		if got := invite(fmt.Sprintf("guest-%d@example.com", i)); !got.EmailSent || got.EmailNote != "" {
+			t.Fatalf("invite %d = %+v, want an email and no note", i+1, got)
+		}
+	}
+	got := invite("one-too-many@example.com")
+	if got.EmailSent || got.AcceptURL == "" {
+		t.Fatalf("invite past the account cap = %+v, want no email and an accept_url", got)
+	}
+	retry := start.Add(24 * time.Hour).Truncate(time.Minute).Add(time.Minute)
+	for _, want := range []string{"reached its limit of 100 invitation emails in 24 hours", "again after"} {
+		if !strings.Contains(got.EmailNote, want) {
+			t.Fatalf("email note %q lacks %q", got.EmailNote, want)
+		}
+	}
+	if !strings.Contains(got.EmailNote, retry.Format("15:04 UTC on Jan 2, 2006")) && !strings.Contains(got.EmailNote, retry.Add(time.Minute).Format("15:04 UTC on Jan 2, 2006")) {
+		t.Fatalf("email note %q does not name the minute 24 hours after the first email (%s)", got.EmailNote, start)
+	}
+	for _, private := range []string{"team-34", "team-67", "guest-", owner.id} {
+		if strings.Contains(got.EmailNote, private) {
+			t.Fatalf("email note %q names %q", got.EmailNote, private)
+		}
+	}
+	if n := len(mail.messages()); n != store.MaxInvitationEmailsPerAccountPerDay {
+		t.Fatalf("sent %d invitation emails from one account in a day, want %d", n, store.MaxInvitationEmailsPerAccountPerDay)
+	}
+	if out := logs.String(); !strings.Contains(out, "reason=account_limit") || strings.Contains(out, "one-too-many@example.com") ||
+		strings.Contains(out, "recipient_limit") {
+		t.Fatalf("logs should name only the account limit, without the address:\n%s", out)
 	}
 }
 

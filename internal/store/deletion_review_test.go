@@ -144,11 +144,11 @@ func TestInvitationEmailCapSurvivesTeamDeletion(t *testing.T) {
 			t.Fatal(err)
 		}
 		st.SetTestClock(t, func() time.Time { return now })
-		ok, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID)
+		withheld, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ok {
+		if withheld == "" {
 			claimed++
 		}
 		deleteAndPurge(t, st, slug, now)

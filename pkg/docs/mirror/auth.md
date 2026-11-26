@@ -448,6 +448,12 @@ controller refuses a display name or angle brackets around the address with
 Sparkwing"; the inviter's name and the team name appear only in the body, in
 quotation marks, as names Sparkwing users chose.
 
+Each account sends at most 100 invitation emails in any 24 hours, counted
+across every team it has invited from, and each address receives at most 5.
+Past either limit the invitation is created without an email. Deleting, leaving
+or creating teams does not reset the account's count. See
+[invitation limits](limits.md#invitation-limits).
+
 `GET /api/v1/team/settings` returns `members_can_add_machines`,
 `claim_ranking`, `max_children_per_root` and `high_trust` under `runs.read`. `PUT /api/v1/team/settings` requires
 `team.admin` and names at least one of them. `claim_ranking` takes distinct

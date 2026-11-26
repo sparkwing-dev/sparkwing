@@ -867,7 +867,8 @@ CREATE TABLE team_deletions (
 
 CREATE TABLE invitation_email_log (
     address TEXT NOT NULL,
-    sent_at BIGINT NOT NULL
+    sent_at BIGINT NOT NULL,
+    inviter TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE signup_gate (
@@ -1699,6 +1700,8 @@ CREATE INDEX idx_github_app_triggers_installation ON github_app_triggers(team,in
 CREATE INDEX idx_team_deletions_state ON team_deletions(state);
 
 CREATE INDEX idx_invitation_email_log_address ON invitation_email_log(address, sent_at);
+
+CREATE INDEX idx_invitation_email_log_inviter ON invitation_email_log(inviter, sent_at);
 
 CREATE INDEX idx_triggers_team_created ON triggers(team, created_at);
 

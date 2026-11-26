@@ -2150,6 +2150,35 @@ components:
         - remedy
       type: object
       x-sparkwing-go-type: controllerwire.HealthView
+    internal.controllerwire.InvitationCreate:
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+        role:
+          type: string
+      required:
+        - email
+        - role
+      type: object
+      x-sparkwing-go-type: controllerwire.InvitationCreate
+    internal.controllerwire.InvitationCreated:
+      additionalProperties: true
+      properties:
+        accept_url:
+          type: string
+        email_note:
+          type: string
+        email_sent:
+          type: boolean
+        id:
+          type: string
+      required:
+        - id
+        - accept_url
+        - email_sent
+      type: object
+      x-sparkwing-go-type: controllerwire.InvitationCreated
     internal.controllerwire.JobArtifacts:
       additionalProperties: true
       properties:
@@ -17998,21 +18027,32 @@ paths:
             liveness: credential
         retry: safe
     post:
-      description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.
       parameters:
         - description: Retain one key and the exact body when replaying a request.
           in: header
           name: Idempotency-Key
           schema:
             type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/internal.controllerwire.InvitationCreate'
+        required: true
       responses:
+        2XX:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/internal.controllerwire.InvitationCreated'
+          description: Successful response.
         default:
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/internal.apierr.Envelope'
           description: Canonical API failure.
-      summary: POST /api/v1/team/invitations
+      summary: Invite an address to the team and email the invitation when the daily limits allow
       x-sparkwing-policy:
         method: POST
         path: /api/v1/team/invitations
@@ -18026,7 +18066,6 @@ paths:
             binding: none
             liveness: credential
         retry: idempotency_key
-      x-sparkwing-wire: undocumented
   /api/v1/team/invitations/{invitation}:
     delete:
       description: Authorization is declared by the shared policy. A shared success-body contract is not documented for this operation.

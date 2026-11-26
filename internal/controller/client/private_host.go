@@ -273,6 +273,12 @@ func (c *LocalHostClient) Principal(ctx context.Context) (capability.Principal, 
 		return capability.Principal{}, errors.New("owner heartbeat policy is unavailable")
 	}
 	authenticated, err := capability.NewAuthenticator(c).Authenticate(ctx, capability.Presentation{Class: capability.CredentialBearer, Raw: raw, Evidence: capability.RequestEvidence{Target: capability.Target{RunID: c.run, NodeID: c.node}}}, route)
+	if err == nil && c.node != "" {
+		p := authenticated.Principal.Capability
+		c.mu.Lock()
+		c.nodes[c.node] = localNodeBearer{prefix: p.Prefix, generation: p.Binding.Generation, unit: p.UnitID}
+		c.mu.Unlock()
+	}
 	return authenticated.Principal, err
 }
 
@@ -332,13 +338,8 @@ func (c *LocalHostClient) nodeTransport(ctx context.Context, ref runspec.NodeRef
 	if closed || !ok {
 		return nil, localNodeBearer{}, localHostClientRefusal()
 	}
-	row, err := c.ReadNode(ctx, ref)
-	if err != nil {
-		return nil, localNodeBearer{}, err
-	}
-	if row.Generation != runspec.ClaimGeneration(award.generation) || row.CapabilityPrefix != award.prefix && (row.FinishedAt == nil || row.StateActor.CapabilityPrefix != award.prefix) {
-		return nil, localNodeBearer{}, localHostClientRefusal()
-	}
+	// safety: the controller authenticates the retained bearer against the node's current claim fence, so a write
+	// needs no budgeted read first; a bearer the node no longer holds is refused there.
 	transport := *c.transport
 	transport.bearer = func(context.Context) (string, error) { return award.raw, c.live() }
 	return &transport, award, nil
@@ -351,17 +352,33 @@ func (c *LocalHostClient) RenewNode(ctx context.Context, ref runspec.NodeRef, ac
 		return runstate.LeaseBeat{}, err
 	}
 	if c.node != "" {
-		principal, err := c.Principal(ctx)
+		award, err = c.ownAward(ctx)
 		if err != nil {
 			return runstate.LeaseBeat{}, err
 		}
-		award.prefix, award.generation, award.unit = principal.Capability.Prefix, principal.Capability.Binding.Generation, principal.Capability.UnitID
 	}
 	if award.unit == "" || actor.CapabilityPrefix != award.prefix || actor.Generation != runspec.ClaimGeneration(award.generation) {
 		return runstate.LeaseBeat{}, localHostClientRefusal()
 	}
 	response, err := transport.Renew(ctx, award.unit, controllerwire.RenewalRequest{Executing: executing})
 	return runstate.LeaseBeat{ExpiresAt: response.ExpiresAt, CancelRequested: response.CancelRequested, CancelReason: response.CancelReason, Watched: response.Watched, WatchedNodes: response.WatchedJobs}, err
+}
+
+// safety: an award's prefix, generation and unit never change, so a renewal reuses what Principal last read and
+// spends no budgeted authentication read; the controller still authenticates the renewal itself.
+func (c *LocalHostClient) ownAward(ctx context.Context) (localNodeBearer, error) {
+	c.mu.Lock()
+	award, ok := c.nodes[c.node]
+	c.mu.Unlock()
+	if ok {
+		return award, nil
+	}
+	if _, err := c.Principal(ctx); err != nil {
+		return localNodeBearer{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.nodes[c.node], nil
 }
 
 // NodeController selects a retained current node bearer for execution reports and renewal.
