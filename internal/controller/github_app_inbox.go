@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 type githubDeliveryReceivedKey struct{}
@@ -42,7 +44,7 @@ func (o *githubDeliveryOutcome) Write(body []byte) (int, error) {
 
 func (o *githubDeliveryOutcome) failureReason() string {
 	if o.failure != nil {
-		return o.failure.Error()
+		return sourceurl.PublicReason(o.failure)
 	}
 	if o.status == 0 || o.status >= 400 {
 		return fmt.Sprintf("processing returned %d: %s", o.status, o.body.String())
@@ -79,7 +81,7 @@ func (s *Server) processNextGitHubDelivery(ctx context.Context) (*githubDelivery
 	s.processGitHubDelivery(outcome, r, *queued)
 	reason := outcome.failureReason()
 	if reason != "" {
-		s.logger.Warn("github app delivery failed", "delivery", queued.ID, "reason", reason)
+		s.logger.Warn("github app delivery failed", "delivery", queued.ID, "reason", reason, "err", outcome.failure)
 	}
 	return outcome, s.operator.FinishGitHubDelivery(ctx, *queued, reason)
 }

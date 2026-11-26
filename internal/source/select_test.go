@@ -2,6 +2,9 @@ package source_test
 
 import (
 	"context"
+	"errors"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -9,11 +12,14 @@ import (
 	"strings"
 	"testing"
 
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/source"
 	"github.com/sparkwing-dev/sparkwing/internal/source/sourcetest"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func TestSelectAndAcquisitionFollowContainedConfigurationSymlinks(t *testing.T) {
@@ -163,6 +169,39 @@ func TestSelectUsesHostAuthorityForExecutionAndConfiguredSourceRevisions(t *test
 			}
 			if git.SHA != execution || code.Ref != wantSHA || code.RequestedRef != pin || !slices.Equal(lookedUp, wantLookups) {
 				t.Fatalf("selection git=%s source=%+v lookups=%v, want source=%s lookups=%v", git.SHA, code, lookedUp, wantSHA, wantLookups)
+			}
+		})
+	}
+}
+
+func TestSelectRefusesOnlyAMissingCloneHostAsInput(t *testing.T) {
+	missing := &net.DNSError{Err: "no such host", Name: "api.github.com", Server: "10.255.255.254:53", IsNotFound: true}
+	apiFailure := &url.Error{Op: "Get", URL: "https://api.github.com/repos/acme/repo", Err: &net.OpError{Op: "dial", Net: "tcp", Err: missing}}
+	cloneHost := &sourceurl.HostLookupError{Host: "github.invalid", Err: &net.DNSError{Err: "no such host", Name: "github.invalid", IsNotFound: true}}
+	for name, tc := range map[string]struct {
+		resolve, read error
+		status        int
+	}{
+		"GitHub API ref lookup": {resolve: apiFailure, status: 503},
+		"GitHub API file read":  {read: apiFailure, status: 503},
+		"missing clone host":    {read: cloneHost, status: 422},
+		"clone host ref lookup": {resolve: cloneHost, status: 422},
+		"unanswered clone host": {read: &sourceurl.HostLookupError{Host: "github.invalid", Err: &net.DNSError{Err: "i/o timeout", Name: "github.invalid", IsTimeout: true}}, status: 503},
+	} {
+		t.Run(name, func(t *testing.T) {
+			options := source.Options{
+				ResolveRef: func(_ context.Context, ref string) (string, error) {
+					if ref == "refs/heads/main" {
+						return "0123456789abcdef0123456789abcdef01234567", tc.resolve
+					}
+					return "", nil
+				},
+				ReadFile: func(context.Context, string, string) ([]byte, bool, error) { return nil, false, tc.read },
+			}
+			_, _, _, err := source.Select(t.Context(), source.Spec{RepoKey: "gh:701", RemoteURL: "https://github.invalid/acme/repo.git"}, "build", runspec.Git{Ref: "main"}, runspec.Source{}, "", options)
+			var failure *apierr.Error
+			if !errors.As(err, &failure) || hosterr.Status(failure.Code) != tc.status {
+				t.Fatalf("selection error %v, want HTTP %d", err, tc.status)
 			}
 		})
 	}

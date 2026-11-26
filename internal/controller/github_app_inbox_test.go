@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -293,5 +294,31 @@ func TestGitHubInboxPermanentFailureRetainsReasonWithoutRetry(t *testing.T) {
 	}
 	if next, err := e.Server.processNextGitHubDelivery(t.Context()); err != nil || next != nil {
 		t.Fatalf("permanent failure retried: %+v, %v", next, err)
+	}
+}
+
+func TestGitHubInboxStoresALookupFailureWithoutTheResolverAddress(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const resolver = "10.255.255.254:53"
+	cfg := githubapp.Config{AppID: 1, PrivateKey: key, WebhookSecret: "hook", HTTP: &http.Client{Transport: billingPageTransport(func(r *http.Request) (*http.Response, error) {
+		return nil, &net.DNSError{Err: "no such host", Name: r.URL.Hostname(), Server: resolver, IsNotFound: true}
+	})}}
+	e, _ := engineServerFixture(t, deploymenttest.Team(t), func(s *Server) { s.WithGitHubApp(cfg) })
+	engineSQL(t, e.Store, `INSERT INTO github_app_installations(installation_id,team,account_id,account_login,account_type,created_at,updated_at) VALUES (7,'a',42,'acme','Organization',1,1)`)
+	engineSQL(t, e.Store, `INSERT INTO github_app_triggers(team,repository_id,pipeline,repository,installation_id,on_push,created_at,repo_key) VALUES ('a',701,'build','acme/widgets',7,1,1,'gh:701')`)
+	body := fmt.Sprintf(`{"ref":"refs/heads/main","after":"0123456789abcdef0123456789abcdef01234567","installation":{"id":7},"repository":{"id":701,"full_name":"acme/widgets","pushed_at":%d}}`, time.Now().Unix())
+	if err := e.Store.AsOperator().EnqueueGitHubDelivery(t.Context(), "unresolved", "push", []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := e.Server.processNextGitHubDelivery(t.Context())
+	if err != nil || outcome == nil || outcome.failure == nil || !strings.Contains(outcome.failure.Error(), resolver) {
+		t.Fatalf("delivery outcome %+v, %v; want a failure whose operator cause names the resolver", outcome, err)
+	}
+	var reason string
+	if err := teststore.SQL(t, e.Store).QueryRow(`SELECT last_error FROM github_app_deliveries WHERE delivery_id='unresolved'`).Scan(&reason); err != nil || reason == "" || strings.Contains(reason, resolver) {
+		t.Fatalf("stored delivery reason %q, %v; want one without the resolver address", reason, err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/cronspec"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 )
 
@@ -37,6 +38,8 @@ type Decision struct {
 	Outcome  string             `json:"outcome"`
 	RunID    string             `json:"run_id,omitempty"`
 	Detail   string             `json:"detail,omitempty"`
+	// Cause is the full launch failure behind a public Detail, for operator logs only.
+	Cause error `json:"-"`
 	// Args are the arguments the launch was given, after this host's
 	// override.
 	Args map[string]string `json:"args,omitempty"`
@@ -278,6 +281,7 @@ func (s *Service) resolveDue(ctx context.Context, sched store.CronSchedule, eval
 	due, now time.Time, dryRun bool, report *TickReport,
 ) {
 	outcome, runID, detail := store.CronOutcomeFired, "", ""
+	var cause error
 
 	if err := s.pinnedBinaryReady(sched); err != nil {
 		outcome, detail = store.CronOutcomeFailed, err.Error()
@@ -304,7 +308,7 @@ func (s *Service) resolveDue(ctx context.Context, sched store.CronSchedule, eval
 				report.Errors = append(report.Errors, fmt.Sprintf("%s: %v", DisplayName(sched), err))
 				return
 			}
-			outcome, detail = store.CronOutcomeFailed, err.Error()
+			outcome, detail, cause = store.CronOutcomeFailed, sourceurl.PublicReason(err), err
 		} else {
 			runID = id
 		}
@@ -319,7 +323,7 @@ func (s *Service) resolveDue(ctx context.Context, sched store.CronSchedule, eval
 		report.Failed++
 	}
 	report.Decisions = append(report.Decisions, Decision{
-		Schedule: sched, Due: due, Outcome: outcome, RunID: runID, Detail: detail, Args: eval.args,
+		Schedule: sched, Due: due, Outcome: outcome, RunID: runID, Detail: detail, Cause: cause, Args: eval.args,
 	})
 	if dryRun {
 		return

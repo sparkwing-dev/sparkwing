@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -62,7 +63,9 @@ func SetSourceLookup(s *Server, lookup sourceurl.Lookup) {
 }
 
 // FixtureCloneHostLookup resolves every clone host to one public address.
-var FixtureCloneHostLookup sourceurl.Lookup = fixtureCloneHostLookup
+func FixtureCloneHostLookup(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return fixtureCloneHostLookup(ctx, host)
+}
 
 // BindTenantPortForTest binds one fake tenant rather than independent route ports.
 func BindTenantPortForTest[P any](s *Server, resolve func(context.Context, store.Team) (P, error)) *Server {

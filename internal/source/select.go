@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/limits"
 	"github.com/sparkwing-dev/sparkwing/internal/procenv"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
@@ -59,8 +60,8 @@ func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, co
 		} else {
 			sha, err = ResolveRef(ctx, spec, ref, options)
 		}
-		var dns *net.DNSError
-		if errors.Is(err, errRefUnavailable) || spec.RemoteURL != "" && (gitExit(err, 128) || errors.As(err, &dns) && dns.IsNotFound) {
+		var host *sourceurl.HostLookupError
+		if errors.Is(err, errRefUnavailable) || spec.RemoteURL != "" && (gitExit(err, 128) || errors.As(err, &host) && host.NotFound()) {
 			return "", errors.Join(&apierr.Error{Code: apierr.PlanFailed, Message: fmt.Sprintf("cannot resolve source repository %q at ref %q; check the repository URL, access credentials and that the ref exists", repository, ref)}, err)
 		}
 		return sha, hostLookupFailure(err, repository)
@@ -100,18 +101,18 @@ func Select(ctx context.Context, spec Spec, pipeline string, git runspec.Git, co
 	return git, code, &SelectedConfig{Config: cfg, Raw: raw}, err
 }
 
-// safety: only a resolver's definite "no such host" is the caller's input to fix; any other
-// lookup failure is a temporary outage that clients retry, never an internal error.
+// safety: only the resolver's "no such host" for the caller's clone host is input to fix; a DNS
+// failure for any service source selection calls is an outage that clients retry.
 func hostLookupFailure(err error, repository string) error {
-	var dns *net.DNSError
-	switch {
-	case !errors.As(err, &dns):
-		return err
-	case dns.IsNotFound:
-		return errors.Join(&apierr.Error{Code: apierr.PlanFailed, Message: fmt.Sprintf("source repository %q names a host that does not exist; check the repository URL", repository)}, err)
-	default:
-		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: fmt.Sprintf("cannot resolve the host of source repository %q right now; retry shortly", repository), Details: map[string]any{"retry_after_ms": 1000}}, err)
+	var host *sourceurl.HostLookupError
+	if errors.As(err, &host) && host.NotFound() {
+		return errors.Join(&apierr.Error{Code: apierr.PlanFailed, Message: fmt.Sprintf("source repository %q names host %q, which does not exist; check the repository URL", repository, host.Host)}, err)
 	}
+	var dns *net.DNSError
+	if errors.As(err, &dns) {
+		return errors.Join(&apierr.Error{Code: hosterr.Unavailable, Message: "source selection cannot resolve a host it needs right now; retry shortly", Details: map[string]any{"retry_after_ms": 1000}}, err)
+	}
+	return err
 }
 
 func readCommitFile(ctx context.Context, spec Spec, sha, name string, options Options) (_ []byte, _ bool, err error) {
