@@ -166,7 +166,7 @@ func TestLauncherTeamListReadsNoRejectedUnit(t *testing.T) {
 		t.Fatalf("the launcher would search %v, want %v", teams, want)
 	}
 	if s.Dialect() == store.DialectPostgres {
-		if rejected > 0 || buffers > 200 || strings.Contains(plan, `"Seq Scan"`) && regexp.MustCompile(`"Node Type": "(Seq|Bitmap Heap) Scan",[^{}]*"Relation Name": "(nodes|triggers|eval_units)"`).MatchString(plan) {
+		if rejected > 0 || buffers > 200 || regexp.MustCompile(`"Node Type": "(Seq|Bitmap Heap) Scan",[^{}]*"Relation Name": "(nodes|triggers|eval_units)"`).MatchString(plan) {
 			t.Fatalf("the team list read %d rejected units and %d buffers:\n%s", rejected, buffers, plan)
 		}
 		return
