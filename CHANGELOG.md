@@ -20,6 +20,67 @@ unlock.
 
 ## [Unreleased]
 
+## [v0.80.0] - 2026-11-26
+
+### Changed
+
+- **controller:** Read a credential's authority ancestry twice per write transaction instead of on every check
+  A write transaction now validates the ancestry, locks it, then verifies each ancestor once; later checks in the same transaction reuse that verification until the transaction writes. A lease renewal reads the ancestry 15 times instead of 47 and takes about half the store time. A read-only snapshot reads each ancestor once however many checks it makes, so a local-host snapshot read takes about 30% less store time. Authority and membership locks taken after a credit ledger lock are now refused, as team locks already were.
+
+
+- **controller:** An idle runner's claim poll costs the controller much less
+  When a team has none of the requested work queued, a team runner's claim poll now skips the full claim search, which loaded every other live runner, the team's credit balance and its ranking, after one indexed check. The cost of an empty poll no longer grows with the number of runners in the team.
+
+
+- **cloud:** Cloud Pods reach the controller sooner after starting
+  Strict network policy drops a new Pod's traffic until it attaches, so the first lookup of the controller's address was lost and retried only after 1 s, in both the planning Pod and each job Pod. The runner now starts a fresh controller lookup every 200 ms, up to five lookups, and once one answers it connects to the controller as before. The connection still verifies the controller's TLS certificate, and a failed lookup or connection reports the same error as before.
+
+
+- **cloud:** Cloud jobs reach their Pods sooner after planning
+  The Cloud launcher no longer uses client-go's default limit of 5 Kubernetes requests per second for each API group. Reconciliation used up that budget, so node-reservation and Pod requests during the first-job handoff waited for it to refill, adding about 1 s.
+
+
+- **cloud:** Cloud Pods skip the engine download when the runner image ships the selected release
+  Each deploy verifies its release base's signed engine files and ships them read-only in the runner image. When signed policy selects that release, planning and each job's restore verify those files exactly like a download, with the same signatures, digest, platform, embedded version and signed policy checks, instead of downloading the 76 MB executable again in every Pod. Other engine versions, and shipped files that fail verification, are still downloaded.
+
+
+- **controller:** The PostgreSQL pool keeps up to 25 idle connections
+  The controller's pool previously kept 5 idle connections and closed the rest after each burst of concurrent requests, so the next burst paid a new TLS handshake and login for each one. It now keeps every connection it opened, up to its existing limit of 25, until a connection has been idle for five minutes.
+
+
+- **toolchain:** Build Sparkwing and its runner images with Go 1.27.4
+  The engine and pipeline modules still accept Go 1.26.0 or later, and the Go SDK
+  still accepts Go 1.25.0 or later. The GitHub Actions migration recipe now pins
+  Go 1.27.4.
+
+
+- **controller:** Idle poll advice follows each team's own queue
+  The interval a controller suggests to an idle runner now grows from the last award or admitted run of the runner's own team. Every newly admitted run that queues work counts, and so does a newly approved job: CLI and API submissions, retries, child runs, scheduled and run-now runs, GitHub App runs and approvals. A team's runners return to their 500 ms cadence on their next claim request after its work is queued; a runner already waiting honors the interval it was given. A replayed submission or approval and a publish-only intake leave the idle clock alone. Another team's activity no longer returns every runner on the controller to polling every 500 ms for 8 s. The Cloud launcher, which serves every team, still follows any team's activity.
+
+
+- **controller:** A team's runners return to their own poll cadence when its plan is accepted
+  When the hosted controller newly accepts a run's plan, the jobs it releases count as new work for that team, so the team's idle runners get no widened poll interval on their next claim request. A runner already waiting honors the interval it was given. A refused or replayed plan, or an imported publication of local history, leaves the team's idle clock unchanged.
+
+
+- **sdk:** Publish the TypeScript SDK as 0.75.0
+  Its Windows native binaries are now built with Go 1.27.4; the SDK's API is unchanged. New TypeScript pipelines pin 0.75.0, and `sparkwing pipeline upgrade` moves an existing pin.
+
+### Fixed
+
+- **orchestrator:** A burst job waiting for this machine no longer claims and returns itself every second
+  A `--route burst` run whose job waits behind other work on the same machine used to take the job, be refused by the machine, and hand the job back about 49 times a minute, each time minting a job credential and calling the controller about 20 times. It happened whenever the machine had some CPU free but less than the job's charge, such as about 0.6 of a core on a 2-core machine running one job. The run now asks this machine's local controller whether the job's whole charge can fit, and while it certainly cannot, waits and asks again every 100 ms. The job stays ready for Cloud or another machine during the wait. Once the machine has room, the run notices it on its next check and then claims the job, so the job usually starts within about 100 ms plus one claim. When the local controller's answer is uncertain or slow, the run claims the job and lets admission decide, as before.
+
+
+- **web:** Keep console pages loading, rather than empty or stuck, while the controller is slow
+  The runs list shows loading rows until its first response instead of "No runs yet". A request that outlives its deadline says the controller did not answer and may be busy, instead of "signal is aborted without reason", and no longer raises the "Cannot reach the sparkwing controller" banner. Home, Runs and Fleet wait for a pending refresh rather than sending another, a response body that stalls still ends at the deadline, Home allows its overview read up to 60 seconds and no longer waits on approvals to show it, so a slow answer still renders. Fleet keeps its last inventory when a refresh times out instead of showing an empty fleet.
+
+### Security
+
+- **controller:** Keep user-chosen names out of the invitation email subject
+  The subject is now always "You're invited to a team on Sparkwing". The inviter's name and the team name appear only in the body, quoted as names Sparkwing users chose, so they cannot read as Sparkwing's own words in an authenticated message. See [capability inventory and rotation](docs/auth.md#capability-inventory-and-rotation).
+- **controller:** Accept only a plain email address for a team invitation
+  An address with a display name or angle brackets, such as `"text"<name@example.com>`, is refused with `400` and a request for a plain address. Each such spelling of one mailbox had its own five-per-day invitation email allowance.
+
 ## [v0.79.0] - 2026-11-24
 
 ### Added
