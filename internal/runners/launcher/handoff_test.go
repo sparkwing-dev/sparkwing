@@ -238,6 +238,7 @@ type leasedControl struct {
 	lapsed    bool
 	claimed   int
 	prepared  int
+	lease     time.Duration
 	cancelled bool
 }
 
@@ -254,9 +255,16 @@ func (c *leasedControl) Prepare(ctx context.Context, fences []capability.LeaseRe
 			c.lapsed = true
 			return time.Time{}, &apierr.Error{Code: hosterr.LockHeld, Message: "lease lapsed"}
 		}
-		c.expires[fence] = now.Add(time.Minute)
+		c.expires[fence] = now.Add(c.leaseLength())
 	}
-	return now.Add(time.Minute), context.Cause(ctx)
+	return now.Add(c.leaseLength()), context.Cause(ctx)
+}
+
+func (c *leasedControl) leaseLength() time.Duration {
+	if c.lease == 0 {
+		return time.Minute
+	}
+	return c.lease
 }
 
 func (c *leasedControl) Claim(context.Context, string, []string) (*CloudJobAward, time.Duration, error) {
@@ -560,58 +568,87 @@ func TestClaimRetiresPlanInHandoffInSamePass(t *testing.T) {
 	})
 }
 
-func TestTeardownWaitSkipsPreparationUntilNodeFreesOrRenewalIsDue(t *testing.T) {
+func TestTeardownWaitSkipsPreparationUntilNodeFreesOrPrepareIsDue(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		lease    time.Duration
+		interval time.Duration
+	}{
+		{name: "two-second cap", lease: time.Minute, interval: teardownPrepareInterval},
+		{name: "third of a short lease", lease: 3 * time.Second, interval: time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				l, kube, control, leased, first, pod, _ := planHandoff(t)
+				leased.lease = tc.lease
+				claimed := time.Now()
+				control.award, control.remove = first, true
+				if _, err := l.launch(t.Context(), first); !errors.Is(err, ErrNoDedicatedNode) {
+					t.Fatalf("first job did not wait for the planning node: %v", err)
+				}
+				control.remove = false
+				pass := func(at time.Duration, want int) {
+					t.Helper()
+					time.Sleep(time.Until(claimed.Add(at)))
+					if err := l.Sync(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+					if err := l.placeWaiting(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+					leased.mu.Lock()
+					defer leased.mu.Unlock()
+					if leased.prepared != want || leased.lapsed {
+						t.Fatalf("at %v: preparations=%d want %d, lapsed=%v", at, leased.prepared, want, leased.lapsed)
+					}
+				}
+				pass(tc.interval/2, 1)
+				pass(tc.interval-time.Nanosecond, 1)
+				pass(tc.interval, 2)
+				pass(tc.interval+tc.interval/2, 2)
+				pass(2*tc.interval-time.Nanosecond, 2)
+				pass(2*tc.interval, 3)
+				if tc.lease < time.Minute {
+					return
+				}
+				if err := kube.CoreV1().Pods("cloud").Delete(t.Context(), pod.Name, metav1.DeleteOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				pass(2*tc.interval+time.Millisecond, 4)
+				if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(first.Binding), metav1.GetOptions{}); err != nil {
+					t.Fatalf("first job was not placed once the node emptied: %v", err)
+				}
+			})
+		})
+	}
+}
+
+func TestCancelledTeardownWaitIsReleasedWithinPrepareInterval(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		l, kube, control, leased, first, pod, _ := planHandoff(t)
+		l, _, control, leased, first, _, _ := planHandoff(t)
 		claimed := time.Now()
 		control.award, control.remove = first, true
 		if _, err := l.launch(t.Context(), first); !errors.Is(err, ErrNoDedicatedNode) {
 			t.Fatalf("first job did not wait for the planning node: %v", err)
 		}
 		control.remove = false
-		prepared := func() int {
-			leased.mu.Lock()
-			defer leased.mu.Unlock()
-			return leased.prepared
-		}
-		pass := func(at time.Duration) {
-			t.Helper()
-			time.Sleep(time.Until(claimed.Add(at)))
-			if err := l.Sync(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			if err := l.placeWaiting(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-		}
-		for _, at := range []time.Duration{time.Second, 5 * time.Second, 15 * time.Second, 20*time.Second - time.Nanosecond} {
-			pass(at)
-		}
-		if n := prepared(); n != 1 {
-			t.Fatalf("preparations while the planning Pod held the node = %d, want 1", n)
-		}
-		pass(20 * time.Second)
-		if n := prepared(); n != 2 {
-			t.Fatalf("preparations at the renewal deadline = %d, want 2", n)
-		}
-		pass(21 * time.Second)
-		if n := prepared(); n != 2 {
-			t.Fatalf("preparations after renewal while the node is held = %d, want 2", n)
-		}
-		if err := kube.CoreV1().Pods("cloud").Delete(t.Context(), pod.Name, metav1.DeleteOptions{}); err != nil {
+		leased.mu.Lock()
+		leased.cancelled = true
+		leased.mu.Unlock()
+		time.Sleep(time.Until(claimed.Add(teardownPrepareInterval - time.Nanosecond)))
+		if err := l.placeWaiting(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		pass(21 * time.Second)
-		if n := prepared(); n != 3 {
-			t.Fatalf("preparations after the node emptied = %d, want 3", n)
+		if l.held(capacityName(first.Binding)) == nil {
+			t.Fatal("award left the wait before Prepare was due")
 		}
-		if _, err := kube.BatchV1().Jobs("cloud").Get(t.Context(), jobName(first.Binding), metav1.GetOptions{}); err != nil {
-			t.Fatalf("first job was not placed once the node emptied: %v", err)
+		time.Sleep(time.Nanosecond)
+		var failure *apierr.Error
+		if err := l.placeWaiting(t.Context()); !errors.As(err, &failure) || failure.Code != hosterr.LockHeld {
+			t.Fatalf("cancelled award was not refused at the prepare interval: %v", err)
 		}
-		leased.mu.Lock()
-		defer leased.mu.Unlock()
-		if leased.lapsed {
-			t.Fatal("waiting award's lease lapsed")
+		if l.held(capacityName(first.Binding)) != nil {
+			t.Fatal("cancelled award still waits while its predecessor holds the node")
 		}
 	})
 }

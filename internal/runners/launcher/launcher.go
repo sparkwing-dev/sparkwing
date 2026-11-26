@@ -125,6 +125,9 @@ const maxClaimsPerCycle = 8
 
 const podWatchTimeout = 5 * time.Minute
 
+// safety: a waiting award learns of cancellation only from Prepare, so skipped passes must not hide it for long.
+const teardownPrepareInterval = 2 * time.Second
+
 func (l *Launcher) claimPoll() time.Duration {
 	if l.Poll <= 0 {
 		return 5 * time.Second
@@ -496,8 +499,8 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 		l.recordStartupStage(ctx, award.Binding, "launcher_claim_applied", award.claimReceivedAt, true)
 	}
 	started := time.Now()
-	// perf: Reserve fails while the predecessor holds its node. Prepare is this award's only
-	// renewal, so a pass skips both until the node changes or a third of the lease has passed.
+	// perf: Reserve fails while the predecessor holds its node. Prepare is this award's only renewal
+	// and how it learns of cancellation, so a pass skips both until the node changes or Prepare is due.
 	if started.Before(award.teardownDeadline) && started.Before(award.renewAt) && l.predecessorsHold(ctx, award.predecessors) {
 		return true, ErrNoDedicatedNode
 	}
@@ -508,7 +511,7 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	if err != nil {
 		return true, err
 	}
-	award.renewAt = started.Add(limits.Renew(expires.Sub(started)))
+	award.renewAt = started.Add(min(limits.Renew(expires.Sub(started)), teardownPrepareInterval))
 	ctx = prepared
 	defer func() {
 		cause := context.Cause(ctx)
