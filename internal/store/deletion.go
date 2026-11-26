@@ -820,19 +820,16 @@ func (o *Operator) ClaimInvitationEmail(ctx context.Context, invitationID string
 	if inviter == "" {
 		return InvitationEmailNoInviter, nil
 	}
-	now := tx.now(ctx)
 	// safety: every claim takes the account before the address, so concurrent claims lock in one order.
-	fromAccount, ok, err := claimWindowLimitTx(ctx, tx, invitationEmailsPerAccount, inviter, now)
+	now, refused, err := claimWindowLimitsTx(ctx, tx,
+		limitClaim{invitationEmailsPerAccount, inviter}, limitClaim{invitationEmailsPerRecipient, normalizeEmail(email)})
 	if err != nil {
 		return "", err
 	}
-	if !ok {
-		return "", &InvitationEmailLimitError{RetryAt: fromAccount.oldest.Add(invitationEmailWindow).UTC()}
-	}
-	if _, ok, err = claimWindowLimitTx(ctx, tx, invitationEmailsPerRecipient, normalizeEmail(email), now); err != nil {
-		return "", err
-	}
-	if !ok {
+	if refused != nil {
+		if refused.limit == invitationEmailsPerAccount {
+			return "", &InvitationEmailLimitError{RetryAt: refused.usage.oldest.Add(invitationEmailWindow).UTC()}
+		}
 		return InvitationEmailRecipientLimit, nil
 	}
 	res, err := tx.execContext(ctx,

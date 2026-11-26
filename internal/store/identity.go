@@ -1184,12 +1184,12 @@ func (t *Tenant) createInvitationTx(ctx context.Context, tx *storeTx, actorID, e
 	if open >= maxOpenInvitations {
 		return Invitation{}, fmt.Errorf("%w: open invitation limit is %d per team, current usage is %d invitations; withdraw unused invitations or contact support@sparkwing.dev to raise this limit", ErrInvitationLimit, maxOpenInvitations, open)
 	}
-	today, ok, err := claimWindowLimitTx(ctx, tx, teamInvitationsPerDay, string(t.team), now)
+	_, refused, err := claimWindowLimitsTx(ctx, tx, limitClaim{teamInvitationsPerDay, string(t.team)})
 	if err != nil {
 		return Invitation{}, err
 	}
-	if !ok {
-		return Invitation{}, fmt.Errorf("%w: daily invitation limit is %d per team, current usage is %d invitations in 24 hours; wait for the window to pass or contact support@sparkwing.dev to raise this limit", ErrInvitationLimit, maxInvitationsPerDay, today.count)
+	if refused != nil {
+		return Invitation{}, fmt.Errorf("%w: daily invitation limit is %d per team, current usage is %d invitations in 24 hours; wait for the window to pass or contact support@sparkwing.dev to raise this limit", ErrInvitationLimit, maxInvitationsPerDay, refused.usage.count)
 	}
 	var already int
 	if err := tx.QueryRowContext(ctx, `

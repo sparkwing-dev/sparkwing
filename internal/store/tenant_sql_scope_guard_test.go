@@ -176,6 +176,8 @@ var reviewedForeignKeyedJoins = map[string]string{
 // safety: claim search reads every claimable team; this statement binds each row's team from the
 // proof heads the caller passed as one JSON parameter, so the guard cannot see the binding.
 var reviewedClaimSearchSQL = map[string]string{
+	"backfillTeamInvitationEventsTx": "the schema 43 upgrade reads every team's invitations of the last day once, " +
+		"to record each in limit_events under its own team's digest",
 	"claimProofFactsTx": "joins requirement terms on each proof head's own team and requirements, both bound per head",
 }
 

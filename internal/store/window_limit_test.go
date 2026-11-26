@@ -5,7 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"runtime"
+	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,12 +18,18 @@ import (
 
 const teamInvitationsPerDay = 100
 
+func claimTeamInvitationAt(t *testing.T, st *store.Store, key string, at time.Time) (int, bool, error) {
+	t.Helper()
+	st.SetTestClock(t, func() time.Time { return at })
+	return st.ClaimTeamInvitationForTest(t.Context(), key)
+}
+
 func fillTeamInvitations(t *testing.T, st *store.Store, key string, n int, at time.Time) {
 	t.Helper()
+	st.SetTestClock(t, func() time.Time { return at })
 	for i := range n {
-		used, ok, err := st.ClaimTeamInvitationForTest(t.Context(), key, at)
-		if err != nil || !ok || used != i {
-			t.Fatalf("claim %d for %q = %d, %t, %v", i, key, used, ok, err)
+		if _, ok, err := st.ClaimTeamInvitationForTest(t.Context(), key); err != nil || !ok {
+			t.Fatalf("claim %d for %q = %t, %v", i, key, ok, err)
 		}
 	}
 }
@@ -29,7 +38,7 @@ func TestWindowLimitRefusesAtTheLimitAndRecordsNothing(t *testing.T) {
 	st := storetest.Open(t)
 	now := time.Now()
 	fillTeamInvitations(t, st, "full", teamInvitationsPerDay, now)
-	used, ok, err := st.ClaimTeamInvitationForTest(t.Context(), "full", now)
+	used, ok, err := claimTeamInvitationAt(t, st, "full", now)
 	if err != nil || ok || used != teamInvitationsPerDay {
 		t.Fatalf("claim past the limit = %d, %t, %v; want %d, false", used, ok, err, teamInvitationsPerDay)
 	}
@@ -42,11 +51,11 @@ func TestWindowLimitSlotReturnsWhenTheWindowRollsOver(t *testing.T) {
 	st := storetest.Open(t)
 	start := time.Unix(1_800_000_000, 0)
 	fillTeamInvitations(t, st, "rolling", teamInvitationsPerDay, start)
-	if used, ok, err := st.ClaimTeamInvitationForTest(t.Context(), "rolling", start.Add(24*time.Hour-time.Nanosecond)); err != nil || ok || used != teamInvitationsPerDay {
+	if used, ok, err := claimTeamInvitationAt(t, st, "rolling", start.Add(24*time.Hour-time.Nanosecond)); err != nil || ok || used != teamInvitationsPerDay {
 		t.Fatalf("claim inside the window = %d, %t, %v; want refused", used, ok, err)
 	}
-	if used, ok, err := st.ClaimTeamInvitationForTest(t.Context(), "rolling", start.Add(24*time.Hour)); err != nil || !ok || used != 0 {
-		t.Fatalf("claim once the window passed = %d, %t, %v; want granted with 0 used", used, ok, err)
+	if _, ok, err := claimTeamInvitationAt(t, st, "rolling", start.Add(24*time.Hour)); err != nil || !ok {
+		t.Fatalf("claim once the window passed = %t, %v; want granted", ok, err)
 	}
 }
 
@@ -54,15 +63,15 @@ func TestWindowLimitCountsEachKeySeparately(t *testing.T) {
 	st := storetest.Open(t)
 	now := time.Now()
 	fillTeamInvitations(t, st, "busy", teamInvitationsPerDay, now)
-	if used, ok, err := st.ClaimTeamInvitationForTest(t.Context(), "quiet", now); err != nil || !ok || used != 0 {
-		t.Fatalf("claim for another key = %d, %t, %v; want granted with 0 used", used, ok, err)
+	if _, ok, err := claimTeamInvitationAt(t, st, "quiet", now); err != nil || !ok {
+		t.Fatalf("claim for another key = %t, %v; want granted", ok, err)
 	}
 }
 
 func TestWindowLimitLogKeepsOnlyTheKeyDigest(t *testing.T) {
 	st := storetest.Open(t)
 	const key = "raw-team-name"
-	if _, ok, err := st.ClaimTeamInvitationForTest(t.Context(), key, time.Now()); err != nil || !ok {
+	if _, ok, err := st.ClaimTeamInvitationForTest(t.Context(), key); err != nil || !ok {
 		t.Fatalf("claim = %t, %v", ok, err)
 	}
 	sum := sha256.Sum256([]byte(key))
@@ -90,7 +99,7 @@ func raceForTheLastSlot(t *testing.T, st *store.Store, gate func(racers int, sta
 	for range racers {
 		go func() {
 			<-start
-			_, ok, err := st.ClaimTeamInvitationForTest(t.Context(), "contended", now)
+			_, ok, err := st.ClaimTeamInvitationForTest(t.Context(), "contended")
 			results <- result{ok, err}
 		}()
 	}
@@ -154,8 +163,8 @@ func TestRetentionDropsLimitEventsOnceTheirWindowPasses(t *testing.T) {
 	if _, err := st.AsOperator().MaintainRetention(t.Context(), store.RetentionRequest{Limit: 100}); err != nil {
 		t.Fatal(err)
 	}
-	if used, ok, err := st.ClaimTeamInvitationForTest(t.Context(), "live", now); err != nil || !ok || used != 1 {
-		t.Fatalf("live key after retention = %d, %t, %v; want its recent event kept", used, ok, err)
+	if _, ok, err := st.ClaimTeamInvitationForTest(t.Context(), "live"); err != nil || !ok {
+		t.Fatalf("live key after retention = %t, %v; want granted", ok, err)
 	}
 	if n := countWhere(t, st, "limit_events", "1=1"); n != 2 {
 		t.Fatalf("log holds %d events after retention, want the live key's 2", n)
@@ -218,5 +227,128 @@ func TestSchemaUpgradeMovesTheInvitationEmailLogIntoLimitEvents(t *testing.T) {
 				t.Fatalf("schema upgrade differs: %s", shapeDiff(a, b))
 			}
 		})
+	}
+}
+
+func TestWindowLimitRefusesAnUndeclaredLimit(t *testing.T) {
+	st := storetest.Open(t)
+	if _, ok, err := st.ClaimUndeclaredLimitForTest(t.Context(), "key"); err == nil || ok {
+		t.Fatalf("claim under an undeclared limit = %t, %v; want an error", ok, err)
+	}
+	if n := countWhere(t, st, "limit_events", "1 = 1"); n != 0 {
+		t.Fatalf("a refused undeclared limit left %d events, want 0", n)
+	}
+}
+
+func TestWindowLimitKindsAreUnique(t *testing.T) {
+	kinds := store.WindowLimitKindsForTest()
+	for i, kind := range kinds {
+		if kind == "" || slices.Contains(kinds[i+1:], kind) {
+			t.Fatalf("declared limit kinds %q repeat or leave one empty", kinds)
+		}
+	}
+}
+
+func TestSchemaUpgradeKeepsEachTeamsDailyInvitationCount(t *testing.T) {
+	for _, dialect := range []struct {
+		name   string
+		target func(*testing.T) *storetest.Target
+	}{{"sqlite", storetest.NewSQLite}, {"postgres", storetest.NewPostgres}} {
+		t.Run(dialect.name, func(t *testing.T) {
+			target := dialect.target(t)
+			st := target.Open(t)
+			now := time.Now()
+			if _, err := st.DB().ExecContext(t.Context(), `INSERT INTO teams(name,created_at,updated_at) VALUES ('kept',1,1)`); err != nil {
+				t.Fatal(err)
+			}
+			insert := storetest.Rebind(st, `INSERT INTO invitations(id,team,email,role,invited_by,created_at,expires_at,withdrawn_at) VALUES (?,'kept',?,'reader','owner',?,?,?)`)
+			for i := range teamInvitationsPerDay + 1 {
+				at := now.Add(-time.Hour)
+				if i == teamInvitationsPerDay {
+					at = now.Add(-25 * time.Hour)
+				}
+				if _, err := st.DB().ExecContext(t.Context(), insert, fmt.Sprintf("inv-%d", i), fmt.Sprintf("guest-%d@example.com", i),
+					at.UnixNano(), at.Add(7*24*time.Hour).UnixNano(), at.UnixNano()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store.RewindToSchema43ForTest(t, st)
+			if _, err := st.DB().ExecContext(t.Context(), `UPDATE sparkwing_schema_version SET version=43,baseline_digest='7fe46a7554104b26ea25bac28ab7a719513991ad4f42af62a9cf7d9260bfc000'`); err != nil {
+				t.Fatal(err)
+			}
+			if err := st.Close(); err != nil {
+				t.Fatal(err)
+			}
+			upgraded := target.Open(t)
+			if used, ok, err := claimTeamInvitationAt(t, upgraded, "kept", now); err != nil || ok || used != teamInvitationsPerDay {
+				t.Fatalf("invitation after the upgrade = %d, %t, %v; want refused at %d", used, ok, err, teamInvitationsPerDay)
+			}
+		})
+	}
+}
+
+func TestRecipientRefusalLeavesTheInvitingAccountsSlot(t *testing.T) {
+	st := storetest.Open(t)
+	now := time.Now()
+	owner := signIn(t, st, "o", "owner@example.com")
+	store.SeedInvitationEmailsForTest(t, st, owner.Account.ID, store.MaxInvitationEmailsPerAccountPerDay-1, now)
+	store.SeedLimitEventsForTest(t, st, "invitation_email_recipient", "full@example.com", store.MaxInvitationEmailsPerDay, now)
+	full := inviteAt(t, st, owner.Account.ID, owner.PersonalTeam, "full@example.com", now)
+	if withheld, err := claimReasonAt(t, st, full, now); err != nil || withheld != store.InvitationEmailRecipientLimit {
+		t.Fatalf("email to a full inbox = %q, %v; want withheld for the recipient", withheld, err)
+	}
+	last := inviteAt(t, st, owner.Account.ID, owner.PersonalTeam, "last@example.com", now)
+	if ok, err := claimAt(t, st, last, now); err != nil || !ok {
+		t.Fatalf("the account's last email after a recipient refusal = %t, %v; want sent", ok, err)
+	}
+}
+
+// The account lock is held while the oldest send leaves the window, so a claim that read the clock before waiting
+// would refuse with a retry time already past.
+func TestPostgresInvitationEmailClaimReadsTheClockAfterItsLocks(t *testing.T) {
+	st := storetest.OpenPostgres(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	owner := signIn(t, st, "o", "owner@example.com")
+	start := time.Now()
+	var clock atomic.Int64
+	clock.Store(start.Add(24*time.Hour - time.Second).UnixNano())
+	st.SetTestClock(t, func() time.Time { return time.Unix(0, clock.Load()) })
+	store.SeedInvitationEmailsForTest(t, st, owner.Account.ID, store.MaxInvitationEmailsPerAccountPerDay, start)
+	inv, err := tenant(t, st, owner.PersonalTeam).InviteForTest(t, ctx, owner.Account.ID, "waiting@example.com", store.RoleReader, time.Unix(0, clock.Load()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.SetTestClock(t, func() time.Time { return time.Unix(0, clock.Load()) })
+	blocker, err := st.DB().BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = blocker.Rollback() }()
+	if _, err := blocker.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, store.InvitationEmailAccountLockForTest(owner.Account.ID)); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		withheld store.InvitationEmailWithheld
+		err      error
+	}
+	done := make(chan result, 1)
+	go func() {
+		withheld, err := st.AsOperator().ClaimInvitationEmail(ctx, inv.ID)
+		done <- result{withheld, err}
+	}()
+	for waiting := 0; waiting == 0; {
+		if err := st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		runtime.Gosched()
+	}
+	clock.Store(start.Add(24*time.Hour + time.Second).UnixNano())
+	if err := blocker.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if r := <-done; r.err != nil || r.withheld != "" {
+		t.Fatalf("claim after the oldest send left the window = %q, %v; want sent", r.withheld, r.err)
 	}
 }

@@ -261,15 +261,52 @@ func RewindToSchema41ForTest(t testing.TB, st *Store) {
 	}
 }
 
-// ClaimTeamInvitationForTest claims one of key's daily team invitations at now in its own transaction.
-func (s *Store) ClaimTeamInvitationForTest(ctx context.Context, key string, now time.Time) (used int, ok bool, err error) {
-	err = s.inTx(ctx, func(tx *storeTx) (err error) {
-		var usage windowUsage
-		usage, ok, err = claimWindowLimitTx(ctx, tx, teamInvitationsPerDay, key, now)
-		used = usage.count
+// ClaimTeamInvitationForTest claims one of key's daily team invitations in its own transaction at the store's
+// clock. A refusal reports the count that refused it.
+func (s *Store) ClaimTeamInvitationForTest(ctx context.Context, key string) (used int, ok bool, err error) {
+	return s.claimLimitForTest(ctx, limitClaim{teamInvitationsPerDay, key})
+}
+
+// ClaimUndeclaredLimitForTest claims an event under a limit missing from the declared list.
+func (s *Store) ClaimUndeclaredLimitForTest(ctx context.Context, key string) (used int, ok bool, err error) {
+	return s.claimLimitForTest(ctx, limitClaim{windowLimit{kind: "undeclared", limit: 1, window: time.Hour}, key})
+}
+
+func (s *Store) claimLimitForTest(ctx context.Context, claims ...limitClaim) (used int, ok bool, err error) {
+	err = s.inTx(ctx, func(tx *storeTx) error {
+		_, refused, err := claimWindowLimitsTx(ctx, tx, claims...)
+		if refused != nil {
+			used = refused.usage.count
+		}
+		ok = err == nil && refused == nil
 		return err
 	})
 	return used, ok, err
+}
+
+// InvitationEmailAccountLockForTest names the advisory lock an email claim takes for accountID on PostgreSQL.
+func InvitationEmailAccountLockForTest(accountID string) string {
+	return "limit:" + invitationEmailsPerAccount.kind + ":" + limitKeyDigest(accountID)
+}
+
+// WindowLimitKindsForTest lists the kind of every declared window limit.
+func WindowLimitKindsForTest() []string {
+	kinds := make([]string, len(windowLimits))
+	for i, l := range windowLimits {
+		kinds[i] = l.kind
+	}
+	return kinds
+}
+
+// SeedLimitEventsForTest records n events for key under kind at at.
+func SeedLimitEventsForTest(t testing.TB, st *Store, kind, key string, n int, at time.Time) {
+	t.Helper()
+	for range n {
+		if _, err := st.exec(t.Context(), `INSERT INTO limit_events (kind, digest, at) VALUES (?, ?, ?)`,
+			kind, limitKeyDigest(key), at.UTC().UnixNano()); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // PrepareSchema36ForTest preserves configured rows in the shipped pre-migration schema.

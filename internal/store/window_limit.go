@@ -19,7 +19,7 @@ type windowLimit struct {
 
 var teamInvitationsPerDay = windowLimit{kind: "team_invitations", limit: maxInvitationsPerDay, window: 24 * time.Hour}
 
-// safety: retention keeps events for the longest window listed here, so claimWindowLimitTx refuses any other limit.
+// safety: retention keeps events for the longest window listed here, so claimWindowLimitsTx refuses any other limit.
 var windowLimits = []windowLimit{teamInvitationsPerDay, invitationEmailsPerAccount, invitationEmailsPerRecipient}
 
 // safety: oldest is zero when the key has no event in the window.
@@ -36,35 +36,58 @@ func longestLimitWindow() time.Duration {
 	return longest
 }
 
-// safety: the event is written in the caller's transaction, so a request refused after the claim rolls it back and
-// keeps its slot; at the limit the claim writes nothing and reports the usage the refusal names.
-func claimWindowLimitTx(ctx context.Context, tx *storeTx, l windowLimit, key string, now time.Time) (windowUsage, bool, error) {
-	if !slices.Contains(windowLimits, l) {
-		return windowUsage{}, false, fmt.Errorf("store: window limit %q is not registered", l.kind)
+type limitClaim struct {
+	limit windowLimit
+	key   string
+}
+
+// safety: a refusal names the limit that refused and the usage the caller's error explains.
+type windowRefusal struct {
+	limit windowLimit
+	usage windowUsage
+}
+
+// safety: the events are written in the caller's transaction, so a request refused after the claim rolls them back
+// and keeps its slots. Keys are locked in the order given before the clock is read, so a wait for a lock never
+// leaves the window stale; the first full limit refuses the request and nothing is written.
+func claimWindowLimitsTx(ctx context.Context, tx *storeTx, claims ...limitClaim) (time.Time, *windowRefusal, error) {
+	digests := make([]string, len(claims))
+	for i, c := range claims {
+		if !slices.Contains(windowLimits, c.limit) {
+			return time.Time{}, nil, fmt.Errorf("store: window limit %q is not registered", c.limit.kind)
+		}
+		digests[i] = limitKeyDigest(c.key)
+		// safety: concurrent claims for one key would each count the other's event as not yet made; the lock orders
+		// them. SQLite already serializes every writer.
+		if err := advisoryLockTx(ctx, tx, "limit:"+c.limit.kind+":"+digests[i]); err != nil {
+			return time.Time{}, nil, err
+		}
 	}
-	digest := limitKeyDigest(key)
-	// safety: concurrent claims for one key would each count the other's event as not yet made; the lock orders
-	// them. SQLite already serializes every writer.
-	if err := advisoryLockTx(ctx, tx, "limit:"+l.kind+":"+digest); err != nil {
-		return windowUsage{}, false, err
+	now := tx.now(ctx)
+	if tx.err != nil {
+		return time.Time{}, nil, tx.err
 	}
-	var used windowUsage
-	var oldest sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), MIN(at) FROM limit_events WHERE kind = ? AND digest = ? AND at > ?`,
-		l.kind, digest, now.Add(-l.window).UnixNano()).Scan(&used.count, &oldest); err != nil {
-		return windowUsage{}, false, err
+	for i, c := range claims {
+		var used windowUsage
+		var oldest sql.NullInt64
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), MIN(at) FROM limit_events WHERE kind = ? AND digest = ? AND at > ?`,
+			c.limit.kind, digests[i], now.Add(-c.limit.window).UnixNano()).Scan(&used.count, &oldest); err != nil {
+			return time.Time{}, nil, err
+		}
+		if oldest.Valid {
+			used.oldest = time.Unix(0, oldest.Int64).UTC()
+		}
+		if used.count >= c.limit.limit {
+			return now, &windowRefusal{limit: c.limit, usage: used}, nil
+		}
 	}
-	if oldest.Valid {
-		used.oldest = time.Unix(0, oldest.Int64).UTC()
+	for i, c := range claims {
+		if _, err := tx.execContext(ctx, `INSERT INTO limit_events (kind, digest, at) VALUES (?, ?, ?)`,
+			c.limit.kind, digests[i], now.UTC().UnixNano()); err != nil {
+			return time.Time{}, nil, err
+		}
 	}
-	if used.count >= l.limit {
-		return used, false, nil
-	}
-	if _, err := tx.execContext(ctx, `INSERT INTO limit_events (kind, digest, at) VALUES (?, ?, ?)`,
-		l.kind, digest, now.UTC().UnixNano()); err != nil {
-		return windowUsage{}, false, err
-	}
-	return used, true, nil
+	return now, nil, nil
 }
 
 // safety: events outlive the accounts, teams and addresses they count, so the log keeps a digest of the key rather
