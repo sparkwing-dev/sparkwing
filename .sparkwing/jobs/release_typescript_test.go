@@ -5,9 +5,7 @@ package jobs
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -258,7 +256,7 @@ func setSDKVersion(t *testing.T, repo, version string) {
 }
 
 // safety: hosted CI soft-resets HEAD to the event base and keeps the candidate
-// only in the index and worktree, so the clone takes the checkout's current files.
+// in the index, so the clone checks out the index tree rather than HEAD.
 func cloneCheckout(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.Abs("../..")
@@ -267,38 +265,13 @@ func cloneCheckout(t *testing.T) string {
 	}
 	repo := filepath.Join(t.TempDir(), "repo")
 	gitRun(t, root, "clone", "--quiet", "--shared", root, repo)
-	changed := gitOutput(t, root, "diff", "-z", "--name-only", "--no-renames", "HEAD")
-	for _, name := range strings.Split(changed, "\x00") {
-		if name == "" {
-			continue
-		}
-		target := filepath.Join(repo, name)
-		info, err := os.Stat(filepath.Join(root, name))
-		if errors.Is(err, fs.ErrNotExist) {
-			if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				t.Fatal(err)
-			}
-			continue
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, err := os.ReadFile(filepath.Join(root, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(target, body, info.Mode().Perm()); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chmod(target, info.Mode().Perm()); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if changed != "" {
+	tree := strings.TrimSpace(gitOutput(t, root, "write-tree"))
+	if tree != strings.TrimSpace(gitOutput(t, repo, "rev-parse", "HEAD^{tree}")) {
+		gitRun(t, repo, "read-tree", "--reset", "-u", tree)
 		gitCommitAll(t, repo, "checkout files")
+	}
+	if got := strings.TrimSpace(gitOutput(t, repo, "rev-parse", "HEAD^{tree}")); got != tree {
+		t.Fatalf("fixture tree %s does not match the checkout index tree %s", got, tree)
 	}
 	return repo
 }

@@ -344,7 +344,8 @@ the index cannot be downloaded or verified, the step passes with an
 the release cut's `typescript-release` check still refuses without a verified
 index. A change outside those paths does not fetch the index. When main already
 needs a bump, every change that touches SDK release inputs fails, including one
-that leaves the digest unchanged, until a change bumps the version.
+that leaves the digest unchanged, until a change bumps the version or restores
+the published source.
 
 The `windows-compile` policy step uses the existing changed Go package and
 committed module selection. It compiles tests with `GOOS=windows GOARCH=amd64`
