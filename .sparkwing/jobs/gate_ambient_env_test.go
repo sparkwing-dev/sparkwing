@@ -123,3 +123,44 @@ func TestNoLiveServiceIsWithinReach(t *testing.T) {
 	}
 }
 `
+
+func TestTheTestStepHidesTheMachinesGitConfigFromTheSuitesItRuns(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: 0.7s of real work; the fast class runs under -short")
+	}
+	root := gateFixtureRepo(t)
+	ctx := newTestContext(t)
+
+	writeGoFile(t, filepath.Join(root, "internal", "git_identity_probe_test.go"), gitIdentityProbe)
+	gitAddAll(t, root)
+
+	config := t.TempDir()
+	for _, name := range []string{"global", "system"} {
+		path := filepath.Join(config, name)
+		writeGoFile(t, path, "[user]\n\tname = operator\n\temail = "+name+"@operator.test\n")
+		t.Setenv("GIT_CONFIG_"+strings.ToUpper(name), path)
+	}
+
+	if err := forEachGoModule(ctx, "go test", "go test ./...", ""); err == nil {
+		t.Fatal("the probe must fail while the machine's git identity reaches it, or the pass below proves nothing")
+	}
+	if err := runTest(ctx); err != nil {
+		t.Fatalf("the test step handed its suites the machine's git config: %v", err)
+	}
+}
+
+const gitIdentityProbe = `package internal
+
+import (
+	"os/exec"
+	"strings"
+	"testing"
+)
+
+func TestNoGitIdentityIsConfigured(t *testing.T) {
+	out, _ := exec.Command("git", "config", "--get", "user.email").Output()
+	if email := strings.TrimSpace(string(out)); email != "" {
+		t.Fatalf("git config supplied user.email %s, which hosted CI does not have", email)
+	}
+}
+`
