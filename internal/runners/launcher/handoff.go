@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 func (b *KubernetesBoundary) predecessorTeardown(ctx context.Context, node corev1.Node, successor CloudJobBinding) (bool, error) {
@@ -57,30 +59,42 @@ func (b *KubernetesBoundary) predecessorTeardown(ctx context.Context, node corev
 	return finishing, nil
 }
 
-func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJobBinding) (bool, error) {
-	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
+// perf: a Pod that outlasts this wait costs no more than the reconcile pass it would otherwise wait for.
+const handoffWait = time.Second
+
+func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJobBinding, planOnly bool) ([]string, error) {
+	selector := "app.kubernetes.io/managed-by=" + managedByLauncher + "," + TeamLabel + "=" + TeamNodeValue(l.Config.Namespace, successor.Team)
+	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	var ending []string
 	var observations []CloudJobObservation
 	live := map[string]int{}
 	reservations := map[string]CloudNodeReservation{}
 	for i, job := range jobs.Items {
 		binding, reservation, err := jobOwnership(job)
-		if err != nil || job.DeletionTimestamp != nil || job.Annotations[rejectedAnnotation] != "" || binding.Team != successor.Team || binding.RunID != successor.RunID || sameBinding(binding, successor) {
+		if err != nil || job.Annotations[rejectedAnnotation] != "" || binding.Team != successor.Team || binding.RunID != successor.RunID || sameBinding(binding, successor) {
+			continue
+		}
+		if job.DeletionTimestamp != nil {
+			ending = append(ending, job.Name)
+			continue
+		}
+		// perf: siblings in a fan-out are live Jobs too, so asking only about the plan adds no controller call per claim.
+		if planOnly && binding.Kind != CloudPlan {
 			continue
 		}
 		live[job.Name], reservations[job.Name] = i, reservation
 		observations = append(observations, CloudJobObservation{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID})
 	}
 	if len(observations) == 0 {
-		return false, nil
+		return ending, nil
 	}
 	states, err := l.retirements(ctx, observations)
 	if err != nil {
-		return false, err
+		return ending, err
 	}
-	retired := false
 	var errs []error
 	for _, observation := range observations {
 		if state := states[observation.JobName]; !state.Delete || state.Deferred {
@@ -88,7 +102,68 @@ func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJ
 		}
 		job := &jobs.Items[live[observation.JobName]]
 		errs = append(errs, teardownFault(job.Name, l.teardown(ctx, job, reservations[job.Name])))
-		retired = true
+		ending = append(ending, job.Name)
 	}
-	return retired, errors.Join(errs...)
+	return ending, errors.Join(errs...)
+}
+
+func (l *Launcher) handoffEvent(event watch.Event) (until time.Time, gone, awaited bool) {
+	pod, ok := event.Object.(*corev1.Pod)
+	if !ok || pod.Labels[JobLabel] == "" {
+		return time.Time{}, false, false
+	}
+	now := time.Now()
+	for _, award := range l.waitingAwards() {
+		if now.Before(award.handoffUntil) && slices.Contains(award.handoffJobs, pod.Labels[JobLabel]) {
+			return award.handoffUntil, event.Type == watch.Deleted, true
+		}
+	}
+	return time.Time{}, false, false
+}
+
+// safety: Release refuses while any Pod remains on the node, so a successor placed here never shares it.
+func (l *Launcher) finishHandoffs(ctx context.Context) error {
+	var errs []error
+	now := time.Now()
+	for _, award := range l.waitingAwards() {
+		if !now.Before(award.handoffUntil) {
+			continue
+		}
+		released, err := l.releasePredecessors(ctx, award.handoffJobs)
+		if err != nil || !released {
+			errs = append(errs, err)
+			continue
+		}
+		award.handoffUntil, award.handoffJobs = time.Time{}, nil
+		errs = append(errs, l.place(ctx, award))
+	}
+	return errors.Join(errs...)
+}
+
+// safety: the controller already ended these Jobs, and a Job is gone only after Release freed its node.
+func (l *Launcher) releasePredecessors(ctx context.Context, names []string) (bool, error) {
+	released := false
+	for _, name := range names {
+		job, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			released = true
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		_, reservation, err := jobOwnership(*job)
+		if err != nil || job.DeletionTimestamp == nil {
+			continue
+		}
+		err = l.teardown(ctx, job, reservation)
+		if errors.Is(err, errContainersRunning) {
+			continue
+		}
+		if err != nil {
+			return false, teardownFault(name, err)
+		}
+		released = true
+	}
+	return released, nil
 }

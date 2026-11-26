@@ -195,8 +195,15 @@ func (l *Launcher) Run(ctx context.Context) error {
 	var synced error
 	nextReconcile := time.Now()
 	claimed := 0
+	handoff := false
 	for ctx.Err() == nil {
 		claims.receive()
+		var handoffErr error
+		if handoff && blocking(synced) == nil {
+			// perf: a predecessor's Pod is gone, so its successor places before this pass's slower reconciliation.
+			handoffErr = l.finishHandoffs(ctx)
+		}
+		handoff = false
 		reconcile = reconcile || !time.Now().Before(nextReconcile)
 		// perf: consume a ready award before slow reconciliation; the burst bound still yields to safety work.
 		applyClaim := claims.result != nil && claims.result.award != nil && claimed < maxClaimsPerCycle && blocking(synced) == nil && !time.Now().Before(cooldown)
@@ -268,9 +275,13 @@ func (l *Launcher) Run(ctx context.Context) error {
 		claimImmediately := false
 		if blocking(synced) == nil {
 			// safety: held awards without a Job or capacity Pod renew only here, so claim backoff must not skip them.
-			var err error
+			err := handoffErr
 			if reconcile && !applyClaim {
-				err = l.placeWaiting(ctx)
+				if placed := l.placeWaiting(ctx); err == nil {
+					err = placed
+				} else if placed != nil {
+					err = errors.Join(err, placed)
+				}
 			}
 			startupRateLimit := false
 			if err == nil && ctx.Err() == nil && !time.Now().Before(cooldown) {
@@ -351,7 +362,17 @@ func (l *Launcher) Run(ctx context.Context) error {
 		case event, ok := <-changes:
 			timer.Stop()
 			observeWatch(event, ok)
-			reconcile = true
+			until, gone, awaited := l.handoffEvent(event)
+			handoff = handoff || gone
+			// perf: an awaited predecessor's own teardown events must not start a full pass ahead of its handoff;
+			// if its Pod outlasts the wait, reconciliation resumes when the wait ends.
+			if awaited && !gone {
+				if until.Before(nextReconcile) {
+					nextReconcile = until
+				}
+			} else {
+				reconcile = true
+			}
 		case <-timer.C:
 			reconcile = true
 		}
@@ -475,17 +496,23 @@ func (l *Launcher) claim(ctx context.Context) (bool, time.Duration, error) {
 func (l *Launcher) placeWaiting(ctx context.Context) error {
 	var errs []error
 	for _, award := range l.waitingAwards() {
-		if slices.Contains(l.Config.StoppedTeams, award.Binding.Team) {
-			continue
-		}
-		_, err := l.launch(ctx, award)
-		var failure *apierr.Error
-		if errors.Is(err, limits.ErrNoTime) || errors.As(err, &failure) && failure.Code == hosterr.LockHeld {
-			errs = append(errs, l.releaseCapacity(ctx, award.Binding))
-		}
-		if err != nil && err != ErrNoDedicatedNode { //nolint:errorlint // Retain faults joined with the expected wait.
-			errs = append(errs, err)
-		}
+		errs = append(errs, l.place(ctx, award))
+	}
+	return errors.Join(errs...)
+}
+
+func (l *Launcher) place(ctx context.Context, award *CloudJobAward) error {
+	if slices.Contains(l.Config.StoppedTeams, award.Binding.Team) {
+		return nil
+	}
+	var errs []error
+	_, err := l.launch(ctx, award)
+	var failure *apierr.Error
+	if errors.Is(err, limits.ErrNoTime) || errors.As(err, &failure) && failure.Code == hosterr.LockHeld {
+		errs = append(errs, l.releaseCapacity(ctx, award.Binding))
+	}
+	if err != nil && err != ErrNoDedicatedNode { //nolint:errorlint // Retain faults joined with the expected wait.
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
 }
@@ -495,8 +522,27 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 		award.claimApplied = true
 		l.recordStartupStage(ctx, award.Binding, "launcher_claim_applied", award.claimReceivedAt, true)
 	}
+	// perf: an award proves the controller has handed off its run's plan, usually after this pass's
+	// reconciliation. Retiring the plan while Prepare runs starts the teardown that reuse waits on
+	// before the first reservation; one award per run finds a live plan, so the rest pay one list.
+	var retiring chan []string
+	if !award.WaitedForFreshNode && award.teardownDeadline.IsZero() {
+		retiring = make(chan []string, 1)
+		go func() {
+			// safety: a failed retirement keeps this attempt's result, and the reconciliation loop reports it.
+			ending, err := l.retireEndedPredecessors(ctx, award.Binding, true)
+			if err != nil {
+				l.logger().DebugContext(ctx, "claim-time plan retirement deferred to reconciliation", "error", err)
+			}
+			retiring <- ending
+		}()
+	}
 	started := time.Now()
 	prepared, stop, expires, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
+	var predecessors []string
+	if retiring != nil {
+		predecessors = <-retiring
+	}
 	if !errors.Is(err, ErrNoDedicatedNode) && !errors.Is(err, errCapacityUnconfigured) {
 		l.recordStartupStage(ctx, award.Binding, "launcher_preparation", started, err == nil)
 	}
@@ -515,17 +561,17 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	current.LeaseExpiresAt = expires
 	started = time.Now()
 	r, err := BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
-	// perf: the controller can end a same-run predecessor, or hand off its plan, after this pass's
-	// reconciliation. Its live Job would hide the handoff, and the demand it prompted would leave
-	// Karpenter a tainted node to replace. Retiring ended awards in the claim pass starts the
-	// teardown that reuse waits on.
-	if errors.Is(err, ErrNoDedicatedNode) && !award.WaitedForFreshNode && award.teardownDeadline.IsZero() {
-		// safety: a failed retirement keeps this attempt's result, and the reconciliation loop reports it.
-		retired, retireErr := l.retireEndedPredecessors(ctx, award.Binding)
+	// perf: the controller can also end a same-run work predecessor after this pass's reconciliation.
+	// Its live Job would hide the handoff, and the demand it prompted would leave Karpenter a tainted
+	// node to replace, so a failed first reservation retires it in this pass.
+	if errors.Is(err, ErrNoDedicatedNode) && retiring != nil {
+		ending, retireErr := l.retireEndedPredecessors(ctx, award.Binding, false)
+		retired := slices.ContainsFunc(ending, func(name string) bool { return !slices.Contains(predecessors, name) })
 		// perf: a predecessor in teardown usually still holds its node, so another attempt now would usually fail.
 		if retired && retireErr == nil && !errors.Is(err, errPredecessorTeardown) {
 			r, err = BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
 		}
+		predecessors = ending
 	}
 	if errors.Is(err, errCapacityUnconfigured) {
 		l.wait(award)
@@ -535,6 +581,9 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 		if errors.Is(err, errPredecessorTeardown) {
 			if award.teardownDeadline.IsZero() {
 				award.teardownDeadline = time.Now().Add(30 * time.Second)
+			}
+			if len(predecessors) > 0 {
+				award.handoffUntil, award.handoffJobs = time.Now().Add(handoffWait), predecessors
 			}
 			l.wait(award)
 			return true, ErrNoDedicatedNode

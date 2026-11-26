@@ -50,7 +50,10 @@ func TestLauncherPodWatchReconcileSurvivesReadyClaim(t *testing.T) {
 		pods := &pausedStopWatch{Interface: stream, stopped: make(chan struct{}), resume: resume}
 		kube.PrependWatchReactor("pods", func(ktesting.Action) (bool, watch.Interface, error) { return true, pods, nil })
 		var passes, publications atomic.Int32
-		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+		kube.PrependReactor("list", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
+			if !reconcileList(action) {
+				return false, nil, nil
+			}
 			if passes.Add(1) == 2 && publications.Load() != 1 {
 				t.Error("pending reconcile ran before the ready award was applied")
 			}
@@ -229,6 +232,7 @@ func (b *watchLogBuffer) Write(p []byte) (int, error) {
 	defer b.mu.Unlock()
 	return b.text.Write(p)
 }
+
 func (b *watchLogBuffer) String() string { b.mu.Lock(); defer b.mu.Unlock(); return b.text.String() }
 
 func TestLauncherWarnsOncePerPodWatchFailureStreak(t *testing.T) {

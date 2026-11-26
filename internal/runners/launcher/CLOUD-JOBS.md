@@ -612,15 +612,24 @@ that Job for deletion: the controller can award work as planning exits.
 Only that predecessor's Pods and DaemonSets may occupy the node.
 Normal reconciliation retries teardown before placement. The controller can also
 end a work predecessor, or hand off its plan, and award the dependent between
-reconciliation and claim. So on a fresh award's first failed placement, the launcher
-asks the controller about the run's other live Jobs in the same pass and tears down
-those whose awards ended. A successor that would otherwise request capacity places
+reconciliation and claim. So while a fresh award's first preparation is in flight,
+the launcher asks the controller about the run's live planning Job and tears it
+down if its award ended; when no plan is live this costs one team-scoped Job list.
+On that award's first failed placement, it asks the same about the run's other
+live Jobs and tears down those whose awards ended. A successor that would otherwise request capacity places
 again. That attempt succeeds if the teardown already freed the node; otherwise the
 successor waits for the teardown rather than creating demand that cannot fit on the
 reserved node and would make Karpenter add one. An ordinary placement miss can still
 request fresh capacity. A successor already waiting on a
 predecessor's teardown keeps waiting, and the teardown starts without waiting for the
-next reconcile pass. Live work
+next reconcile pass. For up to one second after that first failure, the launcher
+waits for the watch to report the predecessor's Pod deleted. It then finishes that
+Job's teardown, and if `Release` frees the node, places the successor at once with a
+new preparation and reservation, ahead of the full reconciliation pass that the
+event also requests. The predecessor Pod's other events do not start a pass during
+that second; the pass they would have requested runs when it ends. The loop never
+blocks on this wait: other claims, placement, renewal and cancellation run as
+usual, and a Pod that outlasts the second falls back to the reconciliation above. Live work
 reservations still permit fanout. The 60-second idle-retire grace starts only
 after release; it cannot cover this occupied-node gap. Log sealing can defer the
 controller's retirement decision, so Pod exit evidence also earns the bounded
@@ -637,7 +646,12 @@ through the handoff and fresh-capacity fallback at 30 seconds.
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
 normal runs and retries, including launcher restarts, and
 `TestClaimRetiresPlanInHandoffInSamePass` guards that the claim pass starts a handed-off
-plan's teardown.
+plan's teardown. `TestClaimRetiresEndedPlanWhilePreparing` guards that it overlaps
+preparation, and `TestClaimMeetingLivePlanPlacesOnPodDeletionWithoutReconcilePass`,
+`TestHandoffWaitLeavesOtherAwardsUnblocked`,
+`TestHandoffWaitEndsAtItsBoundAndFallsBackToReconciliation`,
+`TestCancelledAwardLeavesHandoffWithoutAJob`, `TestHandoffWaitKeepsRenewingTheAward`
+and `TestClaimAfterPlanIsGoneTakesOneAttempt` guard the Pod-deletion handoff.
 
 An unheld empty response, explicit poll advice or claim failure waits at least the configured poll
 interval or the controller's `PollAfter`, whichever is longer, after response
