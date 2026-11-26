@@ -20,6 +20,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/crons"
 	"github.com/sparkwing-dev/sparkwing/internal/routepolicy"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -957,7 +958,7 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 		// and an operator can process the delivery again once the default branch reads.
 		policy, err := placement(ctx, plan.pipeline)
 		if err != nil {
-			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "refused", Reason: err.Error()})
+			resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "refused", Reason: sourceurl.PublicReason(err)})
 			s.logger.Warn("github app run refused: placement unavailable", "team", string(in.Team), "repo", repo.Slug(), "pipeline", plan.pipeline, "err", err)
 			continue
 		}
@@ -970,7 +971,8 @@ func (s *Server) startGitHubAppRuns(w http.ResponseWriter, r *http.Request, in s
 					return
 				}
 				failed++
-				resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "failed", Reason: err.Error()})
+				resp.Runs = append(resp.Runs, githubAppRun{Pipeline: plan.pipeline, Status: "failed", Reason: sourceurl.PublicReason(err)})
+				s.logger.Warn("github app run failed", "team", string(in.Team), "repo", repo.Slug(), "pipeline", plan.pipeline, "err", err)
 				continue
 			}
 			if s.writeComputeLimitRefusal(w, r, err) {
