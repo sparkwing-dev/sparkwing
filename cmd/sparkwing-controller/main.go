@@ -172,10 +172,12 @@ func run(args []string) error {
 			"budgets above cannot. The deployment's Cloud launcher credential is "+
 			"exempt on its claim and sync routes only. Past the bucket a request "+
 			"is answered 429 with a Retry-After naming the refill delay, except "+
-			"that a team reserve of N/8 more a minute admits live leases' "+
-			"renewals, node transitions and step reports, so a team's sustained "+
-			"ceiling is 9N/8 a minute and its worst one-minute window 9N/4. Zero "+
-			"is unlimited.")
+			"that a team reserve of N/8 more a minute, at least 1, admits live "+
+			"leases' renewals, node transitions and step reports. For a named "+
+			"team with N of at least 8 that makes the sustained ceiling 9N/8 a "+
+			"minute and the worst one-minute window 9N/4. Default-team "+
+			"credentials each have their own bucket, so that team could already "+
+			"exceed N. Zero is unlimited.")
 	requestsPerMinuteAlarm := fs.Int(flagRequestsPerMinuteAlarm, 0,
 		"request rate, across every caller, past which this controller logs at "+
 			"warn and counts sparkwing_request_rate_alarm_total. It refuses "+
