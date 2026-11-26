@@ -872,8 +872,6 @@ activation and uses only the sealed identity after bootstrap exchange.
 Shared NodePools need `disruption: {consolidationPolicy: WhenEmpty,
 consolidateAfter: 10m}` or longer, above the award lease, so a node emptied by
 a launcher restart survives until its unit is re-awarded.
-[W8-SCALE-FROM-ZERO.md](../../../design/rewrite/W8-SCALE-FROM-ZERO.md) records
-the rationale.
 
 ## Team identity and credential rotation
 

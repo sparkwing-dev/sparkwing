@@ -73,7 +73,7 @@ func referenceWorld(t *testing.T, s *Store, repo string) *Tenant {
 		}
 		s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at) VALUES ('a',?,'value','owner',?,?,1,?,1,1)`, row[0], owner, row[1], shared)
 	}
-	// Decision 66: another repository of the team has a pipeline named ci too.
+	// safety: another repository of the team has a pipeline named ci too.
 	// No run of this world's repository, verified or asserted, reads its secret.
 	s.testOnlyExec(t, `INSERT INTO secrets(team,name,value,principal,repo,pipeline,masked,shared,created_at,updated_at) VALUES ('a','outsider-token','value','owner','gh:999999','ci',1,0,1,1)`)
 	return &Tenant{s: s, team: "a"}
@@ -395,8 +395,8 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 		write := "manual:" + writer + ":" + ref
 		return provenanceObservation{Subject: "team:a:repository_id::pipeline:" + pipeline + ":trigger:manual:runner:runner:runner_environment:persistent:ref:", Write: write, Reads: []string{write}, Pools: []string{}, Secrets: secrets}
 	}
-	// Decision 70: code the controller fetched from a repository proves that
-	// repository's id and name. Decision 72: when the code ran at the branch or
+	// safety: code the controller fetched from a repository proves that
+	// repository's id and name. When the code ran at the branch or
 	// tag head the App resolved, it also claims that ref and commit. Its data
 	// scope is its writer's fetched scope, apart from that writer's uploads.
 	fetched := func(o provenanceObservation, repository string) provenanceObservation {
@@ -440,7 +440,7 @@ func ProvenanceReferenceModel(t *testing.T, open func(*testing.T) *Store) {
 				return appReference(t, s, "refs/heads/main", referenceMain, "pipelines")
 			},
 			// The controller still fetches the code from the repository, so the
-			// pipeline secrets arrive (decision 68 refinement).
+			// pipeline secrets arrive.
 			want: fetched(asserted("ci", "run/{run}", "refs/heads/main", "ci-token", "team-token"), "acme/repo"),
 		},
 		{
@@ -640,7 +640,7 @@ func UnverifiedWritersShareNoScope(t *testing.T, open func(*testing.T) *Store) {
 	}
 }
 
-// ChildPipelinesMustBeDeclared is decision 28 item 11: a job starts only the child
+// ChildPipelinesMustBeDeclared: a job starts only the child
 // pipelines its accepted plan declared.
 func ChildPipelinesMustBeDeclared(t *testing.T, open func(*testing.T) *Store) {
 	parent, git := referenceAppProvenance(t, "refs/heads/main", referenceMain)

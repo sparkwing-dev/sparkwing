@@ -63,7 +63,7 @@ func (f *fakeAccounts) run(_ context.Context, name string, args ...string) (stri
 		}
 		return record, nil
 	case name == "dscl" && args[1] == "-list" && args[2] == "/Users":
-		return "root 0\n_www 70\nkorey 501\n_sw 400\n", nil
+		return "root 0\n_www 70\navery 501\n_sw 400\n", nil
 	case name == "dscl" && args[1] == "-list":
 		return "wheel 0\nstaff 20\n_sw 400\n", nil
 	case name == "dscl" && args[1] == "-create" && len(args) == 5 && args[3] == "NFSHomeDirectory":
@@ -76,7 +76,7 @@ func (f *fakeAccounts) run(_ context.Context, name string, args ...string) (stri
 func newFakeAccounts(t *testing.T) (*fakeAccounts, AccountHost) {
 	t.Helper()
 	f := &fakeAccounts{passwd: map[string]string{}, dscl: map[string]string{}, groups: map[string]string{}, homes: t.TempDir(), nextUID: os.Getuid(), fail: map[string]string{}}
-	return f, AccountHost{GOOS: "linux", HomeRoot: f.homes, InvokerName: "korey", InvokerUID: 4242, PeopleRoots: []string{"/home/pat-test", "/Users", "/home/sam"}, Exec: f.run, Chown: func(string, int, int) error { return nil }}
+	return f, AccountHost{GOOS: "linux", HomeRoot: f.homes, InvokerName: "avery", InvokerUID: 4242, PeopleRoots: []string{"/home/pat-test", "/Users", "/home/sam"}, Exec: f.run, Chown: func(string, int, int) error { return nil }}
 }
 
 func TestEnsureAccountCreatesAPrivateSystemUserOnLinux(t *testing.T) {
@@ -140,7 +140,7 @@ func TestEnsureAccountRefusesAccountsThatCanReachThePerson(t *testing.T) {
 		home                bool
 	}{
 		"root":        {entry: "toor:x:0:0::%s:/bin/sh", want: "it is root", home: true},
-		"invoker":     {entry: "korey:x:4100:4100::%s:/bin/zsh", want: "your own account", home: true},
+		"invoker":     {entry: "avery:x:4100:4100::%s:/bin/zsh", want: "your own account", home: true},
 		"invoker uid": {entry: "alias:x:4242:4242::%s:/bin/zsh", want: "your own account", home: true},
 		"sudo":        {entry: "ops:x:%d:%d::%s:/bin/sh", groups: "ops sudo", want: "sudo group", home: true},
 		"docker":      {entry: "ops:x:%d:%d::%s:/bin/sh", groups: "ops docker", want: "docker group", home: true},
@@ -353,11 +353,11 @@ func TestSystemServicesRefuseOtherPlatforms(t *testing.T) {
 }
 
 func TestServicePathDropsEntriesUnderPeoplesHomes(t *testing.T) {
-	kept, dropped := ServicePath("/home/korey/.asdf/installs/golang/1.26/go/bin:/usr/local/go/bin:relative:/usr/bin:/Users/k/bin:/root/bin", "/var/lib/sparkwing/sw-ci/.local/bin")
+	kept, dropped := ServicePath("/home/avery/.asdf/installs/golang/1.26/go/bin:/usr/local/go/bin:relative:/usr/bin:/Users/k/bin:/root/bin", "/var/lib/sparkwing/sw-ci/.local/bin")
 	if kept != "/var/lib/sparkwing/sw-ci/.local/bin:/usr/local/go/bin:/usr/bin" {
 		t.Fatalf("kept = %q", kept)
 	}
-	if !slices.Equal(dropped, []string{"/home/korey/.asdf/installs/golang/1.26/go/bin", "/Users/k/bin", "/root/bin"}) {
+	if !slices.Equal(dropped, []string{"/home/avery/.asdf/installs/golang/1.26/go/bin", "/Users/k/bin", "/root/bin"}) {
 		t.Fatalf("dropped = %q", dropped)
 	}
 }

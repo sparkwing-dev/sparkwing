@@ -32,7 +32,7 @@ func armCron(t *testing.T, st *store.Store, id, repo, pipeline string, at time.T
 	sched, created, err := teststore.ForTeam(t, st, store.DefaultTeam).ArmCronSchedule(context.Background(), store.CronSchedule{
 		ID: id, RepoPath: repo, Pipeline: pipeline,
 		Cron: "0 * * * *", TZ: "UTC", Overlap: store.CronOverlapSkip,
-		CatchUp: time.Hour, ArmedBy: "korey", NextDueAt: &next,
+		CatchUp: time.Hour, ArmedBy: "avery", NextDueAt: &next,
 	})
 	if err != nil {
 		t.Fatalf("ArmCronSchedule(%s): %v", id, err)
@@ -48,7 +48,7 @@ func TestArmCronScheduleInsertsThenRefreshesWithoutClobberingState(t *testing.T)
 	st := storetest.Open(t)
 	cronRun(t, st, "run-1")
 	sched := armCron(t, st, "crn_a", "/repo/one", "nightly", cronBase)
-	if !sched.ArmedAt.Equal(cronBase) || !sched.CursorAt.Equal(cronBase) || sched.ArmedBy != "korey" {
+	if !sched.ArmedAt.Equal(cronBase) || !sched.CursorAt.Equal(cronBase) || sched.ArmedBy != "avery" {
 		t.Fatalf("armed row = %+v, want armed_at/cursor_at %v", sched, cronBase)
 	}
 	if !sched.Declared || sched.Paused {
@@ -84,7 +84,7 @@ func TestArmCronScheduleInsertsThenRefreshesWithoutClobberingState(t *testing.T)
 	if created {
 		t.Fatal("re-arm reported a create")
 	}
-	if again.ID != sched.ID || !again.ArmedAt.Equal(cronBase) || again.ArmedBy != "korey" {
+	if again.ID != sched.ID || !again.ArmedAt.Equal(cronBase) || again.ArmedBy != "avery" {
 		t.Errorf("re-arm rewrote identity or arming: %+v", again)
 	}
 	if again.Cron != "0 3 * * *" || again.TZ != "America/Boise" ||

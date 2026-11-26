@@ -651,7 +651,7 @@ after source deletion. GC uses a controlled store clock across grace and takeove
 The ledger retention proof creates all financial-table rows through their mutation
 owners, then verifies them unchanged after run retention and reopening. The signed
 refund proof also joins C2 verification to settlement, using the schema fake below.
-Decision 29 leaves one active controller per store: a PostgreSQL session advisory
+One controller is active per store: a PostgreSQL session advisory
 lock and a write epoch fence every write, and SQLite stores are single-process. The
 singleton maintenance leases (`leases`, their generations and the lease parameters
 on maintenance calls), per-delivery GitHub inbox leases and the `replica_id`

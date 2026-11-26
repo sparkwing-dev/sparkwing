@@ -171,8 +171,8 @@ placeholders and KEDA PostgreSQL scalers. Each placeholder reserves one catalog
 node. KEDA queries the `warm_pool_desired` view with a separate read-only role;
 its DSN Secret, TriggerAuthentication and ScaledObjects live in the dedicated
 warm namespace. Placeholder pods mount no volumes. Infrastructure installs KEDA and
-supplies shared NodePools. See the chart README and
-[proposed infrastructure manifests](../design/rewrite/proposals/warm-capacity.md)
+supplies shared NodePools. See the
+[chart README](../charts/sparkwing-full/README.md)
 for role grants, Secret keys, resource sizing and scheduling labels.
 
 Self-hosted runner pools use `runner.repos`, `runner.alsoClaimTriggers` and pool

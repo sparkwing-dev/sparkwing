@@ -149,7 +149,7 @@ test("keeps a long node name visible beside its location icon", async ({ page })
       execution_attempts: [{
         attempt: 1,
         executor_kind: "runner",
-        executor_name: "moonborn",
+        executor_name: "mybox",
         location: "local",
         started_at: "2026-08-27T18:00:00Z",
         finished_at: "2026-08-27T18:01:30Z",
@@ -179,18 +179,18 @@ test("keeps a long node name visible beside its location icon", async ({ page })
   expect(fit).toEqual({ clipped: true, ellipsis: true, inside: true });
   await expect(label).toHaveAttribute("title", longName);
   await expect(row.getByText("Local", { exact: true })).toHaveCount(0);
-  const rowSite = row.getByLabel("Ran on moonborn (your machine)");
+  const rowSite = row.getByLabel("Ran on mybox (your machine)");
   await expect(rowSite).toBeVisible();
   await rowSite.focus();
   await expect(rowSite.getByRole("tooltip")).toBeVisible();
   await page.getByRole("button", { name: /DAG/ }).click();
-  const dagSite = page.locator('svg [role="img"][aria-label="Ran on moonborn (your machine)"]');
+  const dagSite = page.locator('svg [role="img"][aria-label="Ran on mybox (your machine)"]');
   await expect(dagSite).toBeVisible();
   await dagSite.hover();
-  await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
+  await expect(page.locator("svg text", { hasText: "Ran on mybox (your machine)" })).toBeVisible();
   await page.mouse.move(0, 0);
   await dagSite.focus();
-  await expect(page.locator("svg text", { hasText: "Ran on moonborn (your machine)" })).toBeVisible();
+  await expect(page.locator("svg text", { hasText: "Ran on mybox (your machine)" })).toBeVisible();
 });
 
 test("shows the run's notices, job summaries and earlier attempts' steps", async ({ page }) => {

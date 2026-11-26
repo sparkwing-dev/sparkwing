@@ -71,7 +71,7 @@ func TestRepositoryReviewPolicyParses(t *testing.T) {
 	if _, err := newReviewer(p.Reviewers[p.DocsOnly.Reviewer].Model); err != nil {
 		t.Errorf("docs_only reviewer: %v", err)
 	}
-	docs := []string{"docs/admission.md", "pkg/docs/changelog.md", "CHANGELOG.md", "README.md", "design/rewrite/ORIENTATION.md"}
+	docs := []string{"docs/admission.md", "pkg/docs/changelog.md", "CHANGELOG.md", "README.md", "CONTRIBUTING.md"}
 	if got := p.defaultModel(docs); got != "claude-haiku" {
 		t.Errorf("docs-only diff routes to %q, want claude-haiku", got)
 	}

@@ -1,13 +1,15 @@
 # Agent orientation
 
+This repository is public: every commit is publication. Working notes, handoffs, progress logs, review-round reports, benchmark dumps and decision logs never go in it; keep them outside the repository. Commit only what a stranger maintaining the code needs, including design documentation written for that reader.
+
 Sparkwing is standalone. Do not assume any other local service or machine-specific agent harness exists.
 
 - Start with `sparkwing info --for-agent`; its output is current context for this wake, not documentation to copy.
-- Read [design/rewrite/ORIENTATION.md](design/rewrite/ORIENTATION.md) for the owner and guard test of each core rule, the test workflow, known gotchas and the decision index.
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for the owner and guard test of each core rule, the test workflow and known gotchas.
 - Search the command index with `sparkwing commands --search status`; narrow it with `--path "sparkwing pipeline"`. Read a named command with `<command> --help`. `-o json` emits index records (`path`, `synopsis`, `subcommand_count`) followed by a page record. Commands default to 40 matches; use a positive `--limit` and continue with `--cursor <next_cursor>` using the same filters. Search documentation with `sparkwing docs search --search <topic>` and read a hit with `sparkwing docs read --topic <slug> --section <start_line>`. Discovery JSON is NDJSON, one complete record per line.
 - Use `sparkwing pipeline list -o json` to discover repository pipelines.
 - Treat the README, embedded docs, CLI help, and tests as product truth. Run the relevant pipeline with `sparkwing run <name>`.
-- Before selecting checks or changing hook behavior, read [DELIVERY.md](DELIVERY.md) for tier membership, budgets, coverage limits, and measured costs. `sparkwing pipeline hooks status` verifies which hooks are armed in this checkout.
+- Before selecting checks or changing hook behavior, read [DELIVERY.md](DELIVERY.md) for tier membership, budgets and coverage limits. `sparkwing pipeline hooks status` verifies which hooks are armed in this checkout.
 - Read `DELIVERY.md` before landing a change; it names the cheap checks and the decisions that must not be skipped.
 - Submit every agent landing with the script extracted from freshly fetched `origin/main`, using the [queued Land recipe](DELIVERY.md#queue-focused-lands). That recipe also covers pin refusals and changes to the pipeline itself.
 - The committed `go.work` joins the host, Go SDK and pipeline modules. Use this

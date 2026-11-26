@@ -147,7 +147,7 @@ func ownedSDKProxy(t *testing.T, version string) {
 
 func TestOwnedSDKOnlySelectsOwnedGoReposWithAMainLandPolicy(t *testing.T) {
 	repo := atomicReleaseRepo(t, fixtureChangelog)
-	gitRun(t, repo, "remote", "add", "origin", "https://github.com/koreyGambill/fixture")
+	gitRun(t, repo, "remote", "add", "origin", "https://github.com/sparkwing-dev/fixture")
 	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -156,12 +156,12 @@ func TestOwnedSDKOnlySelectsOwnedGoReposWithAMainLandPolicy(t *testing.T) {
 		origin, policy string
 		want           bool
 	}{
-		{"git@github.com:koreyGambill/fixture.git", "landing: {branch: main, verify: verify}", true},
+		{"git@github.com:sparkwing-dev/fixture.git", "landing: {branch: main, verify: verify}", true},
 		{"https://github.com/sparkwing-dev/fixture", "landing: {branch: main, verify: verify}", true},
 		{"https://github.com/employer/fixture", "landing: {branch: main, verify: verify}", false},
-		{"https://github.com/koreyGambill/fixture", "landing: {branch: main, verify: verify, delivery: pull-request}", false},
-		{"https://github.com/koreyGambill/fixture", "landing: {branch: develop, verify: verify}", false},
-		{"https://github.com/koreyGambill/fixture", "landing: {branch: main}", false},
+		{"https://github.com/sparkwing-dev/fixture", "landing: {branch: main, verify: verify, delivery: pull-request}", false},
+		{"https://github.com/sparkwing-dev/fixture", "landing: {branch: develop, verify: verify}", false},
+		{"https://github.com/sparkwing-dev/fixture", "landing: {branch: main}", false},
 	} {
 		writeFile(t, filepath.Join(repo, ".xwing-env.yaml"), tc.policy)
 		gitRun(t, repo, "remote", "set-url", "origin", tc.origin)

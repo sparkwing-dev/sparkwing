@@ -286,7 +286,7 @@
           "page_bytes": 255090,
           "taken_at": "2026-09-10T08:57:11Z",
           "commit": "ee750b0",
-          "host": "bomberangz-pc",
+          "host": "dev-desktop",
           "load_per_cpu": 0.11,
           "samples": 5
         }
@@ -300,7 +300,7 @@
           "page_bytes": 375504,
           "taken_at": "2026-09-10T08:57:11Z",
           "commit": "ee750b0",
-          "host": "bomberangz-pc",
+          "host": "dev-desktop",
           "load_per_cpu": 0.11,
           "samples": 5
         }
@@ -314,7 +314,7 @@
           "page_bytes": 259723,
           "taken_at": "2026-09-10T08:57:11Z",
           "commit": "ee750b0",
-          "host": "bomberangz-pc",
+          "host": "dev-desktop",
           "load_per_cpu": 0.11,
           "samples": 5
         }
@@ -328,7 +328,7 @@
           "page_bytes": 256607,
           "taken_at": "2026-09-10T08:57:11Z",
           "commit": "ee750b0",
-          "host": "bomberangz-pc",
+          "host": "dev-desktop",
           "load_per_cpu": 0.11,
           "samples": 5
         }
@@ -342,7 +342,7 @@
           "page_bytes": 259016,
           "taken_at": "2026-09-10T08:57:11Z",
           "commit": "ee750b0",
-          "host": "bomberangz-pc",
+          "host": "dev-desktop",
           "load_per_cpu": 0.11,
           "samples": 5
         }
@@ -356,7 +356,7 @@
           "page_bytes": 256721,
           "taken_at": "2026-09-10T08:57:11Z",
           "commit": "ee750b0",
-          "host": "bomberangz-pc",
+          "host": "dev-desktop",
           "load_per_cpu": 0.11,
           "samples": 5
         }
@@ -370,7 +370,7 @@
           "page_bytes": 459505,
           "taken_at": "2026-09-10T08:57:11Z",
           "commit": "ee750b0",
-          "host": "bomberangz-pc",
+          "host": "dev-desktop",
           "load_per_cpu": 0.11,
           "samples": 5
         }
@@ -384,7 +384,7 @@
           "page_bytes": 35959,
           "taken_at": "2026-09-10T08:57:11Z",
           "commit": "ee750b0",
-          "host": "bomberangz-pc",
+          "host": "dev-desktop",
           "load_per_cpu": 0.11,
           "samples": 5
         }

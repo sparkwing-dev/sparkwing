@@ -2,8 +2,7 @@
 
 Run `go test -v ./tests/acceptance` from the repository root to retain JSON
 results for executed assertion leaves and their cells. Empty cells and groups
-whose leaves were all filtered out cannot pass. See the
-[execution contract](../../design/rewrite/contracts/t1-acceptance.md).
+whose leaves were all filtered out cannot pass.
 
 The opt-in [local controller feature scenarios](LOCAL_FEATURES.md) exercise a
 built CLI and dashboard with real processes, separate actors and isolated homes.

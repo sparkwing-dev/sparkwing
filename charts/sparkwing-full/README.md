@@ -8,7 +8,7 @@ own controller is outside the launch offering.
 ## Cloud on EKS
 
 [examples/cloud.yaml](examples/cloud.yaml) is a secret-free input for ArgoCD on
-`kikd-prod`. It renders the controller, Service, nginx Ingress for
+an EKS cluster. It renders the controller, Service, nginx Ingress for
 `api.sparkwing.dev` and `console.sparkwing.dev`, launcher Deployment, the
 `sparkwing-cloud-jobs` namespace with its customer ServiceAccount, RBAC, Job egress
 policies and admission policies. It uses
@@ -263,8 +263,43 @@ higher of half the last 30 minutes' cold-start waits (rounded up) and one more
 than current warm capacity when the last hour's median start exceeds target
 while a job is waiting for a fresh node, clamped to the operator
 minimum/maximum. With no waits it returns the minimum.
-See [the infrastructure proposal](../../design/rewrite/proposals/warm-capacity.md)
-for exact KEDA manifests, the reader role and Secret, and shared-pool labels.
+
+KEDA's [PostgreSQL scaler](https://keda.sh/docs/2.18/scalers/postgresql/) reads
+the DSN through `TriggerAuthentication.secretTargetRef` parameter `connection`,
+so KEDA needs TCP access to the database and to the Kubernetes API. Create the
+reader role as the database owner, substituting the password from your secret
+store. The view runs with its owner's table permissions, so the role needs
+SELECT on the view and nothing else:
+
+```sql
+CREATE ROLE sparkwing_warm_reader LOGIN PASSWORD 'REPLACE_FROM_SECRET_STORE';
+ALTER ROLE sparkwing_warm_reader SET default_transaction_read_only = on;
+GRANT CONNECT ON DATABASE sparkwing TO sparkwing_warm_reader;
+GRANT USAGE ON SCHEMA public TO sparkwing_warm_reader;
+GRANT SELECT ON public.warm_pool_desired TO sparkwing_warm_reader;
+```
+
+Store that role's DSN in the warm namespace under the key named by
+`warmCapacity.databaseSecret.key` (default `dsn`). Placeholder containers
+receive no database credentials:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sparkwing-warm-db
+  namespace: sparkwing-cloud-warm
+type: Opaque
+stringData:
+  dsn: postgresql://sparkwing_warm_reader:REPLACE_FROM_SECRET_STORE@REPLACE_DB_HOST:5432/sparkwing?sslmode=require
+```
+
+Placeholder pods mount no volumes, including ServiceAccount tokens. The launcher
+checks the placeholder label, priority class and negative priority, then verifies
+the ReplicaSet controller UID and its owning `sparkwing-cloud-warm-<vCPU>`
+Deployment. Pod get/delete and ReplicaSet get are bound only in the warm
+namespace. Shared pools follow
+[examples/shared-nodepool.yaml](examples/shared-nodepool.yaml).
 
 - Nodes need the awarded CPU/memory plus system overhead and at least 20 GiB of
   allocatable ephemeral storage. The example's ceilings are 2 CPU and 8 GiB.

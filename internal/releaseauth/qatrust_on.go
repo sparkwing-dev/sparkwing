@@ -3,7 +3,7 @@
 package releaseauth
 
 // QAPublicKey verifies QA pre-releases from https://qa-releases.sparkwing.dev.
-// Its signing seed is SSM SecureString /kikd-prod/sparkwing/qa-release-signing-key.
+// Its signing seed is the SSM SecureString bin/qa-release.sh names.
 // A production build never carries the qatrust tag.
 const QAPublicKey = "S37ijVuRXJjKzLlFAkPYR8YFXmayaiH21BHzbndcPFU="
 

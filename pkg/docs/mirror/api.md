@@ -367,8 +367,8 @@ through the admission owner.
 
 ## Version policy
 
-A repository's exact SDK pin selects its verified engine. From launch freeze,
-the controller supports requests emitted by each engine for twelve calendar
+A repository's exact SDK pin selects its verified engine. Once live-mode
+Stripe is enabled, the controller supports requests emitted by each engine for twelve calendar
 months after its release. Older engines continue until a signed security
 revocation or minimum-version policy takes effect. Additive fields and codes
 remain readable. Each selected engine owns its matching node protocol.

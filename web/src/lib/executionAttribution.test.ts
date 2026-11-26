@@ -87,14 +87,14 @@ describe("executionDisplay", () => {
   it("maps known execution origins to a compact icon and specific tooltip", () => {
     assert.deepEqual(
       [
-        executionDisplay({ executor_kind: "agent", executor_name: "moonborn", location: "local" }),
-        executionDisplay({ executor_kind: "github-actions", executor_name: "koreyGambill/moonborn-ws", location: "unknown" }),
+        executionDisplay({ executor_kind: "agent", executor_name: "mybox", location: "local" }),
+        executionDisplay({ executor_kind: "github-actions", executor_name: "acme/mybox-ws", location: "unknown" }),
         executionDisplay({ executor_kind: "cloud", location: "cloud" }),
         executionDisplay({ executor_kind: "kubernetes", executor_name: "warm-pool", location: "cloud" }),
       ].map(({ icon, tooltip }) => [icon, tooltip]),
       [
-        ["machine", "Ran on moonborn (your machine)"],
-        ["github", "Ran on GitHub Actions: koreyGambill/moonborn-ws"],
+        ["machine", "Ran on mybox (your machine)"],
+        ["github", "Ran on GitHub Actions: acme/mybox-ws"],
         ["cloud", "Ran in Sparkwing Cloud"],
         ["cluster", "Ran on the cluster warm pool"],
       ],
