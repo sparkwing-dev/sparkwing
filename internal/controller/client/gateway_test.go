@@ -86,7 +86,8 @@ func TestGatewaySafeRequestRecovers(t *testing.T) {
 				if _, err := c.ReadRun(t.Context(), "run"); err != nil || calls != 3 {
 					t.Fatalf("calls=%d error=%v", calls, err)
 				}
-				if elapsed := time.Since(start); elapsed < 150*time.Millisecond || elapsed > 4*time.Second || advice == "2" && elapsed != 4*time.Second {
+				elapsed := time.Since(start)
+				if elapsed < 150*time.Millisecond || advice == "2" && (elapsed <= 4*time.Second || elapsed > 7*time.Second) || advice != "2" && elapsed > 4*time.Second {
 					t.Fatalf("retry elapsed=%s advice=%q", elapsed, advice)
 				}
 			})

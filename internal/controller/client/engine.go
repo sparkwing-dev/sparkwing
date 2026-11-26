@@ -146,7 +146,7 @@ func (c *engineClient) request(ctx context.Context, method, pattern, path, key s
 			if !ok && !recoverIntake {
 				return err
 			}
-			if ok && resp.StatusCode == http.StatusTooManyRequests {
+			if ok && (resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable) {
 				// safety: jitter above the whole-second advice keeps callers refused together from returning together.
 				advised += RetryJitter(attempt)
 			}
