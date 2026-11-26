@@ -1311,7 +1311,11 @@ file. Other syntax and workflow checks remain active.
   and of untracked files' names and contents), which the pipeline module's
   `TestCheckoutStateKeysTheTestCache` reads: go test never hashes files above
   the module and records a variable only while a test runs, so without it a
-  change to `.github/` or `bin/` would replay that module's cached pass. A gate runs inside a sparkwing node, which hands its children the
+  change to `.github/` or `bin/` would replay that module's cached pass. Every
+  product test step also pins `GIT_CONFIG_GLOBAL=/dev/null` and
+  `GIT_CONFIG_NOSYSTEM=1`, so suites read no global or system git config, as
+  on a hosted runner: a fixture that commits without its own identity fails
+  locally the way it fails in hosted CI. A gate runs inside a sparkwing node, which hands its children the
   machine's admission socket, the dispatcher's service URLs and the run's own
   credentials, so a suite that read one would reach a live service and fail
   only under the gate. The node consumes its WorkStep window before the body

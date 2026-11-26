@@ -790,10 +790,9 @@ const productTestRepoStateVar = "SPARKWING_TEST_REPO_STATE"
 // count by name and content, because an edit to one is a change too.
 const productTestRepoState = `"$(git rev-parse -q --verify 'HEAD^{tree}')-$(git diff HEAD 2>/dev/null | git hash-object --stdin)-$({ git ls-files -o --exclude-standard; git ls-files -o --exclude-standard -z | xargs -0 -r git hash-object --; } 2>/dev/null | git hash-object --stdin)"`
 
-// safety: hosted runners have no global or system git config, so a fixture
-// that commits without its own identity, or relies on the operator's hooks,
-// signing or default branch, must fail here the way it fails there.
-// gitcontrol keeps these two names while it scrubs other GIT_ bindings.
+// safety: product suites read no global or system git config, as on a hosted
+// runner, so the operator's identity, hooks, signing and default branch never
+// reach a fixture. gitcontrol keeps these two names when it scrubs GIT_.
 var productTestGitConfig = []string{"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1"}
 
 func productTestPins(home string) []string {
