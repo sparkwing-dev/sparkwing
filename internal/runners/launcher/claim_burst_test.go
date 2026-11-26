@@ -114,12 +114,7 @@ func TestLauncherLaunchesWorkReadyTogetherInOneCycle(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		var passes atomic.Int32
-		kube.PrependReactor("list", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-			if reconcileList(action) {
-				passes.Add(1)
-			}
-			return false, nil, nil
-		})
+		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) { passes.Add(1); return false, nil, nil })
 		l.Poll = 2 * time.Second
 		at, lists, syncs := productionBurst(ctx, t, l, 6, 7, cancel, &passes)
 		if len(at) != 7 {
@@ -143,12 +138,7 @@ func TestLauncherBoundsClaimsPerCycle(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		var passes atomic.Int32
-		kube.PrependReactor("list", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-			if reconcileList(action) {
-				passes.Add(1)
-			}
-			return false, nil, nil
-		})
+		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) { passes.Add(1); return false, nil, nil })
 		l.Poll = 2 * time.Second
 		at, _, _ := productionBurst(ctx, t, l, maxClaimsPerCycle+2, maxClaimsPerCycle+1, cancel, &passes)
 		if len(at) != maxClaimsPerCycle+1 {
@@ -221,12 +211,7 @@ func TestLauncherHeldRepliesKeepSafetyReconciliationOnSchedule(t *testing.T) {
 		l, kube, _, _ := fixture()
 		l.Poll = time.Second
 		var passes atomic.Int32
-		kube.PrependReactor("list", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-			if reconcileList(action) {
-				passes.Add(1)
-			}
-			return false, nil, nil
-		})
+		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) { passes.Add(1); return false, nil, nil })
 		var err error
 		l.Control, err = NewControllerControl(launcherWireFake{
 			claim: func(ctx context.Context, _ controllerwire.ClaimRequest) (controllerwire.ClaimResponse, error) {

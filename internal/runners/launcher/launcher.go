@@ -541,26 +541,6 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 		award.claimApplied = true
 		l.recordStartupStage(ctx, award.Binding, "launcher_claim_applied", award.claimReceivedAt, true)
 	}
-	// perf: an award proves the controller has handed off its run's plan, usually after this pass's
-	// reconciliation. Retiring the plan while Prepare runs starts the teardown that reuse waits on
-	// before the first reservation; one award per run finds a live plan, so the rest pay one list.
-	var retiring chan []string
-	if !award.WaitedForFreshNode && award.teardownDeadline.IsZero() {
-		retiring = make(chan []string, 1)
-		// safety: the retirement runs under the loop's context, detached from this launch, so a deadline
-		// or refused preparation never interrupts a teardown between Job deletion and finalizer removal.
-		go func(ctx context.Context, successor CloudJobBinding) {
-			// safety: a failed retirement keeps this attempt's result, and the reconciliation loop reports it.
-			ending, err := l.retireEndedPredecessors(ctx, successor, true)
-			if err != nil {
-				l.logger().DebugContext(ctx, "claim-time plan retirement deferred to reconciliation", "error", err)
-			}
-			retiring <- ending
-		}(ctx, award.Binding)
-	}
-	// safety: a stalled controller or API server delays placement by at most this bound.
-	retireWait := time.NewTimer(handoffWait)
-	defer retireWait.Stop()
 	started := time.Now()
 	prepared, stop, expires, err := l.keepPreparation(ctx, award.Binding.LeaseRef())
 	if !errors.Is(err, ErrNoDedicatedNode) && !errors.Is(err, errCapacityUnconfigured) {
@@ -568,13 +548,6 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	}
 	if err != nil {
 		return true, err
-	}
-	var predecessors []string
-	if retiring != nil {
-		select {
-		case predecessors = <-retiring:
-		case <-retireWait.C:
-		}
 	}
 	ctx = prepared
 	defer func() {
@@ -588,17 +561,20 @@ func (l *Launcher) launch(ctx context.Context, award *CloudJobAward) (launched b
 	current.LeaseExpiresAt = expires
 	started = time.Now()
 	r, err := BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
-	// perf: the controller can also end a same-run work predecessor after this pass's reconciliation.
-	// Its live Job would hide the handoff, and the demand it prompted would leave Karpenter a tainted
-	// node to replace, so a failed first reservation retires it in this pass.
-	if errors.Is(err, ErrNoDedicatedNode) && retiring != nil {
-		ending, retireErr := l.retireEndedPredecessors(ctx, award.Binding, false)
-		retired := slices.ContainsFunc(ending, func(name string) bool { return !slices.Contains(predecessors, name) })
+	// perf: the controller can end a same-run predecessor, or hand off its plan, after this pass's
+	// reconciliation. Its live Job would hide the handoff, and the demand it prompted would leave
+	// Karpenter a tainted node to replace. Retiring ended awards in the claim pass starts the
+	// teardown that reuse waits on.
+	var predecessors []string
+	if errors.Is(err, ErrNoDedicatedNode) && !award.WaitedForFreshNode && award.teardownDeadline.IsZero() {
+		// safety: a failed retirement keeps this attempt's result, and the reconciliation loop reports it.
+		var retired bool
+		var retireErr error
+		predecessors, retired, retireErr = l.retireEndedPredecessors(ctx, award.Binding)
 		// perf: a predecessor in teardown usually still holds its node, so another attempt now would usually fail.
 		if retired && retireErr == nil && !errors.Is(err, errPredecessorTeardown) {
 			r, err = BuildJob(ctx, time.Now(), l.Config, current, l.Boundary)
 		}
-		predecessors = ending
 	}
 	if errors.Is(err, errCapacityUnconfigured) {
 		l.wait(award)

@@ -612,11 +612,9 @@ that Job for deletion: the controller can award work as planning exits.
 Only that predecessor's Pods and DaemonSets may occupy the node.
 Normal reconciliation retries teardown before placement. The controller can also
 end a work predecessor, or hand off its plan, and award the dependent between
-reconciliation and claim. So while a fresh award's first preparation is in flight,
-the launcher asks the controller about the run's live planning Job and tears it
-down if its award ended; when no plan is live this costs one team-scoped Job list.
-On that award's first failed placement, it asks the same about the run's other
-live Jobs and tears down those whose awards ended. A successor that would otherwise request capacity places
+reconciliation and claim. So on a fresh award's first failed placement, the launcher
+asks the controller about the run's other live Jobs in the same pass and tears down
+those whose awards ended. A successor that would otherwise request capacity places
 again. That attempt succeeds if the teardown already freed the node; otherwise the
 successor waits for the teardown rather than creating demand that cannot fit on the
 reserved node and would make Karpenter add one. An ordinary placement miss can still
@@ -646,8 +644,9 @@ through the handoff and fresh-capacity fallback at 30 seconds.
 `TestRunAndRetryPlanHandoffCreateOnlyOneNodeClaim` guards the plan-to-work gap for
 normal runs and retries, including launcher restarts, and
 `TestClaimRetiresPlanInHandoffInSamePass` guards that the claim pass starts a handed-off
-plan's teardown. `TestClaimRetiresEndedPlanWhilePreparing` guards that it overlaps
-preparation, and `TestClaimMeetingLivePlanPlacesOnPodDeletionWithoutReconcilePass`,
+plan's teardown. `TestClaimMeetingLivePlanPlacesOnPodDeletionWithoutReconcilePass`,
+`TestQueuedPredecessorDeletionHandsOffBeforeTheFullPass`,
+`TestAwaitedPodUpdateAfterATimerPassStartsNoExtraPass`,
 `TestHandoffWaitLeavesOtherAwardsUnblocked`,
 `TestHandoffWaitEndsAtItsBoundAndFallsBackToReconciliation`,
 `TestCancelledAwardLeavesHandoffWithoutAJob`, `TestHandoffWaitKeepsRenewingTheAward`

@@ -1,11 +1,7 @@
 package launcher
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"log/slog"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,8 +26,6 @@ type handoffControl struct {
 	*controlFake
 	deliveries chan *CloudJobAward
 	prepare    func(context.Context, capability.LeaseRef)
-	stallSync  atomic.Bool
-	slowSync   atomic.Pointer[func(context.Context) error]
 
 	mu        sync.Mutex
 	planEnded bool
@@ -61,16 +55,7 @@ func (c *handoffControl) Prepare(ctx context.Context, refs []capability.LeaseRef
 	return time.Now().Add(time.Minute), context.Cause(ctx)
 }
 
-func (c *handoffControl) Sync(ctx context.Context, observations []CloudJobObservation) ([]CloudJobState, error) {
-	if c.stallSync.CompareAndSwap(true, false) {
-		<-ctx.Done()
-		return nil, context.Cause(ctx)
-	}
-	if slow := c.slowSync.Swap(nil); slow != nil {
-		if err := (*slow)(ctx); err != nil {
-			return nil, err
-		}
-	}
+func (c *handoffControl) Sync(_ context.Context, observations []CloudJobObservation) ([]CloudJobState, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	states := make([]CloudJobState, len(observations))
@@ -248,37 +233,6 @@ func TestClaimMeetingLivePlanPlacesOnPodDeletionWithoutReconcilePass(t *testing.
 	})
 }
 
-func TestClaimRetiresEndedPlanWhilePreparing(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		f := newHandoffFixture(t)
-		retired := make(chan struct{})
-		var once sync.Once
-		f.kube.PrependReactor("delete", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
-			once.Do(func() { close(retired) })
-			return false, nil, nil
-		})
-		overlapped := false
-		f.control.prepare = func(ctx context.Context, _ capability.LeaseRef) {
-			select {
-			case <-retired:
-				overlapped = true
-			case <-time.After(time.Second):
-			case <-ctx.Done():
-			}
-		}
-		f.control.endPlan()
-		if _, err := f.l.launch(t.Context(), f.first); !errors.Is(err, ErrNoDedicatedNode) {
-			t.Fatalf("first job did not wait for the live planning Pod: %v", err)
-		}
-		if !overlapped {
-			t.Fatal("plan retirement waited for Prepare to finish")
-		}
-		if len(f.first.handoffJobs) != 1 || f.first.handoffJobs[0] != f.plan.Labels[JobLabel] {
-			t.Fatalf("handoff waits on %v, want the plan's Job", f.first.handoffJobs)
-		}
-	})
-}
-
 func TestHandoffWaitLeavesOtherAwardsUnblocked(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newHandoffFixture(t)
@@ -427,12 +381,6 @@ func TestClaimAfterPlanIsGoneTakesOneAttempt(t *testing.T) {
 	})
 }
 
-// hack: a claim's team-scoped retirement also lists Jobs, so only an unscoped list marks a reconcile pass.
-func reconcileList(action ktesting.Action) bool {
-	_, scoped := action.(ktesting.ListAction).GetListRestrictions().Labels.RequiresExactMatch(TeamLabel)
-	return !scoped
-}
-
 type countingSync struct {
 	CloudControl
 	syncs *atomic.Int32
@@ -441,37 +389,6 @@ type countingSync struct {
 func (c *countingSync) Sync(ctx context.Context, observations []CloudJobObservation) ([]CloudJobState, error) {
 	c.syncs.Add(1)
 	return c.CloudControl.Sync(ctx, observations)
-}
-
-func TestRefusedPreparationDoesNotWaitForStalledRetirement(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		f := newHandoffFixture(t)
-		f.l.Poll = 2 * time.Second
-		other := f.otherRun(t)
-		defer f.run(t)()
-		initial := f.passes.Load()
-		f.control.endPlan()
-		f.control.refuse(f.first)
-		f.control.stallSync.Store(true)
-		f.control.deliveries <- f.first
-		select {
-		case f.control.deliveries <- other:
-		case <-time.After(time.Minute):
-			t.Fatal("a refused award's stalled retirement stopped further claims")
-		}
-		synctest.Wait()
-		if !f.job(t, other) {
-			t.Fatal("another award was not placed after a refused award")
-		}
-		time.Sleep(f.l.Poll)
-		synctest.Wait()
-		if f.passes.Load() == initial {
-			t.Fatal("reconciliation stopped behind a refused award's stalled retirement")
-		}
-		if f.job(t, f.first) {
-			t.Fatal("refused award created a Job")
-		}
-	})
 }
 
 func TestQueuedPredecessorDeletionHandsOffBeforeTheFullPass(t *testing.T) {
@@ -549,107 +466,4 @@ func TestAwaitedPodUpdateAfterATimerPassStartsNoExtraPass(t *testing.T) {
 			t.Fatalf("the awaited Pod's update after a timer pass started %d extra passes", got-before)
 		}
 	})
-}
-
-func TestPreparationStageExcludesClaimTimeRetirement(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		f := newHandoffFixture(t)
-		var logs bytes.Buffer
-		f.l.Logger = slog.New(slog.NewJSONHandler(&logs, nil))
-		f.kube.PrependReactor("list", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-			if !reconcileList(action) {
-				time.Sleep(500 * time.Millisecond)
-			}
-			return false, nil, nil
-		})
-		f.control.endPlan()
-		if _, err := f.l.launch(t.Context(), f.first); !errors.Is(err, ErrNoDedicatedNode) {
-			t.Fatalf("first job did not wait for the live planning Pod: %v", err)
-		}
-		stages := startupRecords(t, &logs)["launcher_preparation"]
-		if len(stages) != 1 || stages[0]["duration_ms"] != float64(0) {
-			t.Fatalf("preparation stage=%v, want Prepare's own instant duration", stages)
-		}
-	})
-}
-
-func TestRefusedPreparationLetsAStartedRetirementFinish(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		f := newHandoffFixture(t)
-		f.deletePlanPod(t)
-		f.control.endPlan()
-		f.control.refuse(f.first)
-		slow := func(ctx context.Context) error {
-			select {
-			case <-time.After(1500 * time.Millisecond):
-				return nil
-			case <-ctx.Done():
-				return context.Cause(ctx)
-			}
-		}
-		f.control.slowSync.Store(&slow)
-		started := time.Now()
-		if _, err := f.l.launch(t.Context(), f.first); err == nil {
-			t.Fatal("refused award launched")
-		}
-		if waited := time.Since(started); waited != 0 {
-			t.Fatalf("refused award waited %s for its retirement", waited)
-		}
-		time.Sleep(2 * time.Second)
-		synctest.Wait()
-		if _, err := f.kube.BatchV1().Jobs("cloud").Get(t.Context(), f.plan.Labels[JobLabel], metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-			t.Fatalf("retired plan Job left behind its cleanup finalizer: %v", err)
-		}
-	})
-}
-
-func TestClaimTimeRetirementWaitEndsAtItsBound(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		f := newHandoffFixture(t)
-		probe := &contextProbe{Handler: slog.DiscardHandler}
-		f.l.Logger = slog.New(probe)
-		f.control.endPlan()
-		slow := func(context.Context) error {
-			time.Sleep(handoffWait + 500*time.Millisecond)
-			return errors.New("controller unavailable")
-		}
-		f.control.slowSync.Store(&slow)
-		started := time.Now()
-		if _, err := f.l.launch(t.Context(), f.first); !errors.Is(err, ErrNoDedicatedNode) {
-			t.Fatalf("first job did not wait for the live planning Pod: %v", err)
-		}
-		if waited := time.Since(started); waited != handoffWait {
-			t.Fatalf("launch waited %s for a stalled retirement, want %s", waited, handoffWait)
-		}
-		time.Sleep(time.Second)
-		synctest.Wait()
-		if errs := probe.errs(); len(errs) != 1 || errs[0] != nil {
-			t.Fatalf("late retirement ran under contexts with errors %v, want the launcher's live context", errs)
-		}
-	})
-}
-
-// hack: the race detector cannot see a reassigned context across synctest's clock, so the retirement's
-// log records which context it was given.
-type contextProbe struct {
-	slog.Handler
-	mu   sync.Mutex
-	seen []error
-}
-
-func (p *contextProbe) Enabled(context.Context, slog.Level) bool { return true }
-
-func (p *contextProbe) Handle(ctx context.Context, record slog.Record) error {
-	if record.Message == "claim-time plan retirement deferred to reconciliation" {
-		p.mu.Lock()
-		p.seen = append(p.seen, ctx.Err())
-		p.mu.Unlock()
-	}
-	return nil
-}
-
-func (p *contextProbe) errs() []error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return slices.Clone(p.seen)
 }

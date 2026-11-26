@@ -62,13 +62,13 @@ func (b *KubernetesBoundary) predecessorTeardown(ctx context.Context, node corev
 // perf: a Pod that outlasts this wait costs no more than the reconcile pass it would otherwise wait for.
 const handoffWait = time.Second
 
-func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJobBinding, planOnly bool) ([]string, error) {
-	selector := "app.kubernetes.io/managed-by=" + managedByLauncher + "," + TeamLabel + "=" + TeamNodeValue(l.Config.Namespace, successor.Team)
-	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+// safety: a same-run Job already deleting is named without asking the controller, which decided its
+// retirement earlier; the successor may still be waiting on its node.
+func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJobBinding) (ending []string, retired bool, err error) {
+	jobs, err := l.Kube.BatchV1().Jobs(l.Config.Namespace).List(ctx, metav1.ListOptions{LabelSelector: "app.kubernetes.io/managed-by=" + managedByLauncher})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	var ending []string
 	var observations []CloudJobObservation
 	live := map[string]int{}
 	reservations := map[string]CloudNodeReservation{}
@@ -81,19 +81,15 @@ func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJ
 			ending = append(ending, job.Name)
 			continue
 		}
-		// perf: siblings in a fan-out are live Jobs too, so asking only about the plan adds no controller call per claim.
-		if planOnly && binding.Kind != CloudPlan {
-			continue
-		}
 		live[job.Name], reservations[job.Name] = i, reservation
 		observations = append(observations, CloudJobObservation{Binding: binding, JobNamespace: job.Namespace, JobName: job.Name, JobUID: string(job.UID), NodeUID: reservation.NodeUID})
 	}
 	if len(observations) == 0 {
-		return ending, nil
+		return ending, false, nil
 	}
 	states, err := l.retirements(ctx, observations)
 	if err != nil {
-		return ending, err
+		return ending, false, err
 	}
 	var errs []error
 	for _, observation := range observations {
@@ -103,8 +99,9 @@ func (l *Launcher) retireEndedPredecessors(ctx context.Context, successor CloudJ
 		job := &jobs.Items[live[observation.JobName]]
 		errs = append(errs, teardownFault(job.Name, l.teardown(ctx, job, reservations[job.Name])))
 		ending = append(ending, job.Name)
+		retired = true
 	}
-	return ending, errors.Join(errs...)
+	return ending, retired, errors.Join(errs...)
 }
 
 func (l *Launcher) handoffEvent(event watch.Event) (until time.Time, gone string, awaited bool) {

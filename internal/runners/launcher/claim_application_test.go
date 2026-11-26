@@ -50,8 +50,8 @@ func TestLauncherAppliesCompletedClaimsBeforeNextReconcile(t *testing.T) {
 		defer cancel()
 		var passes atomic.Int32
 		reconciles := make(chan struct{}, 1)
-		kube.PrependReactor("list", "jobs", func(action ktesting.Action) (bool, runtime.Object, error) {
-			if reconcileList(action) && passes.Add(1) > 1 {
+		kube.PrependReactor("list", "jobs", func(ktesting.Action) (bool, runtime.Object, error) {
+			if passes.Add(1) > 1 {
 				select {
 				case <-reconciles:
 				case <-ctx.Done():
