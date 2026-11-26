@@ -104,8 +104,11 @@ func readDeployBootstrap() (deployBootstrap, error) {
 			missing = append(missing, s.key)
 		}
 	}
-	file, _ := pipelinesEnvFile()
 	if len(missing) > 0 {
+		file, err := pipelinesEnvFile()
+		if err != nil {
+			return b, err
+		}
 		return b, fmt.Errorf("the deploy runner's machine settings lack %s; set them in %s or the environment as DELIVERY.md's \"Deploy configuration\" section describes", strings.Join(missing, ", "), file)
 	}
 	var errs []error
