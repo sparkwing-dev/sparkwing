@@ -132,23 +132,40 @@ func (s *Server) verifyGitHubAppReturn(r *http.Request) error {
 	if r.URL.Path == "/github/app/setup" && (query.Get("setup_action") == "request" || (query.Get("setup_action") == "update" && query.Get("state") == "")) {
 		return nil
 	}
-	if !s.githubAppReturnFlowValid(r) {
-		// safety: a setup return naming an installation reaches the handler only to render a page that offers
-		// the existing installation; it changes no flow and sets no cookie.
-		if r.URL.Path == "/github/app/setup" && query.Get("installation_id") != "" {
-			return nil
-		}
-		return hosterr.Authorization(hosterr.ReasonReauthRequired, errConnectState.Error())
+	flow, proof := s.githubAppReturnProof(r)
+	switch {
+	case proof == githubReturnValid:
+		return nil
+	// safety: these returns reach their handler only to render a page that offers the existing installation;
+	// it changes no flow and sets no cookie.
+	case r.URL.Path == "/github/app/setup" && query.Get("installation_id") != "",
+		r.URL.Path == githubAppCallbackPath && proof == githubReturnExpired && !flow.Existing && flow.InstallationID > 0:
+		return nil
 	}
-	return nil
+	return hosterr.Authorization(hosterr.ReasonReauthRequired, errConnectState.Error())
 }
 
-func (s *Server) githubAppReturnFlowValid(r *http.Request) bool {
+type githubReturnProof int
+
+const (
+	githubReturnUnverified githubReturnProof = iota
+	// githubReturnExpired is this browser's own signed flow, past its expiry.
+	githubReturnExpired
+	githubReturnValid
+)
+
+func (s *Server) githubAppReturnProof(r *http.Request) (githubAppFlow, githubReturnProof) {
 	flow, ok := s.readGitHubAppFlow(r)
-	if !ok || !constantTimeEqual(r.URL.Query().Get("state"), flow.State) {
-		return false
+	if !ok || s.githubApp == nil || !constantTimeEqual(r.URL.Query().Get("state"), flow.State) {
+		return flow, githubReturnUnverified
 	}
 	var state githubConnectState
-	return openFlowState(s.githubApp.stateKey, flow.State, &state) && state.Nonce != "" && time.Now().Unix() < state.Expires &&
-		constantTimeEqual(state.Verifier, verifierDigest(flow.Verifier))
+	if !openFlowState(s.githubApp.stateKey, flow.State, &state) || state.Nonce == "" ||
+		!constantTimeEqual(state.Verifier, verifierDigest(flow.Verifier)) {
+		return flow, githubReturnUnverified
+	}
+	if time.Now().Unix() >= state.Expires {
+		return flow, githubReturnExpired
+	}
+	return flow, githubReturnValid
 }

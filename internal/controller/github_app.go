@@ -210,6 +210,8 @@ const (
 	githubIdentityMissing = "github_identity_missing"
 	githubUnreachable     = "github_unreachable"
 	githubConnectSpent    = "github_connect_spent"
+	// githubConnectUnverified marks a return whose flow could not be verified, so what it names is unconfirmed.
+	githubConnectUnverified = "github_connect_unverified"
 )
 
 var errNoGitHubIdentity = errors.New("link a GitHub sign-in to this account before connecting the GitHub App")
@@ -450,9 +452,8 @@ func (s *Server) githubAppConnectFinish(ctx context.Context, p capability.Author
 		return store.GitHubAppInstallation{}, refuse(http.StatusForbidden, code, err.Error())
 	}
 	if err := writer.ConsumeGitHubConnect(ctx, p, st.Nonce, time.Unix(st.Expires, 0)); err != nil {
-		var refused *apierr.Error
-		if errors.As(err, &refused) && refused.Code == hosterr.Forbidden {
-			return store.GitHubAppInstallation{}, errors.Join(refuse(http.StatusForbidden, githubConnectSpent, refused.Message), err)
+		if errors.Is(err, store.ErrGitHubConnectSpent) {
+			return store.GitHubAppInstallation{}, errors.Join(refuse(http.StatusForbidden, githubConnectSpent, ""), err)
 		}
 		return store.GitHubAppInstallation{}, err
 	}
@@ -488,6 +489,8 @@ func (s *Server) githubAppConnectFinish(ctx context.Context, p capability.Author
 
 func (s *Server) githubAppConnectRefusal(err error) error {
 	switch {
+	case errors.Is(err, githubapp.ErrAppJWT):
+		return fmt.Errorf("github app connect: %w", err)
 	case errors.Is(err, githubapp.ErrNotInstalled):
 		return refuse(http.StatusNotFound, "", "GitHub reports no installation of the App by that id")
 	case errors.Is(err, githubapp.ErrRejected):

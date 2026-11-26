@@ -54,9 +54,12 @@ test("a fresh connect that cannot finish offers the existing installation", asyn
     );
     await page.getByRole("button", { name: "Connect GitHub", exact: true }).click();
     await expect(page.getByRole("heading", { name: "GitHub was not connected" })).toBeVisible();
+    await expect(page.getByText("If the App is already installed on GitHub, connect that installation.")).toBeVisible();
     await page.getByRole("link", { name: "Connect an existing installation" }).click();
     await expect(page).toHaveURL(new RegExp(`^${dashboard.origin}/team/github(\\?connect=existing)?$`));
-    await page.getByRole("button", { name: "Connect an existing installation", exact: true }).click();
+    const existing = page.getByRole("button", { name: "Connect an existing installation", exact: true });
+    await expect(existing).toBeFocused();
+    await existing.click();
     await expect(
       page.getByRole("heading", { name: "No existing installations" }),
     ).toBeVisible();
