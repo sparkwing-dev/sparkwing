@@ -1317,14 +1317,14 @@ file. Other syntax and workflow checks remain active.
   130-minute hosted job deadline.
   The hosted broad and touched-package race
   jobs each keep an 80-minute deadline.
-  A Go step's own parallelism depends on who else holds the
-  box. A shared host bounds each step to `(cpus-1)/2`, so one gate cannot
-  saturate a machine another gate is running on. `GITHUB_ACTIONS=true` selects
-  dedicated sizing of `cpus/2`. The Cloud snapshot gate selects the same sizing
-  with `--base`, with the CPU count capped at four. Sparkwing sets `CI=true`
-  for local jobs too. At four CPUs a shared broad Go step gets one worker
-  and a dedicated step gets two. Race commands keep `GOMAXPROCS=1` on
-  either four-core host and can overlap two packages.
+  On a shared host, the broad Go width is `(cpus-1)/2` with a minimum of one.
+  Shared race uses half that width, rounded down, with a floor of two and
+  a cap at the broad width. `GITHUB_ACTIONS=true` selects dedicated sizing of
+  `cpus/2`. The Cloud snapshot gate selects the same sizing with `--base`,
+  with the CPU count capped at four. Sparkwing sets `CI=true` for local jobs
+  too. At four CPUs a shared broad Go step gets one worker and a dedicated
+  step gets two. Race commands on either four-core host can overlap two
+  packages and keep `GOMAXPROCS=1`.
   That publication path
   stops at the parent runner rather than
   entering node processes, so nested Sparkwing commands choose their own
