@@ -51,7 +51,11 @@ func TestGateCoreRequestsEqualTheParallelismTheirCommandsRun(t *testing.T) {
 			t.Errorf("%+v: race-touched declares %d cores but its command runs -p %d", h, race, got)
 		}
 		full := raceJobCores(h, gateFull)
-		if workers := gateRaceParallelism(h) + gateRaceExtraWorkers(h); full != max(race, workers) {
+		workers := gateRaceParallelism(h)
+		if h.singleTenant {
+			workers += gateRaceExtraWorkers(h)
+		}
+		if full != max(race, workers) {
 			t.Errorf("%+v: full race-touched declares %d cores but runs one -p %d command, then %d shard workers", h, full, race, workers)
 		}
 	}

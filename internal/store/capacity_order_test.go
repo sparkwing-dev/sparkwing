@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capability"
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
@@ -224,23 +225,47 @@ func TestJobBoxGroupRunsTwoRunsOnOneHostOneAfterAnother(t *testing.T) {
 		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "machine-suite", Scope: new("box"), Capacity: new(1), OnLimit: new("queue")}}
 	}
 	f := newStoreRecoveryFixtureAt(t, false, storetest.New(t), box)
-	first, firstActor := admissionPolicyBlocker(t, f, box)
-	admissionWant(t, f, first, firstActor, runstate.AcquireGranted)
-	second := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
-	admissionWant(t, f, second, f.holder, runstate.AcquireQueued)
-
-	holder, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.holder.Authority)
+	ctx := t.Context()
+	operator := f.s.AsOperator()
+	holder, err := operator.ResolveAuthority(ctx, f.holder.Authority)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if holder.Capability.Parent == nil || holder.Capability.ExecutionHost == "" {
+		t.Fatal("first job has no runner or execution host")
+	}
+	plan, owner := admissionAcceptedPlan(t, f)
+	ref := runspec.NodeRef{RunID: runspec.RunID(plan.RunID), NodeID: f.ref.NodeID}
+	if _, err := f.tenant.TransitionNode(ctx, store.ReadyNode{Ref: ref, Actor: owner}); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := operator.ClaimUnit(ctx, store.UnitDemand{
+		CapabilityPrefix: holder.Capability.Parent.ID,
+		MaxConcurrent:    2,
+		Target:           &store.UnitRef{Kind: capability.UnitNode, RunID: ref.RunID, NodeID: ref.NodeID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := runstate.Actor{
+		Kind:             runstate.ActorHolder,
+		Authority:        capability.AuthorityRef{Kind: capability.AuthorityCapability, ID: claim.Award.CapabilityPrefix},
+		CapabilityPrefix: claim.Award.CapabilityPrefix,
+		NodeFence:        runspec.NodeFence{RunID: ref.RunID, NodeID: ref.NodeID, Holder: claim.Award.Holder, Generation: claim.Award.Generation},
+	}
+	first := admissionBinding(f)
+	second := runstate.CapacityBinding{RunID: plan.RunID, NodeID: string(ref.NodeID), Generation: int64(claim.Award.Generation)}
+	admissionWant(t, f, first, f.holder, runstate.AcquireGranted)
+	admissionWant(t, f, second, actor, runstate.AcquireQueued)
+
 	key := runspec.ConcurrencyKey("job", "box", holder.Capability.ExecutionHost, "machine-suite")
-	state, err := f.tenant.GetConcurrencyState(t.Context(), key)
+	state, err := f.tenant.GetConcurrencyState(ctx, key)
 	if err != nil || len(state.Holders) != 1 || state.Holders[0].RunID != first.RunID || len(state.Waiters) != 1 || state.Waiters[0].RunID != second.RunID {
 		t.Fatalf("both runs must share one slot on their host: %+v %v", state, err)
 	}
 
-	admissionFinishJob(t, f, first, firstActor)
-	admissionWant(t, f, second, f.holder, runstate.AcquireGranted)
+	admissionFinishJob(t, f, first, f.holder)
+	admissionWant(t, f, second, actor, runstate.AcquireGranted)
 }
 
 func TestWaitingGroupSetDoesNotPreemptEarlierGroup(t *testing.T) {

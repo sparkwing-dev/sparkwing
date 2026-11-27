@@ -199,10 +199,9 @@ func raceCommandWidth(h hostShape) int {
 	return goStepParallelism(h)
 }
 
-// perf: the race job asks admission for the most race processes it runs at
-// once: one race command, then in full mode the shard workers after it.
+// perf: only the hosted race job enables the extra shard workers.
 func raceJobCores(h hostShape, mode gateMode) int {
-	if mode != gateFull || gateRaceParallelism(h) == 0 {
+	if mode != gateFull || !h.singleTenant {
 		return raceCommandWidth(h)
 	}
 	return max(raceCommandWidth(h), gateRaceParallelism(h)+gateRaceExtraWorkers(h))

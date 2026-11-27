@@ -1502,8 +1502,13 @@ file. Other syntax and workflow checks remain active.
   for declared pipelines so admission can account for their reservations;
   focused commands outside a run also consume host resources. Coordinate tests
   that share mutable services, same-repository landings, and production cutovers.
-  There is no blanket single-gate lock. `sparkwing queue list` shows running and
-  queued work; keep each pipeline's required checks and budgets in force.
+  The broad `gate` job and queued Land's `fast` and `affected-tests` jobs share
+  the capacity-one `machine-suite` box group. It queues members on the same
+  execution host within one controller and team. Admission accounts for other
+  jobs, including `race-touched`, by their declared cores. Gate and race size
+  their requests from Go command and shard parallelism, with the existing
+  four-core reservation for `--base`. `GITHUB_ACTIONS=true` selects the hosted
+  runner's parallelism. `sparkwing queue list` shows running and queued work.
 - **Gating a branch beside a released daemon:** when the branch's pipeline
   binary carries a newer runs-store schema than the sparkwing hosting this
   machine's admission daemon, admission refuses the run. The refusal names both
