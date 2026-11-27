@@ -17,10 +17,13 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/api"
+	hosterr "github.com/sparkwing-dev/sparkwing/internal/apierr"
+	"github.com/sparkwing-dev/sparkwing/internal/apierrhttp"
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/storage"
 	"github.com/sparkwing-dev/sparkwing/internal/store"
 	"github.com/sparkwing-dev/sparkwing/internal/streamhttp"
+	"github.com/sparkwing-dev/sparkwing/sparkwing/protocol/apierr"
 )
 
 func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, runID, nodeID string) {
@@ -91,11 +94,7 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 
 	run, err := b.GetRun(r.Context(), runID)
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			http.NotFound(w, r)
-			return
-		}
-		writeErr(w, http.StatusInternalServerError, err)
+		writeRunReadErr(w, r, err)
 		return
 	}
 
@@ -184,6 +183,38 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 				terminal = isRunTerminal(fresh.Status)
 			}
 		}
+	}
+}
+
+var (
+	errRunStoreBusy   = &apierr.Error{Code: hosterr.Unavailable, Message: "the run store is busy; retry the request", Details: map[string]any{"retry_after_ms": 1000}}
+	errRunReadStopped = &apierr.Error{Code: hosterr.Unavailable, Message: "the controller stopped before answering; retry the request", Details: map[string]any{"retry_after_ms": 1000}}
+)
+
+// safety: the answer is chosen from the error alone, and the cause goes to the request's masked diagnostic, never a
+// log line of its own, because a store error can quote stored values. A stopping controller cancels the read while the
+// client is still connected, so a cancelled read still answers a retryable 503; a real store error answers 500 even
+// when a cancel races it.
+func writeRunReadErr(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		http.NotFound(w, r)
+	case store.IsRetryableErr(err):
+		apierrhttp.NoteResponseError(w, err)
+		writeFailure(w, errRunStoreBusy)
+	case errors.Is(err, context.Canceled):
+		apierrhttp.NoteResponseError(w, errors.Join(apierrhttp.ErrStoppedRetryable, err))
+		writeFailure(w, errRunReadStopped)
+	default:
+		apierrhttp.NoteResponseError(w, err)
+		writeErr(w, http.StatusInternalServerError, err)
+	}
+}
+
+func writeFailure(w http.ResponseWriter, failure *apierr.Error) {
+	// safety: the status is already sent, so a client that went away mid-body is the only failure left to see.
+	if err := apierrhttp.Write(w, failure); err != nil {
+		return
 	}
 }
 

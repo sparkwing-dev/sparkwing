@@ -38,7 +38,10 @@ func gateFixtureRepo(t *testing.T) string {
 
 func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&Gate{}).Plan(newTestContext(t), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
+		return (&Gate{}).Plan(newTestContext(t), plan, GateArgs{}, sparkwing.RunContext{
+			Pipeline: "gate",
+			Trigger:  sparkwing.TriggerInfo{Source: "local"},
+		})
 	})
 
 	if plan.Source.FullHistory == nil || !*plan.Source.FullHistory || plan.Source.Tags == nil || !*plan.Source.Tags {
@@ -51,10 +54,9 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	if got := time.Duration(nodes[1].TimeoutMS) * time.Millisecond; got != gateRunTimeout {
 		t.Fatalf("gate node timeout = %s, want declared workload deadline %s", got, gateRunTimeout)
 	}
-	// perf: the policy, gate and race-touched jobs keep the one-core default; with their whole process tree counted as
-	// Sparkwing load they overcommit like fixed runner slots, which kept six lands no slower than before.
-	if nodes[0].Cores != 0 || nodes[1].Cores != 0 || nodes[2].Cores != 0 || nodes[3].Cores != lightJobCores {
-		t.Fatalf("core requests = %v %v %v %v, want default, default, default, %v", nodes[0].Cores, nodes[1].Cores, nodes[2].Cores, nodes[3].Cores, lightJobCores)
+	host := currentHost()
+	if nodes[0].Cores != 0 || nodes[1].Cores != float64(goStepParallelism(host)) || nodes[2].Cores != float64(raceJobCores(host, gateAffected)) || nodes[3].Cores != lightJobCores {
+		t.Fatalf("core requests = %v %v %v %v, want default, %d, %d, %v", nodes[0].Cores, nodes[1].Cores, nodes[2].Cores, nodes[3].Cores, goStepParallelism(host), raceJobCores(host, gateAffected), lightJobCores)
 	}
 	for _, tc := range []struct{ cpus, parallelism int }{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {8, 3}, {14, 6}, {16, 7}} {
 		if got := goStepParallelism(hostShape{cpus: tc.cpus}); got != tc.parallelism {
@@ -72,22 +74,24 @@ func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	if got := boundedGoCommand(hostShape{cpus: 14, singleTenant: true}, "test", "./..."); got != "GOMAXPROCS=7 go test -p 7 ./..." {
 		t.Fatalf("single-tenant bounded command = %q", got)
 	}
-	t.Setenv("CI", "1")
+	t.Setenv("GITHUB_ACTIONS", "true")
 	if got := currentHost(); !got.singleTenant || got.cpus != min(runtime.NumCPU(), runtime.GOMAXPROCS(0)) {
-		t.Fatalf("currentHost under CI = %#v, want the runtime CPU budget and single tenancy", got)
+		t.Fatalf("currentHost on a hosted runner = %#v, want the runtime CPU budget and single tenancy", got)
 	}
-	t.Setenv("CI", "")
+	// safety: Sparkwing sets CI in every job, so CI alone must not claim the whole machine.
+	t.Setenv("GITHUB_ACTIONS", "")
+	t.Setenv("CI", "true")
 	if currentHost().singleTenant {
-		t.Fatal("currentHost reported single tenancy with CI unset")
+		t.Fatal("currentHost reported single tenancy from CI alone")
 	}
 }
 
 func TestGateHonorsTheRuntimeCPULimit(t *testing.T) {
 	previous := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
-	t.Setenv("CI", "true")
+	t.Setenv("GITHUB_ACTIONS", "true")
 	if got := boundedGoCommand(currentHost(), "test", "./..."); got != "GOMAXPROCS=1 go test -p 1 ./..." {
-		t.Fatalf("bounded command = %q, want the runtime limit retained under CI", got)
+		t.Fatalf("bounded command = %q, want the runtime limit retained on a hosted runner", got)
 	}
 }
 

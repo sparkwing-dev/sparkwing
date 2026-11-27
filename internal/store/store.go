@@ -30,7 +30,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/sparkwing-dev/sparkwing/internal/runspec"
 	"github.com/sparkwing-dev/sparkwing/internal/runstate"
@@ -368,17 +369,32 @@ func retryOnBusyWithSleep(fn func() error, sleep func(time.Duration)) error {
 	return err
 }
 
+// IsRetryableErr reports whether a store call failed for want of capacity or time rather than because of what it
+// read or wrote: a lock conflict, a Postgres lock timeout, or an expired deadline. A caller answers it with a
+// retryable unavailable error instead of an internal one.
+func IsRetryableErr(err error) bool {
+	return isBusyErr(err) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// safety: the conflict is read from the drivers' typed codes, never from the message, because a message can quote a
+// stored value, and a value that mentions SQLITE_BUSY must not turn a failed read into a retry.
 func isBusyErr(err error) bool {
 	if err == nil || isRunCancellationNotificationError(err) {
 		return false
 	}
-	if isPGConflict(err) {
+	var pgErr *pgconn.PgError
+	if isPGConflict(err) || errors.As(err, &pgErr) && pgErr.Code == "55P03" {
 		return true
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "database is locked") ||
-		strings.Contains(msg, "sqlite_busy") ||
-		strings.Contains(msg, "database table is locked")
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	switch sqliteErr.Code() & 0xff {
+	case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED:
+		return true
+	}
+	return false
 }
 
 func isPGConflict(err error) bool {
@@ -395,7 +411,7 @@ func isPGConflict(err error) bool {
 // resolved by retrying -- it clears only when the conflicting process
 // releases its locks or exits -- so pollers treat it as immediately
 // terminal instead of waiting out a busy budget. Matched on the stable
-// message text for the same reason as isBusyErr.
+// message text.
 func IsProtocolErr(err error) bool {
 	if err == nil {
 		return false

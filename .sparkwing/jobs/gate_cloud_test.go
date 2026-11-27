@@ -1,10 +1,14 @@
 package jobs
 
 import (
+	"context"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
 
@@ -53,5 +57,42 @@ func TestCloudGatePreparesTheBaselineInEveryJobWorkspace(t *testing.T) {
 		if len(job.Closures.BeforeRun) != 1 {
 			t.Fatalf("%s has no baseline preparation: %+v", job.ID, job.Closures)
 		}
+	}
+}
+
+func TestCloudGateUsesDedicatedWidthWithoutGitHubActions(t *testing.T) {
+	if runtime.NumCPU() < overlappedGoSuiteCPUs {
+		t.Skip("needs four visible CPUs")
+	}
+	previous := runtime.GOMAXPROCS(overlappedGoSuiteCPUs)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	gateFixtureRepo(t)
+	t.Setenv("CI", "true")
+	t.Setenv("GITHUB_ACTIONS", "")
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(`#!/bin/sh
+case "$1" in
+list) printf 'fixture/internal 1\n' ;;
+vet) test "$GOMAXPROCS" = 2 && test "$2" = -p && test "$3" = 2 ;;
+*) exit 1 ;;
+esac
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	host, plan, _ := preparePlan(t, func(ctx context.Context, plan *sparkwing.Plan) error {
+		return (&Gate{}).Plan(ctx, plan, GateArgs{Full: true, Base: strings.Repeat("a", 40)}, sparkwing.RunContext{Pipeline: "gate"})
+	})
+	if _, err := host.RunStep(t.Context(), plan, "gate", "vet"); err != nil {
+		t.Fatalf("Cloud gate vet must use two Go workers: %v", err)
+	}
+	if err := gateStep(true, func(ctx context.Context) error {
+		shape := gateStepHost(ctx)
+		if shards, race := storePostgresShardCount(shape), raceJobCores(shape, gateFull); shards != 4 || race != 4 {
+			t.Fatalf("Cloud full gate has %d PostgreSQL shards and %d race workers, want four each", shards, race)
+		}
+		return nil
+	})(t.Context()); err != nil {
+		t.Fatal(err)
 	}
 }

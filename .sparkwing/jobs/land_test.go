@@ -214,7 +214,11 @@ type landPlanJob struct {
 
 func landPlan(t *testing.T) map[string]landPlanJob {
 	t.Helper()
-	doc, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", nil)
+	host := newTestHost(t, sparkwingtest.Options{Run: sparkwing.RunContext{
+		Pipeline: "land",
+		Trigger:  sparkwing.TriggerInfo{Source: "local"},
+	}})
+	doc, err := host.Plan(t.Context(), "Land", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,6 +278,9 @@ func TestLandOverlapsPolicyAndReviewBeforeTheGateAndPush(t *testing.T) {
 		if jobs[id].Cores != lightJobCores {
 			t.Fatalf("%s core request = %v, want %v so it starts beside running gates", id, jobs[id].Cores, lightJobCores)
 		}
+	}
+	if host := currentHost(); jobs["gate"].Cores != float64(goStepParallelism(host)) || jobs["race-touched"].Cores != float64(raceJobCores(host, gateAffected)) {
+		t.Fatalf("gate and race-touched ask for %v and %v cores, want the widths their commands run at", jobs["gate"].Cores, jobs["race-touched"].Cores)
 	}
 	for _, step := range land.Steps {
 		if step.ID == "push" {

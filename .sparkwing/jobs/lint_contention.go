@@ -32,8 +32,8 @@ func lintCommand(base string) string {
 
 // perf: affected lint has its own checkout cache and bounded workers, so it
 // can judge a small diff while a neighboring full scan owns the global lock.
-func affectedLintCommand(base string) string {
-	cores := goStepParallelism(currentHost())
+func affectedLintCommand(base string, host hostShape) string {
+	cores := goStepParallelism(host)
 	return fmt.Sprintf("GOMAXPROCS=%d golangci-lint run --allow-parallel-runners -j %d --new-from-merge-base= --new-from-rev=%s ./...", cores, cores, base)
 }
 
@@ -105,7 +105,8 @@ func runGolangciLintTouched(ctx context.Context) error {
 		targets[module] = defaultBuildPackages(module, pkgs, true)
 	}
 	sparkwing.Info(ctx, "golangci-lint: linting the packages that hold changed Go files (%s)", scope)
-	return lintModules(ctx, gateLintDeadline, affectedLintCommand, targets)
+	host := gateStepHost(ctx)
+	return lintModules(ctx, gateLintDeadline, func(base string) string { return affectedLintCommand(base, host) }, targets)
 }
 
 // safety: nil targets lint every package; a module absent from targets is skipped.

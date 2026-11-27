@@ -109,13 +109,13 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 		// submitter's GOMAXPROCS, so the reservation counts the same CPUs.
 		fast := sparkwing.Job(plan, "fast", &PrePush{Checks: checks, Head: checks.Head}).Inline().
 			Timeout(queuedFastTimeout).NoProgressTimeout(queuedFastNoProgressTimeout).
-			Cores(float64(prePushReservationCores(runtime.NumCPU()))).Needs(pre)
+			Cores(float64(prePushReservationCores(runtime.NumCPU()))).Needs(pre).Concurrency(machineSuite)
 		joined := sparkwing.Job(plan, "affected-tests", &queuedLandChecks{args: in.ReviewArgs, branch: branch, Checks: checks, Head: checks.Head}).Inline().
 			Timeout(affectedPushTestsTimeout).NoProgressTimeout(affectedPushTestsTimeout).
-			Cores(lightJobCores+float64(goStepParallelism(affectedPushHost()))).Needs(policy, fast)
+			Cores(lightJobCores+float64(goStepParallelism(affectedPushHost()))).Needs(policy, fast).Concurrency(machineSuite)
 		needs = []sparkwing.Dep{policy, fast, joined}
 	} else {
-		gate := gateJobs(plan, &Gate{}, "gate", false)
+		gate := gateJobs(plan, &Gate{}, "gate", false, rc)
 		gate[0].Needs(pre)
 		for _, n := range gate {
 			needs = append(needs, n)
