@@ -98,9 +98,12 @@ func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool) []*sparkwing.
 	ref := provenGatePass(id)
 	p.Proven = ref
 	proven := skipWhenTreePassed(ref)
+	host := currentHost()
 	policy := sparkwing.Job(plan, policyJobID, &policyJob{Proven: ref}).Timeout(policyJobTimeout).SkipIf(proven)
-	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).SkipIf(proven).Needs(policy).Concurrency(machineSuite)
-	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode}).Timeout(raceTouchedStepTimeout).SkipIf(proven).Needs(policy)
+	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).SkipIf(proven).Needs(policy).
+		Cores(float64(goStepParallelism(host))).Concurrency(machineSuite)
+	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode}).Timeout(raceTouchedStepTimeout).SkipIf(proven).Needs(policy).
+		Cores(float64(raceJobCores(host, p.mode)))
 	record := &recordTree{Proven: ref, Gate: sparkwing.RefTo[bool](broad), Race: sparkwing.RefTo[bool](race), mode: p.mode}
 	tree := sparkwing.Job(plan, recordTreeJob, record).Needs(broad, race).SkipIf(proven).Cores(lightJobCores)
 	return []*sparkwing.JobNode{policy, broad, race, tree}
@@ -135,10 +138,10 @@ type hostShape struct {
 	singleTenant bool
 }
 
-// safety: CI names the hosted runner, which carries one job and is thrown away
-// after it, so no neighbor loses cores to a gate that takes the whole box.
+// safety: only the hosted runner carries one job and is thrown away after it.
+// Sparkwing sets CI in every job, shared machines included, so CI cannot say so.
 func currentHost() hostShape {
-	return hostShape{cpus: min(runtime.NumCPU(), runtime.GOMAXPROCS(0)), singleTenant: os.Getenv("CI") != ""}
+	return hostShape{cpus: min(runtime.NumCPU(), runtime.GOMAXPROCS(0)), singleTenant: os.Getenv("GITHUB_ACTIONS") == "true"}
 }
 
 // perf: half the machine, so one gate cannot saturate a box another is

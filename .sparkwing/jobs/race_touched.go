@@ -187,9 +187,25 @@ func raceGoCommand(h hostShape, args string) string {
 	// perf: four-core runners can overlap two package processes while each Go
 	// runtime retains the existing GOMAXPROCS=1 bound.
 	if h.cpus == overlappedGoSuiteCPUs {
-		return goCommandWithLimits(1, 2, "test", args)
+		return goCommandWithLimits(1, raceCommandWidth(h), "test", args)
 	}
-	return boundedGoCommand(h, "test", args)
+	return goCommandAt(raceCommandWidth(h), "test", args)
+}
+
+func raceCommandWidth(h hostShape) int {
+	if h.cpus == overlappedGoSuiteCPUs {
+		return 2
+	}
+	return goStepParallelism(h)
+}
+
+// perf: the race job asks admission for the most race processes it runs at
+// once: one race command, then in full mode the shard workers after it.
+func raceJobCores(h hostShape, mode gateMode) int {
+	if mode != gateFull || gateRaceParallelism(h) == 0 {
+		return raceCommandWidth(h)
+	}
+	return max(raceCommandWidth(h), gateRaceParallelism(h)+gateRaceExtraWorkers(h))
 }
 
 func touchedPackageTargets(files, modules []string) map[string][]string {

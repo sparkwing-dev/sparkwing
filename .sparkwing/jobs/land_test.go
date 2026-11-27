@@ -275,6 +275,9 @@ func TestLandOverlapsPolicyAndReviewBeforeTheGateAndPush(t *testing.T) {
 			t.Fatalf("%s core request = %v, want %v so it starts beside running gates", id, jobs[id].Cores, lightJobCores)
 		}
 	}
+	if host := currentHost(); jobs["gate"].Cores != float64(goStepParallelism(host)) || jobs["race-touched"].Cores != float64(raceJobCores(host, gateAffected)) {
+		t.Fatalf("gate and race-touched ask for %v and %v cores, want the widths their commands run at", jobs["gate"].Cores, jobs["race-touched"].Cores)
+	}
 	for _, step := range land.Steps {
 		if step.ID == "push" {
 			if !slices.Equal(step.Risks, []string{"destructive", "prod"}) || !step.HasDryRun {
