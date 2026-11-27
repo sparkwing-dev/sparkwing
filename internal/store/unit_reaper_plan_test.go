@@ -10,7 +10,6 @@ import (
 
 var planIndexName = regexp.MustCompile(`\b(idx_\w+|sqlite_autoindex_\w+)\b`)
 
-// planIndexNames lists the index each plan line names, in plan order, with "" for a line that names none.
 func planIndexNames(plan string) []string {
 	var names []string
 	for line := range strings.SplitSeq(plan, "\n") {
