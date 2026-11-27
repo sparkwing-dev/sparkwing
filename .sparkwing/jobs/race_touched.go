@@ -60,7 +60,7 @@ func runAffectedRaceModules(ctx context.Context, targets map[string][]string) er
 	return withStableProductTestHome("gate-race", func(home string) error {
 		var failures []string
 		for _, module := range mapKeys(targets) {
-			cmd := raceGoCommand(currentHost(), "-race -short -timeout "+raceTouchedPackageTimeout.String()+" "+quoteAll(targets[module]))
+			cmd := raceGoCommand(gateStepHost(ctx), "-race -short -timeout "+raceTouchedPackageTimeout.String()+" "+quoteAll(targets[module]))
 			script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
 			if _, err := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Run(); err != nil {
 				failures = append(failures, describeModuleFailure(module, err))
@@ -75,10 +75,11 @@ func runAffectedRaceModules(ctx context.Context, targets map[string][]string) er
 
 func raceModules(ctx context.Context, targets map[string][]string, testRoot, home string, suitesDone <-chan struct{}) error {
 	var failures []string
+	host := gateStepHost(ctx)
 	for _, module := range mapKeys(targets) {
 		pkgs := slices.Clone(targets[module])
 		var sharded []racePackagePlan
-		if module == "." && gateRaceParallelism(currentHost()) > 0 {
+		if module == "." && gateRaceParallelism(host) > 0 {
 			pkgs = slices.DeleteFunc(pkgs, func(pkg string) bool {
 				if gateRaceShardsForPackage(pkg) > 0 {
 					sharded = append(sharded, racePackagePlan{pkg: pkg, shardCount: gateRaceShardsForPackage(pkg), lead: gateRaceLeadTests(pkg)})
@@ -88,7 +89,7 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 			})
 		}
 		sparkwing.Info(ctx, "race-touched: %s: %s", module, strings.Join(targets[module], " "))
-		cmd := raceGoCommand(currentHost(), "-race -count=1 -timeout "+raceTouchedPackageTimeout.String()+" "+strings.Join(pkgs, " "))
+		cmd := raceGoCommand(host, "-race -count=1 -timeout "+raceTouchedPackageTimeout.String()+" "+strings.Join(pkgs, " "))
 		if len(pkgs) > 0 {
 			script := productTestScript(fmt.Sprintf("cd %q && %s", module, cmd), home)
 			if _, runErr := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Env("TMPDIR", testRoot).Run(); runErr != nil {
@@ -96,7 +97,7 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 			}
 		}
 		if len(sharded) > 0 {
-			workers := raceWorkers{initial: gateRaceParallelism(currentHost()), extra: gateRaceExtraWorkers(currentHost()), ready: suitesDone}
+			workers := raceWorkers{initial: gateRaceParallelism(host), extra: gateRaceExtraWorkers(host), ready: suitesDone}
 			if runErr := runRaceShardsAtHome(ctx, home, module, sharded, workers, gateRaceShardArgs); runErr != nil {
 				failures = append(failures, fmt.Sprintf("%s: %v", module, runErr))
 			}
@@ -199,7 +200,7 @@ func raceCommandWidth(h hostShape) int {
 	return goStepParallelism(h)
 }
 
-// perf: only the hosted race job enables the extra shard workers.
+// perf: only a dedicated race job enables the extra shard workers.
 func raceJobCores(h hostShape, mode gateMode) int {
 	if mode != gateFull || !h.singleTenant {
 		return raceCommandWidth(h)

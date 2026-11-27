@@ -28,7 +28,7 @@ func TestGateCoreRequestsEqualTheParallelismTheirCommandsRun(t *testing.T) {
 		{module: ".sparkwing", packages: []string{"./jobs"}},
 	}
 	for _, h := range []hostShape{{cpus: 1}, {cpus: 4}, {cpus: 4, singleTenant: true}, {cpus: 8}, {cpus: 16}, {cpus: 16, singleTenant: true}, {cpus: 32}} {
-		gate := goStepParallelism(h)
+		gate := gateJobCores(h, gateAffected)
 		if got := commandParallelism(t, testGoCommand(h)); got != gate {
 			t.Errorf("%+v: gate declares %d cores but its full test command runs -p %d", h, gate, got)
 		}
@@ -45,6 +45,9 @@ func TestGateCoreRequestsEqualTheParallelismTheirCommandsRun(t *testing.T) {
 		}
 		if widest != gate {
 			t.Errorf("%+v: gate declares %d cores but its widest concurrent affected-test group runs -p %d in total", h, gate, widest)
+		}
+		if full, shards := gateJobCores(h, gateFull), storePostgresShardCount(h); full != max(gate, shards) {
+			t.Errorf("%+v: full gate declares %d cores but runs Go at -p %d and %d PostgreSQL shards", h, full, gate, shards)
 		}
 		race := raceJobCores(h, gateAffected)
 		if got := commandParallelism(t, raceGoCommand(h, "-race -short ./...")); got != race {

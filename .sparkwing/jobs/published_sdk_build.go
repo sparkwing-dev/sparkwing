@@ -14,11 +14,11 @@ import (
 )
 
 func runPublishedSDKBuild(ctx context.Context) error {
-	return buildPublishedSDK(ctx, goStepParallelism(currentHost()), gateFull)
+	return buildPublishedSDK(ctx, goStepParallelism(gateStepHost(ctx)), gateFull)
 }
 
 func runAffectedPublishedSDKBuild(ctx context.Context) error {
-	return buildPublishedSDK(ctx, goStepParallelism(currentHost()), gateAffected)
+	return buildPublishedSDK(ctx, goStepParallelism(gateStepHost(ctx)), gateAffected)
 }
 
 // safety: workspace and alternate modfiles can compile unpublished SDK APIs.

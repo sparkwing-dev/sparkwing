@@ -1138,15 +1138,17 @@ file. Other syntax and workflow checks remain active.
   owns a separate four-core runner, so race tests share no cores with the full
   Go or PostgreSQL suite. `--only` keeps a job's dependencies, so each lane
   runs the `policy` job first; on a fresh runner its first compile of the
-  checkers and the CLI is the cost. `sparkwing run gate` runs the policy job,
-  then both jobs, locally. There
-  both keep the one-core admission charge while running half the runtime's
-  CPU budget (the smaller of the machine CPU count and `GOMAXPROCS`), overcommitting like fixed runner slots; local admission counts their
-  CPU as Sparkwing load, not external. The `preconditions`, `review`,
+  checkers and the CLI is the cost. A local `sparkwing run gate` makes both
+  jobs eligible once policy passes. Each reserves cores based on its Go
+  test or shard width. They start together only when both reservations
+  fit admission headroom. On a shared 16-core host, each asks for seven
+  cores, so the two run serially under Auto admission's 20% headroom.
+  Go, lint and frontend steps can overlap within `gate`, so the reservation
+  describes Go parallelism and measured CPU can be higher. The `preconditions`, `review`,
   `record-tree` and `land` jobs declare a quarter core (`Cores(0.25)`), so they
   start beside running gates instead of queueing behind them. A simulation of
-  six concurrent lands found declaring 4 or 6 cores for the gate pair slower
-  than this under external load.
+  six concurrent lands under external load found that four- or six-core
+  requests were slower than the historical one-core requests.
   The `cli-docs` policy step compiles the CLI's registry, help metadata and
   Markdown renderer through `reference_generate.go`, without linking the
   execution runtime or embedding the docs it checks. `gen-cli-docs.sh --check`
@@ -1507,8 +1509,10 @@ file. Other syntax and workflow checks remain active.
   execution host within one controller and team. Admission accounts for other
   jobs, including `race-touched`, by their declared cores. Gate and race size
   their requests from Go command and shard parallelism, with the existing
-  four-core reservation for `--base`. `GITHUB_ACTIONS=true` selects the hosted
-  runner's parallelism. `sparkwing queue list` shows running and queued work.
+  four-core reservation and dedicated execution width for Cloud `--base`.
+  `GITHUB_ACTIONS=true` selects the GitHub runner's parallelism.
+  The queued Land slot remains held until both review and affected tests
+  finish. `sparkwing queue list` shows running and queued work.
 - **Gating a branch beside a released daemon:** when the branch's pipeline
   binary carries a newer runs-store schema than the sparkwing hosting this
   machine's admission daemon, admission refuses the run. The refusal names both

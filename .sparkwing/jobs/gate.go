@@ -24,8 +24,9 @@ import (
 type Gate struct {
 	sparkwing.Base
 	sparkwing.Produces[bool]
-	Proven sparkwing.Ref[gatePass]
-	mode   gateMode
+	Proven    sparkwing.Ref[gatePass]
+	mode      gateMode
+	cloudBase bool
 }
 
 // safety: a struct job, because only a reference held in a job field is
@@ -33,12 +34,14 @@ type Gate struct {
 type raceTouchedJob struct {
 	sparkwing.Base
 	sparkwing.Produces[bool]
-	Proven sparkwing.Ref[gatePass]
-	mode   gateMode
+	Proven    sparkwing.Ref[gatePass]
+	mode      gateMode
+	cloudBase bool
 }
 
 func (j *raceTouchedJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	return sparkwing.Step(w, "run", func(ctx context.Context) (bool, error) { return true, runGateRaceTouched(ctx, j.mode) }), nil
+	run := gateStep(j.cloudBase, func(ctx context.Context) error { return runGateRaceTouched(ctx, j.mode) })
+	return sparkwing.Step(w, "run", func(ctx context.Context) (bool, error) { return true, run(ctx) }), nil
 }
 
 type GateArgs struct {
@@ -68,11 +71,14 @@ func (Gate) Examples() []sparkwing.Example {
 }
 
 func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc sparkwing.RunContext) error {
-	jobs := gateJobs(plan, p, rc.Pipeline, in.Full)
-	if in.Base != "" {
+	p.cloudBase = in.Base != ""
+	if p.cloudBase {
 		if err := validateGateBase(in.Base); err != nil {
 			return err
 		}
+	}
+	jobs := gateJobs(plan, p, rc.Pipeline, in.Full)
+	if p.cloudBase {
 		for _, job := range jobs {
 			if job.ID() == rc.Pipeline || job.ID() == "race-touched" {
 				job.Cores(overlappedGoSuiteCPUs)
@@ -101,8 +107,8 @@ func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool) []*sparkwing.
 	host := currentHost()
 	policy := sparkwing.Job(plan, policyJobID, &policyJob{Proven: ref}).Timeout(policyJobTimeout).SkipIf(proven)
 	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).SkipIf(proven).Needs(policy).
-		Cores(float64(goStepParallelism(host))).Concurrency(machineSuite)
-	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode}).Timeout(raceTouchedStepTimeout).SkipIf(proven).Needs(policy).
+		Cores(float64(gateJobCores(host, p.mode))).Concurrency(machineSuite)
+	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode, cloudBase: p.cloudBase}).Timeout(raceTouchedStepTimeout).SkipIf(proven).Needs(policy).
 		Cores(float64(raceJobCores(host, p.mode)))
 	record := &recordTree{Proven: ref, Gate: sparkwing.RefTo[bool](broad), Race: sparkwing.RefTo[bool](race), mode: p.mode}
 	tree := sparkwing.Job(plan, recordTreeJob, record).Needs(broad, race).SkipIf(proven).Cores(lightJobCores)
@@ -123,8 +129,8 @@ const overlappedGoSuiteCPUs = 4
 
 func runGateRaceTouched(ctx context.Context, mode gateMode) error {
 	var suitesDone chan struct{}
-	if currentHost().singleTenant {
-		// perf: the hosted race job owns its runner, so all four workers can start immediately.
+	if gateStepHost(ctx).singleTenant {
+		// perf: the dedicated race job owns its runner, so all four workers can start immediately.
 		suitesDone = make(chan struct{})
 		close(suitesDone)
 	}
@@ -144,6 +150,27 @@ func currentHost() hostShape {
 	return hostShape{cpus: min(runtime.NumCPU(), runtime.GOMAXPROCS(0)), singleTenant: os.Getenv("GITHUB_ACTIONS") == "true"}
 }
 
+type cloudGateHostKey struct{}
+
+func gateStep(cloudBase bool, run func(context.Context) error) func(context.Context) error {
+	if !cloudBase {
+		return run
+	}
+	return func(ctx context.Context) error {
+		return run(context.WithValue(ctx, cloudGateHostKey{}, true))
+	}
+}
+
+func gateStepHost(ctx context.Context) hostShape {
+	host := currentHost()
+	if ctx.Value(cloudGateHostKey{}) == true {
+		// perf: --base dispatches an uploaded snapshot on a dedicated four-core runner.
+		host.singleTenant = true
+		host.cpus = min(host.cpus, overlappedGoSuiteCPUs)
+	}
+	return host
+}
+
 // perf: half the machine, so one gate cannot saturate a box another is
 // sharing. The shared form subtracts a CPU first and so collapses to one
 // thread at four, pinning a gate that reserved 2.5 cores to one of them. A
@@ -157,6 +184,14 @@ func goStepParallelism(h hostShape) int {
 		return parallelism
 	}
 	return 1
+}
+
+func gateJobCores(h hostShape, mode gateMode) int {
+	width := goStepParallelism(h)
+	if mode == gateFull {
+		return max(width, storePostgresShardCount(h))
+	}
+	return width
 }
 
 func boundedGoCommand(h hostShape, verb, args string) string {
@@ -181,13 +216,13 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	if p.mode == gateAffected {
 		vet, build = runAffectedVet, runAffectedBuild
 	}
-	vetStep := sparkwing.Step(w, "vet", vet)
-	buildStep := sparkwing.Step(w, "build", build).Needs(vetStep)
+	vetStep := sparkwing.Step(w, "vet", gateStep(p.cloudBase, vet))
+	buildStep := sparkwing.Step(w, "build", gateStep(p.cloudBase, build)).Needs(vetStep)
 	published := runPublishedSDKBuild
 	if p.mode == gateAffected {
 		published = runAffectedPublishedSDKBuild
 	}
-	publishedBuild := sparkwing.Step(w, "build-published-sdk", published).Needs(buildStep)
+	publishedBuild := sparkwing.Step(w, "build-published-sdk", gateStep(p.cloudBase, published)).Needs(buildStep)
 	sparkwing.Step(w, "vet-qatrust", runQATrustVetTouched).Needs(vetStep)
 	// safety: a Gate that Plan never configured runs every test, so a missing
 	// mode can only widen the gate.
@@ -197,13 +232,14 @@ func (p *Gate) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}
 	// safety: tests/acceptance drives the dashboard client through web/node_modules.
 	frontendDeps := sparkwing.Step(w, "frontend-deps", runFrontendDeps)
-	testStep := sparkwing.Step(w, "test", test).Needs(publishedBuild, frontendDeps)
+	testStep := sparkwing.Step(w, "test", gateStep(p.cloudBase, test)).Needs(publishedBuild, frontendDeps)
 	lint := runGolangciLint
 	if p.mode == gateAffected {
 		lint = runGolangciLintTouched
 	}
-	lintStep := sparkwing.Step(w, "lint", lint)
-	sparkwing.Step(w, "store-postgres", func(ctx context.Context) error { return runStorePostgresIfTouched(ctx, p.mode) }).Needs(testStep)
+	lintStep := sparkwing.Step(w, "lint", gateStep(p.cloudBase, lint))
+	postgres := func(ctx context.Context) error { return runStorePostgresIfTouched(ctx, p.mode) }
+	sparkwing.Step(w, "store-postgres", gateStep(p.cloudBase, postgres)).Needs(testStep)
 	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit).Needs(frontendDeps)
 	frontendLint := sparkwing.Step(w, "frontend-lint", runFrontendLint).Needs(frontendDeps)
 	frontendBuild := sparkwing.Step(w, "frontend-build", runFrontendBuild).Needs(frontendUnit, frontendLint)
@@ -875,16 +911,16 @@ func withStableProductTestHome(step string, run func(home string) error) error {
 }
 
 func runVet(ctx context.Context) error {
-	return forEachGoModule(ctx, "go vet", boundedGoCommand(currentHost(), "vet", "./..."), "")
+	return forEachGoModule(ctx, "go vet", boundedGoCommand(gateStepHost(ctx), "vet", "./..."), "")
 }
 
 func runBuild(ctx context.Context) error {
-	return forEachGoModule(ctx, "go build", boundedGoCommand(currentHost(), "build", "./..."), "")
+	return forEachGoModule(ctx, "go build", boundedGoCommand(gateStepHost(ctx), "build", "./..."), "")
 }
 
 func runTest(ctx context.Context) error {
 	return withStableProductTestHome("gate-test", func(home string) error {
-		return forEachGoModule(ctx, "go test", testGoCommand(currentHost()), home)
+		return forEachGoModule(ctx, "go test", testGoCommand(gateStepHost(ctx)), home)
 	})
 }
 

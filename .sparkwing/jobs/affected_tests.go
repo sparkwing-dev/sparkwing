@@ -110,7 +110,7 @@ func runAffectedTest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return runAffectedTestFiles(ctx, files, scope, currentHost(), false)
+	return runAffectedTestFiles(ctx, files, scope, gateStepHost(ctx), false)
 }
 
 // perf: land passes the files a merge of origin/main changed, so a clean merge
@@ -286,7 +286,7 @@ func runAffectedCompileFiles(ctx context.Context, verb string, files []string) e
 		if verb == "build" {
 			args = "-o " + shellQuote(os.DevNull) + " " + args
 		}
-		script := fmt.Sprintf("env -C %s %s", shellQuote(dir), boundedGoCommand(currentHost(), verb, args))
+		script := fmt.Sprintf("env -C %s %s", shellQuote(dir), boundedGoCommand(gateStepHost(ctx), verb, args))
 		if _, err := sparkwing.Bash(ctx, script).Env("GOWORK", "auto").Run(); err != nil {
 			failures = append(failures, describeModuleFailure(p.module, err))
 		}

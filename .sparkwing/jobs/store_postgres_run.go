@@ -25,7 +25,7 @@ const storePostgresDatabasePrefix = "sparkwing_store_shard_"
 func runStoreSuiteAgainst(ctx context.Context, dsn string) error {
 	return withGoTestScratch(func(testRoot string) error {
 		return withProductTestHome(func(home string) error {
-			if err := runStorePostgresShards(ctx, home, testRoot, dsn, storePostgresShardCount(currentHost())); err != nil {
+			if err := runStorePostgresShards(ctx, home, testRoot, dsn, storePostgresShardCount(gateStepHost(ctx))); err != nil {
 				return fmt.Errorf("store suite against postgres: %w", err)
 			}
 			sparkwing.Info(ctx, "store suite: passed against postgres")
