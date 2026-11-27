@@ -99,12 +99,17 @@ func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool) []*sparkwing.
 	p.Proven = ref
 	proven := skipWhenTreePassed(ref)
 	policy := sparkwing.Job(plan, policyJobID, &policyJob{Proven: ref}).Timeout(policyJobTimeout).SkipIf(proven)
-	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).SkipIf(proven).Needs(policy)
+	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).SkipIf(proven).Needs(policy).Concurrency(machineSuite)
 	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode}).Timeout(raceTouchedStepTimeout).SkipIf(proven).Needs(policy)
 	record := &recordTree{Proven: ref, Gate: sparkwing.RefTo[bool](broad), Race: sparkwing.RefTo[bool](race), mode: p.mode}
 	tree := sparkwing.Job(plan, recordTreeJob, record).Needs(broad, race).SkipIf(proven).Cores(lightJobCores)
 	return []*sparkwing.JobNode{policy, broad, race, tree}
 }
+
+// perf: one heavy suite per machine across every run declaring this group, so two
+// suites that each fit admission do not start together. Only jobs that run one
+// after another within a run join, so a run never waits on its own sibling.
+var machineSuite = sparkwing.NewConcurrencyGroup("machine-suite", sparkwing.ConcurrencyLimit{Capacity: 1, Scope: sparkwing.ScopeBox})
 
 // perf: jobs that mostly wait on git, the network or a reviewer ask local
 // admission for a quarter core, so they start beside running gates.

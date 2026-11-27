@@ -218,6 +218,31 @@ func TestJobBoxScopeUsesExecutingAward(t *testing.T) {
 	}
 }
 
+func TestJobBoxGroupRunsTwoRunsOnOneHostOneAfterAnother(t *testing.T) {
+	box := func(doc *nodewire.PlanDoc) {
+		doc.Concurrency = nil
+		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{{Group: "machine-suite", Scope: new("box"), Capacity: new(1), OnLimit: new("queue")}}
+	}
+	f := newStoreRecoveryFixtureAt(t, false, storetest.New(t), box)
+	first, firstActor := admissionPolicyBlocker(t, f, box)
+	admissionWant(t, f, first, firstActor, runstate.AcquireGranted)
+	second := runstate.CapacityBinding{RunID: string(f.ref.RunID), NodeID: string(f.ref.NodeID), Generation: int64(f.holder.Generation)}
+	admissionWant(t, f, second, f.holder, runstate.AcquireQueued)
+
+	holder, err := f.s.AsOperator().ResolveAuthority(t.Context(), f.holder.Authority)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := runspec.ConcurrencyKey("job", "box", holder.Capability.ExecutionHost, "machine-suite")
+	state, err := f.tenant.GetConcurrencyState(t.Context(), key)
+	if err != nil || len(state.Holders) != 1 || state.Holders[0].RunID != first.RunID || len(state.Waiters) != 1 || state.Waiters[0].RunID != second.RunID {
+		t.Fatalf("both runs must share one slot on their host: %+v %v", state, err)
+	}
+
+	admissionFinishJob(t, f, first, firstActor)
+	admissionWant(t, f, second, f.holder, runstate.AcquireGranted)
+}
+
 func TestWaitingGroupSetDoesNotPreemptEarlierGroup(t *testing.T) {
 	f := newStoreRecoveryFixtureAt(t, false, storetest.New(t), func(doc *nodewire.PlanDoc) {
 		doc.Jobs[0].Concurrency = []nodewire.ConcurrencySpec{
