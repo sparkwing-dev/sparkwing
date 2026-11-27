@@ -42,18 +42,21 @@ func TestRaceTargetsAreEmptyWhenNothingChanged(t *testing.T) {
 	}
 }
 
-func TestRaceCommandBoundsPackageOverlapOnFourCPUs(t *testing.T) {
+func TestRaceCommandBoundsPackageOverlap(t *testing.T) {
 	const args = "-race -count=1 ./internal/orchestrator ./internal/store"
 	for _, tc := range []struct {
-		cpus int
+		host hostShape
 		want string
 	}{
-		{3, "GOMAXPROCS=1 go test -p 1 " + args},
-		{4, "GOMAXPROCS=1 go test -p 2 " + args},
-		{8, "GOMAXPROCS=3 go test -p 3 " + args},
+		{hostShape{cpus: 3}, "GOMAXPROCS=1 go test -p 1 " + args},
+		{hostShape{cpus: 4}, "GOMAXPROCS=1 go test -p 2 " + args},
+		{hostShape{cpus: 4, singleTenant: true}, "GOMAXPROCS=1 go test -p 2 " + args},
+		{hostShape{cpus: 8}, "GOMAXPROCS=2 go test -p 2 " + args},
+		{hostShape{cpus: 16}, "GOMAXPROCS=3 go test -p 3 " + args},
+		{hostShape{cpus: 16, singleTenant: true}, "GOMAXPROCS=8 go test -p 8 " + args},
 	} {
-		if got := raceGoCommand(hostShape{cpus: tc.cpus}, args); got != tc.want {
-			t.Errorf("race command on %d CPUs = %q, want %q", tc.cpus, got, tc.want)
+		if got := raceGoCommand(tc.host, args); got != tc.want {
+			t.Errorf("race command on %+v = %q, want %q", tc.host, got, tc.want)
 		}
 	}
 }
@@ -181,9 +184,9 @@ func TestGateRaceWorkersKeepTheHostsPackageBound(t *testing.T) {
 		{4, 2, false},
 		{4, 2, true},
 		{5, 2, false},
-		{8, 3, false},
+		{8, 2, false},
 		{8, 4, true},
-		{16, 7, false},
+		{16, 3, false},
 		{16, 8, true},
 	} {
 		host := hostShape{cpus: tc.cpus, singleTenant: tc.singleTenant}

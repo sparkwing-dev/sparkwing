@@ -110,10 +110,7 @@ func raceModules(ctx context.Context, targets map[string][]string, testRoot, hom
 }
 
 func gateRaceParallelism(h hostShape) int {
-	if h.cpus == overlappedGoSuiteCPUs {
-		return 2
-	}
-	if parallelism := goStepParallelism(h); parallelism >= 2 {
+	if parallelism := raceCommandWidth(h); parallelism >= 2 {
 		return parallelism
 	}
 	return 0
@@ -197,7 +194,12 @@ func raceCommandWidth(h hostShape) int {
 	if h.cpus == overlappedGoSuiteCPUs {
 		return 2
 	}
-	return goStepParallelism(h)
+	width := goStepParallelism(h)
+	if h.singleTenant {
+		return width
+	}
+	// perf: leave room for the broad gate and admission headroom on shared hosts.
+	return min(width, max(2, width/2))
 }
 
 // perf: only a dedicated race job enables the extra shard workers.

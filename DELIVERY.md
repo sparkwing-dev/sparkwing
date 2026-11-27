@@ -1141,8 +1141,10 @@ file. Other syntax and workflow checks remain active.
   checkers and the CLI is the cost. Local Gate and ordinary Land make both
   jobs eligible once policy passes. Each reserves cores based on its Go
   test or shard width. They start together only when both reservations
-  fit admission headroom. On a shared 16-core host, each asks for seven
-  cores, so the two run serially under Auto admission's 20% headroom.
+  fit admission headroom. Shared race commands and shards use a narrower
+  width to leave cores for the broad gate. On a shared 16-core host, the
+  broad gate asks for seven cores and race asks for three. Under Auto
+  admission's 20% headroom, up to 2.8 cores remain for other load when both run.
   Go, lint and frontend steps can overlap within `gate`, so the reservation
   describes Go parallelism and measured CPU can be higher. The
   `preconditions`, `review`, `record-tree` and `land` jobs declare a quarter
@@ -1320,9 +1322,9 @@ file. Other syntax and workflow checks remain active.
   saturate a machine another gate is running on. `GITHUB_ACTIONS=true` selects
   dedicated sizing of `cpus/2`. The Cloud snapshot gate selects the same sizing
   with `--base`, with the CPU count capped at four. Sparkwing sets `CI=true`
-  for local jobs too. At four CPUs a shared Go step gets one worker and a
-  dedicated step gets two. Race commands keep `GOMAXPROCS=1` on either
-  four-core host.
+  for local jobs too. At four CPUs a shared broad Go step gets one worker
+  and a dedicated step gets two. Race commands keep `GOMAXPROCS=1` on
+  either four-core host and can overlap two packages.
   That publication path
   stops at the parent runner rather than
   entering node processes, so nested Sparkwing commands choose their own
