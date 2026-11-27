@@ -1507,8 +1507,9 @@ file. Other syntax and workflow checks remain active.
   the capacity-one `machine-suite` box group. It queues members on the same
   execution host within one controller and team. Admission accounts for other
   jobs, including `race-touched`, by their declared cores. Gate and race size
-  their requests from Go command and shard parallelism, with the existing
-  four-core reservation and dedicated execution width for Cloud `--base`.
+  their local requests from Go command and shard parallelism. Triggered runs
+  keep the default reservation so plans replay across different hosts.
+  Cloud `--base` keeps its four-core reservation and dedicated execution width.
   `GITHUB_ACTIONS=true` selects the GitHub runner's parallelism.
   The group is released between `fast` and `affected-tests`.
   `affected-tests` holds it until review and tests both finish.

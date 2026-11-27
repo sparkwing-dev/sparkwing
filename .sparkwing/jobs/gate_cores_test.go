@@ -1,10 +1,45 @@
 package jobs
 
 import (
+	"reflect"
 	"regexp"
+	"runtime"
 	"strconv"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
+	"github.com/sparkwing-dev/sparkwing/sparkwingtest"
 )
+
+func TestTriggeredGatePlanSurvivesReplayWithDifferentCPUCounts(t *testing.T) {
+	if runtime.NumCPU() < overlappedGoSuiteCPUs {
+		t.Skip("needs four visible CPUs")
+	}
+	t.Setenv("GITHUB_ACTIONS", "")
+	previous := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+	host := newTestHost(t, sparkwingtest.Options{Run: sparkwing.RunContext{
+		Pipeline: "gate",
+		Trigger:  sparkwing.TriggerInfo{Source: "trigger"},
+	}})
+	accepted, err := host.Plan(t.Context(), "Gate", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.GOMAXPROCS(overlappedGoSuiteCPUs)
+	replayed, err := host.Plan(t.Context(), "Gate", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(accepted, replayed) {
+		t.Fatal("triggered gate plan changed when replayed under a different CPU limit")
+	}
+	for _, job := range replayed.Jobs {
+		if (job.ID == "gate" || job.ID == "race-touched") && job.Cores != nil {
+			t.Fatalf("%s needs the portable default reservation, got %g", job.ID, *job.Cores)
+		}
+	}
+}
 
 var goParallelismFlag = regexp.MustCompile(`(?:^| )go (?:-C \S+ )?(?:test|vet|build)(?: -json)? -p ([0-9]+)`)
 

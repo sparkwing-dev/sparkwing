@@ -214,7 +214,11 @@ type landPlanJob struct {
 
 func landPlan(t *testing.T) map[string]landPlanJob {
 	t.Helper()
-	doc, err := newTestHost(t, sparkwingtest.Options{}).Plan(t.Context(), "Land", nil)
+	host := newTestHost(t, sparkwingtest.Options{Run: sparkwing.RunContext{
+		Pipeline: "land",
+		Trigger:  sparkwing.TriggerInfo{Source: "local"},
+	}})
+	doc, err := host.Plan(t.Context(), "Land", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

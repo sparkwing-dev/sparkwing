@@ -38,7 +38,10 @@ func gateFixtureRepo(t *testing.T) string {
 
 func TestGateReservesAndBoundsItsCPU(t *testing.T) {
 	plan := inspectPlan(t, func(plan *sparkwing.Plan) error {
-		return (&Gate{}).Plan(newTestContext(t), plan, GateArgs{}, sparkwing.RunContext{Pipeline: "gate"})
+		return (&Gate{}).Plan(newTestContext(t), plan, GateArgs{}, sparkwing.RunContext{
+			Pipeline: "gate",
+			Trigger:  sparkwing.TriggerInfo{Source: "local"},
+		})
 	})
 
 	if plan.Source.FullHistory == nil || !*plan.Source.FullHistory || plan.Source.Tags == nil || !*plan.Source.Tags {

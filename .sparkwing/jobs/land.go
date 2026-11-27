@@ -115,7 +115,7 @@ func (p *Land) Plan(_ context.Context, plan *sparkwing.Plan, in LandArgs, rc spa
 			Cores(lightJobCores+float64(goStepParallelism(affectedPushHost()))).Needs(policy, fast).Concurrency(machineSuite)
 		needs = []sparkwing.Dep{policy, fast, joined}
 	} else {
-		gate := gateJobs(plan, &Gate{}, "gate", false)
+		gate := gateJobs(plan, &Gate{}, "gate", false, rc)
 		gate[0].Needs(pre)
 		for _, n := range gate {
 			needs = append(needs, n)

@@ -77,7 +77,7 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc spa
 			return err
 		}
 	}
-	jobs := gateJobs(plan, p, rc.Pipeline, in.Full)
+	jobs := gateJobs(plan, p, rc.Pipeline, in.Full, rc)
 	if p.cloudBase {
 		for _, job := range jobs {
 			if job.ID() == rc.Pipeline || job.ID() == "race-touched" {
@@ -94,7 +94,7 @@ func (p *Gate) Plan(_ context.Context, plan *sparkwing.Plan, in GateArgs, rc spa
 // safety: land composes the gate through this one function and orders its
 // push after every node returned, so a job added to the gate here is one the
 // push waits for.
-func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool) []*sparkwing.JobNode {
+func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool, rc sparkwing.RunContext) []*sparkwing.JobNode {
 	history, tags := true, true
 	plan.Checkout(sparkwing.Checkout{FullHistory: &history, Tags: &tags})
 	p.mode = gateAffected
@@ -104,12 +104,15 @@ func gateJobs(plan *sparkwing.Plan, p *Gate, id string, full bool) []*sparkwing.
 	ref := provenGatePass(id)
 	p.Proven = ref
 	proven := skipWhenTreePassed(ref)
-	host := currentHost()
 	policy := sparkwing.Job(plan, policyJobID, &policyJob{Proven: ref}).Timeout(policyJobTimeout).SkipIf(proven)
-	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).SkipIf(proven).Needs(policy).
-		Cores(float64(gateJobCores(host, p.mode))).Concurrency(machineSuite)
-	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode, cloudBase: p.cloudBase}).Timeout(raceTouchedStepTimeout).SkipIf(proven).Needs(policy).
-		Cores(float64(raceJobCores(host, p.mode)))
+	broad := sparkwing.Job(plan, id, p).Timeout(gateRunTimeout).SkipIf(proven).Needs(policy).Concurrency(machineSuite)
+	race := sparkwing.Job(plan, "race-touched", &raceTouchedJob{Proven: ref, mode: p.mode, cloudBase: p.cloudBase}).Timeout(raceTouchedStepTimeout).SkipIf(proven).Needs(policy)
+	// safety: transferred runs replay on other machines and need stable declarations.
+	if rc.Trigger.Source == "local" {
+		host := currentHost()
+		broad.Cores(float64(gateJobCores(host, p.mode)))
+		race.Cores(float64(raceJobCores(host, p.mode)))
+	}
 	record := &recordTree{Proven: ref, Gate: sparkwing.RefTo[bool](broad), Race: sparkwing.RefTo[bool](race), mode: p.mode}
 	tree := sparkwing.Job(plan, recordTreeJob, record).Needs(broad, race).SkipIf(proven).Cores(lightJobCores)
 	return []*sparkwing.JobNode{policy, broad, race, tree}
